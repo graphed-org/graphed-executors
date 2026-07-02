@@ -106,3 +106,11 @@ Build cmds:
 4. graphed-exec-local: two-phase executor + transport + cluster-sim.
 5. graphed-checkpoint: multi-stage journal + resume.
 6. §6.5 CLAUDE.md amendments (exec-local + checkpoint).
+
+> **freeze-M39-1 (2026-07-02):** owner-sanctioned refreeze resolving both M39 disputes.
+> (1) graphed-core `test_exchange_serialize.py:43` → deserialize-vs-deserialize comparison (the M8
+> pattern); the marked-vs-unmarked form was unsatisfiable under the M22 read-only-serialize pin.
+> Core m39 now 22/22. (2) exec-local: I001 blank-line/grouping fix applied to the six frozen files
+> and the per-file-ignore REMOVED — no gate remains relaxed ("ruff check --no-cache ." clean).
+> 47/47 green after. Both sanctioned explicitly by the project owner; no assertion weakened.
+> Applied by the orchestrator session (roles were shut down), recorded here per B.6.

@@ -22,6 +22,7 @@ from exchange_backends import (
     observed_dest_keys,
     scenario_src_blocks,
 )
+
 from graphed_exec_local.shuffle import ShuffleFaults, run_repartition
 
 ADAPTERS = adapters()

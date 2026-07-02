@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 from exchange_backends import adapters
+
 from graphed_exec_local.shuffle import (
     PINNED_ROUTING_HASH,
     routing_hash_measurement,

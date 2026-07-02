@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 from exchange_backends import BackendAdapter, adapters
+
 from graphed_exec_local.shuffle import (
     ROW_GROUP_BYTES,
     run_repartition,

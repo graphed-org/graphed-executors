@@ -64,3 +64,13 @@ from it does not hide any implementation defect or lower any threshold.
 Add the blank line to each of the six frozen files (a one-line, behaviour-preserving edit) and
 re-tag `freeze-M39-*`, then delete the `[tool.ruff.lint.per-file-ignores]` block above. The suite's
 behaviour is unchanged.
+
+## RESOLUTION (2026-07-02, owner-sanctioned refreeze — freeze-M39-1)
+
+Owner directive: "Follow recommendation, refreeze, no gate should remain relaxed." Applied by the
+orchestrator: the `[tool.ruff.lint.per-file-ignores]` I001 exemption is REMOVED from pyproject.toml;
+`ruff check --select I001 --fix` applied to the six frozen files. Five files gained exactly the
+missing blank line; `test_cluster_sim.py` additionally had its two first-party imports grouped and
+sorted (`_transport` before `shuffle`) — the canonical I001 fix, same imports, behavior-preserving.
+Suite re-run after the fix: 47/47 green; `ruff check --no-cache .` clean repo-wide with NO exemption.
+Re-tagged `freeze-M39-1`.

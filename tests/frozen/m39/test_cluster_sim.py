@@ -19,9 +19,9 @@ from exchange_backends import (
     observed_dest_keys,
     scenario_src_blocks,
 )
-from graphed_exec_local.shuffle import run_repartition
 
 from graphed_exec_local._transport import is_routable_host
+from graphed_exec_local.shuffle import run_repartition
 
 ADAPTERS = adapters()
 
