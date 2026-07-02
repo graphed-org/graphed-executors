@@ -18,21 +18,42 @@ from __future__ import annotations
 from graphed_core.execution import LocalResources
 
 from ._reduce import plan_tree, running_fold, tree_reduce
+from ._transport import is_routable_host, select_advertise_host
 from .executors import (
     PinnedPoolExecutor,
     ProcessExecutor,
     ProcessPoolExecutor,
     ThreadExecutor,
 )
+from .shuffle import (
+    PINNED_ROUTING_HASH,
+    ROW_GROUP_BYTES,
+    ShuffleFaults,
+    ShuffleResult,
+    ShuffleWitness,
+    routing_hash_measurement,
+    run_repartition,
+    run_repartition_by_size,
+)
 
 __all__ = [
+    "PINNED_ROUTING_HASH",
+    "ROW_GROUP_BYTES",
     "LocalResources",
     "PinnedPoolExecutor",
     "ProcessExecutor",
     "ProcessPoolExecutor",
+    "ShuffleFaults",
+    "ShuffleResult",
+    "ShuffleWitness",
     "ThreadExecutor",
+    "is_routable_host",
     "plan_tree",
+    "routing_hash_measurement",
+    "run_repartition",
+    "run_repartition_by_size",
     "running_fold",
+    "select_advertise_host",
     "tree_reduce",
 ]
 __version__ = "0.0.1"

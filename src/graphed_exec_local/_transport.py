@@ -21,8 +21,10 @@ guaranteed, and reduction determinism is the protocol layer's job (it keys by le
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import pickle
 import queue
+import socket
 import threading
 import time
 import urllib.error
@@ -32,6 +34,50 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 _DEFAULT_MAXSIZE = 10000
+
+
+# ---- routable-address selection (M39 §6.1 / B4) -------------------------------------------------
+def is_routable_host(host: str) -> bool:
+    """True iff ``host`` is a concrete address a PEER can dial — NOT loopback (``127.0.0.0/8`` / ``::1``)
+    and NOT the bind-all wildcard (``0.0.0.0`` / ``::``). Private ranges (10.x, 192.168.x) ARE routable
+    (they are exactly the cluster-internal addresses). A non-IP string is not routable."""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return not (ip.is_loopback or ip.is_unspecified)
+
+
+def _detect_routable_host() -> str | None:
+    """A concrete non-loopback IP for this host, or ``None``. Tries the hostname's resolved address,
+    then the source address a UDP socket would use toward a public IP (no packet is actually sent)."""
+    with contextlib.suppress(OSError):
+        candidate = socket.gethostbyname(socket.gethostname())
+        if is_routable_host(candidate):
+            return candidate
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # no packet is sent for a connected UDP socket; picks the source IP
+        candidate = s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+    return candidate if is_routable_host(candidate) else None
+
+
+def select_advertise_host(candidate: str | None = None) -> str:
+    """The address to ANNOUNCE to peers (the transport may BIND ``0.0.0.0``, but it must never
+    announce loopback/wildcard — a peer cannot dial those). Validates an explicit ``candidate`` or
+    auto-detects one; raises ``ValueError`` on loopback/``0.0.0.0`` (or when none is available)."""
+    if candidate is not None:
+        if not is_routable_host(candidate):
+            raise ValueError(f"advertise host {candidate!r} is not routable (loopback or 0.0.0.0)")
+        return candidate
+    host = _detect_routable_host()
+    if host is None:
+        raise ValueError("no routable non-loopback address available to advertise")
+    return host
 
 
 class PipeInbox:
