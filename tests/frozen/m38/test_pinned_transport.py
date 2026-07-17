@@ -14,7 +14,7 @@ import queue
 import threading
 
 import pytest
-from graphed_core import Partition, Plan, Task
+from graphed.core import Partition, Plan, Task
 
 import graphed_exec_local._peer as _peer
 from graphed_exec_local._peer import (

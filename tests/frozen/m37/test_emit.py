@@ -13,7 +13,7 @@ import collections
 import threading
 
 import pytest
-from graphed_core import Partition, Plan, Task, TaskEvent, TaskPhase
+from graphed.core import Partition, Plan, Task, TaskEvent, TaskPhase
 from probe import add, boom, count_entries
 
 from graphed_exec_local.executors import ProcessExecutor, ThreadExecutor

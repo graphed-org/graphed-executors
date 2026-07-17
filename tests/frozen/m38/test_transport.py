@@ -1,5 +1,5 @@
 """M38 transport conformance suite (spike; frozen at P6). One body, both backends — every
-:class:`graphed_core.execution.WorkerTransport` implementation must pass identically, so the
+:class:`graphed.core.execution.WorkerTransport` implementation must pass identically, so the
 reduction / work-stealing layers above can be written once and run on either."""
 
 from __future__ import annotations
@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from graphed_core.execution import WorkerTransport
+from graphed.core.execution import WorkerTransport
 
 from graphed_exec_local._transport import build_ipc_transports, build_transports
 

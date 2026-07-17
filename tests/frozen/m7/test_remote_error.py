@@ -4,9 +4,9 @@ pointing at the user's analysis line — never an opaque worker traceback (plan 
 from __future__ import annotations
 
 import analyses as A
-import graphed_debug as gd
+import graphed.debug as gd
 import pytest
-from graphed_core import Partition, Plan, Task
+from graphed.core import Partition, Plan, Task
 
 from graphed_exec_local import ProcessExecutor
 

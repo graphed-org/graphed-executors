@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import analyses as A
-from graphed_core import ExecContext, Partition, Plan, StopCondition, StopReason, Task
+from graphed.core import ExecContext, Partition, Plan, StopCondition, StopReason, Task
 
 from graphed_exec_local import ThreadExecutor
 

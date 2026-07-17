@@ -6,9 +6,9 @@ from __future__ import annotations
 import time
 
 import pytest
-from graphed_core import Partition, Plan, Task
-from graphed_core.execution import TaskPhase
-from graphed_debug._sampler import make_worker_profiler, tree_from_bytes
+from graphed.core import Partition, Plan, Task
+from graphed.core.execution import TaskPhase
+from graphed.debug._sampler import make_worker_profiler, tree_from_bytes
 
 from graphed_exec_local.executors import ProcessExecutor, ThreadExecutor
 

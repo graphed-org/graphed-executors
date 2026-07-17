@@ -7,7 +7,7 @@ import time
 
 import numpy as np
 from graphed import Session
-from graphed_core import Partition
+from graphed.core import Partition
 
 
 # ---- simple / concurrency ---------------------------------------------------
@@ -74,7 +74,7 @@ def _load_dataset(uri: str) -> object:
 
 
 def _met_counts(events: object) -> np.ndarray:
-    from graphed_awkward import AwkwardBackend, from_awkward  # noqa: PLC0415
+    from graphed.awkward import AwkwardBackend, from_awkward  # noqa: PLC0415
     from graphed_corpus.histograms import hist1d  # noqa: PLC0415
 
     s = Session(AwkwardBackend())
@@ -105,7 +105,7 @@ def hist_zero() -> np.ndarray:
 
 
 def met_partitions(n_chunks: int) -> list:
-    from graphed_core import Task  # noqa: PLC0415
+    from graphed.core import Task  # noqa: PLC0415
 
     edges = np.linspace(0, N_EVENTS, n_chunks + 1, dtype=int)
     return [
@@ -118,10 +118,10 @@ def met_partitions(n_chunks: int) -> list:
 def raise_stage_error(part: Partition, res: object) -> int:
     """Build + run a deliberately-failing analysis IN THE WORKER; the StageError must reach the
     driver picklable (never an opaque string)."""
-    import graphed_debug as gd  # noqa: PLC0415
-    import graphed_numpy as gn  # noqa: PLC0415
+    import graphed.debug as gd  # noqa: PLC0415
+    import graphed.numpy as gn  # noqa: PLC0415
 
     s = Session(gn.NumpyBackend())
     events = gn.from_record(s, "events", pt=np.arange(1.0, 5.0))
     bad = (events["pt"] * 2.0).map(lambda a: a[100], name="worker_oob")  # out-of-range in the worker
-    return gd.run(s, bad, opt_level=1)  # raises graphed_debug.StageError
+    return gd.run(s, bad, opt_level=1)  # raises graphed.debug.StageError

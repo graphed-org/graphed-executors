@@ -1,7 +1,7 @@
 """The two-phase shuffle executor (plan M39 §4): map-write + gather over a ``ShuffleBackend``.
 
 This is the generic exchange/repartition ENGINE, backend-agnostic (it deals only in the opaque
-``graphed_core.ShuffleBackend`` primitives — ``partition``/``concat``/``slice_rows``/
+``graphed.core.ShuffleBackend`` primitives — ``partition``/``concat``/``slice_rows``/
 ``estimated_bytes``/``to_wire``/``from_wire``), so its correctness is witnessed by EXECUTION over
 BOTH real backends (the a-BI theme), not merely a §A.4 import lint.
 
@@ -45,7 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from graphed_core import ShuffleBackend
+from graphed.core import ShuffleBackend
 
 from ._transport import select_advertise_host
 

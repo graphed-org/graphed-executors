@@ -17,7 +17,7 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
 ]
 # graphed-core (the execution contract) + graphed-debug (StageError) + graphed (Session); from git.
-dependencies = ["graphed-core", "graphed-debug", "graphed"]
+dependencies = ["graphed"]
 
 [project.optional-dependencies]
 # the backends + corpus are only needed to exercise realistic HEP analyses end-to-end in the suite
@@ -28,8 +28,7 @@ dev = [
   "hypothesis",
   "mypy",
   "ruff",
-  "graphed-numpy",
-  "graphed-awkward",
+  "graphed[awkward,numpy]",
   "graphed-corpus",
   "numpy>=1.24",
   "awkward>=2.6",
@@ -81,10 +80,10 @@ files = ["src"]
 module = [
   "awkward.*",
   "numpy.*",
-  "graphed_awkward.*",
-  "graphed_numpy.*",
+  "graphed.awkward.*",
+  "graphed.numpy.*",
   "graphed_corpus.*",
-  "graphed_debug.*",
+  "graphed.debug.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

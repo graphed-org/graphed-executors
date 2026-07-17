@@ -6,7 +6,7 @@ from __future__ import annotations
 import analyses as A
 import numpy as np
 import pytest
-from graphed_core import Plan
+from graphed.core import Plan
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 from graphed import Array, Session
-from graphed_awkward import AwkwardBackend, from_awkward, gak
-from graphed_core import Partition, Task
+from graphed.awkward import AwkwardBackend, from_awkward, gak
+from graphed.core import Partition, Task
 from graphed_corpus import make_events
 from graphed_corpus.histograms import hist1d
 

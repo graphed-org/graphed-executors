@@ -11,9 +11,9 @@ import pickle
 import queue
 import threading
 
-from graphed_core import Partition, Plan, Task, TaskPhase
-from graphed_debug import StageError
-from graphed_debug.errors import SourceFrame
+from graphed.core import Partition, Plan, Task, TaskPhase
+from graphed.debug import StageError
+from graphed.debug.errors import SourceFrame
 from probe import add, count_entries
 
 import graphed_exec_local.executors as ex

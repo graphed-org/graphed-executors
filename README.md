@@ -145,9 +145,7 @@ with Dashboard(profile=True) as dash:
 ## Install
 
 ```bash
-pip install "graphed-core @ git+https://github.com/graphed-org/graphed-core-mvp@main"  # needs Rust
-pip install "graphed @ git+https://github.com/graphed-org/graphed-mvp@main"
-pip install "graphed-debug @ git+https://github.com/graphed-org/graphed-debug-mvp@main"
+pip install "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"  # needs Rust
 pip install -e ".[dev,docs]"
 ```
 

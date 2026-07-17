@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import functions_probe
 import shipping_probe
-from graphed_core import Partition, Plan, Task
+from graphed.core import Partition, Plan, Task
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 

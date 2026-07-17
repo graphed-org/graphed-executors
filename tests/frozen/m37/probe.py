@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from graphed_core import Partition
+from graphed.core import Partition
 
 
 def count_entries(partition: Partition, resources: object) -> int:

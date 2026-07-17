@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from graphed_core import Partition, Plan, Task
+from graphed.core import Partition, Plan, Task
 
 
 def _sum_proc(partition: Partition, resources: object) -> np.ndarray:

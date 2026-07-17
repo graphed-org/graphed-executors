@@ -19,7 +19,7 @@ from golden_route import GOLDEN
 _CHILD = r"""
 import sys
 import numpy as np
-from graphed_numpy import NumpyBackend
+from graphed.numpy import NumpyBackend
 be = NumpyBackend()
 dt = np.dtype([("__joinkey__", np.uint64)])
 parts = 8

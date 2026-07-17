@@ -2,7 +2,7 @@
 
 The driver is no longer the combine hub. Each worker owns a contiguous **leaf range** and reduces it
 with the lazy index tree (:mod:`_reduce`); the partials that straddle a range boundary are handed
-**worker→worker** over a :class:`graphed_core.execution.WorkerTransport`. The driver only collects the
+**worker→worker** over a :class:`graphed.core.execution.WorkerTransport`. The driver only collects the
 final root.
 
 Why it stays **bit-for-bit identical** to the existing (hub) path — even for non-associative float
@@ -29,8 +29,8 @@ from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Generic, TypeVar
 
-from graphed_core.execution import LocalResources, Partition, TaskEvent, TaskPhase, partition_label
-from graphed_debug import StageError
+from graphed.core.execution import LocalResources, Partition, TaskEvent, TaskPhase, partition_label
+from graphed.debug import StageError
 
 from ._transport import HttpTransport, QueueTransport
 
@@ -91,7 +91,7 @@ def lifeline_neighbors(idx: int, w: int) -> set[int]:
 
 
 class _EdgeRecorder:
-    """A :class:`graphed_core.execution.WorkerTransport`-shaped stub used only to compute the static
+    """A :class:`graphed.core.execution.WorkerTransport`-shaped stub used only to compute the static
     reduction topology: it records each ``send`` destination and queues ``node`` hand-offs so a
     value-free in-process replay of the reduction propagates fully. Reusing the real
     :meth:`PeerReducer.settle` guarantees the topology never diverges from the runtime reduction."""

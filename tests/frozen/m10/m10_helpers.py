@@ -7,7 +7,7 @@ import os
 import threading
 import time
 
-from graphed_core import Partition
+from graphed.core import Partition
 
 
 def leaf_index(part: Partition, res: object) -> int:

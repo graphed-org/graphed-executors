@@ -9,8 +9,8 @@ from __future__ import annotations
 import time
 
 import pytest
-from graphed_core import Partition, Plan, Task
-from graphed_core.execution import SequentialRunner
+from graphed.core import Partition, Plan, Task
+from graphed.core.execution import SequentialRunner
 
 from graphed_exec_local.executors import ProcessExecutor, ThreadExecutor
 

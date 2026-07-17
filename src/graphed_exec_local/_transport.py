@@ -1,4 +1,4 @@
-"""Inter-worker comms backends (M38): concrete :class:`graphed_core.execution.WorkerTransport`
+"""Inter-worker comms backends (M38): concrete :class:`graphed.core.execution.WorkerTransport`
 implementations for single-machine executors.
 
 Two interchangeable backends behind one interface — the seam peer reduction and work-stealing ride,

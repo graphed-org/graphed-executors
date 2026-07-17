@@ -10,7 +10,7 @@ the DEFAULT remains a fresh pool per run (the existing suites pin that behavior 
 from __future__ import annotations
 
 import numpy as np
-from graphed_core import Partition, Plan, Task
+from graphed.core import Partition, Plan, Task
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 

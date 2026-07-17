@@ -4,7 +4,7 @@ The M31 ship-once broadcast cached the process per worker but never evicted: a p
 over many distinct plans accumulated every compiled-IR-bearing process for the workers' whole
 lifetime. M34 bounds that cache (FIFO, cap _SHARED_CACHE_CAP) in lockstep with the driver's
 broadcast-token set, asserts full worker coverage before caching a token (never a silent
-under-prime), and reuses the one canonical bounded LocalResources from graphed_core (P3-6/P0-1).
+under-prime), and reuses the one canonical bounded LocalResources from graphed.core (P3-6/P0-1).
 
 M38: these broadcast-cache tests pin ``comms=None`` (the hub path). The ship-once broadcast is a
 hub mechanism — peer reduction ships the process to each worker directly (no per-worker token cache) —
@@ -14,8 +14,8 @@ so after peer became the default ``comms``, the broadcast cache is exercised exp
 from __future__ import annotations
 
 import cache_probe
-import graphed_core
-from graphed_core.execution import Partition, Plan, Task
+import graphed.core
+from graphed.core.execution import Partition, Plan, Task
 
 import graphed_exec_local
 from graphed_exec_local import ProcessExecutor
@@ -28,7 +28,7 @@ def _plan(process, n_tasks=2):  # type: ignore[no-untyped-def]
 
 
 def test_local_resources_is_the_canonical_core_one() -> None:
-    assert graphed_exec_local.LocalResources is graphed_core.LocalResources  # no duplicate class
+    assert graphed_exec_local.LocalResources is graphed.core.LocalResources  # no duplicate class
 
 
 def test_shared_cache_stays_bounded_across_many_distinct_plans() -> None:

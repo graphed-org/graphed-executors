@@ -38,7 +38,7 @@ class BackendAdapter:
 
 def _awkward_adapter() -> BackendAdapter:
     ak = pytest.importorskip("awkward")
-    from graphed_awkward import AwkwardBackend  # noqa: PLC0415
+    from graphed.awkward import AwkwardBackend  # noqa: PLC0415
 
     def make(keys: Sequence[int]) -> object:
         return ak.Array(
@@ -55,7 +55,7 @@ def _awkward_adapter() -> BackendAdapter:
 
 
 def _numpy_adapter() -> BackendAdapter:
-    from graphed_numpy import NumpyBackend  # noqa: PLC0415
+    from graphed.numpy import NumpyBackend  # noqa: PLC0415
 
     dtype = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
 

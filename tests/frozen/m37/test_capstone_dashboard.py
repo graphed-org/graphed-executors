@@ -18,8 +18,8 @@ import pytest
 pytest.importorskip("perspective")
 pytest.importorskip("websocket")
 
-from graphed_core import Partition, Plan, Task
-from graphed_debug import Dashboard
+from graphed.core import Partition, Plan, Task
+from graphed.debug import Dashboard
 from probe import addf, cpu_work
 
 from graphed_exec_local.executors import ProcessExecutor

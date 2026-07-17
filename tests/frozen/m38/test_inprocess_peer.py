@@ -16,7 +16,7 @@ import queue
 import threading
 
 import pytest
-from graphed_core import Partition
+from graphed.core import Partition
 
 from graphed_exec_local._peer import (
     DRIVER,

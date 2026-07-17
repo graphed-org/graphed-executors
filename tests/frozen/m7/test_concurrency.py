@@ -4,7 +4,7 @@ including under the free-threaded interpreter via the experimental CI job (plan 
 from __future__ import annotations
 
 import analyses as A
-from graphed_core import Partition, Plan, Task
+from graphed.core import Partition, Plan, Task
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 

@@ -1,11 +1,11 @@
 """Reference single-machine executors (plan M7): a thread pool AND a process pool, both running the
-same `graphed_core.Plan` to one reduced result.
+same `graphed.core.Plan` to one reduced result.
 
 Both share the driver below; they differ only in the worker pool and how per-worker `open_once`
 resources are held (thread-local vs a per-process global set by an initializer). Fixed partition sets
 use the deterministic straggler-tolerant tree reduction; an adaptive `next_tasks` plan uses a running
 fold over a partition set discovered from observed timings. A worker failure (thread or process)
-propagates to the driver intact — in particular a picklable `graphed_debug.StageError` is re-raised
+propagates to the driver intact — in particular a picklable `graphed.debug.StageError` is re-raised
 as-is, never degraded to an opaque string (plan A.3 #8).
 """
 
@@ -40,8 +40,8 @@ from concurrent.futures import (
 from multiprocessing.managers import SyncManager
 from typing import Any, TypeVar, cast
 
-from graphed_core import ExecContext, ExecResult, Partition, Plan, StopReason, Task
-from graphed_core.execution import (
+from graphed.core import ExecContext, ExecResult, Partition, Plan, StopReason, Task
+from graphed.core.execution import (
     LocalResources,
     Monitor,
     TaskEvent,
@@ -50,7 +50,7 @@ from graphed_core.execution import (
     emit_task,
     partition_label,
 )
-from graphed_debug import StageError
+from graphed.debug import StageError
 
 from ._peer import (
     http_driver_handshake,

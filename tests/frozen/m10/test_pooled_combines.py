@@ -19,7 +19,7 @@ import threading
 
 import m10_helpers as H
 import pytest
-from graphed_core import Partition, Plan, StopReason, Task
+from graphed.core import Partition, Plan, StopReason, Task
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
