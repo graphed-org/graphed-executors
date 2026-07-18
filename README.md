@@ -1,11 +1,15 @@
-# graphed-exec-local
+# graphed-executors
 
-The **reference single-machine executors** for [`graphed`](https://github.com/graphed-org/graphed-mvp)
-(milestone M7). The execution *contract* lives in `graphed-core` (`graphed_core.execution`: `Plan`,
-`Task`, `Partition`, `Executor`, `Monitor`, `WorkerTransport`); this repo implements it for one
-machine and is the executor the integration suites run real analyses through — thousands of tiny
-tasks, deliberate stragglers, worker crashes. Part of the
-[graphed-org](https://github.com/graphed-org) project.
+Pluggable **executor backends** for [`graphed`](https://github.com/graphed-org/graphed-mvp). The
+reference single-machine one is `graphed_executors.local` (milestone M7); future backends (e.g.
+distributed) are added as sibling subpackages under their own extras. The execution *contract* lives
+in `graphed-core` (`graphed_core.execution`: `Plan`, `Task`, `Partition`, `Executor`, `Monitor`,
+`WorkerTransport`); this repo implements it for one machine and is the executor the integration
+suites run real analyses through — thousands of tiny tasks, deliberate stragglers, worker crashes.
+Part of the [graphed-org](https://github.com/graphed-org) project.
+
+> Import from `graphed_executors.local`. `import graphed_exec_local` still works as a back-compat
+> alias (the pre-rename import path), but new code should use the namespaced form.
 
 A `Plan` is four pieces the executor consumes but never interprets: `process(partition, resources)`
 does one partition's work, `combine(R, R)` merges two partials associatively, `empty()` is the
@@ -28,7 +32,7 @@ All executors share one driver and differ only in the worker pool and the resour
 ```python
 import numpy as np
 from graphed_core import Partition, Plan, Task
-from graphed_exec_local import ProcessPoolExecutor
+from graphed_executors.local import ProcessPoolExecutor
 
 def count(partition, resources):          # module-level => picklable
     return np.asarray([partition.entry_stop - partition.entry_start])
@@ -136,7 +140,7 @@ running analysis (flamegraph included; it works under the hub and the peer paths
 
 ```python
 from graphed_debug import Dashboard
-from graphed_exec_local import ProcessPoolExecutor
+from graphed_executors.local import ProcessPoolExecutor
 
 with Dashboard(profile=True) as dash:
     ProcessPoolExecutor(monitor=dash.monitor).run(plan)

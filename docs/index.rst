@@ -1,4 +1,4 @@
-graphed-exec-local
+graphed-executors
 ==================
 
 Reference single-machine executors for ``graphed`` (milestone M7): a thread pool and a process pool

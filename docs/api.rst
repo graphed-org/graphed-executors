@@ -9,4 +9,4 @@ for its functions and classes.
    :toctree: generated
    :recursive:
 
-   graphed_exec_local
+   graphed_executors.local

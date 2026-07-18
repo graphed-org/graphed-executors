@@ -1,4 +1,4 @@
-# Contributing to graphed-exec-local
+# Contributing to graphed-executors
 
 Part of the `graphed` project, governed by the gated three-role pipeline. The root
 [`graphed-project/CLAUDE.md`](https://github.com/graphed-org/graphed-project-mvp) and the project plan
@@ -21,6 +21,6 @@ pip install "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed
 pip install "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
 pip install -e ".[dev,docs]"
 ruff check . && ruff format --check . && mypy
-pytest tests/frozen/m2 --cov=graphed_exec_local --cov-branch   # 100%
+pytest tests/frozen/m2 --cov=graphed_executors --cov-branch   # 100%
 sphinx-build -W -b html docs docs/_build/html
 ```

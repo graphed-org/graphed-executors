@@ -1,7 +1,7 @@
-How graphed-exec-local works
+How graphed-executors works
 ============================
 
-``graphed-exec-local`` is the reference executor: it takes a ``graphed_core.Plan`` — process
+``graphed-executors`` is the reference executor: it takes a ``graphed_core.Plan`` — process
 each partition, combine the partials, start from empty — and runs it on one machine with a
 thread pool or a process pool, producing one reduced result. "Reference" does not mean toy:
 this is the executor the integration suites run real analyses through (thousands of tiny
@@ -35,7 +35,7 @@ A minimal, runnable plan::
 
     import numpy as np
     from graphed_core import Partition, Plan, Task
-    from graphed_exec_local import ProcessExecutor
+    from graphed_executors.local import ProcessExecutor
 
     def count(partition, resources):          # module-level: picklable
         return np.asarray([partition.entry_stop - partition.entry_start])
@@ -158,9 +158,9 @@ one per address, no ``Manager`` server in the data path) for a single machine, a
 reuses. Determinism is *not* the transport's job; it is the reduction protocol's.
 
 The IPC path has **two worker pools, and you pick which by choosing the executor class** — there is no
-silent runtime switch. :class:`~graphed_exec_local.ProcessPoolExecutor` (the default; original M7
+silent runtime switch. :class:`~graphed_executors.local.ProcessPoolExecutor` (the default; original M7
 behaviour) uses a full-registry pool: every worker *inherits the whole registry* (O(N²) fds — fine
-while N is well under the per-process fd limit, and the fast common path). :class:`~graphed_exec_local.PinnedPoolExecutor`
+while N is well under the per-process fd limit, and the fast common path). :class:`~graphed_executors.local.PinnedPoolExecutor`
 uses a ``PinnedProcessPool`` of **identity-pinned** workers that each inherit ONLY their inbox + the
 O(log N) outboxes of their *overlay* peers (reduction targets + a symmetric **hypercube lifeline**
 graph + driver, ``worker_outbox_addresses``), so the registry is O(N log N), not O(N²). Both bound

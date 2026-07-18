@@ -1,11 +1,11 @@
-# CLAUDE.md — graphed-exec-local
+# CLAUDE.md — graphed-executors
 
 Defers to the root **`graphed-project/CLAUDE.md`**; the **project plan
 (`graphed-project-plan-gated.md`) always wins.** This file distills **milestone M7**.
 
 ## What this repo is
 
-`graphed-exec-local`: the **reference executors**. The execution *contract* lives in `graphed-core`
+`graphed-executors`: pluggable executor backends; the reference single-machine one is `graphed_executors.local`. The execution *contract* lives in `graphed-core`
 (`graphed_core.execution`: `Plan`, `Task`, `Partition`, `StopCondition`, `Executor`); this repo
 implements it for a single machine, **two ways**: a thread pool and a process pool.
 
@@ -48,6 +48,6 @@ reproduce the corpus reference histograms **bit-for-bit**, invariant to `opt_lev
 
 Runtime: `graphed-core` (contract) + `graphed-debug` (StageError) + `graphed` (Session). Tests use
 `graphed-numpy` / `graphed-awkward` / `graphed-corpus`. Gates: `ruff` + `ruff format` · `mypy
---strict` · `pytest tests/frozen --cov=graphed_exec_local` (≥90%) · `sphinx -W`.
+--strict` · `pytest tests/frozen --cov=graphed_executors` (≥90%) · `sphinx -W`.
 
 Status: see `.graphed/state.json`.

@@ -1209,7 +1209,7 @@ class ProcessPoolExecutor(_ProcessExecutorBase):
 
 class PinnedPoolExecutor(_ProcessExecutorBase):
     """Process executor whose peer-reduction IPC uses an **identity-pinned** worker pool
-    (:class:`~graphed_exec_local._pinned_pool.PinnedProcessPool`): each worker is spawned once and
+    (:class:`~graphed_executors.local._pinned_pool.PinnedProcessPool`): each worker is spawned once and
     inherits ONLY its own inbox plus its O(log N) overlay peers (segment-tree reduction targets +
     hypercube steal lifelines + the driver). The registry is therefore O(N log N), not O(N²), so it
     stays under the per-process fd limit — the executor to pick for large many-core machines. Identical
