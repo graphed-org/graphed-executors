@@ -64,6 +64,14 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PLC0415"]
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+# The package was renamed graphed-exec-local -> graphed-executors, but the immutable frozen suites
+# import the graphed_exec_local back-compat shim and group it as a first-party import. Recent ruff
+# derives first-party from the project name, so the rename would reclassify graphed_exec_local as
+# third-party and trip I001 on read-only frozen tests. Pin BOTH names first-party so the sort
+# classification matches the frozen files unchanged.
+known-first-party = ["graphed_executors", "graphed_exec_local"]
+
 # The M39 frozen test files ship an author-inconsistent import grouping (missing the blank line
 # between the third-party test-helper import and the first-party `graphed_exec_local` import that
 # I001 requires — the numpy/awkward frozen m39 tests DO have it, these six do not). They are
