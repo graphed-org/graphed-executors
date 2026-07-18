@@ -149,6 +149,12 @@ with Dashboard(profile=True) as dash:
 ## Install
 
 ```bash
+pip install graphed-executors          # from PyPI (pulls graphed); import graphed_executors.local
+```
+
+From source (development — builds graphed's Rust core):
+
+```bash
 pip install "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"  # needs Rust
 pip install -e ".[dev,docs]"
 ```
