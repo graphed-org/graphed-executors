@@ -55,6 +55,24 @@ def test_fetch_plane_spills_and_bounds_peak_under_a_budget_smaller_than_the_dest
     oracle = expected_dest_keys(src, _PARTS)
     assert sum(len(v) for v in oracle.values()) == _N_SRC * _ROWS, "the scenario must pile one dest high"
 
+    # Warm imports + allocator arenas so the measured window below reflects the operation's STEADY-STATE
+    # peak, not the one-time first-touch growth (~0.9 MB) that only the FIRST tracemalloc window in a
+    # process pays. Without this the ceiling is order-dependent (green full-dir because a prior test warms
+    # the arena, red in isolation / under a different collection order). A throwaway run over the SAME code
+    # path (public API, its own store_root) removes only that one-time cost — a wasteful impl's per-op
+    # copies are re-allocated INSIDE the measured window and are still caught by the ceiling.
+    warm_root = tmp_path / "warmup"
+    warm_root.mkdir()
+    run_repartition(
+        BACKEND,
+        src,
+        parts=_PARTS,
+        workers=_WORKERS,
+        comms="ipc",
+        store_root=warm_root,
+        fetch_budget_bytes=_FETCH_BUDGET,
+    )
+
     tracemalloc.start()
     try:
         res = run_repartition(

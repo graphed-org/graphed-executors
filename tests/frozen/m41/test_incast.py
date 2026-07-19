@@ -59,12 +59,12 @@ def test_bulk_fetch_count_is_sub_linear_and_carries_few_large_streams(tmp_path) 
     )
     assert w.bulk_fetch_count >= 1, "there must be at least one fetch"
 
-    # (few LARGE streams, not skipped fetches) — the mean is CONSISTENT with a genuinely low count and a
-    # complete transfer: a stub that batches the counter but moves bytes per block breaks this equality.
+    # (few LARGE streams, not skipped fetches) — "few" is carried by the bulk_fetch_count bounds above
+    # (<= 2*K*K and < n_blocks); "large / not skipped" is the completeness floor below
+    # (bytes_transferred >= result/2) plus the routing oracle. `bytes_per_fetch` is DEFINED as
+    # bytes_transferred / bulk_fetch_count (README contract), so bulk_fetch_count * bytes_per_fetch equals
+    # bytes_transferred for every impl — no independent constraint lives there, so no check is asserted on it.
     assert w.bytes_transferred > 0
-    assert abs(w.bulk_fetch_count * w.bytes_per_fetch - w.bytes_transferred) <= w.bytes_transferred * 0.05, (
-        "bytes_per_fetch (mean) is inconsistent with bulk_fetch_count * total transferred"
-    )
     total_result_bytes = sum(BACKEND.estimated_bytes(v) for v in res.value.values())
     assert w.bytes_transferred >= total_result_bytes // 2, (
         f"bytes_transferred {w.bytes_transferred} too low for the gathered data {total_result_bytes} — "

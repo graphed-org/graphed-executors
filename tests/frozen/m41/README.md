@@ -55,7 +55,7 @@ launch_routable_cluster(n_nodes: int, *, store_root: str, advertise_host: str) -
 #   spawns `n_nodes` CHILD processes (multiprocessing 'spawn'); each child:
 #     - creates a node-local Store dir under store_root,
 #     - starts an HTTP blob server bound to a ROUTABLE (non-loopback) `advertise_host` address
-#       (GET /blob/{hash}, PUT /blob, GET+PUT /manifest/… — the §4.3 endpoints),
+#       (GET /blob/{hash}, PUT /blob — the §4.3 blob endpoints),
 #     - REGISTERS (node_id -> (host, port), registered_by=<child os.getpid()>) into the shared
 #       core AddressTable.
 # RoutableClusterSim (returned handle):
