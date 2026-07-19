@@ -30,7 +30,9 @@ _ROWS = 4
 def _identical_block() -> np.ndarray:
     b = np.zeros(_ROWS, dtype=_DTYPE)
     b["__joinkey__"] = np.full(_ROWS, _HOT, dtype=np.uint64)
-    b["v"] = np.ones(_ROWS, dtype=np.int64)  # SAME values -> byte-identical wire -> one shared content-address
+    b["v"] = np.ones(
+        _ROWS, dtype=np.int64
+    )  # SAME values -> byte-identical wire -> one shared content-address
     return b
 
 
@@ -52,7 +54,9 @@ def test_steal_colocated_byte_identical_blocks_do_not_crash_evict(tmp_path) -> N
     w = res.witness
     assert w.steals > 0, "force_steal did not steal — the co-location that triggers the evict bug never ran"
 
-    rows = [(int(k), int(v)) for b in res.value.values() for k, v in zip(b["__joinkey__"], b["v"], strict=True)]
+    rows = [
+        (int(k), int(v)) for b in res.value.values() for k, v in zip(b["__joinkey__"], b["v"], strict=True)
+    ]
     assert len(rows) == _N * _ROWS, f"rows dropped under steal + co-located identical blocks: {len(rows)}"
     assert rows == [(_HOT, 1)] * (_N * _ROWS), "the gather corrupted or reordered the hot-key rows"
 

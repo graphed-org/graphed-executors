@@ -117,14 +117,18 @@ class ShuffleWitness:
     join_chunks_read: int = 0  # spilled chunks READ BACK off disk (F5 — must equal join_spilled_partitions)
     join_output_rows: int = 0  # total relational (duplicating) output rows produced
     # ---- M41 fetch/gather (reader) plane + cluster-seam counters ----
-    peak_fetch_bytes: int = 0  # peak live bytes in the FETCH-ACCUMULATION buffer (bounded to fetch_budget_bytes
-    #   + one block); NOT total reader RAM — reassembly (read-back + concat) still holds the whole dest resident
+    # peak live bytes in the FETCH-ACCUMULATION buffer (bounded to fetch_budget_bytes + one block); NOT
+    # total reader RAM — reassembly (read-back + concat) still holds the whole dest resident.
+    peak_fetch_bytes: int = 0
     fetch_spilled_bytes: int = 0  # wire bytes the fetch spill wrote to node Stores on disk (T1/T3)
     fetch_spill_count: int = 0  # number of fetch-plane spill flushes (spill engaged)
-    bulk_fetch_count: int = 0  # COALESCED fetch ops (one per (gather,holder) node-pair); also the cluster-sim fetch count
+    # COALESCED fetch ops (one per (gather,holder) node-pair); also the cluster-sim fetch count.
+    bulk_fetch_count: int = 0
     bytes_per_fetch: float = 0.0  # mean bytes per coalesced fetch = bytes_transferred / bulk_fetch_count
-    bytes_transferred: int = 0  # total UNIQUE payload bytes moved through fetch() (re-fetch of a present digest adds 0)
-    per_node_disk_bytes: dict[str, int] = field(default_factory=dict)  # node addr -> on-disk fetch-spill bytes (== du)
+    # total UNIQUE payload bytes moved through fetch() (re-fetch of a present digest adds 0).
+    bytes_transferred: int = 0
+    # node addr -> on-disk fetch-spill bytes (agrees with du of that node's Store dir).
+    per_node_disk_bytes: dict[str, int] = field(default_factory=dict)
     disk_budget_bytes: int = 0  # the configured per-node Store disk cap (echoes the input)
     disk_backpressure_events: int = 0  # times the per-node cap forced a spill onto another node (T3)
     served_pid: int = 0  # os.getpid() of the CHILD that served the last cluster-sim fetch (c.2)
@@ -467,7 +471,7 @@ def _stage2_gather(
             for dest, t, digest in by_holder[holder_i]:
                 wire = cluster.get(holder_i, digest)  # pull the block from its holder (thief if stolen)
                 if digest not in billed:
-                    witness.bytes_transferred += len(wire)  # UNIQUE bytes: re-fetch of a present digest adds 0
+                    witness.bytes_transferred += len(wire)  # UNIQUE bytes: re-fetch of a digest adds 0
                     billed.add(digest)
                 if holder_i != gather_i:
                     witness.cross_node_fetches += 1  # M39 per-block cross-node witness (kept for cross-check)
@@ -475,7 +479,7 @@ def _stage2_gather(
                 live_bytes += len(wire)
                 witness.peak_fetch_bytes = max(witness.peak_fetch_bytes, live_bytes)
                 if fetch_budget_bytes is not None and live_bytes >= fetch_budget_bytes:
-                    for key, w in resident.items():  # flush: stream the buffered wires to a node Store on disk
+                    for key, w in resident.items():  # flush: stream buffered wires to a node Store on disk
                         node_i = _spill_node(witness, disk_budget_bytes, k, gather_i, len(w), cluster)
                         objdir = Path(cluster.store_dir(node_i)) / "objects"
                         fname = f"fetchspill-{spill_seq:08d}"
@@ -489,7 +493,7 @@ def _stage2_gather(
                     resident.clear()
                     live_bytes = 0
             for digest in billed:  # evict each unique block ONCE, after all its (dest,t) refs are pulled —
-                cluster.evict(holder_i, digest)  # a mid-loop evict would KeyError the next ref to a shared digest
+                cluster.evict(holder_i, digest)  # a mid-loop evict KeyErrors the next ref to a shared digest
 
         for dest in dests_here:
             blocks: list[Any] = []
