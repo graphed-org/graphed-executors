@@ -469,9 +469,10 @@ def _join_with_budget(
     output), and SPILLS each partition's wire to the node Store **on disk**, DROPPING it from RAM —
     so the kernel's live RAM is one chunk, never a full-RAM concat of the whole dest. Each spilled chunk
     is then READ BACK off disk to reconstruct the return value (F5 — a real reader, not dead write-only
-    I/O): the caller's RAM holds one read-back chunk at a time here too, and ``chunks_read`` witnesses
-    the reader actually ran. The caller keeps the chunks as separate result blocks (their union is the
-    dest's join). Returns
+    I/O), and ``chunks_read`` witnesses the reader actually ran. The one-chunk-at-a-time RAM bound is
+    the JOIN+SPILL loop above (each ``joined`` is dropped once its wire spills); the read-back list IS
+    the return value, so all chunks are resident on the way out — the bound is the spill, not the read.
+    The caller keeps the chunks as separate result blocks (their union is the dest's join). Returns
     ``(chunks, chunk_hashes, peak_output_bytes, spilled_partitions, output_rows, chunks_read)``.
     """
     on_l = list(on)
@@ -582,12 +583,14 @@ def _run_shuffle_join(
             if not right_blocks:  # partitionless probe side -> no schema; keep the build rows (never drop)
                 blk = backend.concat(build_side)
                 value[dest], dest_block_hashes[dest] = blk, _sha256_hex(backend.to_wire(blk))
+                witness.join_output_rows += len(blk)
                 continue
             build, probe, how_here = backend.concat(build_side), right_blocks[0], "left"
         else:
             if not left_blocks:  # partitionless build side -> keep the probe rows (never drop)
                 blk = backend.concat(probe_side)
                 value[dest], dest_block_hashes[dest] = blk, _sha256_hex(backend.to_wire(blk))
+                witness.join_output_rows += len(blk)
                 continue
             build, probe, how_here = left_blocks[0], backend.concat(probe_side), "right"
         chunks, hashes, peak, spilled, rows, chunks_read = _join_with_budget(
@@ -722,8 +725,9 @@ def run_join(
 
     F6: the auto (``broadcast=None``) choice is keyed on ``parts``, NOT the runtime ``workers`` count —
     a PLAN-STABLE N, so the SAME logical join makes the SAME choice regardless of how the worker pool
-    happens to be sized at run time (``graphed.join_plan`` computes the same rule the same way, on the
-    same ``parts``, at plan-build time)."""
+    happens to be sized at run time. (``graphed.join_plan`` applies the same ``parts``-keyed cost rule
+    at plan-build time, but on partition COUNTS — the only size it has before any data is read — whereas
+    here the rule sees measured BYTES; the two can differ when per-partition size is skewed.)"""
     faults = faults if faults is not None else ShuffleFaults()
     k = max(1, workers)
     build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
