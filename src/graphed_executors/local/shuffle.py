@@ -34,6 +34,8 @@ cluster *simulation* of the transport seam — see ``CLAUDE.md`` for the cluster
 from __future__ import annotations
 
 import hashlib
+import multiprocessing
+import os
 import tempfile
 import threading
 import time
@@ -46,7 +48,10 @@ from pathlib import Path
 from typing import Any
 
 from graphed.core import ShuffleBackend
-from graphed.core.execution import JoinBackend  # the join-half protocol (match_indices/take), M40
+from graphed.core.execution import (
+    AddressTable,  # the M41 cluster-seam address table (data-only)
+    JoinBackend,  # the join-half protocol (match_indices/take), M40
+)
 from graphed.shuffle import (
     broadcast_join_choice,  # the pinned cost rule (F6: graphed.shuffle is the single source of truth)
     join_blocks,  # the generic radix-hash join kernel over a JoinBackend (M40)
@@ -111,6 +116,19 @@ class ShuffleWitness:
     join_spilled_partitions: int = 0  # radix output partitions spilled to the node Store (spill engaged)
     join_chunks_read: int = 0  # spilled chunks READ BACK off disk (F5 — must equal join_spilled_partitions)
     join_output_rows: int = 0  # total relational (duplicating) output rows produced
+    # ---- M41 fetch/gather (reader) plane + cluster-seam counters ----
+    peak_fetch_bytes: int = 0  # peak live bytes in the FETCH-ACCUMULATION buffer (bounded to fetch_budget_bytes
+    #   + one block); NOT total reader RAM — reassembly (read-back + concat) still holds the whole dest resident
+    fetch_spilled_bytes: int = 0  # wire bytes the fetch spill wrote to node Stores on disk (T1/T3)
+    fetch_spill_count: int = 0  # number of fetch-plane spill flushes (spill engaged)
+    bulk_fetch_count: int = 0  # COALESCED fetch ops (one per (gather,holder) node-pair); also the cluster-sim fetch count
+    bytes_per_fetch: float = 0.0  # mean bytes per coalesced fetch = bytes_transferred / bulk_fetch_count
+    bytes_transferred: int = 0  # total UNIQUE payload bytes moved through fetch() (re-fetch of a present digest adds 0)
+    per_node_disk_bytes: dict[str, int] = field(default_factory=dict)  # node addr -> on-disk fetch-spill bytes (== du)
+    disk_budget_bytes: int = 0  # the configured per-node Store disk cap (echoes the input)
+    disk_backpressure_events: int = 0  # times the per-node cap forced a spill onto another node (T3)
+    served_pid: int = 0  # os.getpid() of the CHILD that served the last cluster-sim fetch (c.2)
+    served_host: str = ""  # the routable host that served the last cluster-sim fetch (c.2)
 
 
 @dataclass
@@ -186,6 +204,12 @@ class _IpcCluster:
     def get(self, i: int, digest: str) -> bytes:
         return self._blocks[i][digest]
 
+    def evict(self, i: int, digest: str) -> None:
+        """Drop a consumed block from the in-RAM node store (each repartition-gather block is fetched
+        exactly once, so evicting after the fetch keeps the reader plane from holding the producer store
+        AND the gathered dest resident at once)."""
+        self._blocks[i].pop(digest, None)
+
     def close(self) -> None:
         pass
 
@@ -236,6 +260,10 @@ class _HttpCluster:
         with urllib.request.urlopen(url, timeout=10) as resp:  # a real cross-node socket fetch
             data: bytes = resp.read()
         return data
+
+    def evict(self, i: int, digest: str) -> None:
+        """Drop a consumed block from a node's block Store (see :meth:`_IpcCluster.evict`)."""
+        self._nodes[i].blocks.pop(digest, None)
 
     def close(self) -> None:
         for node in self._nodes:
@@ -359,7 +387,28 @@ def _stage1_map_write(
     return manifests
 
 
-# ---- stage 2: gather ----------------------------------------------------------------------------
+# ---- stage 2: gather (M41: coalesced fetch + reader-plane RAM/disk budgets) ----------------------
+def _spill_node(
+    witness: ShuffleWitness, disk_budget_bytes: int | None, k: int, gather_i: int, nbytes: int, cluster: Any
+) -> int:
+    """Pick the node whose Store a fetch-spilled block lands on. Default is the gather node; if that
+    node's on-disk Store would exceed ``disk_budget_bytes`` (the T3 skew cap), REDISTRIBUTE to another
+    node still under budget (round-robin), counting a backpressure event — so one hot dest never blows a
+    single node's disk (Dask P2P #8433). Never drops data: if every node is full it falls back to the
+    gather node (still counting the event) rather than lose the block."""
+    if disk_budget_bytes is None:
+        return gather_i
+    here = cluster.addr(gather_i)
+    if witness.per_node_disk_bytes.get(here, 0) + nbytes <= disk_budget_bytes:
+        return gather_i
+    for j in range(k):
+        if witness.per_node_disk_bytes.get(cluster.addr(j), 0) + nbytes <= disk_budget_bytes:
+            witness.disk_backpressure_events += 1
+            return j
+    witness.disk_backpressure_events += 1
+    return gather_i
+
+
 def _stage2_gather(
     backend: ShuffleBackend[Any, Any],
     parts: int,
@@ -368,28 +417,100 @@ def _stage2_gather(
     manifests: dict[int, dict[int, tuple[str, int]]],
     cluster: Any,
     witness: ShuffleWitness,
+    *,
+    fetch_budget_bytes: int | None = None,
+    disk_budget_bytes: int | None = None,
 ) -> tuple[dict[int, Any], dict[int, str]]:
+    """Gather each dest in ascending-task (== ascending-src_pid) order — the deterministic merge — but
+    with two M41 reader-plane hardenings over the M39 per-dest concat:
+
+    - **T2 incast avoidance:** cross-node pulls are COALESCED to one bulk fetch per (gather, holder)
+      node-pair (``bulk_fetch_count <= K*K``), instead of one ``cluster.get`` per (task, dest) block.
+    - **T1 RAM budget + spill:** when the live FETCH-ACCUMULATION buffer crosses ``fetch_budget_bytes`` the
+      buffered wires STREAM to a node-local Store on disk (byte-backpressure), so that buffer stays
+      ``<= budget + one block`` (``peak_fetch_bytes``). Reassembly (read-back + concat) still holds the whole
+      dest resident — T1 bounds the *fetch* plane, not total reader RAM. **T3 disk budget:** the spill target
+      respects a per-node ``disk_budget_bytes`` cap, redistributing under skew.
+
+    Distinct from the M40 join spill (``_join_with_budget`` bounds the JOIN OUTPUT) and the M39 writer
+    flush (``ROW_GROUP_BYTES``): this is the third, reader-plane spill. Content + order are preserved
+    (spill/read-back is FIFO in ascending-task order), so ``dest_block_hashes`` stay byte-identical."""
     witness.manifest_fetch_is_per_dest = True
+    if disk_budget_bytes is not None:
+        witness.disk_budget_bytes = disk_budget_bytes
     value: dict[int, Any] = {}
     dest_block_hashes: dict[int, str] = {}
-    for dest in range(parts):
-        gather_i = dest % k
-        blocks: list[Any] = []
-        for t in range(n_tasks):  # ascending task -> ascending src_pid: the deterministic merge order
-            entry = manifests[t].get(dest)  # per-dest manifest GET (.../{task}/{dest}), O(N*P) metadata
-            if entry is None:
+    spill_seq = 0  # unique on-disk spill names: hot-key blocks can be byte-identical, so a content-address
+    #                would dedup REAL bytes and undercount the independent `du` disk cross-check.
+
+    for gather_i in range(k):
+        dests_here = [d for d in range(parts) if d % k == gather_i]
+        by_holder: dict[int, list[tuple[int, int, str]]] = {}
+        for dest in dests_here:
+            for t in range(n_tasks):  # ascending task -> ascending src_pid: the deterministic merge order
+                entry = manifests[t].get(dest)  # per-dest manifest GET (.../{task}/{dest}), O(N*P) metadata
+                if entry is None:
+                    continue
+                digest, holder_i = entry
+                witness.manifest_bytes += _MANIFEST_ENTRY_BYTES
+                by_holder.setdefault(holder_i, []).append((dest, t, digest))
+
+        resident: dict[tuple[int, int], bytes] = {}  # (dest, task) -> wire held in RAM
+        spilled: dict[tuple[int, int], Path] = {}  # (dest, task) -> spilled wire path on a node Store
+        live_bytes = 0
+
+        for holder_i in sorted(by_holder):
+            witness.bulk_fetch_count += 1  # ONE coalesced fetch per (gather, holder) node-pair (T2)
+            billed: set[str] = set()  # digests already billed to bytes_transferred + queued for eviction:
+            #   byte-identical hot-key blocks (steal can co-locate them) share ONE content-address, so bill
+            #   each digest to bytes_transferred once, and evict it once — AFTER all its (dest,t) refs pull.
+            for dest, t, digest in by_holder[holder_i]:
+                wire = cluster.get(holder_i, digest)  # pull the block from its holder (thief if stolen)
+                if digest not in billed:
+                    witness.bytes_transferred += len(wire)  # UNIQUE bytes: re-fetch of a present digest adds 0
+                    billed.add(digest)
+                if holder_i != gather_i:
+                    witness.cross_node_fetches += 1  # M39 per-block cross-node witness (kept for cross-check)
+                resident[(dest, t)] = wire
+                live_bytes += len(wire)
+                witness.peak_fetch_bytes = max(witness.peak_fetch_bytes, live_bytes)
+                if fetch_budget_bytes is not None and live_bytes >= fetch_budget_bytes:
+                    for key, w in resident.items():  # flush: stream the buffered wires to a node Store on disk
+                        node_i = _spill_node(witness, disk_budget_bytes, k, gather_i, len(w), cluster)
+                        objdir = Path(cluster.store_dir(node_i)) / "objects"
+                        fname = f"fetchspill-{spill_seq:08d}"
+                        spill_seq += 1
+                        (objdir / fname).write_bytes(w)
+                        spilled[key] = objdir / fname
+                        witness.fetch_spilled_bytes += len(w)
+                        addr = cluster.addr(node_i)
+                        witness.per_node_disk_bytes[addr] = witness.per_node_disk_bytes.get(addr, 0) + len(w)
+                    witness.fetch_spill_count += 1
+                    resident.clear()
+                    live_bytes = 0
+            for digest in billed:  # evict each unique block ONCE, after all its (dest,t) refs are pulled —
+                cluster.evict(holder_i, digest)  # a mid-loop evict would KeyError the next ref to a shared digest
+
+        for dest in dests_here:
+            blocks: list[Any] = []
+            for t in range(n_tasks):  # reassemble in ascending-task order (RAM residents or read spill back)
+                key = (dest, t)
+                if key in resident:
+                    wire = resident[key]
+                elif key in spilled:
+                    wire = spilled[key].read_bytes()
+                else:
+                    continue
+                blocks.append(backend.from_wire(wire))
+            if not blocks:
                 continue
-            digest, holder_i = entry
-            witness.manifest_bytes += _MANIFEST_ENTRY_BYTES
-            wire = cluster.get(holder_i, digest)  # pull the block from its holder (thief if stolen)
-            if holder_i != gather_i:
-                witness.cross_node_fetches += 1
-            blocks.append(backend.from_wire(wire))
-        if not blocks:
-            continue
-        gathered = backend.concat(blocks)
-        value[dest] = gathered
-        dest_block_hashes[dest] = _sha256_hex(backend.to_wire(gathered))
+            gathered = backend.concat(blocks)
+            blocks = []  # free the read-back blocks/wires before hashing — keeps reader peak ~2x the dest
+            value[dest] = gathered
+            dest_block_hashes[dest] = _sha256_hex(backend.to_wire(gathered))
+
+    if witness.bulk_fetch_count:
+        witness.bytes_per_fetch = witness.bytes_transferred / witness.bulk_fetch_count
     return value, dest_block_hashes
 
 
@@ -405,10 +526,17 @@ def run_repartition(
     steal: bool = False,
     faults: ShuffleFaults | None = None,
     advertise_host: str | None = None,
+    fetch_budget_bytes: int | None = None,
+    disk_budget_bytes: int | None = None,
 ) -> ShuffleResult:
     """Hash-repartition ``src_blocks`` into ``parts`` dest partitions via the two-phase executor.
     See the module docstring for the coalescing / determinism / announcement-independence / steal
-    guarantees. ``comms="http"`` runs the routable cross-node cluster-sim."""
+    guarantees. ``comms="http"`` runs the routable cross-node cluster-sim.
+
+    M41 reader-plane knobs (both default off, so M39/M40 behaviour is unchanged): ``fetch_budget_bytes``
+    caps the RAM the gather holds — over it, fetched wires stream-spill to a node-local Store on disk
+    (:func:`_stage2_gather`); ``disk_budget_bytes`` caps each node's Store, redistributing the spill
+    across nodes under skew (T3)."""
     faults = faults if faults is not None else ShuffleFaults()
     n_src = len(src_blocks)
     k = max(1, workers)
@@ -419,7 +547,17 @@ def run_repartition(
         witness.node_store_dirs = {cluster.addr(i): cluster.store_dir(i) for i in range(k)}
         witness.node_hosts = [cluster.host(i) for i in range(k)]
         manifests = _stage1_map_write(backend, src_blocks, parts, n_tasks, k, faults, steal, cluster, witness)
-        value, dest_block_hashes = _stage2_gather(backend, parts, n_tasks, k, manifests, cluster, witness)
+        value, dest_block_hashes = _stage2_gather(
+            backend,
+            parts,
+            n_tasks,
+            k,
+            manifests,
+            cluster,
+            witness,
+            fetch_budget_bytes=fetch_budget_bytes,
+            disk_budget_bytes=disk_budget_bytes,
+        )
         return ShuffleResult(dest_block_hashes=dest_block_hashes, value=value, partitions=[], witness=witness)
     finally:
         cluster.close()
@@ -817,3 +955,170 @@ def run_repartition_by_size(
         pieces.extend(_split_to_target(backend, block, target_bytes))
     partitions = _coalesce_pieces(backend, pieces, target_bytes)
     return ShuffleResult(dest_block_hashes={}, value={}, partitions=partitions, witness=ShuffleWitness())
+
+
+# ---- M41 T4: the Phase-2 ClusterExecutor launch seam — a genuine CROSS-PROCESS routable Store sim ----
+# The core CONTRACT (AddressTable/NodeStore/ClusterExecutor) lives in graphed.core.execution; here the
+# concrete node-local Store + mock launcher satisfy it BEHIND those types (§A.4). Multi-host launch stays
+# deferred (Phase-2): this is a single-machine simulation — K genuine CHILD processes (spawn), each
+# serving its Store over a real socket on a ROUTABLE (non-loopback) address, registering into the core
+# AddressTable. Scope honesty (§3(e)): throughput is measured on this sim, never a cluster wall-clock SLA.
+def _store_server_handler(
+    objects_dir: Path, served_pid: int, served_host: str
+) -> type[BaseHTTPRequestHandler]:
+    """The node-local Store's bulk data-plane endpoints (§4.3): ``GET /blob/{hash}`` + ``PUT /blob``
+    (content-addressed). A GET response carries ``X-Served-Pid``/``X-Served-Host`` so the consumer
+    witnesses which CHILD (not the driver thread) served the fetch, and over what routable host."""
+
+    class _StoreHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # stdlib http.server handler name — GET /blob/{hash}
+            path = objects_dir / self.path.rsplit("/", 1)[-1]
+            if not path.is_file():
+                self.send_response(404)
+                self.end_headers()
+                return
+            data = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Served-Pid", str(served_pid))
+            self.send_header("X-Served-Host", served_host)
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_PUT(self) -> None:  # PUT /blob -> content-addressed store; returns the stored hash
+            n = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(n) if n else b""
+            digest = _sha256_hex(body)
+            (objects_dir / digest).write_bytes(body)
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(digest)))
+            self.end_headers()
+            self.wfile.write(digest.encode())
+
+        def log_message(self, *args: Any) -> None:  # silence the access log
+            pass
+
+    return _StoreHandler
+
+
+def _routable_store_child(node_id: int, store_root: str, advertise_host: str, ready_q: Any) -> None:
+    """A spawned CHILD (its own PID): stand up a node-local Store served over a real socket on the
+    ROUTABLE ``advertise_host``, then announce ``(node_id, host, port, os.getpid())`` back to the driver
+    so the launcher registers the address with the child's pid as provenance."""
+    store_dir = Path(store_root) / f"node-{node_id}"
+    objects = store_dir / "objects"
+    objects.mkdir(parents=True, exist_ok=True)
+    host = select_advertise_host(advertise_host)  # ValueError on loopback/0.0.0.0 — never bind non-routable
+    server = ThreadingHTTPServer((host, 0), _store_server_handler(objects, os.getpid(), host))
+    ready_q.put((node_id, str(server.server_address[0]), int(server.server_address[1]), os.getpid()))
+    server.serve_forever()
+
+
+class _RoutableNodeStore:
+    """A concrete :class:`graphed.core.execution.NodeStore`: ``fetch(digest)`` GETs a blob from a
+    routable CHILD and STREAMS it (chunked, byte-backpressured — never the whole blob resident) into the
+    driver-side consumer Store on disk. **Idempotent**: a re-fetch of a digest already in the consumer
+    Store returns it without moving bytes again (``bytes_transferred`` unchanged)."""
+
+    def __init__(self, host: str, port: int, consumer_objects: Path, witness: ShuffleWitness) -> None:
+        self._host = host
+        self._port = port
+        self._consumer = consumer_objects
+        self._witness = witness
+
+    def fetch(self, digest: str) -> bytes:
+        target = self._consumer / digest
+        if target.is_file():  # idempotent: already streamed in — no new bytes move
+            return target.read_bytes()
+        url = f"http://{self._host}:{self._port}/blob/{digest}"
+        moved = 0
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            served_pid = int(resp.headers.get("X-Served-Pid", "0"))
+            served_host = str(resp.headers.get("X-Served-Host", ""))
+            with open(target, "wb") as out:
+                while True:
+                    chunk = resp.read(1 << 16)  # 64 KiB — bound the reader buffer, stream to disk
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    moved += len(chunk)
+        self._witness.bytes_transferred += moved  # UNIQUE payload bytes (idempotent re-fetch adds 0)
+        self._witness.bulk_fetch_count += 1
+        self._witness.served_pid = served_pid
+        self._witness.served_host = served_host
+        return target.read_bytes()
+
+
+class RoutableClusterSim:
+    """Handle over a launched cross-process routable-Store cluster (the (c.2)/(e) frozen API). ``put``
+    ships a blob to a child's Store (PUT /blob); ``fetch`` pulls it back THROUGH the core
+    ``NodeStore.fetch`` seam, streaming into the consumer Store. ``close`` tears the children down cleanly
+    (no leaked processes/ports)."""
+
+    def __init__(
+        self,
+        procs: list[Any],
+        address_table: AddressTable,
+        node_ids: tuple[int, ...],
+        child_pids: tuple[int, ...],
+        consumer_dir: Path,
+        witness: ShuffleWitness,
+        stores: dict[int, _RoutableNodeStore],
+    ) -> None:
+        self.driver_pid = os.getpid()
+        self.address_table = address_table
+        self.node_ids = node_ids
+        self.child_pids = child_pids
+        self.consumer_store_dir = str(consumer_dir)
+        self.witness = witness
+        self._procs = procs
+        self._stores = stores
+
+    def put(self, node_id: int, data: bytes) -> str:
+        """PUT /blob to the CHILD hosting ``node_id`` -> the content hash it stored under."""
+        host, port = self.address_table.lookup(node_id)
+        req = urllib.request.Request(f"http://{host}:{port}/blob", data=data, method="PUT")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            digest: bytes = resp.read()
+        return digest.decode()
+
+    def fetch(self, node_id: int, digest: str) -> bytes:
+        """GET /blob from ``node_id`` through the core ``NodeStore.fetch`` seam (idempotent)."""
+        return self._stores[node_id].fetch(digest)
+
+    def close(self) -> None:
+        for p in self._procs:
+            p.terminate()
+        for p in self._procs:
+            p.join(timeout=5)
+
+
+def launch_routable_cluster(n_nodes: int, *, store_root: str, advertise_host: str) -> RoutableClusterSim:
+    """Mock Phase-2 launcher: spawn ``n_nodes`` CHILD processes (multiprocessing 'spawn'), each serving a
+    node-local Store on the ROUTABLE ``advertise_host``, and register each announced ``(host, port)`` —
+    tagged with the CHILD's pid as provenance — into the core :class:`AddressTable`. Returns a
+    :class:`RoutableClusterSim` whose ``fetch`` streams blobs through the core ``NodeStore.fetch`` seam
+    into a driver-side consumer Store. Multi-host launch stays deferred — this is a single-machine sim."""
+    host = select_advertise_host(advertise_host)  # reject loopback/wildcard up front
+    ctx = multiprocessing.get_context("spawn")
+    ready_q: Any = ctx.Queue()
+    root = Path(store_root)
+    consumer_objects = root / "consumer" / "objects"
+    consumer_objects.mkdir(parents=True, exist_ok=True)
+    procs: list[Any] = []
+    for nid in range(n_nodes):
+        p = ctx.Process(target=_routable_store_child, args=(nid, str(root), host, ready_q), daemon=True)
+        p.start()
+        procs.append(p)
+    address_table = AddressTable()
+    witness = ShuffleWitness()
+    child_pids: list[int] = []
+    stores: dict[int, _RoutableNodeStore] = {}
+    for _ in range(n_nodes):
+        nid, bhost, bport, pid = ready_q.get(timeout=60)  # each child announces its routable (host,port,pid)
+        address_table.register(nid, bhost, bport, registered_by=pid)
+        child_pids.append(pid)
+        stores[nid] = _RoutableNodeStore(bhost, bport, consumer_objects, witness)
+    return RoutableClusterSim(
+        procs, address_table, tuple(range(n_nodes)), tuple(child_pids), root / "consumer", witness, stores
+    )
