@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from graphed.core import ShuffleBackend
+from graphed.shuffle import join_blocks  # the generic radix-hash join kernel over a JoinBackend (M40)
 
 from ._transport import select_advertise_host
 
@@ -97,6 +98,14 @@ class ShuffleWitness:
     stolen_tasks: tuple[int, ...] = ()
     cross_node_fetches: int = 0
     peak_writer_buffer_bytes: int = 0
+    # ---- M40 distributed-join counters ----
+    build_side_blocks: int = 0  # shuffle blocks written by the build (left) side's map-write
+    large_side_blocks: int = 0  # shuffle blocks written by the probe (right) side — 0 under broadcast
+    broadcast_puts: int = 0  # times the build side was replicated to a node (== n_nodes under broadcast)
+    broadcast_chosen: bool = False  # the plan-recorded broadcast-vs-shuffle choice the executor honoured
+    peak_join_bytes: int = 0  # the gather-join kernel's peak live working-set bytes (the B5 spill gate)
+    join_spilled_partitions: int = 0  # radix output partitions spilled to the node Store (spill engaged)
+    join_output_rows: int = 0  # total relational (duplicating) output rows produced
 
 
 @dataclass
@@ -254,17 +263,18 @@ def _assign(n_src: int, n_tasks: int) -> list[list[int]]:
 
 # ---- stage 1: coalescing map-write --------------------------------------------------------------
 def _coalesce_task(
-    backend: ShuffleBackend[Any, Any], owned: Sequence[Any], parts: int
+    backend: ShuffleBackend[Any, Any], owned: Sequence[Any], parts: int, salt: int = 0
 ) -> tuple[dict[int, Any], int]:
     """Route + coalesce one producer-task's owned src blocks into <= P dest blocks (one per non-empty
     dest). Streams sub-blocks through P per-dest writers, flushing a writer at ``ROW_GROUP_BYTES``, so
     the peak live writer-buffer bytes are O(P*rg) (guidance 3). Rows for a dest are kept in ascending
-    src order (the deterministic merge)."""
+    src order (the deterministic merge). ``salt`` folds into the pinned route (M40 skew handling; both
+    join sides pass the SAME salt, so co-partitioning — and thus the join result — is preserved)."""
     per_dest_subs: dict[int, list[Any]] = {}
     live: dict[int, int] = {}  # dest -> live writer-buffer bytes not yet flushed to the block file
     peak = 0
     for src in owned:  # ascending src_pid
-        subs = backend.partition(src, "__joinkey__", parts)
+        subs = backend.partition(src, "__joinkey__", parts, salt=salt)
         for dest in range(parts):
             sub = subs[dest]
             if len(sub) == 0:
@@ -301,6 +311,7 @@ def _stage1_map_write(
     steal: bool,
     cluster: Any,
     witness: ShuffleWitness,
+    salt: int = 0,
 ) -> dict[int, dict[int, tuple[str, int]]]:
     assignment = _assign(len(src_blocks), n_tasks)
     stolen: dict[int, int] = {}
@@ -316,7 +327,7 @@ def _stage1_map_write(
     for t, owned_ids in enumerate(assignment):
         owner_i = t % k
         exec_i = stolen.get(t, owner_i)  # a stolen task runs on (and leaves its blocks on) the thief
-        per_dest, task_peak = _coalesce_task(backend, [src_blocks[s] for s in owned_ids], parts)
+        per_dest, task_peak = _coalesce_task(backend, [src_blocks[s] for s in owned_ids], parts, salt)
         peak = max(peak, task_peak)
 
         manifest: dict[int, tuple[str, int]] = {}
@@ -404,6 +415,267 @@ def run_repartition(
         witness.node_hosts = [cluster.host(i) for i in range(k)]
         manifests = _stage1_map_write(backend, src_blocks, parts, n_tasks, k, faults, steal, cluster, witness)
         value, dest_block_hashes = _stage2_gather(backend, parts, n_tasks, k, manifests, cluster, witness)
+        return ShuffleResult(dest_block_hashes=dest_block_hashes, value=value, partitions=[], witness=witness)
+    finally:
+        cluster.close()
+
+
+# ---- M40: distributed relational JOIN over the two-phase substrate ------------------------------
+def broadcast_join_choice(build_bytes: int, probe_bytes: int, n_nodes: int) -> bool:
+    """The pinned broadcast-vs-shuffle cost rule (plan §3.3, theme (c)): broadcast the build side IFF
+    replicating it to every node is cheaper than shuffling BOTH sides — ``|build|·N < |build|+|probe|``.
+    Deterministic in the (typetracer/estimated) form sizes; the plan records the choice (E5) and the
+    executor honours it, so the decision never drifts with a runtime re-observation."""
+    return build_bytes * n_nodes < build_bytes + probe_bytes
+
+
+def _gather_side(
+    backend: ShuffleBackend[Any, Any],
+    manifests: dict[int, dict[int, tuple[str, int]]],
+    dest: int,
+    n_tasks: int,
+    gather_i: int,
+    cluster: Any,
+    witness: ShuffleWitness,
+) -> list[Any]:
+    """Pull one side's blocks for ``dest`` in ascending-task (== ascending-src_pid) order — the
+    deterministic merge — from each block's holder (the thief, if its task was stolen)."""
+    blocks: list[Any] = []
+    for t in range(n_tasks):
+        entry = manifests[t].get(dest)
+        if entry is None:
+            continue
+        digest, holder_i = entry
+        witness.manifest_bytes += _MANIFEST_ENTRY_BYTES
+        wire = cluster.get(holder_i, digest)
+        if holder_i != gather_i:
+            witness.cross_node_fetches += 1
+        blocks.append(backend.from_wire(wire))
+    return blocks
+
+
+def _join_with_budget(
+    backend: ShuffleBackend[Any, Any],
+    build: Any,
+    probe: Any,
+    on: Sequence[str],
+    how: str,
+    budget: int | None,
+    cluster: Any,
+    node_i: int,
+) -> tuple[list[Any], list[str], int, int, int]:
+    """Gather-join one dest's co-partitioned ``build``/``probe`` blocks with the generic kernel, as a
+    LIST of joined sub-partition blocks (one when unbudgeted). With a budget it radix-sub-partitions the
+    PROBE, sizing each chunk so its DUPLICATED output fits ``budget`` (trap 2 — the budget covers
+    output), and SPILLS each partition's wire to the node Store **on disk** — so the kernel's live RAM
+    is one chunk, never a full-RAM concat of the whole dest. The caller keeps the chunks as separate
+    result blocks (their union is the dest's join). Returns
+    ``(chunks, chunk_hashes, peak_output_bytes, spilled_partitions, output_rows)``."""
+    on_l = list(on)
+    if budget is None or len(probe) == 0:
+        joined = join_blocks(backend, build, probe, on=on_l, how=how)
+        return (
+            [joined],
+            [_sha256_hex(backend.to_wire(joined))],
+            backend.estimated_bytes(joined),
+            0,
+            len(joined),
+        )
+
+    n_probe = len(probe)
+    # Size the probe chunk from a ONE-ROW sample so we NEVER materialise the whole duplicated output to
+    # measure it (that would defeat the budget). A denser-than-predicted chunk is caught + halved below.
+    sample = join_blocks(backend, build, backend.slice_rows(probe, 0, 1), on=on_l, how=how)
+    per_row = max(1, backend.estimated_bytes(sample))
+    chunk = max(1, budget // per_row)
+    obj_dir = Path(cluster.store_dir(node_i)) / "objects"
+
+    chunks: list[Any] = []
+    hashes: list[str] = []
+    peak = 0
+    spilled = 0
+    rows = 0
+    off = 0
+    while off < n_probe:
+        c = min(chunk, n_probe - off)
+        joined = join_blocks(backend, build, backend.slice_rows(probe, off, off + c), on=on_l, how=how)
+        jb = backend.estimated_bytes(joined)
+        if jb >= budget and c > 1:
+            chunk = max(1, c // 2)  # a denser radix partition than the sample predicted -> shrink + retry
+            continue
+        wire = backend.to_wire(joined)
+        digest = _sha256_hex(wire)
+        (obj_dir / digest).write_bytes(wire)  # SPILL the radix partition to the node Store on DISK,
+        del wire  # then free its wire from RAM — the real streaming bound, never a full-RAM concat
+        chunks.append(joined)
+        hashes.append(digest)
+        peak = max(peak, jb)
+        spilled += 1
+        rows += len(joined)
+        off += c
+    return chunks, hashes, peak, spilled, rows
+
+
+def _run_shuffle_join(
+    backend: ShuffleBackend[Any, Any],
+    left_blocks: Sequence[Any],
+    right_blocks: Sequence[Any],
+    parts: int,
+    k: int,
+    on: Sequence[str],
+    how: str,
+    salt: int,
+    mem_budget: int | None,
+    steal: bool,
+    faults: ShuffleFaults,
+    cluster: Any,
+    witness: ShuffleWitness,
+) -> tuple[dict[int, Any], dict[int, str]]:
+    """Shuffle both sides on ``__joinkey__`` (same ``parts`` + ``salt`` ⇒ co-partitioned), then gather
+    the two sides per dest in ascending-task order and join them (spilling under ``mem_budget``)."""
+    n_tasks_l = min(k, len(left_blocks)) if left_blocks else 1
+    n_tasks_r = min(k, len(right_blocks)) if right_blocks else 1
+    witness.n_producer_tasks = max(n_tasks_l, n_tasks_r)
+    left_manifests = _stage1_map_write(
+        backend, left_blocks, parts, n_tasks_l, k, faults, steal, cluster, witness, salt
+    )
+    witness.build_side_blocks = sum(len(m) for m in left_manifests.values())
+    right_manifests = _stage1_map_write(
+        backend, right_blocks, parts, n_tasks_r, k, faults, steal, cluster, witness, salt
+    )
+    witness.large_side_blocks = sum(len(m) for m in right_manifests.values())
+    witness.manifest_fetch_is_per_dest = True
+
+    value: dict[int, Any] = {}
+    dest_block_hashes: dict[int, str] = {}
+    next_key = parts  # sub-partition (budget) blocks get fresh keys beyond the dest range
+    for dest in range(parts):
+        gather_i = dest % k
+        build_side = _gather_side(backend, left_manifests, dest, n_tasks_l, gather_i, cluster, witness)
+        probe_side = _gather_side(backend, right_manifests, dest, n_tasks_r, gather_i, cluster, witness)
+        if not build_side or not probe_side:
+            continue  # inner join: a dest missing either side yields no rows
+        build = backend.concat(build_side)
+        probe = backend.concat(probe_side)
+        chunks, hashes, peak, spilled, rows = _join_with_budget(
+            backend, build, probe, on, how, mem_budget, cluster, gather_i
+        )
+        witness.peak_join_bytes = max(witness.peak_join_bytes, peak)
+        witness.join_spilled_partitions += spilled
+        witness.join_output_rows += rows
+        if len(chunks) == 1:  # the whole dest is one block -> keyed by dest (stable for determinism)
+            value[dest], dest_block_hashes[dest] = chunks[0], hashes[0]
+        else:  # spilled sub-partitions -> separate result blocks (their union is the dest's join)
+            for ch, h in zip(chunks, hashes, strict=True):
+                value[next_key], dest_block_hashes[next_key] = ch, h
+                next_key += 1
+    return value, dest_block_hashes
+
+
+def _run_broadcast_join(
+    backend: ShuffleBackend[Any, Any],
+    left_blocks: Sequence[Any],
+    right_blocks: Sequence[Any],
+    k: int,
+    on: Sequence[str],
+    how: str,
+    mem_budget: int | None,
+    cluster: Any,
+    witness: ShuffleWitness,
+) -> tuple[dict[int, Any], dict[int, str]]:
+    """Replicate the small build (left) side to every node and join each probe (right) partition
+    against the whole build — the large side is NEVER shuffled (``large_side_blocks == 0``). ``value``
+    is keyed by probe-partition index; the join RESULT (union over blocks) equals the shuffle join."""
+    value: dict[int, Any] = {}
+    dest_block_hashes: dict[int, str] = {}
+    if not left_blocks:
+        return value, dest_block_hashes
+    build_wire = backend.to_wire(backend.concat(list(left_blocks)))
+    build_digest = _sha256_hex(build_wire)
+    for i in range(k):
+        cluster.put(i, build_digest, build_wire)
+        witness.broadcast_puts += 1
+    witness.large_side_blocks = 0
+    witness.n_producer_tasks = max(1, min(k, len(right_blocks))) if right_blocks else 1
+    next_key = len(right_blocks)  # sub-partition (budget) blocks get fresh keys beyond the pidx range
+    for pidx, probe_block in enumerate(right_blocks):
+        node_i = pidx % k
+        build_here = backend.from_wire(cluster.get(node_i, build_digest))
+        if node_i != 0:
+            witness.cross_node_fetches += 1
+        chunks, hashes, peak, spilled, rows = _join_with_budget(
+            backend, build_here, probe_block, on, how, mem_budget, cluster, node_i
+        )
+        witness.peak_join_bytes = max(witness.peak_join_bytes, peak)
+        witness.join_spilled_partitions += spilled
+        witness.join_output_rows += rows
+        if len(chunks) == 1:
+            value[pidx], dest_block_hashes[pidx] = chunks[0], hashes[0]
+        else:
+            for ch, h in zip(chunks, hashes, strict=True):
+                value[next_key], dest_block_hashes[next_key] = ch, h
+                next_key += 1
+    return value, dest_block_hashes
+
+
+def run_join(
+    backend: ShuffleBackend[Any, Any],
+    left_blocks: Sequence[Any],
+    right_blocks: Sequence[Any],
+    parts: int,
+    *,
+    on: Sequence[str] = ("__joinkey__",),
+    how: str = "inner",
+    workers: int = 1,
+    comms: str = "ipc",
+    store_root: str | None = None,
+    broadcast: bool | None = None,
+    salt: int = 0,
+    mem_budget_bytes: int | None = None,
+    steal: bool = False,
+    faults: ShuffleFaults | None = None,
+    advertise_host: str | None = None,
+) -> ShuffleResult:
+    """Distributed relational hash JOIN of two block sets via the two-phase executor (plan §4.2).
+
+    The build (``left``) and probe (``right``) sides are co-partitioned on ``__joinkey__`` (same
+    ``parts`` + ``salt``) then gather-joined per dest by the generic ``join_blocks`` kernel — SQL
+    *duplicating* semantics (a probe row with k build matches ⇒ k rows). ``broadcast=None`` lets the
+    pinned cost model choose (recorded in ``witness.broadcast_chosen``, E5); ``True``/``False`` honour a
+    plan-recorded choice. ``mem_budget_bytes`` bounds the gather-join working set by spilling duplicated
+    OUTPUT partitions to the node Store (B5). ``value`` maps dest (or probe-partition index, under
+    broadcast) → the joined block; ``dest_block_hashes`` is the content-addressed determinism key."""
+    faults = faults if faults is not None else ShuffleFaults()
+    k = max(1, workers)
+    build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
+    probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
+    chosen = broadcast_join_choice(build_bytes, probe_bytes, k) if broadcast is None else bool(broadcast)
+    cluster = _make_cluster(comms, k, store_root, advertise_host)
+    try:
+        witness = ShuffleWitness()
+        witness.broadcast_chosen = chosen
+        witness.node_store_dirs = {cluster.addr(i): cluster.store_dir(i) for i in range(k)}
+        witness.node_hosts = [cluster.host(i) for i in range(k)]
+        if chosen:
+            value, dest_block_hashes = _run_broadcast_join(
+                backend, left_blocks, right_blocks, k, on, how, mem_budget_bytes, cluster, witness
+            )
+        else:
+            value, dest_block_hashes = _run_shuffle_join(
+                backend,
+                left_blocks,
+                right_blocks,
+                parts,
+                k,
+                on,
+                how,
+                salt,
+                mem_budget_bytes,
+                steal,
+                faults,
+                cluster,
+                witness,
+            )
         return ShuffleResult(dest_block_hashes=dest_block_hashes, value=value, partitions=[], witness=witness)
     finally:
         cluster.close()
