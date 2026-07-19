@@ -540,16 +540,16 @@ def _run_shuffle_join(
     """Shuffle both sides on ``__joinkey__`` (same ``parts`` + ``salt`` ⇒ co-partitioned), then gather
     the two sides per dest in ascending-task order and join them (spilling under ``mem_budget``).
 
-    F1: a dest that only got rows from ONE side is not simply dropped — how=left/outer keeps a
-    BUILD-only dest, how=right/outer keeps a PROBE-only dest. The absent side's block for that dest is
-    genuinely EMPTY (no rows anywhere route there), and ``take``'s miss-clip (``-1`` -> row 0) has no
-    row to clip into on a truly empty array — a real backend gap, not this executor's to fix. Instead
-    the untouched ORIGINAL other-side block (``left_blocks[0]``/``right_blocks[0]``, always non-empty
-    when that side has any data) stands in as a non-empty schema carrier: by the routing invariant, any
-    row sharing a key with this dest would itself route here, so an empty gather for this dest PROVES
-    the stand-in shares no key with it — forcing the internal ``how`` to only the direction being
-    filled (``left``/``right``) means only THIS dest's real rows ever emit, the stand-in's own (other
-    dests') rows are never touched (``match_indices``' opposite arm is simply never taken)."""
+    F1: a dest that only got rows from ONE side is not dropped — how=left/outer keeps a BUILD-only dest,
+    how=right/outer keeps a PROBE-only dest. The absent side's ORIGINAL other-side block
+    (``left_blocks[0]``/``right_blocks[0]``) stands in as a SCHEMA carrier and the internal ``how`` is
+    forced to only the direction being filled (``left``/``right``): by the routing invariant any row
+    sharing a key with this dest would itself route here, so an empty gather PROVES the carrier shares no
+    key with it and ``match_indices``' opposite arm is never taken — only THIS dest's real rows emit,
+    each null-filled against the carrier's schema. The carrier may itself be a ZERO-ROW block (a
+    cut-emptied partition): ``backend.take`` null-fills an empty carrier, so no non-emptiness is assumed.
+    An ENTIRELY partitionless absent side (``right_blocks``/``left_blocks`` == ``[]``) carries no schema
+    at all — its present-side rows are emitted as-is (no null columns to add), never silently dropped."""
     n_tasks_l = min(k, len(left_blocks)) if left_blocks else 1
     n_tasks_r = min(k, len(right_blocks)) if right_blocks else 1
     witness.n_producer_tasks = max(n_tasks_l, n_tasks_r)
@@ -579,11 +579,15 @@ def _run_shuffle_join(
         if build_side and probe_side:
             build, probe, how_here = backend.concat(build_side), backend.concat(probe_side), how
         elif build_side:
-            if not right_blocks:  # ponytail: no probe data anywhere -> no schema to null-fill against
+            if not right_blocks:  # partitionless probe side -> no schema; keep the build rows (never drop)
+                blk = backend.concat(build_side)
+                value[dest], dest_block_hashes[dest] = blk, _sha256_hex(backend.to_wire(blk))
                 continue
             build, probe, how_here = backend.concat(build_side), right_blocks[0], "left"
         else:
-            if not left_blocks:
+            if not left_blocks:  # partitionless build side -> keep the probe rows (never drop)
+                blk = backend.concat(probe_side)
+                value[dest], dest_block_hashes[dest] = blk, _sha256_hex(backend.to_wire(blk))
                 continue
             build, probe, how_here = left_blocks[0], backend.concat(probe_side), "right"
         chunks, hashes, peak, spilled, rows, chunks_read = _join_with_budget(
@@ -665,13 +669,15 @@ def _run_broadcast_join(
 
     if track_unmatched:
         unmatched = sorted(set(range(len(build_concat))) - matched_build_idx)
-        # ponytail: an entirely probe-less run has no right-side schema to null-fill against — not a
-        # scenario the frozen suite exercises (every left/outer case ships >=1 probe block).
+        # ponytail: a probe-less broadcast run (a forced ``broadcast=True`` on an entirely empty right)
+        # leaves the unmatched build rows unemitted — outside the frozen contract and unreachable via the
+        # cost model (which never broadcasts an empty probe: build*parts < build is false); the SHUFFLE
+        # path, the cost-model-reachable one, is where an entirely-empty side is pinned.
         if unmatched and right_blocks:
-            # `right_blocks[0]` stands in as a non-empty schema carrier (never a genuinely empty
-            # block — `take`'s miss-clip has no row to clip into on one, a real backend gap out of
-            # this executor's scope): `unmatched` rows are, by construction, unmatched against EVERY
-            # probe block including this one, so forcing how="left" here can never spuriously match.
+            # `right_blocks[0]` is the probe SCHEMA carrier and may itself be a ZERO-ROW block —
+            # ``backend.take`` null-fills an empty carrier, so no non-emptiness is assumed. `unmatched`
+            # rows are, by construction, unmatched against EVERY probe block, so forcing how="left" here
+            # can never spuriously match.
             build_unmatched = backend.take(build_concat, unmatched)
             chunks, hashes, peak, spilled, rows, chunks_read = _join_with_budget(
                 backend, build_unmatched, right_blocks[0], on, "left", mem_budget, cluster, 0
