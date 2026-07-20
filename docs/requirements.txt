@@ -1,0 +1,5 @@
+# Read the Docs cannot resolve the consolidated `graphed` package from PyPI — it is a Rust/maturin
+# package published only to GitHub. Install it from git@main, mirroring the CI docs job's env.GRAPHED.
+# The [awkward,numpy] extras supply the backends that graphed-executors' autosummary imports at
+# doc-build time; the Rust toolchain declared in ../.readthedocs.yaml builds the extension.
+graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main
