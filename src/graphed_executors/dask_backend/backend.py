@@ -25,6 +25,10 @@ class DaskBackend:
     evaluations — exactly the class dask must NOT dedup by content tokenization). Payloads ship
     once via an identity future (the coffea idiom, over ``scatter`` which breaks on scale-to-zero)."""
 
+    # The flags describe what the underlying dask LIBRARY supports, not what this MVP adapter wires:
+    # per_task_resources/pin_to_worker are real dask features (resources=/workers=), but `submit`
+    # does NOT auto-forward `resources` (an unsatisfiable hard constraint would stall the task in
+    # no-worker state — see `submit`). Enforcement is a future deployment-time opt-in.
     capabilities = SubmitCapabilities(
         peer_data_movement=True,
         scatter_broadcast=True,
@@ -35,11 +39,10 @@ class DaskBackend:
         worker_file_cache=False,  # honest: no ColumnCache-style plugin ships in the MVP
     )
 
-    def __init__(self, client: Any, *, replicate_broadcast: bool = False, default_retries: int = 3) -> None:
+    def __init__(self, client: Any, *, replicate_broadcast: bool = False) -> None:
         self._distributed = _distributed()  # raises the hinted ImportError if the extra is absent
         self._client = client
         self._replicate_broadcast = replicate_broadcast
-        self._default_retries = default_retries  # reserved config (the runner passes per-submit retries)
         from ._shim import _dask_task_shim  # noqa: PLC0415  (lazy: keeps distributed out of __init__)
 
         self._shim = _dask_task_shim
@@ -57,14 +60,15 @@ class DaskBackend:
         priority: int = 0,
         resources: Mapping[str, float] | None = None,
     ) -> SubmitFuture:
+        """``retries`` and ``priority`` ARE forwarded to ``client.submit``; ``resources`` is accepted
+        but **advisory-dropped** (NOT forwarded). dask treats ``resources=`` as a HARD scheduling
+        constraint, so a request for a resource no worker advertises (e.g. ``{"GPU": 1}``) pins the
+        task in no-worker state forever — that would make correctness depend on a hint, which §1.1
+        forbids. Enforcement on a resource-provisioned cluster is a future deployment-time opt-in
+        (e.g. a ``DaskBackend(enforce_resources=True)`` knob), recorded for m43/Phase-2."""
         # Wrap in the worker shim so the neutral engine task fn runs under a WorkerEnv (§1.1). dask
         # resolves future args before invoking the shim, so wrapping is transparent to dependency
-        # resolution; pure=False + the explicit key ARE the task identity (§1.2.3). retries/priority
-        # pass through (per_task_retries=True). `resources` is ADVISORY here and deliberately NOT
-        # forwarded to client.submit: dask treats resources= as a HARD constraint, so a request for a
-        # resource no worker advertises (e.g. {"GPU": 1}) pins the task in no-worker forever — that
-        # would make correctness depend on a hint, which §1.1 forbids ("correctness must never depend
-        # on them"). Wiring resources to a resource-provisioned cluster is a deployment-time opt-in.
+        # resolution; pure=False + the explicit key ARE the task identity (§1.2.3).
         return cast(
             "SubmitFuture",
             self._client.submit(
@@ -119,9 +123,11 @@ def dask_runner(
     client: Any, *, monitor: Any = None, retries: int = 3, replicate_broadcast: bool = False
 ) -> SubmitRunner:
     """The user-facing one-liner: register the per-worker plugin on ``client`` and return a
-    :class:`SubmitRunner` over a :class:`DaskBackend`. ``close()`` does NOT close the caller's client."""
+    :class:`SubmitRunner` over a :class:`DaskBackend`. ``close()`` does NOT close the caller's client.
+    ``retries`` is forwarded to dask (per-task); a Plan's per-task ``resources`` hints, if any, are
+    advisory only — this adapter does not enforce them yet (see :meth:`DaskBackend.submit`)."""
     from .plugin import GraphedWorkerPlugin  # noqa: PLC0415  (lazy: distributed is the optional extra)
 
     client.register_plugin(GraphedWorkerPlugin())
-    backend = DaskBackend(client, replicate_broadcast=replicate_broadcast, default_retries=retries)
+    backend = DaskBackend(client, replicate_broadcast=replicate_broadcast)
     return SubmitRunner(backend, monitor=monitor, retries=retries)

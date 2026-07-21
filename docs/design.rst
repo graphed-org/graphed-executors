@@ -222,7 +222,11 @@ The common seam: ``SubmitBackend`` + ``SubmitRunner``
   peer data movement, scatter/broadcast, worker pinning, per-task retries, per-task resources,
   running-cancel, worker file cache). The engine may use a capability only behind an
   ``if backend.capabilities.X`` check, and both Plan paths are correct with **every flag false** —
-  that is the parsl floor.
+  that is the parsl floor. A flag states what the underlying *library* supports, not what the MVP
+  adapter wires: ``DaskBackend`` reports ``per_task_resources``/``pin_to_worker`` true (real dask
+  features) but its ``submit`` does **not** auto-forward a Plan's per-task ``resources`` — dask treats
+  ``resources=`` as a hard constraint, so an unsatisfiable request would stall the task forever;
+  enforcement on a resource-provisioned cluster is a future deployment-time opt-in.
 * ``SubmitRunner`` — one ``graphed_core.Executor`` over any ``SubmitBackend``. ``DaskBackend`` is the
   first real backend; a stdlib ``ThreadBackend`` is the conformance second one, so the seam is
   witnessed by *executing two backends against one frozen suite*, not by an import lint. Its flag set
@@ -350,6 +354,11 @@ port avoids ``EADDRINUSE``. Batch clusters follow the same "produce a Client" sh
   preemption-prone queues so innocent tasks on evicted workers are not blamed. With draining, in-flight
   leaves reroute and the fixed tree is unaffected (grouping is by index, not worker). Keep the same
   ``dask``/``distributed``/``graphed`` versions on client and workers (``client.get_versions(check=True)``).
+* **Per-task resources are not enforced yet.** Even on a resource-provisioned cluster (e.g. GPU
+  workers advertising ``resources={"GPU": 1}``), a Plan's per-task ``resources`` hints are dropped —
+  this adapter does not forward them to ``client.submit``, because an unsatisfiable request would
+  stall the task in no-worker state. Provisioning them is a future opt-in; today, pin resource-bound
+  work by shaping the cluster (all workers uniform) rather than by per-task hints.
 
 **Free-threaded 3.14t is not supported for the dask backend** — upstream ``distributed`` has no
 free-threaded build (its ``py314t`` CI is commented out, "WIP - tests don't pass yet"). The

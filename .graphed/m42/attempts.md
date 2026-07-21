@@ -107,3 +107,42 @@ wiring it is a deployment-time opt-in on a resource-provisioned cluster. No m42 
 resource enforcement. `_as_completed` (plan target 2) is implemented INLINE in `_run_adaptive`
 (add_done_callback -> queue.Queue) rather than as a standalone helper, to keep the frozen suite
 exercising every line (no dead helper).
+
+---
+
+## REVIEW / REMEDIATION (2026-07-21)
+
+Review verdict: **3× APPROVE, 0 blockers**. The `resources` deviation was ruled
+ACCEPT-WITH-FOLLOWUP (the frozen seam test forces accept-but-don't-forward; only doc honesty owed).
+Two follow-ups remediated on this branch; a third deferred.
+
+**F1 (doc honesty — DOC-ONLY, no semantic change; non-forwarding is frozen-pinned):**
+- `backend.py`: added a note at the `SubmitCapabilities` declaration that the flags describe what the
+  dask *library* supports (per_task_resources/pin_to_worker are real dask features) while this
+  adapter does NOT auto-forward `resources`.
+- `DaskBackend.submit` gained a docstring: retries/priority ARE forwarded, `resources` accepted but
+  advisory-dropped, enforcement a future opt-in (`DaskBackend(enforce_resources=True)`) for
+  m43/Phase-2. `dask_runner` docstring notes the same.
+- `docs/design.rst`: disclosure in the capability-flag list AND a new deployment-section bullet
+  (a user on a GPU cluster passing `resources=` learns it is not enforced yet).
+
+**F3 (dead config — RESOLVED BY DROP):** `DaskBackend.default_retries` was stored but never
+consulted (the runner passes per-submit `retries`). Chose to DROP it rather than wire a fallback:
+the only meaningful wiring is `retries or self._default_retries`, which would silently override the
+runner's EXPLICIT `retries=0` (e.g. the StageError/killed-worker tests set retries=0) up to 3 — a
+behavioral footgun (3× redundant retries of a deterministically-failing task), even though it never
+breaks correctness. Deleting dead config is cleaner and more honest.
+- **Plan-signature deviation (recorded):** the plan §1.3.2 and the frozen README/harness docstring
+  pin `DaskBackend(client, *, replicate_broadcast=False, default_retries=3)`; the impl now omits
+  `default_retries`. No frozen TEST passes it (only frozen docstrings mention it, which are not
+  assertions), so nothing breaks; the divergence is cosmetic and blessed by the reviewer's F3
+  option (b). `dask_runner` no longer forwards it.
+
+**F2 (adaptive monitor drain + adaptive KilledWorker key_to_task attribution): DEFERRED to m43** per
+the reviewers — its frozen tests land there. NOT touched. (The fixed path already drains monitor
+events before unsubscribe and attributes KilledWorker via key_to_task; only the adaptive path's
+equivalents are deferred.)
+
+Re-verification after F1/F3: frozen m42 **47 passed**; `git diff freeze-m42 -- tests/frozen` empty;
+ruff check src tests clean; ruff format --check src clean; mypy strict clean (18 files); sphinx -W
+build succeeded.
