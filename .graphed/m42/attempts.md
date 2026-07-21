@@ -146,3 +146,9 @@ equivalents are deferred.)
 Re-verification after F1/F3: frozen m42 **47 passed**; `git diff freeze-m42 -- tests/frozen` empty;
 ruff check src tests clean; ruff format --check src clean; mypy strict clean (18 files); sphinx -W
 build succeeded.
+
+## DONE (orchestrator, 2026-07-21)
+
+m42 is DONE: frozen 47/47 (re-verified post-remediation by the orchestrator), review 3x APPROVE
+0 blockers (wf_20cb8bd3-42f), F1+F3 remediated (d24215a; F3 README-prose deviation recorded in
+disputes/frozen_readme_default_retries.md), F2a/F2b carried into m43 (plan §2 m43 block).
