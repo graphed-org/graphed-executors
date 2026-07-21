@@ -66,6 +66,36 @@ jobs:
           python -m pip install -e ".[dev]"
           pytest tests/frozen
 
+  # The dask.distributed backend (graphed_executors.dask_backend) lives behind the [dask] extra and
+  # importorskips out of the main matrix. This dedicated job installs it and runs the m42 dask suite
+  # with coverage scoped to the NEW subpackages only (.coveragerc-dask, fail_under 90 — the §B.3
+  # diff-coverage gate). pyarrow is a runtime need of the parquet parity surfaces (ak.to_parquet).
+  # m43 extends this job's pytest path (cov scope unchanged: all m43 code is under dask_backend/).
+  test-dask:
+    name: test-dask py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install deps + this package with the dask extra
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" pyarrow
+          python -m pip install -e ".[dev,dask]"
+      - name: Pytest m42 dask suite + scoped coverage gate (>=90%)
+        run: |
+          pytest tests/frozen/m42 --cov-config=.coveragerc-dask --cov-branch \
+            --cov=graphed_executors.submit --cov=graphed_executors.dask_backend \
+            --cov-report=term-missing
+
   docs:
     name: docs (sphinx -W)
     runs-on: ubuntu-latest

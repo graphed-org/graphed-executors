@@ -200,11 +200,169 @@ runtime, which reuses ``worker_outbox_addresses``.)
   rather than silently degrading to hub.
 
 
+How the dask backend works
+--------------------------
+
+The dask backend (``graphed_executors.dask_backend``, behind the optional ``[dask]`` extra) runs the
+**same** ``Plan`` on a ``dask.distributed`` cluster used as a *dumb scheduler* — no dask collections,
+no ``HighLevelGraph``, no dask-awkward. It ``client.submit``\ s opaque graphed callables with explicit
+keys and future-dependency edges, and inherits determinism, straggler tolerance, and intact errors
+from the local design rather than re-deriving them. It sits behind a small **common protocol** so a
+second library (parsl) can be adapted later without touching the engine.
+
+The common seam: ``SubmitBackend`` + ``SubmitRunner``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``graphed_executors.submit`` defines the portable intersection every submit-style library shares:
+
+* ``SubmitBackend`` — ``submit(fn, *args, key=…) -> future`` (future-valued args arrive **resolved**),
+  ``broadcast(payload, token=…)`` (a payload placed once, referenced by many tasks),
+  ``subscribe_events(topic, handler)`` (a driver-side monitor tap), ``cancel``, ``close``, and a
+  ``n_workers()``. Each backend advertises a per-**instance** ``SubmitCapabilities`` (seven flags:
+  peer data movement, scatter/broadcast, worker pinning, per-task retries, per-task resources,
+  running-cancel, worker file cache). The engine may use a capability only behind an
+  ``if backend.capabilities.X`` check, and both Plan paths are correct with **every flag false** —
+  that is the parsl floor.
+* ``SubmitRunner`` — one ``graphed_core.Executor`` over any ``SubmitBackend``. ``DaskBackend`` is the
+  first real backend; a stdlib ``ThreadBackend`` is the conformance second one, so the seam is
+  witnessed by *executing two backends against one frozen suite*, not by an import lint. Its flag set
+  differs from dask's on five of seven flags, proving the engine is correct across capability
+  variation.
+
+``plan_tree`` as a future graph
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The fixed path mirrors the local reduction topology **exactly**: leaves are ``process`` tasks;
+combines are submitted **up front** with future dependencies following the same ``plan_tree`` shape
+``(out, a, b)``, ``a < b``; the driver waits on the single root future. The grouping is fixed by
+*leaf index*, never by arrival time or worker count — so the result is bit-for-bit equal to
+``SequentialRunner`` and invariant to the worker count, inherited rather than re-proven. dask resolves
+each combine's future args on whichever worker runs it and fetches inputs **peer-to-peer**, so the
+combines run off the driver (the role ``PeerReducer`` plays locally); a slow leaf blocks only its own
+path to the root. Intermediate futures are released as their parent combine consumes them — an
+``O(log N)`` live frontier the scheduler enforces, the bound ``LazyReducer`` gives locally. This is
+*not* coffea's arrival-batched reduction, whose grouping varies with future-submission order (the
+source of its known reduce-time race); ``plan_tree`` keys every combine by index.
+
+Broadcast-once, keys, and determinism
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The pickled ``process`` (and ``combine``) ships **once** as an identity future
+(``client.submit(_identity, payload)`` — the coffea pattern, chosen over ``client.scatter`` whose
+worker-discovery timeout breaks on scale-to-zero clusters, and over closure-per-task which
+re-serializes the payload for every task). A worker-side token cache deserializes it **once per
+worker** however many tasks that worker runs. Every submit is ``pure=False`` with an explicit,
+namespaced, per-run-nonced key ``graphed-<plan-fp>-<nonce>-leaf|combine-<i>``: ``pure=False`` stops
+dask deduping distinct-byte-range I/O reads by content token; the ``graphed-`` prefix makes a
+user-string collision with a key impossible (dask/dask#9969); the nonce makes a second ``run()`` on
+one client re-execute instead of returning the first run's cached futures. A construction knob
+``replicate_broadcast=True`` spreads the payload's replicas (a mitigation for the coffea#1490
+single-worker-pinning suspicion; a frozen witness fails CI if leaves ever pin to one worker).
+
+The worker seam: ``RunContext`` + ``WorkerEnv`` + the plugin
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The engine's task functions are backend-neutral, yet on the worker a task needs the monitor topic,
+``open_once`` resources, and an event transport. Per-run state travels as an ordinary pickled
+``RunContext`` first argument; per-worker capability arrives via a ``WorkerEnv`` the **backend**
+installs by wrapping every submitted function in its own module-level shim
+(``dask_backend/_shim.py``). A ``GraphedWorkerPlugin`` (``name="graphed-worker"``, ``idempotent=True``,
+so re-registration is a no-op and *late-joining* elastic/jobqueue workers get ``setup`` too) holds one
+``LocalResources`` per worker, so a uri opens **once per dask worker** across its tasks — exactly the
+local ``open_once`` locality. All dask-touching code lives under ``dask_backend/`` and is imported only
+lazily (at ``DaskBackend`` construction) or by-reference (worker unpickle); ``submit/`` names dask
+nowhere, so it installs and runs with the base package.
+
+Errors and worker death
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An ordinary worker exception round-trips intact: dask re-raises it driver-side and
+``StageError.__reduce__`` reconstructs it byte-for-byte, so ``format_traceback`` still points at the
+user's analysis line (the M6 obligation) with **zero** wrapping. A hard worker death — segfault, OOM,
+preemption — surfaces as a ``distributed.KilledWorker`` after ``distributed.scheduler.allowed-failures``
+deaths; the engine recognises it (via the backend's ``describe_failure``, staying dask-import-free)
+and raises an **attributed** ``StageError`` naming the partition and the last worker, with a message
+noting the blame can be unfair under co-located tasks — never an opaque scheduler string. Per-task
+retries map to dask's native ``retries=`` (resubmit on another worker); there is no second
+graphed-level retry loop (coffea zeroes its own under dask to avoid double-retrying — we follow).
+
+Live observability
+~~~~~~~~~~~~~~~~~~~~
+
+Monitoring rides dask's structured-event channel: ``Worker.log_event(topic, msg)`` on the worker,
+``Client.subscribe_topic(topic, handler)`` on the driver. Each run mints a namespaced
+``graphed-monitor-<nonce>`` topic, subscribed for the run and released in a ``finally`` after trailing
+events drain. ``SUBMITTED`` is emitted driver-side at submit; ``STARTED``/``FINISHED``/``ERRORED``
+worker-side as msgpack-safe scalar dicts. Emission is off the data path and swallow-on-error, so the
+reduced value is **byte-identical** whether a monitor is attached, detached, or actively raising (M37
+passivity) — telemetry never inflates the payload or breaks the run.
+
+What is *not* distributed here (checkpoint scope)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The dask backend executes ``execution.Plan``\ s (and, in a later milestone, shuffle/join stages).
+Checkpoint/resume is **out of scope**: ``run_resumable``/``run_shuffle_resumable`` are self-driving
+loops over a *local* content-addressed store, not ``Executor`` consumers, so
+``run_resumable(executor=dask_runner(...))`` does not exist. Journaled, resumable execution on dask
+needs a distributed content-addressed store and belongs with the Phase-2 store data plane.
+
+Deployment recipes
+~~~~~~~~~~~~~~~~~~~~
+
+The public seam is a **ready** ``distributed.Client`` — cluster construction (``LocalCluster``,
+``SLURMCluster``, ``LPCCondorCluster``) is out-of-band user code. Produce a client, hand it to
+``dask_runner``::
+
+    import numpy as np
+    from distributed import Client, LocalCluster
+    from graphed_core import Partition, Plan, Task
+    from graphed_executors.dask_backend import dask_runner
+
+    def count(partition, resources):          # module-level: picklable + spawn-safe
+        return np.asarray([partition.entry_stop - partition.entry_start])
+    def add(a, b):  return a + b
+    def zero():     return np.zeros(1, dtype=int)
+
+    if __name__ == "__main__":                # processes=True nannies re-import __main__
+        parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
+        plan  = Plan(process=count, combine=add, empty=zero,
+                     tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
+        with LocalCluster(n_workers=2, processes=True, threads_per_worker=1,
+                          dashboard_address=":0") as cluster, Client(cluster) as client:
+            with dask_runner(client) as runner:
+                runner.run(plan).value        # -> array([700])
+
+``processes=True`` + one thread per worker suits GIL-holding compiled HEP stages; the random dashboard
+port avoids ``EADDRINUSE``. Batch clusters follow the same "produce a Client" shape (recipes are
+**site-dependent** — syntax shown, not run in CI):
+
+* **SLURM (dask-jobqueue)** — ``SLURMCluster(cores=…, memory=…, walltime=…, interface="ib0",
+  worker_extra_args=["--lifetime", "55m", "--lifetime-stagger", "4m"])`` then
+  ``cluster.scale(jobs=N)`` (jobs ≠ workers — ``scale`` converts by ``worker_processes``).
+  ``local_directory`` must be node-local scratch, not a network mount. Size ``scale`` to the Plan and
+  use ``adapt()`` only to absorb the tail.
+* **LPC HTCondor (lpcjobqueue)** — ``Client(LPCCondorCluster(ship_env=…, image=…))``; mind the CVMFS
+  singularity image, the shipped venv, the worker port band, and the graceful-then-``condor_rm``
+  teardown. graphed-executors takes **no** lpcjobqueue (or coffea) dependency — this is a pattern.
+* **Preemption** — set ``--lifetime`` strictly below the queue walltime (workers self-drain via
+  ``close_gracefully``, migrating in-memory keys to peers instead of a hard kill) with a
+  ``--lifetime-stagger``, and raise ``distributed.scheduler.allowed-failures`` to 5–10 on
+  preemption-prone queues so innocent tasks on evicted workers are not blamed. With draining, in-flight
+  leaves reroute and the fixed tree is unaffected (grouping is by index, not worker). Keep the same
+  ``dask``/``distributed``/``graphed`` versions on client and workers (``client.get_versions(check=True)``).
+
+**Free-threaded 3.14t is not supported for the dask backend** — upstream ``distributed`` has no
+free-threaded build (its ``py314t`` CI is commented out, "WIP - tests don't pass yet"). The
+``test-dask`` CI job pins GIL builds (py 3.12 + 3.14); the local executors keep their 3.14t story.
+
+
 Phase 2 (deliberately not built)
 --------------------------------
 
-* **Distributed executors** (TaskVine / HTCondor / Slurm / Dask) — the ``Plan`` contract *and* the
-  ``WorkerTransport`` seam are built so they can be written against later; the MVP is single-machine.
+* **Distributed executors** (TaskVine / HTCondor / Slurm) and the **parsl** adapter — the ``Plan``
+  contract, the ``WorkerTransport`` seam, and the ``SubmitBackend`` protocol are built so they can be
+  written against later. The dask backend (above) is the first real distributed backend; parsl's
+  adapter (and the store data plane its head-node routing needs) stays Phase 2.
 * NUMA-aware placement.
 * **Adaptive chunk-size policies** shipped as library code (the ``next_tasks`` hook exists;
   policies beyond tests are user-land for now).

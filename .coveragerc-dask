@@ -1,0 +1,18 @@
+# Coverage config for the dedicated `test-dask` CI job (plan §2 m42 target 9-10).
+#
+# The main pyproject `[tool.coverage.run]` OMITs `*/dask_backend/*` (the main matrix installs no
+# dask, so those tests importorskip out). That omit would still apply even when `dask_backend` is
+# named by `--cov`, so the dask job needs its own config with NO omit. Scope is the two NEW
+# subpackages only — `local/` is already gated by the main matrix, and re-measuring it here (from a
+# suite that never exercises it) would make the job red-by-construction. fail_under 90 is the §B.3
+# diff-coverage gate on the new code. m43 extends the job's pytest path; this scope is unchanged
+# (all m43 code lives under dask_backend/, already named here).
+[run]
+branch = true
+source =
+    graphed_executors.submit
+    graphed_executors.dask_backend
+
+[report]
+fail_under = 90
+show_missing = true
