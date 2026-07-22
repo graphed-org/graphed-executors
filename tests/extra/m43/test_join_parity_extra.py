@@ -127,6 +127,21 @@ def test_broadcast_noninner_matches_local(backend, how, runner) -> None:  # type
     assert local.dest_block_hashes, "scenario degenerate — no joined blocks"
 
 
+@pytest.mark.parametrize("how", ["left", "outer"])
+def test_broadcast_empty_probe_matches_local_no_crash(backend, how, runner) -> None:  # type: ignore[no-untyped-def]
+    """G3 regression: forced broadcast with a NONEMPTY build and an EMPTY probe under left/outer. The
+    local engine guards its never-matched-build tail with ``if unmatched and right_blocks:`` and
+    degrades gracefully; the dask port must match, not ``IndexError`` on ``right_blocks[0]``.
+    NON-VACUOUS: without the guard this raises before returning; with it, it returns local's result."""
+    left = [_make_side(backend, [1, 2, 3], "lval", [10, 20, 30])]
+    right: list[object] = []
+    dask_res = dask_run_join(backend, left, right, PARTS, how=how, runner=runner, broadcast=True)
+    local = run_join(backend, left, right, PARTS, how=how, broadcast=True)
+
+    assert dask_res.dest_block_hashes == local.dest_block_hashes  # both {} — no probe schema carrier
+    assert dask_res.value == local.value
+
+
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
 def test_shuffle_pure_one_sided_dests_match_local(backend, how, runner) -> None:  # type: ignore[no-untyped-def]
     """Keys chosen (verified via the backend's own ``partition``) so left routes to dests {0,3} and

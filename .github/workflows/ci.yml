@@ -95,6 +95,8 @@ jobs:
           pytest tests/frozen/m42 tests/frozen/m43 --cov-config=.coveragerc-dask --cov-branch \
             --cov=graphed_executors.submit --cov=graphed_executors.dask_backend \
             --cov-report=term-missing
+      - name: Pytest m43 join-parity witnesses (non-gating; interim until the frozen fixup lands)
+        run: pytest tests/extra/m43 -q
 
   docs:
     name: docs (sphinx -W)

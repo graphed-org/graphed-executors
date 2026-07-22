@@ -535,7 +535,7 @@ def _broadcast_join(
 
     if track_unmatched:  # emit the never-matched build rows exactly once (F2 of _run_broadcast_join)
         unmatched = tuple(sorted(set(range(len(build_concat))) - matched))
-        if unmatched:
+        if unmatched and right_blocks:  # empty probe -> no schema carrier: local drops the tail (no crash)
             tail = cast(
                 "_JoinOut",
                 submit(

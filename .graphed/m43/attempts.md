@@ -98,3 +98,34 @@ not reached by the frozen scenarios (broadcast-inner + mixed-dest shuffle). Adde
 oracle on identical inputs with disjoint-dest keys verified via the backend's own `partition` —
 lifting shuffle.py to 97% (combined). tests/extra is a local witness (not CI-wired, consistent with
 tests/extra/m41); the DoD frozen-only coverage number stands at 91.18%.
+
+## REVIEW / REMEDIATION — 2026-07-21
+
+**Review verdict** (wf_699eaa05-384): **3× APPROVE, 0 blockers**; all mutations killed. Coverage
+concern ruled ACCEPT-WITH-FOLLOWUP (gate honest, `.coveragerc-dask` untouched, 91.18% from frozen;
+§B.3 frozen-hit intent strained on shuffle.py 83% frozen-only — parity paths only in tests/extra).
+Three follow-ups: G3 (real bug) + G2 (interim CI) to the implementer; **G1 frozen parity fixup to
+the impl-blind test-author — NOT mine.**
+
+**G3 — real bug (mutation lens), FIXED.** `_broadcast_join` dropped the local engine's empty-probe
+guard: local `_run_broadcast_join` gates the never-matched-build tail with `if unmatched and
+right_blocks:` (`local/shuffle.py:821`); my port checked only `if unmatched:` then indexed
+`right_blocks[0]` → **IndexError** on `dask_run_join(left=nonempty, right=[], how='left'|'outer',
+broadcast=True)` where local degrades gracefully (empty result — the tail has no probe schema
+carrier). Root cause = one dropped conjunct; fix = restore `and right_blocks` (shuffle.py:538),
+matching local semantics exactly. Witness `test_broadcast_empty_probe_matches_local_no_crash`
+(tests/extra/m43, parametrized left/outer × both backends) asserts dask == local (both empty) and
+does not raise. **Non-vacuity PROVEN:** reverted to `if unmatched:` → all 4 witness cases FAIL with
+IndexError; restored → 4/4 pass.
+
+**G2 — interim CI, DONE.** Added a NON-GATING `pytest tests/extra/m43 -q` step to the `test-dask`
+job AFTER the coverage-gated invocation (the gate command is untouched), so the 20 parity witnesses
+run continuously until the frozen fixup lands.
+
+**Deferred to the test-author round (G1, NOT done here):** the FROZEN parity fixup (broadcast
+non-inner tail, one-sided carrier null-fill, partitionless side, empty-build/probe) lifting
+shuffle.py ≥90% frozen-only + a fresh freeze tag.
+
+**Post-remediation gates:** frozen m43 38/38; frozen m42 47/47; `git diff freeze-m43 -- tests/frozen`
+empty; tests/extra/m43 20/20; ruff check src tests clean; ruff format --check src clean; mypy strict
+clean (19 files).
