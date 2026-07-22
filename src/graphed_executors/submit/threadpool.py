@@ -70,9 +70,10 @@ class ThreadBackend:
         retries: int = 0,
         priority: int = 0,
         resources: Mapping[str, float] | None = None,
+        workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
-        # `key`/`retries`/`priority`/`resources` are best-effort hints this backend has no capability
-        # for -- silently ignored (correctness never depends on them).
+        # `key`/`retries`/`priority`/`resources`/`workers` are best-effort hints this backend has no
+        # capability for -- silently ignored (correctness never depends on them).
         return self._pool.submit(self._invoke, fn, args)
 
     def _invoke(self, fn: Callable[..., object], args: tuple[object, ...]) -> object:

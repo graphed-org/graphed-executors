@@ -361,6 +361,51 @@ set ``--lifetime`` comfortably **above a single producer task's runtime** (and r
 depending on it — to recompute, turning a long shuffle into repeated work. This is deployment guidance,
 not a correctness gate: the result is bit-for-bit regardless.
 
+Worker-transport engine (m44)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The shuffle/join graph above lets the *scheduler* move blocks (a gather depends on its producers). The
+worker-transport engine (``graphed_executors.dask_backend.transport`` +
+``transport_peer``/``transport_shuffle``) is the alternative that implements graphed's M38
+``WorkerTransport`` **atop dask's own worker-to-worker comm layer** — the P2P-shuffle pattern: a
+``distributed.WorkerPlugin`` registers custom ops in ``worker.handlers`` and workers dial each other over
+``worker.rpc`` (the pooled ``ConnectionPool``). It hosts the M38 peer reduction and the M39–M41
+shuffle/join engine **on the workers**, moving bulk bytes worker→worker over a ``graphed_block_pull``
+handler — never through the driver — with an **O(T+P) scheduler graph** (``T`` pinned
+``_transport_map_task`` producers + ``P`` pinned ``_transport_gather_task``/``_transport_gather_join``
+consumers + an O(k) control tail): no ``T·P`` pick tier and no per-row task creation.
+
+Three design points carry the parity:
+
+- **Reader-plane budgets are a driver-side replay.** A per-*dest* gather cannot reproduce the reference
+  ``_stage2_gather``'s per-*node* shared-fetch-buffer counters (``fetch_spill_count`` /
+  ``peak_fetch_bytes``), yet the frozen goldens pin exact equality with the local engine *and* pin the
+  ``P`` gather-task count. Both hold because the reader/disk counters are computed by **replaying the
+  imported** ``_stage2_gather`` over block *sizes* at the barrier (a size-only backend + a
+  worker-address-keyed size-only cluster — ``_replay_reader_plane``), while the real bytes move
+  worker→worker through the ``P`` gather tasks. The kernel is reused verbatim, so the accounting tracks
+  the local engine bit-for-bit (``tests/extra/m44`` witnesses the replay-vs-real equality directly).
+- **Holder plane is bounded (F12).** A producer's per-dest wires live in the plugin's block store with a
+  ``holder_budget_bytes`` cap — a wire that pushes producer-local RAM over the cap spills to the worker's
+  local disk (``holder_spill_count``/``peak_holder_bytes``), so the producer store is never an unmanaged
+  memory pause/terminate trap. The block plane never routes bytes through the client.
+- **Failure = whole-run restart under a fresh epoch (§1.5).** Every run mints an epoch nonce; the plugin
+  refuses recv/pull for an unknown or purged epoch (the P2P ``run_id`` guard). A lost peer send exhausts
+  a bounded at-least-once retry and raises ``TransportDeliveryError``; a worker death surfaces as
+  ``KilledWorker``. Either restarts the whole run under a new nonce (re-reading the surviving worker set
+  so the restart pins onto survivors) up to ``epoch_restarts_allowed``, then an attributed ``StageError``
+  naming the victim — never a raw ``KilledWorker`` and never a hang (a hard-timeout-guarded gate proves
+  it). Because setup can run during a nanny **restart**, the plugin's handler-seam canary is a *bounded*
+  self-RPC that falls back to a direct handler-dispatch check when the worker's server is not yet
+  accepting — a self-RPC that blocked startup would hang every subsequent ``client.run`` against the
+  restarted worker.
+
+Determinism is unchanged from the shuffle graph: the same ascending-src merge makes
+``dest_block_hashes`` byte-identical to the local engine and across runs, and the peer reduction's fixed
+``(level, pos)`` ownership makes the reduced value bit-for-bit the ``SequentialRunner`` baseline. dask
+stays an optional extra: ``transport_peer``/``transport_shuffle`` import on the dask-free matrix (the
+``distributed``-touching code is deferred into function bodies).
+
 What is *not* distributed here (checkpoint scope)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

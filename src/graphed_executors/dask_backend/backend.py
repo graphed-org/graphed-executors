@@ -59,20 +59,29 @@ class DaskBackend:
         retries: int = 0,
         priority: int = 0,
         resources: Mapping[str, float] | None = None,
+        workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
         """``retries`` and ``priority`` ARE forwarded to ``client.submit``; ``resources`` is accepted
         but **advisory-dropped** (NOT forwarded). dask treats ``resources=`` as a HARD scheduling
         constraint, so a request for a resource no worker advertises (e.g. ``{"GPU": 1}``) pins the
         task in no-worker state forever — that would make correctness depend on a hint, which §1.1
         forbids. Enforcement on a resource-provisioned cluster is a future deployment-time opt-in
-        (e.g. a ``DaskBackend(enforce_resources=True)`` knob), recorded for m43/Phase-2."""
+        (e.g. a ``DaskBackend(enforce_resources=True)`` knob), recorded for m43/Phase-2.
+
+        ``workers`` (m44 §1.2) is a STRICT worker pin honoured only when ``pin_to_worker`` is true —
+        forwarded as ``workers=[…], allow_other_workers=False`` so the task ERRORS on worker loss
+        rather than migrating (the loud signal the epoch restart needs). Advisory-dropped otherwise,
+        mirroring the ``resources`` treatment."""
         # Wrap in the worker shim so the neutral engine task fn runs under a WorkerEnv (§1.1). dask
         # resolves future args before invoking the shim, so wrapping is transparent to dependency
         # resolution; pure=False + the explicit key ARE the task identity (§1.2.3).
+        pin: dict[str, Any] = {}
+        if workers is not None and self.capabilities.pin_to_worker:
+            pin = {"workers": list(workers), "allow_other_workers": False}
         return cast(
             "SubmitFuture",
             self._client.submit(
-                self._shim, fn, *args, key=key, pure=False, retries=retries, priority=priority
+                self._shim, fn, *args, key=key, pure=False, retries=retries, priority=priority, **pin
             ),
         )
 

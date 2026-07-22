@@ -60,11 +60,13 @@ class SubmitBackend(Protocol):
         retries: int = 0,
         priority: int = 0,
         resources: Mapping[str, float] | None = None,
+        workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
         """``args`` may contain :class:`SubmitFuture`\\ s previously returned by THIS backend; the
         backend guarantees ``fn`` receives their RESOLVED VALUES. ``key`` is a caller-owned unique
-        identity. ``retries``/``priority``/``resources`` are best-effort hints a backend without the
-        matching capability silently ignores — correctness must never depend on them."""
+        identity. ``retries``/``priority``/``resources``/``workers`` are best-effort hints a backend
+        without the matching capability silently ignores — correctness must never depend on them
+        (``workers`` is a strict worker pin only where ``pin_to_worker`` holds)."""
         ...
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
