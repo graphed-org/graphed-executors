@@ -301,10 +301,70 @@ worker-side as msgpack-safe scalar dicts. Emission is off the data path and swal
 reduced value is **byte-identical** whether a monitor is attached, detached, or actively raising (M37
 passivity) — telemetry never inflates the payload or breaks the run.
 
+Shuffle and joins on dask
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``dask_run_repartition`` / ``dask_run_join`` (``graphed_executors.dask_backend.shuffle``) express the
+M39–M41 exchange/join as a **native dask future graph** rather than running the local two-phase engine
+over a dask-backed store. The local engine computes every ``partition``/join kernel *in the driver* (its
+cluster duck-type only farms out block *storage*), so a dask-backed store would distribute storage but
+not compute — a driver CPU+NIC bottleneck. Instead the graph is::
+
+    T = min(n_workers, n_src) producer futures   _dask_map_write   (worker-side coalesce + to_wire)
+    T·P pick futures                             _dask_pick        (runs on the holder; one block each)
+    P gather / gather-join futures               _dask_gather / _dask_gather_join
+
+reusing the local per-task kernels verbatim (``_assign``, ``_coalesce_task``, ``_join_with_budget``,
+``broadcast_join_choice``) — no kernel is re-implemented. Under dask the future graph **is**
+completeness: a gather *depends on* its producers, the scheduler tracks who holds what, and workers
+fetch deps peer-to-peer. A backend without ``peer_data_movement`` (a parsl-HTEX-class head-node router)
+is refused with ``NotImplementedError`` before any work is submitted — routing every block through the
+driver is the pathology this design rejects.
+
+**Cross-engine determinism contract.** ``_assign`` gives producer tasks contiguous ascending src ranges
+and gathers concatenate in ascending-task order, so a dest's rows assemble in ascending-src order
+regardless of worker count. Therefore ``dest_block_hashes`` (sha256 of each gathered block's wire bytes,
+computed worker-side) are **byte-identical across two dask runs AND equal to the local**
+``run_repartition``/``run_join`` **on identical inputs** — content-addressing across two independent
+engines pins the route, the merge order, and the wire serialization at once. The broadcast-vs-shuffle
+choice is keyed on ``parts`` (a plan-stable N), never the live worker count, so the same logical join
+makes the same choice on a 1- or 3-worker pool.
+
+**Retired mechanisms.** The M38/M39 announcement/manifest/steal machinery does not exist under dask —
+the scheduler already provides what it was built to construct:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 42 58
+
+   * - M38/M39 mechanism
+     - Why retired under dask
+   * - Announcements / manifests / reliable push
+     - Gather completeness is the future graph, not droppable hints.
+   * - Work-stealing
+     - ``distributed`` owns stealing (``work-stealing: True``); a second layer would fight it.
+   * - ``WorkerTransport`` / ``QueueTransport`` / ``HttpTransport``
+     - dask comms move future data peer-to-peer.
+   * - Node Stores + disk budgets
+     - Block bytes live in worker memory with dask's own spill-to-``local_directory``.
+
+Their witness counters are correspondingly absent from ``DaskShuffleWitness`` (which carries only
+``n_producer_tasks``, ``blocks_per_producer_task``, ``peak_writer_buffer_bytes``, ``broadcast_chosen``,
+the ``_join_with_budget`` spill counters, and ``producer_sites``/``gather_sites``). A worker holding
+stage-1 blocks that dies mid-shuffle is handled by the graph itself: the scheduler recomputes the lost
+producer from its inputs and the result is bit-for-bit unchanged.
+
+**Preemption interplay with long shuffles.** The jobqueue preemption guidance below applies with one
+addition: a producer future recomputes from scratch if its worker dies, so on preemption-prone queues
+set ``--lifetime`` comfortably **above a single producer task's runtime** (and raise
+``allowed-failures``). Otherwise a worker evicted mid-shuffle forces its producer — and every gather
+depending on it — to recompute, turning a long shuffle into repeated work. This is deployment guidance,
+not a correctness gate: the result is bit-for-bit regardless.
+
 What is *not* distributed here (checkpoint scope)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The dask backend executes ``execution.Plan``\ s (and, in a later milestone, shuffle/join stages).
+The dask backend executes ``execution.Plan``\ s and shuffle/join stages (see above).
 Checkpoint/resume is **out of scope**: ``run_resumable``/``run_shuffle_resumable`` are self-driving
 loops over a *local* content-addressed store, not ``Executor`` consumers, so
 ``run_resumable(executor=dask_runner(...))`` does not exist. Journaled, resumable execution on dask

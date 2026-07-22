@@ -53,3 +53,48 @@ m42-review follow-ups (F2a/F2b, wf_20cb8bd3-42f APPROVE). 10 modules + harness +
 - Oracle dep: **pandas 3.0.3 installed into /private/tmp/claude-501/m42venv** for the independent
   non-inner oracle (`pytest.importorskip("pandas")` in the relational module — the m40 pattern);
   the `test-dask` CI job must install it.
+
+## IMPLEMENTING (implementer) — 2026-07-21
+
+### Iteration 1 — first-pass green
+
+**F2 engine fixes** (`src/graphed_executors/submit/engine.py`, `_run_adaptive`), zero regressions:
+- **F2a** — pass the run's `events_seen` counter into `_run_adaptive` and drain trailing worker
+  events in a `finally` (`_wait_until(events_seen >= 2*n_done, _DRAIN_TIMEOUT_S)`), guarded by
+  `monitor_topic is not None` — parity with the fixed path. Guard means F2b (no monitor) never
+  blocks on the drain, and a monitored adaptive death waits at most the bounded 30 s off-path.
+- **F2b** — build `key_to_task[dask_key] = task` in `refill()` and pass the real map to
+  `self._result(fut, key_to_task)` (was `{}`), so a KilledWorker attributes to the partition uri
+  via the existing `_translate` path (unchanged).
+
+**shuffle.py** (`src/graphed_executors/dask_backend/shuffle.py`, NEW, ~430 lines): native dask
+future graph reusing the local kernels verbatim (`_assign`/`_coalesce_task`/`_join_with_budget`/
+`_sha256_hex` + `graphed.shuffle.broadcast_join_choice`), worker identity via `current_env()` (no
+dask import — the capability-gate subprocess probe passes). Producer `_dask_map_write` -> `_MapOut`
+(payload dict + site/blocks/peak metadata); `_dask_pick` scopes gather deps; `_dask_gather` /
+`_dask_gather_join` concat in ascending-producer-task order (== ascending-src -> cross-engine
+byte-identical, worker-count-invariant). `_dask_broadcast_join_part` broadcasts the build once and
+joins each probe block; the once-only unmatched-build tail mirrors `_run_broadcast_join` F2. Budget
+spill reuses `_join_with_budget` via a minimal `_WorkerStore` (worker-local tempdir; F5 read-back).
+`DaskShuffleWitness` carries the §1.3.4 counters only (retired ones absent); cast into the reused
+local `ShuffleResult`. Capability gate `_require_peer` fires first in both entry points.
+
+`dask_backend/__init__.py`: lazy `__getattr__` re-export of the two entry points (dask-free import).
+
+**First full m43 run: 38/38 PASS, 0 skips** (venv m42venv). No frozen edits (`git diff freeze-m43 --
+tests/frozen` empty). m42 still 47/47; whole frozen tree 395 passed / 1 pre-existing skip.
+
+**Gates:** DoD coverage cmd (`pytest tests/frozen/m42 tests/frozen/m43 --cov=…submit
+--cov=…dask_backend --cov-branch --cov-config=.coveragerc-dask`) = **91.18% ≥ 90%**. `ruff check src
+tests` clean; `ruff format --check src` clean; `mypy` strict clean (19 files); `sphinx -W` builds.
+m43 twice back-to-back = identical (determinism). CI `test-dask` extended (+`tests/frozen/m43`,
++pandas). docs `design.rst` gains the "Shuffle and joins on dask" subsection (retired-mechanism
+table, cross-engine determinism contract, preemption interplay).
+
+**Non-frozen coverage note:** three correctness-parity paths (broadcast left/right/outer, pure
+one-sided shuffle dests, a partitionless side) mirror the local `run_join` F1/F2 contracts but are
+not reached by the frozen scenarios (broadcast-inner + mixed-dest shuffle). Added
+`tests/extra/m43/test_join_parity_extra.py` (16 tests) validating each against the local `run_join`
+oracle on identical inputs with disjoint-dest keys verified via the backend's own `partition` —
+lifting shuffle.py to 97% (combined). tests/extra is a local witness (not CI-wired, consistent with
+tests/extra/m41); the DoD frozen-only coverage number stands at 91.18%.

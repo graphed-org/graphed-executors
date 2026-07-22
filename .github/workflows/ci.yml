@@ -88,11 +88,11 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" pyarrow
+          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" pyarrow pandas
           python -m pip install -e ".[dev,dask]"
-      - name: Pytest m42 dask suite + scoped coverage gate (>=90%)
+      - name: Pytest m42+m43 dask suite + scoped coverage gate (>=90%)
         run: |
-          pytest tests/frozen/m42 --cov-config=.coveragerc-dask --cov-branch \
+          pytest tests/frozen/m42 tests/frozen/m43 --cov-config=.coveragerc-dask --cov-branch \
             --cov=graphed_executors.submit --cov=graphed_executors.dask_backend \
             --cov-report=term-missing
 
