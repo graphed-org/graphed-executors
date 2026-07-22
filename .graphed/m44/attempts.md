@@ -210,3 +210,67 @@ Post-remediation measured (cov_wired.json, frozen m42+m43+m44 only, `--cov-branc
 | sphinx -W | build succeeded (0 warnings) | docs_build/ |
 | tests/extra/m44 witnesses (non-gating) | 11 passed (5 replay + 6 R2/R4 semantics) | — |
 | Integrity | `git diff freeze-m44 -- tests/frozen` EMPTY; no skip/xfail/type:ignore blanket added | — |
+
+## REMEDIATION-2 — CI-only frozen failure: zero-partition join IndexError (PR #2, test-dask py3.12)
+
+**Symptom.** `test_transport_join_edges.py::test_one_side_empty_matches_the_local_oracle[numpy-left-left-none]`
+(how=left, LEFT side partitionless, kind=none) failed ONCE on the slow 2-core `test-dask py3.12` CI runner
+with `StageError("... IndexError: tuple index out of range")` attributed to `transport-run:0`. Green
+everywhere else: local 15/15, py3.14 same-commit, my own + orchestrator whole-tree runs. A deterministic
+empty-tuple index would fail everywhere → this is a scheduling/timing RACE the slow runner exposed.
+
+**Root cause (two sentences).** `sorted_addresses()` returns `tuple(sorted(client.scheduler_info()["workers"]))`,
+but `Client.scheduler_info()` reads the client's `_scheduler_identity` cache which is refreshed
+asynchronously, so on a slow runner it can momentarily report ZERO workers even though the scheduler has
+them; the callers then compute `k = max(1, len(addresses))` (which forces `k=1` even for an empty tuple)
+and index `addresses[i % k]` → `addresses[0]` on an EMPTY tuple → `IndexError: tuple index out of range`,
+wrapped by `build_stage_error` into the observed `transport-run` StageError.
+
+**Why the zero-partition test surfaced it (not special, just unlucky).** The mechanism is general — any
+transport submit does `addresses[i % k]`. But the empty read only crashes when it lands on the FIRST
+`sorted_addresses` of an attempt while the cache is stale; the failing param just happened to hit that
+window on that run. Confirmed the exact site by reading (only `addresses[…]` in the join path is a
+TUPLE-index; every other index is a 2-tuple `(digest, holder)[0]` or a list) AND by forcing
+`sorted_addresses → ()` on a live cluster, which reproduces the EXACT signature:
+`StageError in op 'run' at transport-run:0 … IndexError: tuple index out of range`, now with the
+wrapped-traceback pointing at `_run_with_restarts:771 → attempt_fn → addresses[i % k]`.
+
+Measured that `scheduler_info()` is stable at 2 on THIS machine (40/40 fresh clusters, 20 978 warm reads,
+150 join rounds under 8 CPU spinners, 73 whole-module loop iters) — i.e. the transient is a slow-runner
+timing artifact my hardware doesn't reproduce, which is exactly why the fix is validated by a deterministic
+forced-interleaving witness (team-lead-sanctioned) rather than brute force.
+
+**Fix (root cause, shared chokepoint).** `sorted_addresses` (used by peer + repartition + join) now treats
+an empty read as a stale snapshot: a live cluster always has workers, so on empty it forces the client to
+observe ≥1 (`client.wait_for_workers(1, timeout=30)` — clock-free, distributed's own bounded wait, NO sleep
+in src) and re-reads. One guard fixes every caller.
+
+**Visibility (item 4).** `build_stage_error` now appends the wrapped exception's own traceback frames to the
+StageError text (`_with_frames`), so a future CI-only crash names its site instead of being a one-line
+mystery. (Substring/type pins in the frozen retry-exhaustion test are unaffected — the type name still
+appears in the frames.)
+
+**Witnesses (tests/extra/m44/test_transport_failure_semantics.py, non-gating):**
+- `test_sorted_addresses_survives_a_transient_empty_scheduler_info` — unit, clock-free: first read empty →
+  fix waits + re-reads → returns the real 2 addresses. **FAILS pre-fix** (returns `()`).
+- `test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join` — end-to-end on a real cluster,
+  forces `scheduler_info` empty-until-`wait_for_workers`, drives the EXACT failing scenario (how=left, LEFT
+  partitionless). **FAILS pre-fix** with the reported IndexError→StageError; passes post-fix (0-row pass-through).
+- `test_populated_scheduler_info_is_not_needlessly_re_read` — discrimination: a healthy first read is NOT
+  re-read/waited (the guard is scoped to empty, not a blanket double-read). Passes both pre/post.
+
+Non-vacuity MEASURED: reverted `sorted_addresses` to the pre-fix one-liner → the two empty-transient
+witnesses FAIL (the second with the exact `IndexError: tuple index out of range` StageError); restored → all pass.
+
+### Gate re-run (REMEDIATION-2; evidence in /private/tmp/claude-501/m44-remediation/)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| ruff check (`src tests`) | All checks passed | — |
+| ruff format --check (`src tests`) | 27 files already formatted | — |
+| mypy --strict (files=src, py3.12) | no issues in 23 files | — |
+| Frozen m44 | 47/47 (frozen_rc=0) | g_frozen_m44.out |
+| Failing id ×15 (`numpy-left-left-none`) | 15/15 pass | .id15_done, id15_*.out |
+| Wired dask coverage (m42+m43+m44, `.coveragerc-dask`) | 192 passed; scoped total 93.00% ≥ 90 | cov_wired2.out / cov_wired2.json |
+| tests/extra/m44 witnesses (non-gating) | 14 passed (11 + 3 REMEDIATION-2) | — |
+| Integrity | `git diff freeze-m44-fixup -- tests/frozen` EMPTY (the fixup tag is the current frozen baseline: it added `test_transport_join_edges.py`; `freeze-m44` predates it) | — |

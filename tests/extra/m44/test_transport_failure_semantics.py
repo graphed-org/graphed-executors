@@ -22,7 +22,7 @@ from graphed.core.execution import SequentialRunner
 
 pytest.importorskip("distributed")
 
-from graphed_executors.dask_backend._transport_run import is_restart_worthy
+from graphed_executors.dask_backend._transport_run import is_restart_worthy, sorted_addresses
 from graphed_executors.dask_backend.transport import PullTimeoutError, TransportDeliveryError
 from graphed_executors.dask_backend.transport_peer import _MISSING, _select_root
 
@@ -105,3 +105,106 @@ def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(monkeypatch: pytes
         f"root_timeout_s was not forwarded to collect_peer_root (saw {seen.get('timeout_s')!r}); a "
         "hardcoded _ROOT_TIMEOUT_S=30.0 fails this"
     )
+
+
+# ---- REMEDIATION-2: a transient-empty scheduler_info must not crash the pin math ----------------
+class _FakeClient:
+    """A client whose ``scheduler_info`` returns an EMPTY worker set until ``wait_for_workers`` is
+    called (the stale-``_scheduler_identity``-cache-until-refresh race), then the real set."""
+
+    def __init__(self, real_workers: dict[str, object]) -> None:
+        self._real = real_workers
+        self.refreshed = False
+        self.waited = 0
+
+    def scheduler_info(self) -> dict[str, object]:
+        return {"workers": self._real if self.refreshed else {}}
+
+    def wait_for_workers(self, n_workers: int, timeout: float | None = None) -> None:
+        self.waited += 1
+        self.refreshed = True  # a live cluster: the wait forces the client to observe its workers
+
+
+class _FakeBackend:
+    def __init__(self, client: _FakeClient) -> None:
+        self._client = client
+
+
+def test_sorted_addresses_survives_a_transient_empty_scheduler_info() -> None:
+    # The exact CI-only mechanism, unit-level + clock-free: the first scheduler_info read is a stale
+    # empty snapshot. Pre-fix, sorted_addresses returned () -> callers do k=max(1,0)=1 then
+    # addresses[i%k] on an EMPTY tuple -> IndexError: tuple index out of range (the transport-run crash).
+    client = _FakeClient({"tcp://127.0.0.1:1": {}, "tcp://127.0.0.1:2": {}})
+    got = sorted_addresses(_FakeBackend(client))
+    assert got == ("tcp://127.0.0.1:1", "tcp://127.0.0.1:2"), (
+        f"a stale-empty scheduler_info snapshot leaked through as the pin owner list: {got} — "
+        "k=max(1,0)=1 then addresses[i%k] would IndexError"
+    )
+    assert client.waited == 1, "did not force the client to observe its workers before re-reading"
+
+
+def test_populated_scheduler_info_is_not_needlessly_re_read() -> None:
+    # discrimination: when the FIRST read already has workers, no wait/re-read happens (the guard is
+    # scoped to the empty case, not a blanket double-read).
+    client = _FakeClient({"tcp://127.0.0.1:9": {}})
+    client.refreshed = True
+    assert sorted_addresses(_FakeBackend(client)) == ("tcp://127.0.0.1:9",)
+    assert client.waited == 0, "re-read a healthy scheduler_info — the guard is not scoped to empty"
+
+
+def test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # End-to-end: force the CI interleaving on a REAL cluster (scheduler_info empty until the fix's
+    # wait_for_workers refreshes it) and drive the exact failing scenario (how=left, LEFT partitionless).
+    # Pre-fix: addresses=() -> IndexError -> StageError (the reported crash). Post-fix: the empty snapshot
+    # is re-read and the join returns the 0-row pass-through.
+    from transport_harness import (  # noqa: PLC0415  (frozen harness, imported by path above)
+        build_dask_backend,
+        install_transport_plugin,
+        run_bounded,
+        total_result_rows,
+        transport_adapters,
+        transport_cluster,
+        transport_join,
+    )
+
+    adapter = next(a for a in transport_adapters() if a.name == "numpy")
+    right = [
+        adapter.make_side([1, 2, 3, 7], "rval", [10, 20, 30, 70]),
+        adapter.make_side([3, 5, 1], "rval", [31, 50, 11]),
+    ]
+
+    with transport_cluster(2, processes=False) as client:
+        install_transport_plugin(client)
+        state = {"refreshed": False}
+        real_info, real_wait = client.scheduler_info, client.wait_for_workers
+
+        def flaky_info(*a: object, **k: object) -> dict[str, object]:
+            info = real_info(*a, **k)
+            return info if state["refreshed"] else {**info, "workers": {}}
+
+        def flaky_wait(n_workers: int, timeout: float | None = None) -> None:
+            state["refreshed"] = True  # the stale cache refreshes only once the client waits on workers
+            return real_wait(n_workers, timeout)
+
+        monkeypatch.setattr(client, "scheduler_info", flaky_info)
+        monkeypatch.setattr(client, "wait_for_workers", flaky_wait)
+
+        outcome = run_bounded(
+            lambda: transport_join(
+                adapter.backend,
+                [],
+                right,
+                8,
+                how="left",
+                dbackend=build_dask_backend(client),
+                broadcast=False,
+            ),
+            timeout_s=120.0,
+        )
+    assert "error" not in outcome, (
+        f"a transient-empty scheduler_info crashed the zero-partition join: {outcome.get('error')!r}"
+    )
+    assert total_result_rows(outcome["result"].value) == 0, "left/left-empty should pass through 0 rows"
+    assert state["refreshed"], "the fix never re-read past the stale-empty scheduler_info snapshot"

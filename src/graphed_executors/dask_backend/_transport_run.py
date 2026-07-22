@@ -40,8 +40,22 @@ def require_pin(dbackend: Any) -> None:
 
 def sorted_addresses(dbackend: Any) -> tuple[str, ...]:
     """The F8 deterministic worker-address order every ownership/pin decision keys on (same as the
-    harness ``sorted(client.scheduler_info()['workers'])``). Same-package private ``_client`` access."""
-    return tuple(sorted(dbackend._client.scheduler_info()["workers"]))
+    harness ``sorted(client.scheduler_info()['workers'])``). Same-package private ``_client`` access.
+
+    An EMPTY read is treated as a stale snapshot, not a real state: ``Client.scheduler_info()`` returns
+    the client's ``_scheduler_identity`` cache, refreshed asynchronously, so on a slow runner it can
+    momentarily report zero workers even though the scheduler has them. Left unguarded, the callers do
+    ``k = max(1, len(addresses))`` then ``addresses[i % k]`` — indexing an EMPTY tuple → ``IndexError:
+    tuple index out of range`` (the m44 zero-partition CI-only failure). A live cluster always has
+    workers, so on empty we force the client to observe >= 1 (clock-free: distributed's own bounded
+    wait, no sleep here) and re-read."""
+    client = dbackend._client
+    workers = client.scheduler_info()["workers"]
+    if not workers:
+        with contextlib.suppress(Exception):
+            client.wait_for_workers(1, timeout=30)
+        workers = client.scheduler_info()["workers"]
+    return tuple(sorted(workers))
 
 
 @dataclass
@@ -149,10 +163,30 @@ def pick_attributable(errs: Mapping[Any, BaseException], dbackend: Any) -> BaseE
     return next(iter(errs.values()))
 
 
+def _with_frames(exc: BaseException) -> str:
+    """``str(exc)`` plus the exception's own traceback frames when it carries one (a worker task's
+    exception ships its remote traceback through ``fut.result()``). Without this a wrapped engine bug
+    surfaces in CI as a one-line ``StageError(... IndexError: tuple index out of range)`` with no site —
+    the m44 zero-partition CI-only failure was exactly that. Best-effort: never let formatting mask the
+    real error."""
+    base = str(exc)
+    tb = getattr(exc, "__traceback__", None)
+    if tb is None:
+        return base
+    import traceback  # noqa: PLC0415  (error path only)
+
+    with contextlib.suppress(Exception):
+        frames = "".join(traceback.format_tb(tb)).rstrip()
+        if frames:
+            return f"{base}\n--- wrapped traceback ---\n{frames}"
+    return base
+
+
 def build_stage_error(exc: BaseException, dbackend: Any) -> Any:
     """Wrap a run-fatal failure as an attributed ``StageError`` (never a raw ``KilledWorker`` /
     ``TransportDeliveryError`` to the user, §1.5 / m42 precedent). A ``KilledWorker`` names the victim
-    worker via ``describe_failure``; anything else keeps its own type + message."""
+    worker via ``describe_failure``; anything else keeps its own type + message (with the wrapped
+    traceback frames appended, so a CI-only crash names its site)."""
     from graphed.debug import SourceFrame, StageError  # noqa: PLC0415  (dask-free; error path only)
 
     describe = getattr(dbackend, "describe_failure", None)
@@ -177,6 +211,6 @@ def build_stage_error(exc: BaseException, dbackend: Any) -> Any:
         input_forms=(),
         partition="transport-run",
         cause_type=type(exc).__name__,
-        cause_message=str(exc),
+        cause_message=_with_frames(exc),
         opt_level=0,
     )
