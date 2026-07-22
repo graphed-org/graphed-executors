@@ -70,7 +70,10 @@ jobs:
   # importorskips out of the main matrix. This dedicated job installs it and runs the m42 dask suite
   # with coverage scoped to the NEW subpackages only (.coveragerc-dask, fail_under 90 — the §B.3
   # diff-coverage gate). pyarrow is a runtime need of the parquet parity surfaces (ak.to_parquet).
-  # m43/m44 extend this job's pytest path (cov scope unchanged: all m43/m44 code is under dask_backend/).
+  # m43/m44/m45 extend this job's pytest path (cov scope unchanged: all of it is under dask_backend/).
+  # m45's dask-free resolution/gates tests also run on the MAIN matrix via `pytest tests/frozen` (no
+  # distributed needed — same as m44's capability gate); the cluster dispatch/join tests importorskip
+  # out there and run HERE, covering api.py under the .coveragerc-dask gate.
   test-dask:
     name: test-dask py${{ matrix.python }}
     runs-on: ubuntu-latest
@@ -90,9 +93,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" pyarrow pandas
           python -m pip install -e ".[dev,dask]"
-      - name: Pytest m42+m43+m44 dask suite + scoped coverage gate (>=90%)
+      - name: Pytest m42+m43+m44+m45 dask suite + scoped coverage gate (>=90%)
         run: |
-          pytest tests/frozen/m42 tests/frozen/m43 tests/frozen/m44 --cov-config=.coveragerc-dask \
+          pytest tests/frozen/m42 tests/frozen/m43 tests/frozen/m44 tests/frozen/m45 \
+            --cov-config=.coveragerc-dask \
             --cov-branch --cov=graphed_executors.submit --cov=graphed_executors.dask_backend \
             --cov-report=term-missing
       - name: Pytest m43 join-parity witnesses (non-gating; interim until the frozen fixup lands)

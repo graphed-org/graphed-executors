@@ -455,6 +455,44 @@ Determinism is unchanged from the shuffle graph: the same ascending-src merge ma
 stays an optional extra: ``transport_peer``/``transport_shuffle`` import on the dask-free matrix (the
 ``distributed``-touching code is deferred into function bodies).
 
+Choosing an engine — the shuffle facade (m45)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two dask shuffle engines is one knob too many for most callers, so ``graphed_executors.dask_backend.api``
+is the **front door**: ``run_repartition`` / ``run_join`` take a single ``shuffle_method`` and dispatch
+over both. It is a thin dispatcher — zero engine logic — imported dask-free at module load like the
+engines it fronts.
+
+``shuffle_method`` takes three values:
+
+- ``"transport"`` — always the m44 worker-transport engine (the m44 pin/peer gate raises its own
+  ``NotImplementedError`` if the backend can't support it; the facade adds nothing).
+- ``"tasks"`` — always the m43 as-tasks future-graph engine.
+- ``"auto"`` (default) — **capability-static**: the transport engine iff the backend advertises BOTH
+  ``pin_to_worker`` and ``peer_data_movement``, else the as-tasks engine. Resolution is a pure function of
+  ``dbackend.capabilities`` — no size heuristics, and it does **not** inspect cluster elasticity.
+
+**Fixed vs adaptive clusters.** ``"auto"`` keys only on capabilities, not on whether workers come and go.
+The transport engine strict-pins tasks to specific workers, so on an *adaptive/elastic* cluster (workers
+joining and dying) prefer ``shuffle_method="tasks"`` explicitly — the as-tasks future graph lets the dask
+scheduler recompute lost stage-1 blocks, whereas a pinned owner that leaves forces a whole-run epoch
+restart. On a fixed cluster, ``"auto"`` (transport) minimises interpreter touchpoints.
+
+**Knob honesty.** ``salt`` (and ``on`` / ``how`` / ``broadcast`` / ``mem_budget_bytes`` on joins) are
+common and forward on both paths — ``mem_budget_bytes`` bounds the join working set on *either* engine.
+The transport-only knobs (``n_tasks`` / ``fetch_budget_bytes`` / ``disk_budget_bytes`` /
+``holder_budget_bytes`` / ``pull_timeout_s`` / ``epoch_restarts_allowed`` on repartition;
+``holder_budget_bytes`` / ``pull_timeout_s`` / ``epoch_restarts_allowed`` on join) raise a ``ValueError``
+naming the knob if you set one while resolution lands on ``"tasks"`` — never a silent drop. Validation runs
+*after* resolution, so ``"auto"`` degrading to tasks with an explicit transport knob raises too. Callers
+needing ``monitor=`` / ``retries=`` use the still-public ``dask_run_*`` / ``transport_run_*`` entry points.
+
+**Result shape + observability.** The facade returns the engine's own result unchanged — a union
+``ShuffleResult | TransportShuffleResult`` whose portable contract is the common triple
+``dest_block_hashes`` / ``value`` / ``witness``. The engine-specific extra is also a resolution witness: a
+result carrying ``.transport`` proves the transport engine ran, ``.partitions`` the as-tasks engine — handy
+for "why was ``auto`` slow on my adaptive cluster?".
+
 What is *not* distributed here (checkpoint scope)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
