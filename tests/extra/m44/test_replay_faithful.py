@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from graphed.numpy import NumpyBackend
+
+from graphed_executors.dask_backend.transport_shuffle import _replay_reader_plane
 from graphed_executors.local.shuffle import (
     ShuffleWitness,
     _assign,
@@ -28,14 +29,12 @@ from graphed_executors.local.shuffle import (
     _sha256_hex,
     run_repartition,
 )
-from graphed_executors.dask_backend.transport_shuffle import _replay_reader_plane
 
 PARTS = 8
 K = 2
 
 
 def _blocks(copies: int = 4) -> list[object]:
-    be = NumpyBackend()
     dt = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
     key_lists = [
         [0, 1, 2, 3, 4, 5, 6, 7],
@@ -97,7 +96,9 @@ def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budge
     be = NumpyBackend()
     src = _blocks()
     n_tasks = min(K, len(src))
-    local = run_repartition(be, src, PARTS, workers=K, fetch_budget_bytes=fetch_budget, disk_budget_bytes=disk_budget)
+    local = run_repartition(
+        be, src, PARTS, workers=K, fetch_budget_bytes=fetch_budget, disk_budget_bytes=disk_budget
+    )
 
     manifests, size_of = _driver_manifests(be, src, PARTS, K, n_tasks)
     addrs = tuple(f"tcp://w{i}" for i in range(K))
@@ -105,8 +106,7 @@ def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budge
         manifests, PARTS, n_tasks, K, addrs, size_of, fetch_budget=fetch_budget, disk_budget=disk_budget
     )
     assert _reader_counters(replay) == _reader_counters(local.witness), (
-        f"replay diverged from the real _stage2_gather at "
-        f"fetch={fetch_budget}, disk={disk_budget}"
+        f"replay diverged from the real _stage2_gather at fetch={fetch_budget}, disk={disk_budget}"
     )
     # the per-node disk map must be keyed by the passed (worker) addresses, never the local node-i tags
     assert set(replay.per_node_disk_bytes) <= set(addrs)
@@ -121,9 +121,14 @@ def test_replay_detects_wrong_sizes() -> None:
     manifests, size_of = _driver_manifests(be, src, PARTS, K, n_tasks)
     addrs = tuple(f"tcp://w{i}" for i in range(K))
 
-    truth = _replay_reader_plane(manifests, PARTS, n_tasks, K, addrs, size_of, fetch_budget=200, disk_budget=None)
-    halved = {d: max(1, s // 2) for d, s in size_of.items()}
-    mutated = _replay_reader_plane(manifests, PARTS, n_tasks, K, addrs, halved, fetch_budget=200, disk_budget=None)
-    assert mutated.peak_fetch_bytes != truth.peak_fetch_bytes or mutated.bytes_transferred != truth.bytes_transferred, (
-        "the replay ignored block sizes — it is not actually accounting bytes"
+    truth = _replay_reader_plane(
+        manifests, PARTS, n_tasks, K, addrs, size_of, fetch_budget=200, disk_budget=None
     )
+    halved = {d: max(1, s // 2) for d, s in size_of.items()}
+    mutated = _replay_reader_plane(
+        manifests, PARTS, n_tasks, K, addrs, halved, fetch_budget=200, disk_budget=None
+    )
+    assert (
+        mutated.peak_fetch_bytes != truth.peak_fetch_bytes
+        or mutated.bytes_transferred != truth.bytes_transferred
+    ), "the replay ignored block sizes — it is not actually accounting bytes"

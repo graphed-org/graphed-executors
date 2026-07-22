@@ -118,3 +118,95 @@ Frozen suite: `tests/frozen/m44/` (47 tests, freeze tag `freeze-m44` = 12cfd77).
 Probe scripts (moved out of the repo tree to keep it clean): probe_run_after_death.py (the
 nanny-restart canary hang repro), determinism_probe.py, diag_death.py — all in
 /private/tmp/claude-501/m44-scratch/.
+
+## REMEDIATION — review r1 punch list (R1–R7)
+
+REVIEW returned unanimous ACCEPT-WITH-FOLLOWUP (zero blockers); the 7 items below are the mandatory
+pre-DONE remediation. No frozen test was touched (the two mutation-survivor join paths are left for the
+impl-blind test-author, per m43 precedent). Evidence in /private/tmp/claude-501/m44-remediation/.
+
+- **R1 (lint gate, was RED) — FIXED.** `ruff check --fix` + `ruff format` on `src tests` (repo-wide, not
+  package-scoped): removed the F841 unused `be` in test_replay_faithful.py, isort-fixed its imports,
+  reformatted transport.py / transport_shuffle.py / test_replay_faithful.py. Now `ruff check src tests` =
+  "All checks passed"; `ruff format --check src tests` = "27 files already formatted"; `mypy` strict =
+  "no issues found in 23 source files".
+- **R2 (silent-empty-root) — FIXED.** A peer reduction that finishes with NO captured root now RAISES a
+  restart-worthy `TransportDeliveryError` (→ §1.5 restart / attributed `StageError`) instead of defaulting
+  the F3 fallback to `plan.empty()`. Mechanism: (a) a distinct `_NO_ROOT` sentinel + a
+  `DaskWorkerTransport.has_root` property disambiguate a genuinely-`None` reduction root from "no root
+  captured" (the old `root_sent = None` conflated them; the old `r.get("root") is not None` fallback also
+  silently dropped a `None` root); (b) `_dask_peer_main` returns `has_root` (a picklable bool — the
+  sentinel's identity can only be resolved in the endpoint's own process); (c) a pure `_select_root`
+  helper routes the driver-root / peer-root / raise decision; (d) `root_timeout_s` is now a kwarg on
+  `transport_run_plan` (default `_ROOT_TIMEOUT_S=30.0`) so a legitimately long reduction widens the ceiling
+  rather than silently aborting. Witnesses (tests/extra/m44/test_transport_failure_semantics.py):
+  no-captured-root ⇒ raises (not empty); a `None` peer root ⇒ kept as `None`; `root_timeout_s` forwarded to
+  `collect_peer_root` (recorded 7.5 vs the 30.0 default — clock-free). Non-vacuity measured: the pre-r2
+  fallback returns `plan.empty()` for BOTH the no-root and the None-root inputs the witnesses exercise
+  (scratch discrimination print), so each witness fails against the old code.
+- **R3 (canary honesty) — FIXED.** The setup self-RPC `except Exception` is narrowed to `(OSError,
+  TimeoutError)` (CommClosedError is an OSError subclass) — ONLY a connect/timeout class (a nanny-restart
+  startup where the server is not yet listening) falls back to the in-process direct-dispatch check; a
+  non-connect failure or a dispatched-but-wrong reply now propagates as seam drift instead of being masked.
+  A recorded `canary_arm` (`"rpc"` | `"direct"`) marks which arm validated the seam: on a healthy cluster
+  the ONLY green arm is `"rpc"` (a real socket round-trip), so a distributed that ignored the handlers dict
+  can no longer go canary-green via the fallback. `canary_ok` (the frozen-read bool) is unchanged.
+- **R4 (pull-timeout classification) — FIXED.** A block-plane pull timeout now raises a named
+  `PullTimeoutError` (holder named) instead of a bare `asyncio.TimeoutError`, and `is_restart_worthy`
+  classifies it restart-worthy (documented §1.5 decision: a timed-out holder is treated as LOST → the
+  whole-run restart re-runs producers onto the survivors, which recovers a dead holder and rides a
+  transient-slow one). The pull ceiling is now caller-settable: `pull_timeout_s` kwarg on
+  `transport_run_repartition` / `transport_run_join`, threaded through the spec → gather tasks →
+  `pull_blocks(..., timeout_s=…)`, so a legitimately large batch widens the ceiling before the restart
+  budget burns. Witness: `is_restart_worthy(PullTimeoutError(...))` is True (incl. the chained-from-
+  TimeoutError form) while a plain `RuntimeError` is False (discriminating — not "restart on everything").
+- **R5 (unbounded join holder plane) — FIXED.** `transport_run_join` gained a `holder_budget_bytes` kwarg,
+  threaded through `_shuffle_join_attempt` to BOTH the left and right `_transport_map_task` submits (were
+  hardcoded `holder_budget=None`), mirroring repartition's F12 producer-retention cap. (The broadcast join
+  path has no holder plane — the build side ships via `dbackend.broadcast`, not the plugin block store — so
+  it is unaffected, documented in the docstring.)
+- **R6 (docs / coverage-label honesty) — FIXED.** design.rst gained an "Honesty about what the budgets and
+  witnesses mean" subsection stating bluntly: the reader-plane `fetch_budget_bytes` / `disk_budget_bytes`
+  drive the DRIVER-SIDE accounting replay ONLY (the real gather holds one dest resident — no runtime reader
+  buffer, no runtime reader spill); `DaskWorkerTransport.send` retries INLINE (up to ~25 s = SEND_RETRIES ×
+  SEND_ATTEMPT_TIMEOUT_S, blocking the seceded actor thread) — unlike the Protocol's non-blocking contract;
+  and `bulk_fetch_count` / `cross_node_fetches` are the replay's per-node coalesced model, which can
+  UNDERCOUNT the real per-`(dest,holder)` RPC total, with the frozen `≤ P·k` bound staying honest either
+  way. Coverage-label correction (below) states line-only vs line+branch and names the wired gate.
+- **R7 (record-only known limitations) — RECORDED.** A "Known limitations (m44)" subsection in design.rst
+  (mirrored here): loopback self-pull for an own-worker fragment; the holder-store lock held across the
+  spill write; the counter probe's on-loop store read + lock-free witness dicts (all phase-barriered, none
+  can corrupt a result); peer-mode M37 telemetry not wired (`emit=False`) — a Phase-2 follow-up; and the
+  zero-worker / all-roots-withheld stall now subsumed by the R2 raise.
+
+### Coverage-label correction (R6)
+
+The prior FINAL GATE TABLE labeled the diff-coverage figure "90.2% (line+branch)". That was wrong: **90.2%
+was LINE-only; the line+branch figure was 87.3%** (a stricter integrity-lens measurement). The gate that CI
+actually enforces is the **scoped-total** coverage on `graphed_executors.submit` + `dask_backend`
+(`.coveragerc-dask`, `fail_under = 90`) — not the standalone diff-cover figure.
+
+Post-remediation measured (cov_wired.json, frozen m42+m43+m44 only, `--cov-branch`):
+- **Wired CI gate (authoritative): scoped total = 91.02% (line+branch) ≥ 90 — PASS** (156 passed).
+- Diff-coverage on the remediation lines (integrity lens): **77.6% line-only / 71.2% line+branch**. This is
+  below 90 by construction and honestly so: the sub-90 is entirely (i) the R2 no-root and R4 pull-timeout
+  RAISE paths, whose covering hits are the tests/extra/m44 witnesses (the reviewer's own R2 direction —
+  frozen fixups for the adversarial paths go through the impl-blind test-author AFTER remediation), and
+  (ii) `_dask_peer_main`'s worker-thread body, which the peer frozen suite DOES execute but coverage does
+  not trace under threaded `distributed` (an instrumentation artifact, not untested code — the peer
+  reduction frozen tests pass, exercising it). The wired total gate absorbs both and stays ≥ 90.
+
+### Remediation gate re-run (measured; evidence in /private/tmp/claude-501/m44-remediation/)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| ruff check (`src tests`, repo-wide) | All checks passed | (R1) |
+| ruff format --check (`src tests`) | 27 files already formatted | (R1) |
+| mypy --strict (wired: files=src, py3.12) | Success: no issues in 23 source files | (R1) |
+| Frozen m44 | 47/47 (run 1) | det_run1.out |
+| Determinism (2 consecutive frozen-m44 runs) | 47/47 == 47/47 | det_run1.out, det_run2.out |
+| Wired dask coverage gate (m42+m43+m44, `.coveragerc-dask`) | 156 passed; scoped total 91.02% ≥ 90 (fail_under reached) | cov_wired.out / cov_wired.json |
+| Whole frozen tree (`pytest tests/frozen`) | 467 collected, 466 passed / 1 skipped (pre-existing m37 perspective), 0 failures/errors, exit 0 | whole_frozen2.out, whole.xml |
+| sphinx -W | build succeeded (0 warnings) | docs_build/ |
+| tests/extra/m44 witnesses (non-gating) | 11 passed (5 replay + 6 R2/R4 semantics) | — |
+| Integrity | `git diff freeze-m44 -- tests/frozen` EMPTY; no skip/xfail/type:ignore blanket added | — |

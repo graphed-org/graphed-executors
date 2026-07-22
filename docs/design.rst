@@ -390,15 +390,64 @@ Three design points carry the parity:
   local disk (``holder_spill_count``/``peak_holder_bytes``), so the producer store is never an unmanaged
   memory pause/terminate trap. The block plane never routes bytes through the client.
 - **Failure = whole-run restart under a fresh epoch (§1.5).** Every run mints an epoch nonce; the plugin
-  refuses recv/pull for an unknown or purged epoch (the P2P ``run_id`` guard). A lost peer send exhausts
-  a bounded at-least-once retry and raises ``TransportDeliveryError``; a worker death surfaces as
-  ``KilledWorker``. Either restarts the whole run under a new nonce (re-reading the surviving worker set
+  refuses recv/pull for an unknown or purged epoch (the P2P ``run_id`` guard). The restart-worthy set is:
+  a lost peer send that exhausts its bounded at-least-once retry (``TransportDeliveryError``); a block-pull
+  that times out against a slow/dead holder (``PullTimeoutError`` — the pull ceiling is the caller-settable
+  ``pull_timeout_s``, so a legitimately large batch widens it before the restart budget burns); a peer
+  reduction that completes with **no captured root** (also a ``TransportDeliveryError`` — never a silent
+  ``plan.empty()``); and a worker death (``KilledWorker``). Any of these restarts the whole run under a new nonce (re-reading the surviving worker set
   so the restart pins onto survivors) up to ``epoch_restarts_allowed``, then an attributed ``StageError``
   naming the victim — never a raw ``KilledWorker`` and never a hang (a hard-timeout-guarded gate proves
   it). Because setup can run during a nanny **restart**, the plugin's handler-seam canary is a *bounded*
   self-RPC that falls back to a direct handler-dispatch check when the worker's server is not yet
   accepting — a self-RPC that blocked startup would hang every subsequent ``client.run`` against the
   restarted worker.
+
+Honesty about what the budgets and witnesses mean
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Three things are deliberately *not* what a first read might assume, and the frozen goldens are honest
+only because of them:
+
+- **The reader-plane budgets drive the driver-side accounting replay ONLY.** ``fetch_budget_bytes`` /
+  ``disk_budget_bytes`` bound (and are witnessed by) ``_replay_reader_plane``, which re-runs the imported
+  ``_stage2_gather`` accounting over block *sizes* at the barrier. They do **not** cap a live reader on a
+  worker: the real per-*dest* ``_transport_gather_task`` pulls its fragments, holds *one* dest resident,
+  concats, and returns — there is **no runtime reader-side fetch buffer and no runtime reader spill**. The
+  producer/holder plane *is* really bounded and really spills (``holder_budget_bytes`` → ``holder_spill_count``);
+  the reader budgets are an accounting model of the reference engine, not a runtime backpressure knob here.
+- **``DaskWorkerTransport.send`` retries INLINE, blocking the actor thread — unlike the Protocol.** The M38
+  ``WorkerTransport.send`` contract is non-blocking; this dask implementation instead does a bounded
+  at-least-once retry *synchronously* inside ``send`` (``SEND_RETRIES`` × ``SEND_ATTEMPT_TIMEOUT_S`` ≈ up to
+  ~25 s of wall time, plus backoff, blocking the seceded peer actor's task thread) before raising
+  ``TransportDeliveryError``. This is the deliberate trade: the un-editable ``_peer.py`` consumers ignore
+  ``send``'s bool, so at-least-once delivery has to be *inside* ``send`` or a dropped reduction message is
+  lost silently. It is correct but not the Protocol's latency profile.
+- **The bulk-fetch witnesses map to real RPCs only up to coalescing.** ``bulk_fetch_count`` /
+  ``cross_node_fetches`` come from the replay, which coalesces a dest's fragments per node; the real gather
+  coalesces per *holder* and issues one ``graphed_block_pull`` RPC per ``(dest, holder)``. So the witnessed
+  counts can **undercount** the real per-``(dest, holder)`` RPC total. The frozen bound (``≤ P·k``) stays
+  honest because ``k`` holders × ``P`` dests is the ceiling either way; the witness is a lower-bound-safe
+  model of the real bulk traffic, not a per-RPC ledger.
+
+Known limitations (m44)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Recorded rather than fixed (all are phase-barriered — none can corrupt a result, and the reviewer raised
+them as nits, not blockers):
+
+- A gather that owns a fragment on its *own* worker still pulls it over a loopback ``graphed_block_pull``
+  RPC instead of reading the local store directly (a small self-pull cost, never a correctness issue).
+- The holder store lock is held across the spill *write* (disk IO under the lock); the serving handler
+  contends for it only during a spill, and a run is phase-barriered (all producers finish before any
+  gather), so it cannot stall a live pull today.
+- The per-epoch counter probe reads block-store sizes on the IO loop; on a very large store this is a small
+  loop-thread cost. Witness counters are per-worker dicts updated without a lock — safe only because the
+  phase barrier means no two task threads touch the same epoch's counters concurrently.
+- **Peer-mode M37 telemetry is not wired (``emit=False``).** ``transport_run_plan`` accepts ``monitor`` for
+  signature parity but does not emit peer-reduction telemetry over the transport — a Phase-2 follow-up.
+- A **zero-worker** cluster (or one where every root is withheld) no longer stalls: the R2 no-captured-root
+  raise turns it into an attributed ``StageError`` / restart, never a silent identity value or a hang.
 
 Determinism is unchanged from the shuffle graph: the same ascending-src merge makes
 ``dest_block_hashes`` byte-identical to the local engine and across runs, and the peer reduction's fixed

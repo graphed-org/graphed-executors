@@ -58,10 +58,15 @@ _SEND_BACKOFF_S = 0.05  # first inter-attempt sleep; doubles each retry (bounded
 _DEFAULT_INBOX_MAXSIZE = 1 << 20  # generous: reduction traffic is O(n_leaves/k + log k + steal chatter)
 _CANARY_RPC_TIMEOUT_S = 2.0  # bound the setup self-RPC so a nanny-restart startup can never deadlock
 
+# distinct from ``None``: a genuinely-``None`` reduction root must not read as "no root captured"
+# (R2 — the silent-empty-root bug). ``DaskWorkerTransport.has_root`` tests identity against this.
+_NO_ROOT: Any = object()
+
 __all__ = [
     "DaskWorkerTransport",
     "DriverTransport",
     "GraphedTransportPlugin",
+    "PullTimeoutError",
     "TransportDeliveryError",
     "make_transport_spec",
     "open_driver_endpoint",
@@ -75,6 +80,14 @@ class TransportDeliveryError(Exception):
     pinned peer/gather task (never a silent ``False`` on reduction-class traffic) so it escalates to
     the §1.5 epoch restart / attributed ``StageError`` — the un-editable consumers ignore ``send``'s
     bool (``_peer.py:214``/``:453``), so raising is the only sound exhaustion semantics."""
+
+
+class PullTimeoutError(Exception):
+    """A block-plane ``graphed_block_pull`` timed out (a slow or dead holder). Raised OUT of the pinned
+    gather task with the holder named, so §1.5 classifies it restart-worthy (a timed-out holder is
+    treated as lost → whole-run restart onto the survivors) instead of leaking a bare
+    ``asyncio.TimeoutError`` as an opaque ``StageError`` (R4). ``pull_blocks(..., timeout_s=…)`` lets a
+    caller widen the ceiling for a legitimately large coalesced batch before the restart budget burns."""
 
 
 def _driver_topic(epoch: str) -> str:
@@ -95,6 +108,7 @@ class _TransportSpec:
     addresses: tuple[str, ...]
     overlay: dict[str, tuple[str, ...]] | None = None
     inbox_maxsize: int = _DEFAULT_INBOX_MAXSIZE
+    pull_timeout_s: float = PULL_ATTEMPT_TIMEOUT_S  # per-holder block-pull ceiling (R4; caller-settable)
 
     def peers_of(self, address: str) -> tuple[str, ...]:
         if self.overlay is not None:
@@ -108,15 +122,19 @@ def make_transport_spec(
     *,
     inbox_maxsize: int | None = None,
     overlay: Mapping[str, Sequence[str]] | None = None,
+    pull_timeout_s: float | None = None,
 ) -> _TransportSpec:
     """Build the picklable spec. ``overlay=None`` means every worker may send to every other worker
-    and to ``"driver"`` (the engine passes its own bounded ``worker_outbox_addresses`` overlay)."""
+    and to ``"driver"`` (the engine passes its own bounded ``worker_outbox_addresses`` overlay).
+    ``pull_timeout_s=None`` uses the ``PULL_ATTEMPT_TIMEOUT_S`` default; a caller widens it for large
+    block batches (R4)."""
     ov = None if overlay is None else {a: tuple(v) for a, v in overlay.items()}
     return _TransportSpec(
         epoch=epoch,
         addresses=tuple(worker_addresses),
         overlay=ov,
         inbox_maxsize=int(inbox_maxsize) if inbox_maxsize is not None else _DEFAULT_INBOX_MAXSIZE,
+        pull_timeout_s=PULL_ATTEMPT_TIMEOUT_S if pull_timeout_s is None else float(pull_timeout_s),
     )
 
 
@@ -171,6 +189,9 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
         self.inject_recv_failures: dict[str, int] = {}
         self.stale_epoch_rejects = 0
         self.canary_ok = False
+        self.canary_arm: str | None = (
+            None  # which arm validated the seam: "rpc" (healthy) | "direct" (restart)
+        )
         try:
             worker.handlers["graphed_transport_recv"] = self._on_recv
             worker.handlers["graphed_block_pull"] = self._on_block_pull
@@ -189,22 +210,33 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
         # restart never deadlocks. Real drift (an unwritable ``worker.handlers``) already raised above,
         # before this point.
         probe = uuid.uuid4().hex
-        dispatched = False
         try:
             reply = await asyncio.wait_for(
                 worker.rpc(worker.address).graphed_transport_ping(nonce=probe),
                 timeout=_CANARY_RPC_TIMEOUT_S,
             )
-            dispatched = reply.get("nonce") == probe
-        except Exception:  # server-not-yet-listening (startup) or a bounded timeout -> direct fallback
-            dispatched = False
-        if not dispatched:
+        except (OSError, TimeoutError) as exc:
+            # ONLY a connect/timeout class falls back (R3): the server-not-yet-listening case of a nanny
+            # RESTART during startup (a self-connection refused / bounded wait_for timeout). CommClosedError
+            # is an OSError subclass so it's covered. A NON-connect failure — the RPC reached a live server
+            # but our op did not dispatch/echo — is real seam drift and must NOT be masked by the in-process
+            # fallback, so it propagates out of setup. The narrow fallback + the recorded ``canary_arm``
+            # together mean a distributed that ignores the handlers dict can no longer go canary-green: on a
+            # healthy cluster the ONLY green arm is "rpc" (a real socket round-trip through the seam).
             handler = worker.handlers.get("graphed_transport_ping")
             if handler is None or handler(nonce=probe).get("nonce") != probe:
                 raise RuntimeError(
                     "graphed-transport: distributed worker-handler seam drifted "
                     "(canary handler did not dispatch/echo)"
+                ) from exc
+            self.canary_arm = "direct"
+        else:
+            if reply.get("nonce") != probe:
+                raise RuntimeError(
+                    "graphed-transport: self-RPC canary dispatched but did not echo the nonce "
+                    f"({reply!r}) — the worker-handler seam drifted"
                 )
+            self.canary_arm = "rpc"
         self.canary_ok = True
 
     # -- handlers (run on the worker IO loop; put_nowait / block-read only, never blocking work) --
@@ -345,20 +377,32 @@ def _read_spill_files(paths: Sequence[tuple[str, str]]) -> dict[str, bytes]:
     return {d: Path(p).read_bytes() for d, p in paths}
 
 
-def pull_blocks(epoch: str, holder: str, digests: Sequence[str]) -> list[bytes]:
+def pull_blocks(
+    epoch: str, holder: str, digests: Sequence[str], *, timeout_s: float = PULL_ATTEMPT_TIMEOUT_S
+) -> list[bytes]:
     """Worker-task-side block-plane pull (the shuffle gather's data path): dial ``holder``'s
     ``graphed_block_pull`` over ``worker.rpc`` for a COALESCED batch of ``digests`` (one RPC per
     holder — the T2 incast bound), bridging the task thread to the IO loop via ``sync``. A dead holder
     surfaces as the comm-class error the §1.5 restart classifier recognizes; a purged epoch raises
-    (never a silent empty), so a lost block can never be read as zero rows (hard constraint 8). No
-    per-pull retry: a lost holder restarts the WHOLE run under a fresh epoch, not this one pull."""
+    (never a silent empty), so a lost block can never be read as zero rows (hard constraint 8).
+
+    ``timeout_s`` bounds each coalesced batch (default ``PULL_ATTEMPT_TIMEOUT_S``; the gather task
+    passes ``spec.pull_timeout_s`` so a caller can widen it for a legitimately large batch — R4). No
+    per-pull retry: a timed-out or lost holder restarts the WHOLE run under a fresh epoch (a fresh
+    ``PullTimeoutError`` is the §1.5 restart-worthy signal), not this one pull."""
     worker = distributed.get_worker()
 
     async def _go() -> list[bytes]:
-        reply = await asyncio.wait_for(
-            worker.rpc(holder).graphed_block_pull(epoch=epoch, digests=list(digests)),
-            timeout=PULL_ATTEMPT_TIMEOUT_S,
-        )
+        try:
+            reply = await asyncio.wait_for(
+                worker.rpc(holder).graphed_block_pull(epoch=epoch, digests=list(digests)),
+                timeout=timeout_s,
+            )
+        except TimeoutError as exc:  # asyncio.TimeoutError IS builtins.TimeoutError (3.11+)
+            raise PullTimeoutError(
+                f"block pull from holder {holder} timed out after {timeout_s}s "
+                f"({len(digests)} digest(s), epoch {epoch}) — holder slow or dead"
+            ) from exc
         if reply.get("stale"):
             raise RuntimeError(f"graphed_block_pull hit a stale/purged epoch {epoch} on holder {holder}")
         return [bytes(w) for w in reply["wires"]]
@@ -386,7 +430,14 @@ class DaskWorkerTransport:
         self._worker = plugin._worker
         self.address = self._worker.address
         self._run = plugin.ensure_run(spec)
-        self.root_sent: Any = None  # captured when send("driver", ("root", v)) fires (the F3 fallback)
+        self.root_sent: Any = _NO_ROOT  # set when send("driver", ("root", v)) fires (the F3 fallback)
+
+    @property
+    def has_root(self) -> bool:
+        """True once this endpoint has shipped a reduction root to the driver — even a ``None`` root
+        (R2: ``root_sent is None`` must NOT read as 'no root', or a genuinely-None reduction defaults to
+        the identity value on the F3 fallback path)."""
+        return self.root_sent is not _NO_ROOT
 
     def peers(self) -> tuple[str, ...]:
         return self._spec.peers_of(self.address)

@@ -124,10 +124,13 @@ def _in_chain(exc: BaseException | None, name: str) -> bool:
 
 def is_restart_worthy(exc: BaseException | None, dbackend: Any) -> bool:
     """A run restarts under a fresh epoch on ANY of: an exhausted-send ``TransportDeliveryError``, a
+    block-plane ``PullTimeoutError`` (R4 — a timed-out holder is classified LOST: the whole-run restart
+    re-runs the producers onto the survivors, which recovers a dead holder and rides a transient-slow
+    one; a caller who knows the batch is legitimately large widens ``pull_timeout_s`` first), a
     ``describe_failure``-recognized ``KilledWorker``, or a bare comm loss to a dead holder."""
     if exc is None:
         return False
-    if _in_chain(exc, "TransportDeliveryError"):
+    if _in_chain(exc, "TransportDeliveryError") or _in_chain(exc, "PullTimeoutError"):
         return True
     describe = getattr(dbackend, "describe_failure", None)
     if describe is not None and describe(exc) is not None:

@@ -44,6 +44,28 @@ _ROOT_TIMEOUT_S = 30.0  # generous vs a sub-second in-cluster reduction; a peer 
 _MISSING: Any = object()
 
 
+def _select_root(driver_root: Any, results: dict[str, Any], missing: Any) -> Any:
+    """Resolve the reduction root after a clean run. If the driver's ``collect_peer_root`` returned one
+    (``driver_root is not missing``, even a genuinely-``None`` root), it is authoritative. Otherwise fall
+    back to the F3 belt-and-braces: the first peer that CAPTURED a root (``has_root``). If NO peer
+    captured one, RAISE a ``TransportDeliveryError`` (R2): the reduction was aborted before producing a
+    root (e.g. ``collect_peer_root`` timed out and broadcast ``('done',)``, ending the actors) — returning
+    ``plan.empty()`` here would silently substitute the identity value for the real answer (hard
+    constraint 8). The raise is restart-worthy, so it escalates through §1.5, never a silent wrong result."""
+    if driver_root is not missing:
+        return driver_root
+    for r in results.values():
+        if r.get("has_root"):
+            return r["root"]
+    from .transport import TransportDeliveryError  # noqa: PLC0415  (deferred: distributed-touching)
+
+    raise TransportDeliveryError(
+        f"peer reduction completed with no captured root across {len(results)} peer(s): the driver root "
+        "collection did not deliver a root and no peer future carried one (the reduction was aborted "
+        "before the root — a lost/withheld root must never default to the identity value)"
+    )
+
+
 def _dask_peer_main(
     spec: Any,
     process: Any,
@@ -82,7 +104,16 @@ def _dask_peer_main(
         steal_peers=tuple(steal_peers),
         emit=False,
     )
-    return {"address": endpoint.address, "root": endpoint.root_sent, "counters": counters}
+    # ``has_root`` is a plain bool (survives the wire): ``endpoint.root_sent`` may be a genuinely-``None``
+    # root, which the ``_NO_ROOT`` sentinel — a live object identity that does NOT survive pickling —
+    # can only disambiguate here, in the endpoint's own process (R2).
+    captured = endpoint.has_root
+    return {
+        "address": endpoint.address,
+        "has_root": captured,
+        "root": endpoint.root_sent if captured else None,
+        "counters": counters,
+    }
 
 
 def transport_run_plan(
@@ -91,13 +122,16 @@ def transport_run_plan(
     *,
     monitor: Any = None,
     inbox_maxsize: int | None = None,
+    root_timeout_s: float = _ROOT_TIMEOUT_S,
     epoch_restarts_allowed: int = 1,
 ) -> TransportExecResult:
     """Run ``plan`` as an M38 peer reduction hosted on ``backend`` (a ``DaskBackend``). ``monitor`` is
     accepted for signature parity but peer-mode telemetry over the transport is not wired for m44
-    (emit=False) — a documented limitation. Failure semantics (§1.5): an exhausted send / worker
-    death restarts the whole run under a fresh epoch up to ``epoch_restarts_allowed``, else surfaces
-    as an attributed ``StageError``."""
+    (emit=False) — a documented limitation. ``root_timeout_s`` bounds the driver's ``collect_peer_root``
+    wait (R4; default ``_ROOT_TIMEOUT_S``) — raise it for a legitimately long reduction, since a lost
+    root now RAISES rather than defaulting to the identity value (R2). Failure semantics (§1.5): an
+    exhausted send / worker death / no captured root restarts the whole run under a fresh epoch up to
+    ``epoch_restarts_allowed``, else surfaces as an attributed ``StageError``."""
     require_pin(backend)
     tasks = sorted(plan.tasks, key=lambda t: t.key)
     n = len(tasks)
@@ -150,7 +184,7 @@ def transport_run_plan(
         }
         root: Any = _MISSING
         try:
-            root = collect_peer_root(driver_ep, plan.empty, n, timeout_s=_ROOT_TIMEOUT_S)
+            root = collect_peer_root(driver_ep, plan.empty, n, timeout_s=root_timeout_s)
         except TimeoutError:
             pass  # F3: a lost root falls back to the peer future's returned root (below)
         finally:
@@ -166,13 +200,14 @@ def transport_run_plan(
         collect_and_purge(backend._client, nonce, per_worker)
 
         if not errs:
-            if root is _MISSING:  # log_event root lost -> the idempotent future fallback (nonce-keyed)
-                root = next(
-                    (r["root"] for r in results.values() if r.get("root") is not None), plan.empty()
-                )
-            witness.epoch_restarts = attempt
-            witness.per_worker = per_worker
-            return TransportExecResult(root, n, max(0, n - 1), witness)
+            try:
+                root = _select_root(root, results, _MISSING)  # RAISES if no root captured (R2)
+            except BaseException as exc:  # a no-root run is restart-worthy, like an exhausted send
+                errs["__no_root__"] = exc
+            else:
+                witness.epoch_restarts = attempt
+                witness.per_worker = per_worker
+                return TransportExecResult(root, n, max(0, n - 1), witness)
 
         last_exc = pick_attributable(errs, backend)
         if not is_restart_worthy(last_exc, backend) or attempt >= epoch_restarts_allowed:
