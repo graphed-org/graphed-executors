@@ -84,3 +84,37 @@ Frozen suite: `tests/frozen/m44/` (47 tests, freeze tag `freeze-m44` = 12cfd77).
   Post-fix probe: all `client.run` variants return in 0.0s with BOTH workers (incl. the restart).
 - GATE STATUS after iter 2: **47/47 frozen green** (full suite 97.5 s). ruff clean, mypy --strict
   clean (23 files), sphinx -W clean, extra/m44 (5) green.
+
+### Iteration 3 — final gates + __init__ simplification
+
+- Diff-coverage gap: full frozen dask suite gave 89.4% aggregate diff coverage; the drag was
+  `__init__.py` at 12.5% (1/8) — its lazy `__getattr__` re-export accessors are never triggered
+  (frozen tests import the submodules directly). The submodules are all dask-free at import, so the
+  lazy indirection was unnecessary (F13 re-verified: eager import leaves `distributed` out of
+  `sys.modules`). Made the entry-point re-exports EAGER, removing the `__getattr__`. `__init__` →
+  100%, aggregate diff coverage → **90.2%** (712/789); scoped total submit+dask_backend → **91.59%**
+  (fail_under 90 reached). Evidence: /private/tmp/claude-501/m44-scratch/cov_frozen_dask2.{out,json}.
+- The two per-file sub-90% files are legitimate frozen-untested surface (broadcast left/outer,
+  partitionless one-sided joins, `DriverTransport.send` unicast, `dask_transport_setup` user entry,
+  spill-dir teardown), mirroring the local/m43 contracts — the aggregate gate (90.2%) is met.
+
+## FINAL GATE TABLE (measured; evidence in /private/tmp/claude-501/m44-scratch/)
+
+| Gate | Result | Evidence file |
+|---|---|---|
+| Frozen m44 | 47/47 (full suite ~98 s) | full_m44.out |
+| Two consecutive frozen-m44 runs identical | 47/47 == 47/47 (both `[100%]`, exit 0) | det_run1.out, det_run2.out |
+| Whole dask frozen tree (m42+m43+m44) | 156 passed | cov_frozen_dask2.out |
+| Whole frozen tree (`pytest tests/frozen`) | 466 passed, 1 skipped (pre-existing m37 perspective), exit 0 | whole_frozen2.out |
+| Local frozen m38–m41 | exit 0 | local_frozen.out |
+| Diff coverage (line+branch, new/changed, FROZEN hits) | **90.2%** aggregate (712/789); __init__ 100 / _transport_run 97.7 / transport 89.8 / transport_peer 94.0 / transport_shuffle 87.6 / backend·protocol·threadpool touched 100 | cov_frozen_dask2.json |
+| Scoped total coverage (submit+dask_backend) | 91.59% (fail_under 90 reached) | cov_frozen_dask2.out |
+| Determinism | dest_block_hashes byte-identical across 2 runs; fresh epoch nonce each run | determinism_probe.py |
+| ruff | clean (dask_backend package) | — |
+| mypy --strict | clean (23 files, py3.12) | — |
+| sphinx -W | build succeeded, 0 warnings | — |
+| Integrity | `git diff freeze-m44 -- tests/frozen` EMPTY; no skip/xfail added; targeted type:ignore only | — |
+
+Probe scripts (moved out of the repo tree to keep it clean): probe_run_after_death.py (the
+nanny-restart canary hang repro), determinism_probe.py, diag_death.py — all in
+/private/tmp/claude-501/m44-scratch/.
