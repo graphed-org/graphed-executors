@@ -34,7 +34,7 @@ adaptive mode (below).
 A minimal, runnable plan::
 
     import numpy as np
-    from graphed_core import Partition, Plan, Task
+    from graphed.core import Partition, Plan, Task
     from graphed_executors.local import ProcessExecutor
 
     def count(partition, resources):          # module-level: picklable
@@ -43,11 +43,12 @@ A minimal, runnable plan::
     def add(a, b):  return a + b
     def zero():     return np.zeros(1, dtype=int)
 
-    parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
-    plan  = Plan(process=count, combine=add, empty=zero,
-                 tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
+    if __name__ == "__main__":                # spawned workers re-import __main__
+        parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
+        plan  = Plan(process=count, combine=add, empty=zero,
+                     tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
-    ProcessExecutor(max_workers=4).run(plan).value     # -> array([700])
+        ProcessExecutor(max_workers=4).run(plan).value     # -> array([700])
 
 
 The fixed combine tree: deterministic *and* straggler-tolerant
@@ -527,7 +528,7 @@ The public seam is a **ready** ``distributed.Client`` — cluster construction (
 
     import numpy as np
     from distributed import Client, LocalCluster
-    from graphed_core import Partition, Plan, Task
+    from graphed.core import Partition, Plan, Task
     from graphed_executors.dask_backend import dask_runner
 
     def count(partition, resources):          # module-level: picklable + spawn-safe
