@@ -118,3 +118,18 @@ pinned (recorded): exact `disk_backpressure_events` equality with the local engi
 candidate — engagement + echo + per-worker keys are pinned instead), `n_combines` accounting for
 the peer runner, and the gather-task dest-owner formula (only strict single-address pinning +
 run-to-run determinism are frozen).
+
+## Fixup (orchestrator-mandated after REVIEW — mutation-found coverage gaps; m43 cad0476 precedent)
+
+`test_transport_join_edges.py` — 36 tests, additions only (no existing frozen file modified).
+
+| Test | Gap / plan clause | Witness | Why non-vacuous |
+|---|---|---|---|
+| `test_broadcast_join_emits_the_null_filled_build_tail` (left/outer x both adapters) | GAP-A: broadcast non-inner null-fill tail (§1.4 broadcast join) | rows == local `run_join(broadcast=True)` == pandas (option-typed None; ≥2 null-rval tail rows from the never-matched build keys 98/99, outer's probe-only 55 tail); `dest_block_hashes` == local incl. the tail partition; broadcast REALLY ran (`broadcast_chosen`, zero `_transport_map_task`, one `_transport_broadcast_join_part` per LOCAL-oracle output partition — measured len(right)+1 for non-inner: the tail partition is a distinct pinned task) | the mutation that disables the tail emission loses rows 980/990 → multiset, row-count, hash, AND part-task-count asserts all fail; a sentinel fill fails the pandas multiset |
+| `test_one_side_empty_matches_the_local_oracle` (4 hows x left/right-empty x zero-partition/zero-row-carrier x both adapters) | GAP-B: empty/partitionless side (§1.4 join; G3-class degeneracies) | byte-exact `dest_block_hashes` == local (pins the MEASURED distinction: zero-partition side ⇒ surviving side passes through WITHOUT the missing column; zero-row carrier ⇒ 3-field null-filled rows == pandas); measured row table (0/7 per how/side); `join_output_rows == rows`; every call under the F2 `run_bounded` hard timeout | the mutation that disables the empty-side path crashes, hangs (surfaced by the timeout), or diverges from the oracle hashes; carrier arms additionally pin the pandas multiset |
+
+Scenario guards were validated against the LOCAL engine on both adapters at authoring time
+(null tail genuinely emitted, row table measured, carrier==pandas), and the module was run twice
+green against the implementation at branch HEAD `53c8ec7` before freezing. Driver→worker unicast
+was NOT frozen: the plan's F7/FU-C cut `_plugin_put` for having no consumer, so a frozen witness
+would pin an API the plan removes — left to the orchestrator's integrity follow-up.
