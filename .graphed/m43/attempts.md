@@ -129,3 +129,12 @@ shuffle.py ≥90% frozen-only + a fresh freeze tag.
 **Post-remediation gates:** frozen m43 38/38; frozen m42 47/47; `git diff freeze-m43 -- tests/frozen`
 empty; tests/extra/m43 20/20; ruff check src tests clean; ruff format --check src clean; mypy strict
 clean (19 files).
+
+## DONE (orchestrator, 2026-07-22)
+
+m43 is DONE: review 3x APPROVE 0 blockers (wf_699eaa05-384); G3 empty-probe guard bug fixed +
+extra-witnessed (c800bf5); G2 extras wired non-gating into test-dask CI; G1 frozen parity fixup
+landed (cad0476, tag freeze-m43-fixup): 24 new frozen parity tests, shuffle.py 83%->97% frozen-only
+(total 96.45%), discrimination PROVEN by orchestrator mutations (guard revert -> empty-probe FAIL;
+build-only dests dropped -> 8 FAIL; tail doubled -> 4 FAIL; all restored, 24/24 green after).
+Whole frozen tree: 419 passed, 1 pre-existing skip.
