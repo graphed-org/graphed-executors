@@ -200,6 +200,8 @@ runtime, which reuses ``worker_outbox_addresses``.)
   rather than silently degrading to hub.
 
 
+.. _design-dask-backend:
+
 How the dask backend works
 --------------------------
 
@@ -209,6 +211,8 @@ no ``HighLevelGraph``, no dask-awkward. It ``client.submit``\ s opaque graphed c
 keys and future-dependency edges, and inherits determinism, straggler tolerance, and intact errors
 from the local design rather than re-deriving them. It sits behind a small **common protocol** so a
 second library (parsl) can be adapted later without touching the engine.
+
+.. _design-submit-seam:
 
 The common seam: ``SubmitBackend`` + ``SubmitRunner``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -301,6 +305,8 @@ worker-side as msgpack-safe scalar dicts. Emission is off the data path and swal
 reduced value is **byte-identical** whether a monitor is attached, detached, or actively raising (M37
 passivity) — telemetry never inflates the payload or breaks the run.
 
+.. _design-shuffle-graph:
+
 Shuffle and joins on dask
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -361,6 +367,8 @@ set ``--lifetime`` comfortably **above a single producer task's runtime** (and r
 depending on it — to recompute, turning a long shuffle into repeated work. This is deployment guidance,
 not a correctness gate: the result is bit-for-bit regardless.
 
+.. _design-transport-engine:
+
 Worker-transport engine (m44)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -403,6 +411,8 @@ Three design points carry the parity:
   accepting — a self-RPC that blocked startup would hang every subsequent ``client.run`` against the
   restarted worker.
 
+.. _design-budget-honesty:
+
 Honesty about what the budgets and witnesses mean
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -430,6 +440,8 @@ only because of them:
   honest because ``k`` holders × ``P`` dests is the ceiling either way; the witness is a lower-bound-safe
   model of the real bulk traffic, not a per-RPC ledger.
 
+.. _design-m44-limitations:
+
 Known limitations (m44)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -454,6 +466,8 @@ Determinism is unchanged from the shuffle graph: the same ascending-src merge ma
 ``(level, pos)`` ownership makes the reduced value bit-for-bit the ``SequentialRunner`` baseline. dask
 stays an optional extra: ``transport_peer``/``transport_shuffle`` import on the dask-free matrix (the
 ``distributed``-touching code is deferred into function bodies).
+
+.. _design-facade:
 
 Choosing an engine — the shuffle facade (m45)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -501,6 +515,8 @@ Checkpoint/resume is **out of scope**: ``run_resumable``/``run_shuffle_resumable
 loops over a *local* content-addressed store, not ``Executor`` consumers, so
 ``run_resumable(executor=dask_runner(...))`` does not exist. Journaled, resumable execution on dask
 needs a distributed content-addressed store and belongs with the Phase-2 store data plane.
+
+.. _design-deployment:
 
 Deployment recipes
 ~~~~~~~~~~~~~~~~~~~~

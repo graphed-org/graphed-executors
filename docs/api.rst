@@ -10,3 +10,5 @@ for its functions and classes.
    :recursive:
 
    graphed_executors.local
+   graphed_executors.submit
+   graphed_executors.dask_backend

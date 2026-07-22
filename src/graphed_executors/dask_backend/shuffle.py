@@ -8,7 +8,7 @@ contracts, and RETIRES the announcement/manifest/steal machinery — under dask 
 completeness (a gather *depends on* its producers; the scheduler tracks who holds what and workers
 fetch deps peer-to-peer) and the scheduler owns stealing.
 
-Graph shape (plan §1.3.4):
+Graph shape (plan §1.3.4)::
 
     stage-1: T = min(n_workers, n_src) producer futures   ``_dask_map_write`` (worker-side coalesce
                  -> dict[dest -> wire bytes]                 + to_wire; records its (pid, address))
