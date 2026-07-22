@@ -1,7 +1,7 @@
 How graphed-executors works
 ============================
 
-``graphed-executors`` is the reference executor: it takes a ``graphed_core.Plan`` — process
+``graphed-executors`` is the reference executor: it takes a ``graphed.core.Plan`` — process
 each partition, combine the partials, start from empty — and runs it on one machine with a
 thread pool or a process pool, producing one reduced result. "Reference" does not mean toy:
 this is the executor the integration suites run real analyses through (thousands of tiny
@@ -124,7 +124,7 @@ known partition sets, where determinism matters most.
 Live observability: the monitor seam (M37)
 ------------------------------------------
 
-Every executor accepts an optional ``monitor=`` — a passive ``graphed_core.execution.Monitor`` that
+Every executor accepts an optional ``monitor=`` — a passive ``graphed.core.execution.Monitor`` that
 *watches* a run. It is the seam a live dashboard plugs into (see ``graphed-debug``'s ``Dashboard``),
 but the executor knows nothing about rendering or transport: it only emits a small, picklable
 ``TaskEvent`` vocabulary.
@@ -152,7 +152,7 @@ Inter-worker comms: peer reduction + work-stealing (M38)
 --------------------------------------------------------
 
 By default (``comms="ipc"``) the reduction runs **across the workers, off the driver**. The seam is
-:class:`graphed_core.execution.WorkerTransport` — an addressable, non-blocking, best-effort message
+:class:`graphed.core.execution.WorkerTransport` — an addressable, non-blocking, best-effort message
 channel — with two backends: **IPC** (``QueueTransport`` over ``multiprocessing.SimpleQueue`` inboxes,
 one per address, no ``Manager`` server in the data path) for a single machine, and **HTTP** (loopback
 ``http.server`` + a discovery handshake; ``HttpTransport``) as the path a real distributed scheduler
@@ -232,7 +232,7 @@ The common seam: ``SubmitBackend`` + ``SubmitRunner``
   features) but its ``submit`` does **not** auto-forward a Plan's per-task ``resources`` — dask treats
   ``resources=`` as a hard constraint, so an unsatisfiable request would stall the task forever;
   enforcement on a resource-provisioned cluster is a future deployment-time opt-in.
-* ``SubmitRunner`` — one ``graphed_core.Executor`` over any ``SubmitBackend``. ``DaskBackend`` is the
+* ``SubmitRunner`` — one ``graphed.core.Executor`` over any ``SubmitBackend``. ``DaskBackend`` is the
   first real backend; a stdlib ``ThreadBackend`` is the conformance second one, so the seam is
   witnessed by *executing two backends against one frozen suite*, not by an import lint. Its flag set
   differs from dask's on five of seven flags, proving the engine is correct across capability
