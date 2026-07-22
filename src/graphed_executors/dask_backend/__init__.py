@@ -7,6 +7,21 @@ actionable ImportError when the extra is absent.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from .backend import DaskBackend, dask_runner
 
-__all__ = ["DaskBackend", "dask_runner"]
+if TYPE_CHECKING:
+    from .shuffle import dask_run_join, dask_run_repartition
+
+__all__ = ["DaskBackend", "dask_run_join", "dask_run_repartition", "dask_runner"]
+
+
+def __getattr__(name: str) -> Any:
+    # Lazy re-export of the m43 shuffle entry points: the submodule is dask-import-free, but keeping
+    # it out of eager package import matches the m42 "touch nothing until asked" seam.
+    if name in ("dask_run_repartition", "dask_run_join"):
+        from . import shuffle  # noqa: PLC0415  (lazy: the shuffle entry points)
+
+        return getattr(shuffle, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
