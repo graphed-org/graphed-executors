@@ -6,6 +6,10 @@ that run a ``graphed_core.Plan`` to one reduced result via a deterministic, stra
 reduction, with ``open_once`` file-locality, stopping conditions, adaptive reshaping, and intact
 remote ``StageError`` surfacing (plan A.3 #8).
 
+Beyond one machine, the ``[dask]`` extra adds a ``dask.distributed`` backend behind the common
+:class:`~graphed_executors.submit.protocol.SubmitBackend` seam, plus distributed repartition/join engines
+with a one-knob facade — see :doc:`dask` for the how-to.
+
 Start with :doc:`design` for the engineering walkthrough.
 
 .. toctree::
@@ -13,6 +17,7 @@ Start with :doc:`design` for the engineering walkthrough.
    :caption: Contents
 
    design
+   dask
    api
    improvements
 
