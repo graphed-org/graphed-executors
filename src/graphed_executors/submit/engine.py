@@ -256,7 +256,7 @@ class SubmitRunner:
             unsub = self.backend.subscribe_events(monitor_topic, handler)
         try:
             if plan.next_tasks is not None:
-                return self._run_adaptive(plan, run_nonce, monitor_topic)
+                return self._run_adaptive(plan, run_nonce, monitor_topic, events_seen)
             return self._run_fixed(plan, run_nonce, monitor_topic, events_seen)
         finally:
             if unsub is not None:
@@ -306,7 +306,9 @@ class SubmitRunner:
 
     # ---- adaptive path + stop (plan §1.2.4) ----
 
-    def _run_adaptive(self, plan: Plan[R], run_nonce: str, monitor_topic: str | None) -> ExecResult[R]:
+    def _run_adaptive(
+        self, plan: Plan[R], run_nonce: str, monitor_topic: str | None, events_seen: list[int]
+    ) -> ExecResult[R]:
         assert plan.next_tasks is not None
         backend = self.backend
         monitor = self._monitor
@@ -318,6 +320,7 @@ class SubmitRunner:
         exec_ctx = ExecContext()
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
+        key_to_task: dict[str, Task] = {}  # F2b: dask key -> Task, so a worker death names the partition
         results: list[tuple[int, R]] = []
         stopped: StopReason | None = None
         seq = 0
@@ -330,37 +333,37 @@ class SubmitRunner:
             for task in batch:
                 if monitor is not None and monitor_topic is not None:
                     emit_task(monitor, self._submitted_event(task))
+                dask_key = _key(plan_fp, run_nonce, "leaf", seq)
+                key_to_task[dask_key] = task  # F2b: attribute a KilledWorker to this chunk (not the key)
                 fut = backend.submit(
-                    _leaf_task,
-                    ctx,
-                    phandle,
-                    ptoken,
-                    task,
-                    key=_key(plan_fp, run_nonce, "leaf", seq),
-                    retries=self._retries,
+                    _leaf_task, ctx, phandle, ptoken, task, key=dask_key, retries=self._retries
                 )
                 seq += 1
                 outstanding[fut] = (task.key, task.partition.n_entries)
                 fut.add_done_callback(done_q.put)  # backend-neutral as_completed (queue.Queue)
 
-        refill()
-        while outstanding:
-            fut = done_q.get()
-            if fut not in outstanding:  # a cancelled/duplicate callback
-                continue
-            key, n_entries = outstanding.pop(fut)
-            results.append((key, cast(R, self._result(fut, {}))))
-            exec_ctx.n_done += 1
-            exec_ctx.events_done += n_entries
-            reason = plan.stop.reason(exec_ctx) if plan.stop else None
-            if reason is not None:
-                stopped = reason
-                backend.cancel(list(outstanding))  # best-effort; a cancel_running=False backend no-ops
-                break
+        try:
             refill()
+            while outstanding:
+                fut = done_q.get()
+                if fut not in outstanding:  # a cancelled/duplicate callback
+                    continue
+                key, n_entries = outstanding.pop(fut)
+                results.append((key, cast(R, self._result(fut, key_to_task))))  # F2b: real map, not {}
+                exec_ctx.n_done += 1
+                exec_ctx.events_done += n_entries
+                reason = plan.stop.reason(exec_ctx) if plan.stop else None
+                if reason is not None:
+                    stopped = reason
+                    backend.cancel(list(outstanding))  # best-effort; cancel_running=False backend no-ops
+                    break
+                refill()
 
-        value, n_combines = running_fold(iter(results), plan.combine, plan.empty)
-        return ExecResult(value, exec_ctx.n_done, n_combines, stopped or StopReason.EXHAUSTED)
+            value, n_combines = running_fold(iter(results), plan.combine, plan.empty)
+            return ExecResult(value, exec_ctx.n_done, n_combines, stopped or StopReason.EXHAUSTED)
+        finally:
+            if monitor_topic is not None:  # F2a: drain trailing worker events (2 per consumed leaf)
+                _wait_until(lambda: events_seen[0] >= 2 * exec_ctx.n_done, _DRAIN_TIMEOUT_S)
 
     # ---- helpers ----
 
