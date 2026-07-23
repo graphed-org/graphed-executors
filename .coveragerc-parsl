@@ -1,0 +1,25 @@
+# Coverage config for the dedicated `test-parsl` CI job (plan §1.6 item 2, m46 IT5).
+#
+# Scope is the parsl-ONLY modules — `parsl_backend` and `common.relay_engine`. The main pyproject
+# `[tool.coverage.run]` OMITs `*/parsl_backend/*` and `*/common/*` (the main matrix installs no parsl,
+# so those tests importorskip out); this job re-measures them from the frozen m46 suite with NO omit.
+#
+# `common.tasks_engine` is EXECUTED on this job too (the TPE arm of `test_parsl_m43_engine_on_tpe`)
+# but is deliberately NOT listed here: it GATES on the `test-dask` job whose m43/m45 suites cover all
+# of it (including `dask_run_join`). Listing it here would double-gate a module the parsl suite only
+# partially exercises — each `common/` module is gated by exactly ONE job (plan §1.6 item 2).
+# `common.relay_engine` MUST stay listed (no dask-suite caller — it would sit at 0% elsewhere).
+#
+# The `test-parsl` pytest step uses a BARE `--cov` (mandatory to activate coverage at all — modifiers
+# without it are a silent no-op) plus `--cov-config=.coveragerc-parsl`, and NO path-valued `--cov=`
+# (which would OVERRIDE this `[run] source` — plan §1.6 item 3, tests-B-cov-1). fail_under 90 is the
+# §B.3 diff-coverage gate; branch coverage is part of the frozen gate.
+[run]
+branch = true
+source =
+    graphed_executors.parsl_backend
+    graphed_executors.common.relay_engine
+
+[report]
+fail_under = 90
+show_missing = true

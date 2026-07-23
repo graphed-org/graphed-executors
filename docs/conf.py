@@ -21,7 +21,9 @@ autodoc_typehints = "description"
 # can never drift from the code. Imported re-exports are documented in their defining module only.
 autosummary_generate = True
 autosummary_imported_members = False
-# The docs envs (CI `.[docs]`, RTD requirements.txt) install no dask on purpose — the backend is an
-# optional extra. Every dask_backend module is import-safe without it EXCEPT `transport` (its worker
-# plugin subclasses `distributed.WorkerPlugin` at class-definition time), so autodoc mocks the pair.
-autodoc_mock_imports = ["dask", "distributed"]
+# The docs envs (CI `.[docs]`, RTD requirements.txt) install neither dask nor parsl on purpose — the
+# backends are optional extras. Every dask_backend module is import-safe without it EXCEPT `transport`
+# (its worker plugin subclasses `distributed.WorkerPlugin` at class-definition time); the parsl_backend
+# modules are all import-safe without parsl (the import is deferred to construction), but parsl is
+# mocked too so autodoc never needs the extra installed.
+autodoc_mock_imports = ["dask", "distributed", "parsl"]
