@@ -395,6 +395,17 @@ migrate their keys instead of dying hard, raise ``allowed-failures`` to 5–10, 
 shuffles keep the lifetime comfortably above a single producer task's runtime so an eviction does
 not force repeated recomputation.
 
+For **broadcast joins on elastic or preemption-prone clusters**, also pass
+``dask_runner(client, replicate_broadcast=True)``. A broadcast join places the small side as a
+single future that every task references, and ``distributed`` drops the last replica of a key when
+the worker holding it leaves (down-scale or eviction) — which would fail every dependent task
+(coffea#1490). The flag calls ``client.replicate()`` on that future so it survives a lost holder; it
+defaults to ``False`` (one copy, lowest memory), which is correct on a fixed-size cluster that never
+loses the holder. It is a ``DaskBackend`` / ``dask_runner`` constructor knob, not per-shuffle — the
+broadcast-vs-shuffle *choice* still follows the pinned cost rule via ``broadcast=`` on the join
+(``graphed`` prefers a placed identity future over ``client.scatter``, whose hardcoded
+worker-discovery timeout breaks scale-to-zero).
+
 
 Known limitations
 -----------------
