@@ -20,6 +20,9 @@ source =
     graphed_executors.submit
     graphed_executors.dask_backend
     graphed_executors.common.tasks_engine
+    graphed_executors.common.transport_run
+    graphed_executors.common.facade
+    graphed_executors.common.transport_tasks
 
 [report]
 fail_under = 90

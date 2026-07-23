@@ -6,47 +6,34 @@ tasks register their per-dest wires in the holder's plugin block store and the g
 their dest's fragments worker→worker over ``graphed_block_pull`` (the pull-model data plane), so the
 bulk bytes never ride a task return or the driver.
 
-Two accounting decisions make the frozen goldens satisfiable together (see ``.graphed/m44/attempts.md``
-§"Design decisions" for the measured justification):
-
-- **Reader-plane budgets are a DRIVER-SIDE REPLAY.** A per-DEST gather (the O(T+P) shape) cannot, by
-  construction, reproduce the reference ``_stage2_gather``'s per-NODE shared-fetch-buffer counters
-  (``fetch_spill_count`` / ``peak_fetch_bytes`` differ), yet the budget golden pins EXACT equality
-  with the local engine AND the structure gate pins ``_transport_gather_task == parts``. Both hold
-  only if the reader/disk counters are computed by REPLAYING the imported ``_stage2_gather`` over
-  block SIZES at the barrier (a size-only backend + a worker-address-keyed size-only cluster), while
-  the real bytes move worker→worker through the P gather tasks. The replay reuses the kernel VERBATIM
-  (no reimplementation of the accounting), so it tracks the local engine bit-for-bit.
-- **Join gather is naturally per-dest** — ``_run_shuffle_join`` already loops per dest with a per-dest
-  ``_join_with_budget``, so P ``_transport_gather_join`` tasks reproduce the join spill counters
-  EXACTLY with no replay (each dest independent).
-
-Kernels are reused BY IMPORT (never reimplemented, never edited): ``_assign`` / ``_coalesce_task`` /
-``_join_with_budget`` / ``_stage2_gather`` / ``_sha256_hex`` / ``ShuffleWitness`` from the local engine,
-``broadcast_join_choice`` from the frontend, and the m43 ``_WorkerStore`` join-spill dir. The
-distributed-touching imports (``_get_plugin`` / ``pull_blocks``) are deferred into the task/entry
-bodies, so this module imports on the dask-free main matrix (F13)."""
+The compute BODIES + the reader-plane sizing replay MOVED to
+:mod:`graphed_executors.common.transport_tasks` (plan §1.6 m47) so the parsl peer-exchange engine
+runs the SAME bodies. This module keeps the O(T+P) DRIVER (submit/barrier/restart) + the four
+module-level **wrapper** task fns with the exact submit names the m45 dispatch spy records
+(``_transport_map_task`` / ``_transport_gather_task`` / ``_transport_gather_join`` /
+``_transport_broadcast_join_part``), each binding a dask block plane
+(``_get_plugin``/``pull_blocks``, deferred so this module imports on the dask-free main matrix, F13).
+"""
 
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 import uuid
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any
 
 from graphed.shuffle import broadcast_join_choice
 
-from graphed_executors.local.shuffle import (
-    ShuffleWitness,
-    _assign,
-    _coalesce_task,
-    _join_with_budget,
-    _sha256_hex,
-    _stage2_gather,
+from graphed_executors.common.transport_tasks import (
+    _GatherOut,
+    _JoinOut,
+    _MapFrag,
+    broadcast_join_part_body,
+    gather_join_body,
+    gather_task_body,
+    map_task_body,
+    replay_reader_plane,
 )
+from graphed_executors.local.shuffle import ShuffleWitness, _assign, _sha256_hex
 
 from ._transport_run import (
     TransportShuffleResult,
@@ -58,7 +45,6 @@ from ._transport_run import (
     require_pin,
     sorted_addresses,
 )
-from .shuffle import _WorkerStore  # the m43 join-spill dir (reused, not re-implemented)
 
 
 def _skey(epoch: str, *parts: object) -> str:
@@ -67,105 +53,45 @@ def _skey(epoch: str, *parts: object) -> str:
     return "graphed-transport-" + epoch + "-" + "-".join(str(p) for p in parts)
 
 
-# ---- module-level spawn-safe task fns (pickled BY REFERENCE; run pinned on dask workers) ----------
-@dataclass
-class _MapFrag:
-    """One producer task's driver-side fragment: ``dest -> (digest, wire_size)`` (the holder-plane
-    sizes drive the reader replay), the non-empty dest count, and the reused writer-buffer peak. The
-    wires themselves stay in the holder's plugin block store — never returned through the driver."""
+# ---- the dask block plane the wrapper task fns bind (deferred distributed-touching imports) -------
+class _DaskBlockPlane:
+    """The block plane over the dask worker plugin: ``store_block``/``record`` on the holder side,
+    ``pull_blocks`` worker→worker on the puller side. Constructed IN-TASK so the distributed-touching
+    imports stay deferred (F13). ``plugin`` is ``None`` for a pull-only (gather) task."""
 
-    manifest: dict[int, tuple[str, int]]
-    blocks: int
-    peak_writer: int
+    def __init__(self, plugin: Any, epoch: str) -> None:
+        self._plugin = plugin
+        self._epoch = epoch
 
+    def store_block(self, digest: str, wire: bytes, *, to_disk: bool) -> None:
+        self._plugin.store_block(self._epoch, digest, wire, to_disk=to_disk)
 
-@dataclass
-class _GatherOut:
-    dest: int
-    value: Any
-    hash: str
+    def record(self, **counters: int) -> None:
+        self._plugin.record(self._epoch, **counters)
 
+    def pull_blocks(self, holder_addr: str, digests: Sequence[str], *, timeout_s: float) -> list[bytes]:
+        from .transport import pull_blocks  # noqa: PLC0415  (deferred: distributed-touching)
 
-@dataclass
-class _JoinOut:
-    dest: int
-    chunks: list[Any]
-    hashes: list[str]
-    peak: int
-    spilled: int
-    rows: int
-    read: int
-    matched: tuple[int, ...] | None = None
+        return list(pull_blocks(self._epoch, holder_addr, digests, timeout_s=timeout_s))
 
 
+# ---- module-level spawn-safe wrapper task fns (the m45 spy pins these __name__s) ------------------
 def _transport_map_task(
-    spec: Any,
-    backend: Any,
-    owned_blocks: Sequence[Any],
-    parts: int,
-    salt: int,
-    holder_budget: int | None,
+    spec: Any, backend: Any, owned_blocks: Sequence[Any], parts: int, salt: int, holder_budget: int | None
 ) -> _MapFrag:
-    """Stage-1 producer (strict-pinned to ``sorted_addrs[t % k]``): coalesce this task's owned src
-    blocks into <= P dest wires (reused ``_coalesce_task``: ascending-src merge, O(P*rg) writer buffer)
-    and REGISTER each in this worker's plugin block store. F12 holder plane: retention is bounded — a
-    dest wire that pushes producer-local RAM past ``holder_budget`` spills to the worker's local disk
-    (``holder_spill_count`` / ``peak_holder_bytes`` counters), so the producer store is never the
-    unmanaged-memory pause/terminate trap. Returns only the manifest + sizes (bytes stay resident for
-    the gather to pull)."""
     from .transport import _get_plugin  # noqa: PLC0415  (deferred: distributed-touching)
 
     plugin = _get_plugin()
     plugin.ensure_run(spec)
-    per_dest, peak_writer = _coalesce_task(backend, owned_blocks, parts, salt)
-    manifest: dict[int, tuple[str, int]] = {}
-    resident = 0
-    peak_holder = 0
-    spills = 0
-    for dest in sorted(per_dest):
-        wire = bytes(backend.to_wire(per_dest[dest]))
-        digest = _sha256_hex(wire)
-        resident += len(wire)
-        peak_holder = max(peak_holder, resident)
-        to_disk = holder_budget is not None and resident > holder_budget
-        plugin.store_block(spec.epoch, digest, wire, to_disk=to_disk)
-        if to_disk:  # spilled off the RAM budget -> back under the cap (peak already charged this wire)
-            resident -= len(wire)
-            spills += 1
-        manifest[dest] = (digest, len(wire))
-    plugin.record(spec.epoch, holder_spill_count=spills, peak_holder_bytes=peak_holder)
-    return _MapFrag(manifest=manifest, blocks=len(per_dest), peak_writer=peak_writer)
-
-
-def _pull_ordered(backend: Any, epoch: str, pulls: Sequence[tuple[str, str]], timeout_s: float) -> list[Any]:
-    """Pull one side's fragments for a dest, COALESCED per holder (one RPC per holder — the T2 bound),
-    then decode them back in the caller's ascending-task order (the deterministic merge). Byte-identical
-    fragments (same digest from >1 task) share one wire but are re-materialised per manifest entry, so a
-    duplicated route keeps both fragments' rows (parity with ``_stage2_gather``). ``timeout_s`` bounds
-    each per-holder batch (R4)."""
-    from .transport import pull_blocks  # noqa: PLC0415  (deferred: distributed-touching)
-
-    by_holder: dict[str, list[str]] = {}
-    for holder_addr, digest in pulls:
-        by_holder.setdefault(holder_addr, []).append(digest)
-    wires: dict[str, bytes] = {}
-    for holder_addr, digests in by_holder.items():
-        got = pull_blocks(epoch, holder_addr, digests, timeout_s=timeout_s)
-        wires.update(zip(digests, got, strict=True))
-    return [backend.from_wire(wires[digest]) for _holder, digest in pulls]
+    return map_task_body(
+        _DaskBlockPlane(plugin, spec.epoch), backend, owned_blocks, parts, salt, holder_budget
+    )
 
 
 def _transport_gather_task(
     spec: Any, backend: Any, dest: int, pulls: Sequence[tuple[str, str]]
 ) -> _GatherOut | None:
-    """Stage-2 gather (strict-pinned): pull this dest's fragments worker→worker (ascending-task =
-    ascending-src merge), concat, and sha256 the wire bytes — the content-addressed determinism key,
-    byte-identical to the local engine's ``dest_block_hashes``."""
-    blocks = _pull_ordered(backend, spec.epoch, pulls, spec.pull_timeout_s)
-    if not blocks:
-        return None
-    gathered = backend.concat(blocks)
-    return _GatherOut(dest, gathered, _sha256_hex(bytes(backend.to_wire(gathered))))
+    return gather_task_body(_DaskBlockPlane(None, spec.epoch), backend, dest, pulls, spec.pull_timeout_s)
 
 
 def _transport_gather_join(
@@ -180,40 +106,19 @@ def _transport_gather_join(
     left_pulls: Sequence[tuple[str, str]],
     right_pulls: Sequence[tuple[str, str]],
 ) -> _JoinOut | None:
-    """Gather one dest's co-partitioned build/probe fragments and join them under ``mem_budget`` via the
-    reused ``_join_with_budget``. F1 one-sided-dest handling mirrors ``_run_shuffle_join`` VERBATIM: a
-    build-only dest under how=left/outer null-fills against the probe schema carrier, and vice versa; a
-    partitionless absent side (carrier ``None``) keeps the present rows as-is (never dropped)."""
-    build_side = _pull_ordered(backend, spec.epoch, left_pulls, spec.pull_timeout_s)
-    probe_side = _pull_ordered(backend, spec.epoch, right_pulls, spec.pull_timeout_s)
-    if not build_side and not probe_side:
-        return None
-    if not build_side and how not in ("right", "outer"):
-        return None  # probe-only dest, but how keeps no unmatched-probe rows
-    if not probe_side and how not in ("left", "outer"):
-        return None  # build-only dest, but how keeps no unmatched-build rows
-
-    if build_side and probe_side:
-        build, probe, how_here = backend.concat(build_side), backend.concat(probe_side), how
-    elif build_side:
-        if right_carrier is None:  # partitionless probe side -> keep the build rows (never drop)
-            blk = backend.concat(build_side)
-            return _JoinOut(dest, [blk], [_sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0)
-        build, probe, how_here = backend.concat(build_side), right_carrier, "left"
-    else:
-        if left_carrier is None:  # partitionless build side -> keep the probe rows (never drop)
-            blk = backend.concat(probe_side)
-            return _JoinOut(dest, [blk], [_sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0)
-        build, probe, how_here = left_carrier, backend.concat(probe_side), "right"
-
-    store = _WorkerStore()
-    try:
-        chunks, hashes, peak, spilled, rows, read = _join_with_budget(
-            backend, build, probe, on, how_here, mem_budget, store, 0
-        )
-    finally:
-        store.cleanup()
-    return _JoinOut(dest, chunks, hashes, peak, spilled, rows, read)
+    return gather_join_body(
+        _DaskBlockPlane(None, spec.epoch),
+        backend,
+        dest,
+        on,
+        how,
+        mem_budget,
+        left_carrier,
+        right_carrier,
+        left_pulls,
+        right_pulls,
+        spec.pull_timeout_s,
+    )
 
 
 def _transport_broadcast_join_part(
@@ -226,111 +131,9 @@ def _transport_broadcast_join_part(
     track_unmatched: bool,
     take_indices: tuple[int, ...] | None,
 ) -> _JoinOut:
-    """Join one probe block against the (broadcast-resolved) whole build side — the large side is NEVER
-    shuffled. Mirrors ``_run_broadcast_join``'s per-block body: ``take_indices`` restricts the build to
-    its unmatched rows (the once-only left/outer tail); ``track_unmatched`` returns the build indices
-    this block matched so the driver emits the never-matched build rows exactly once."""
-    build = backend.from_wire(build_wire)
-    if take_indices is not None:
-        build = backend.take(build, list(take_indices))
-    matched: tuple[int, ...] | None = None
-    if track_unmatched:
-        b_idx, _p_idx = backend.match_indices(build, probe_block, on=list(on), how="inner")
-        matched = tuple(int(x) for x in b_idx)
-    store = _WorkerStore()
-    try:
-        chunks, hashes, peak, spilled, rows, read = _join_with_budget(
-            backend, build, probe_block, on, how, mem_budget, store, 0
-        )
-    finally:
-        store.cleanup()
-    return _JoinOut(-1, chunks, hashes, peak, spilled, rows, read, matched)
-
-
-# ---- reader-plane driver-side sizing replay (the §1.4 budget-parity decision) -------------------
-@dataclass
-class _Sized:
-    n: int
-
-
-class _SizingBackend:
-    """A size-only ``ShuffleBackend`` stand-in: a block IS its wire length, so replaying
-    ``_stage2_gather`` reproduces the reader-plane byte accounting WITHOUT moving or decoding data."""
-
-    def from_wire(self, wire: bytes) -> _Sized:
-        return _Sized(len(wire))
-
-    def concat(self, blocks: Sequence[_Sized]) -> _Sized:
-        return _Sized(sum(b.n for b in blocks))
-
-    def to_wire(self, block: _Sized) -> bytes:
-        return b"\x00" * block.n
-
-    def estimated_bytes(self, block: _Sized) -> int:
-        return block.n
-
-
-class _SizingCluster:
-    """A size-only ``cluster`` stand-in keyed by REAL worker addresses (so ``per_node_disk_bytes`` comes
-    out keyed by dask worker address, per the disk golden). ``get`` returns zero-filled bytes of the
-    manifest-recorded size; the disk-spill writes land in a throwaway temp tree — the byte accounting
-    is the witness, not the files."""
-
-    def __init__(self, addresses: Sequence[str], size_of: Mapping[str, int]) -> None:
-        self._addrs = tuple(addresses)
-        self._size = size_of
-        self._root = tempfile.mkdtemp(prefix="gx-t44-replay-")
-        self._dirs = [os.path.join(self._root, f"node-{i}") for i in range(len(self._addrs))]
-        for d in self._dirs:
-            os.makedirs(os.path.join(d, "objects"), exist_ok=True)
-
-    def addr(self, i: int) -> str:
-        return self._addrs[i]
-
-    def store_dir(self, i: int) -> str:
-        return self._dirs[i]
-
-    def get(self, i: int, digest: str) -> bytes:
-        return b"\x00" * self._size[digest]
-
-    def evict(self, i: int, digest: str) -> None:
-        return None
-
-    def close(self) -> None:
-        shutil.rmtree(self._root, ignore_errors=True)
-
-
-def _replay_reader_plane(
-    manifests: dict[int, dict[int, tuple[str, int]]],
-    parts: int,
-    n_tasks: int,
-    k: int,
-    addresses: Sequence[str],
-    size_of: Mapping[str, int],
-    *,
-    fetch_budget: int | None,
-    disk_budget: int | None,
-) -> ShuffleWitness:
-    """Reproduce the reference reader/disk-plane counters by running the imported ``_stage2_gather``
-    over the fragment SIZES (size-only backend + worker-address-keyed size-only cluster). Byte-identical
-    to the local engine on identical inputs/budgets because the kernel is reused verbatim."""
-    witness = ShuffleWitness(n_producer_tasks=n_tasks)
-    cluster = _SizingCluster(addresses, size_of)
-    try:
-        _stage2_gather(
-            _SizingBackend(),  # type: ignore[arg-type]
-            parts,
-            n_tasks,
-            k,
-            manifests,
-            cluster,
-            witness,
-            fetch_budget_bytes=fetch_budget,
-            disk_budget_bytes=disk_budget,
-        )
-    finally:
-        cluster.close()
-    return witness
+    return broadcast_join_part_body(
+        backend, build_wire, probe_block, on, how, mem_budget, track_unmatched, take_indices
+    )
 
 
 def _collect_maps(
@@ -402,7 +205,7 @@ def transport_run_repartition(
             for i, owned in enumerate(_assign(n_src, t))
         ]
         manifests, size_of, blocks_per, peak_writer = _collect_maps(map_futs, k)
-        witness = _replay_reader_plane(
+        witness = replay_reader_plane(
             manifests,
             parts,
             t,

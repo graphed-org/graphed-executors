@@ -24,10 +24,21 @@ import os
 from typing import Any
 
 
-def start_htex(*, workers: int, run_dir: str, address: str | None = None, encrypted: bool = False) -> Any:
+def start_htex(
+    *,
+    workers: int,
+    run_dir: str,
+    address: str | None = None,
+    encrypted: bool = False,
+    heartbeat_period: int | None = None,
+) -> Any:
     """Start a direct-use ``HighThroughputExecutor`` with ``workers`` worker processes in one fixed
     LocalProvider block. Returns the STARTED executor (feed it to :class:`ParslBackend`). The caller
     owns teardown via :func:`stop_htex`.
+
+    ``heartbeat_period`` (seconds; ``None`` = the parsl default of 30) compresses the
+    SIGKILL->WorkerLost detection latency — measured 2 s -> ~1.65 s vs ~29.7 s at the default, so the
+    m47 worker-death restart surfaces promptly (the watchdog respawns the worker in place).
 
     The caller's environment is deliberately NOT scrubbed — HTEX workers launch via the
     ``process_worker_pool`` console script and do NOT inherit the driver's ``sys.path``, so a test
@@ -45,6 +56,8 @@ def start_htex(*, workers: int, run_dir: str, address: str | None = None, encryp
     }
     if address is not None:
         kwargs["address"] = address
+    if heartbeat_period is not None:
+        kwargs["heartbeat_period"] = heartbeat_period
     executor = HighThroughputExecutor(**kwargs)
 
     executor.run_dir = run_dir  # move 1

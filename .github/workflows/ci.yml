@@ -135,14 +135,27 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" pyarrow
           python -m pip install -e ".[dev,parsl]"
-      - name: Pytest frozen m46 suite + scoped coverage gate (>=90%)
-        # bare `--cov` is MANDATORY to activate coverage at all (modifiers without it are a silent
-        # no-op and fail_under never runs — verified pytest-cov 7.1.0); NO path-valued `--cov=` (it
-        # would OVERRIDE the per-module `.coveragerc-parsl` source). plan §1.6 item 3 / tests-B-cov-1.
+      - name: Pytest frozen m46 + m47 suites + scoped coverage gate (>=90%)
+        # The §1.4 transport bodies (peer shuffle/join + HTTP block plane) run ONLY in HTEX WORKER
+        # processes, exec'd fresh — coverage's driver tracer never sees them. A portable process-start
+        # hook (coverage.py "Measuring subprocesses") + COVERAGE_PROCESS_START makes each worker
+        # self-measure; pytest-cov leaves those worker data files uncombined, so we fold the driver
+        # file back to a parallel file and `coverage combine` the driver + all worker data before the
+        # gate. bare `--cov` stays MANDATORY (a modifier alone is a silent no-op — pytest-cov 7.1.0);
+        # NO path-valued `--cov=` (it would OVERRIDE the `.coveragerc-parsl` source — plan §1.6 item 3
+        # / tests-B-cov-1). `--cov-fail-under=0` defers the gate to the post-combine `coverage report`
+        # (the inline gate would fire on the driver-only subset before the workers are folded in).
+        env:
+          COVERAGE_PROCESS_START: ${{ github.workspace }}/.coveragerc-parsl
+          COVERAGE_RCFILE: ${{ github.workspace }}/.coveragerc-parsl
         run: |
-          pytest tests/frozen/m46 \
+          python -c "import sysconfig, pathlib; pathlib.Path(sysconfig.get_path('purelib'), 'graphed_subcov.pth').write_text('import coverage; coverage.process_startup()\n')"
+          pytest tests/frozen/m46 tests/frozen/m47 \
             --cov --cov-config=.coveragerc-parsl \
-            --cov-branch --cov-report=term-missing
+            --cov-branch --cov-fail-under=0
+          mv .coverage .coverage.driver
+          coverage combine
+          coverage report --show-missing --fail-under=90
 
   docs:
     name: docs (sphinx -W)

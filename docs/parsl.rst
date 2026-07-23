@@ -166,9 +166,44 @@ Arrow, so install ``graphed[parquet]`` (pyarrow) for ``how`` other than ``inner`
 
    **The relay engine holds the whole shuffle in the driver at the barrier** (≈ total shuffle
    bytes) — that *is* head-node routing, the defining cost of a broker without worker-to-worker
-   reachability. A true peer-exchange transport engine over HTEX worker processes — with a runtime
-   reachability probe that decides ``error`` vs ``fallback`` — is the next milestone
-   (:ref:`design-parsl-backend`); it is not in this release.
+   reachability. It remains the ``"auto"`` / ``"tasks"`` engine (no parsl vector carries both
+   ``pin_to_worker`` and ``peer_data_movement``, so ``"auto"`` always resolves to tasks). The
+   **peer-exchange transport engine** below (opt-in via ``shuffle_method="transport"``) is the
+   head-node-free alternative.
+
+
+The peer-exchange transport engine (``shuffle_method="transport"``)
+-------------------------------------------------------------------
+
+On an HTEX instance (:attr:`~graphed_executors.parsl_backend.backend.ParslBackend.peer_transport`
+is ``True``), ``shuffle_method="transport"`` runs the M39–M41 shuffle/join and the M38 reduction on
+**k persistent peer tasks** (one per worker slot) that move blocks worker-to-worker — never through
+the driver::
+
+    from graphed_executors.parsl_backend.api import run_repartition, probe_peer_reachability
+
+    report = probe_peer_reachability(ParslBackend(htex), k=2)   # optional pre-flight
+    if report.ok:
+        res = run_repartition(NumpyBackend(), src, 8, pbackend=ParslBackend(htex),
+                              shuffle_method="transport")
+
+Each peer mints an ``EscalatingHttpTransport`` endpoint **in-task**, announces a ``hello`` to a
+driver-hosted rendezvous endpoint, and blocks on a barrier until all k hellos arrive — so no peer
+holds the address book (and no send can race a missing inbox) before the driver broadcasts the
+assembled registry. Blocks then travel peer↔peer over a ``/pull`` route (coalesced to one request
+per holder — the ``≤ k·k`` incast bound — and evicted after serve); the driver's inbox sees only
+control traffic. ``dest_block_hashes`` are byte-identical to the local engine.
+
+Because worker-to-worker dialability is a cluster property parsl never guarantees, a **reachability
+probe** runs at rendezvous time, before any data moves. ``on_unreachable`` routes the verdict:
+``"error"`` (the default) raises an attributed ``StageError`` naming the unreachable pair;
+``"fallback"`` transparently re-runs the relay engine on the same inputs and sets
+``witness.fallback_reason`` (observable, never silent). A transport-only knob
+(``fetch_budget_bytes`` / ``pull_timeout_s`` / ``epoch_restarts_allowed`` / ``workers`` /
+``on_unreachable`` / ``registry_rewrite``) set while resolution lands on ``"tasks"`` is a loud
+``ValueError`` before any submit; on a ``ThreadPoolExecutor`` (``peer_transport`` is ``False``)
+``"transport"`` raises ``NotImplementedError`` naming ``"tasks"`` (a loopback re-enactment of
+head-node routing on driver threads adds mechanism and removes honesty).
 
 
 The m43 engine over a ThreadPoolExecutor
@@ -201,9 +236,11 @@ wrapper.
 and stays usable. :meth:`~graphed_executors.parsl_backend.backend.ParslBackend.describe_failure`
 recognises ``WorkerLost`` / ``ManagerLost`` **by class name anywhere in the exception chain** (never
 by parsl identity, so the module stays parsl-import-free at load) and returns a
-``(key, worker)`` attribution tuple the engine turns into an attributed ``StageError``. The
-epoch-restart-driven shuffle recovery that this enables is a Phase-2 concern of the transport engine
-(:doc:`improvements`).
+``(key, worker)`` attribution tuple the engine turns into an attributed ``StageError``. Under the
+transport engine this drives **epoch-restart recovery**: a lost peer (or an exhausted
+``EscalatingHttpTransport.send``) restarts the whole run under a fresh epoch onto the survivors up
+to ``epoch_restarts_allowed`` (default 1); an exhausted budget surfaces as an attributed
+``StageError`` naming the death signal, never a raw parsl exception and never a hang.
 
 
 Monitoring

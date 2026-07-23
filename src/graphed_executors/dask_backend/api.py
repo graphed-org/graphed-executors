@@ -30,33 +30,22 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from graphed_executors.common.facade import (  # the §1.6 m47 move — re-exported (identity-pinned)
+    _VALID_METHODS,
+    _reject_transport_only_knobs,
+    resolve_shuffle_method,
+)
 from graphed_executors.local.shuffle import ShuffleResult
-from graphed_executors.submit.protocol import SubmitCapabilities
 
 from ._transport_run import TransportShuffleResult
 
-_VALID_METHODS = ("auto", "transport", "tasks")
-
-
-def resolve_shuffle_method(method: str, caps: SubmitCapabilities) -> str:
-    """Pure, deterministic engine choice (no cluster, no size heuristics). Explicit ``"transport"`` /
-    ``"tasks"`` resolve to themselves — the engines' own gates then apply. ``"auto"`` picks transport iff
-    ``caps.pin_to_worker AND caps.peer_data_movement``, else tasks. Anything else raises."""
-    if method in ("transport", "tasks"):
-        return method
-    if method == "auto":
-        return "transport" if (caps.pin_to_worker and caps.peer_data_movement) else "tasks"
-    raise ValueError(f"shuffle_method must be one of {_VALID_METHODS}; got {method!r}")
-
-
-def _reject_transport_only_knobs(resolved: str, knob_values: dict[str, Any]) -> None:
-    """When resolution landed on ``"tasks"``, a transport-only knob that was explicitly set (not None) is
-    a caller error — raise naming it, in declared order, BEFORE any dispatch (§1.2). No-op for transport."""
-    if resolved != "tasks":
-        return
-    for name, value in knob_values.items():
-        if value is not None:
-            raise ValueError(f"{name} applies only to shuffle_method='transport' (resolved: 'tasks')")
+__all__ = [
+    "_VALID_METHODS",
+    "_reject_transport_only_knobs",
+    "resolve_shuffle_method",
+    "run_join",
+    "run_repartition",
+]
 
 
 def run_repartition(

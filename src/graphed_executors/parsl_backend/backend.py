@@ -107,6 +107,14 @@ class ParslBackend:
         self._executor = executor
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
 
+    @property
+    def peer_transport(self) -> bool:
+        """m47: True on HTEX (the §1.4 peer plane runs on distinct worker PROCESSES), False on TPE
+        (driver-process threads — a 'peer exchange' there is loopback head-node routing). A
+        parsl_backend-private attribute the facade gates ``shuffle_method='transport'`` on; NEVER a
+        ``SubmitCapabilities`` field (the frozen 7-field vector stays unchanged)."""
+        return self._is_htex
+
     def n_workers(self) -> int:
         if not self._is_htex:
             return int(self._executor.max_threads)
