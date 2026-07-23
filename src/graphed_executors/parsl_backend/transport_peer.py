@@ -38,8 +38,10 @@ from graphed_executors.local._peer import make_bounds, process_and_reduce, slice
 
 DRIVER = "driver"
 HOST = "127.0.0.1"  # single-machine HTEX: peers + driver share the host, so loopback is dialable
-_ROOT_TIMEOUT_S = 30.0  # bound on the driver's root wait (a peer error breaks it sooner)
-_IDLE_DEADLINE_S = 90.0  # the reduce peer's lost-done backstop (> the 25 s send worst case + slack)
+_ROOT_TIMEOUT_S = 30.0  # default bound on the driver's root wait (a peer error breaks it sooner)
+_IDLE_SLACK_S = 60.0  # reduce peer lost-done backstop margin ABOVE root_timeout_s (> the 25 s send
+#                       worst case + slack); the idle deadline is DERIVED, never double-hardcoded
+_IDLE_DEADLINE_S = _ROOT_TIMEOUT_S + _IDLE_SLACK_S  # 90.0 at the default (parsl_run_plan re-derives)
 _BARRIER_DEFAULT_S = 60.0  # production barrier bound (> the 25 s inline-send worst case)
 _PROBE_TIMEOUT_S = 5.0
 
@@ -72,6 +74,7 @@ def _parsl_peer_main(spec: dict[str, Any]) -> dict[str, Any]:
         addr,
         epoch=spec["epoch"],
         host=HOST,
+        inbox_maxsize=spec.get("inbox_maxsize"),
         idle_deadline_s=spec.get("idle_deadline_s"),
         recv_failures=recv_failures,
     )
@@ -332,8 +335,16 @@ def _open_driver_endpoint(nonce: str) -> EscalatingHttpTransport:
     return EscalatingHttpTransport(DRIVER, epoch=nonce, host=HOST)
 
 
-def _resolve_k(pbackend: Any, workers: int | None) -> int:
-    return int(workers) if workers is not None else int(pbackend.n_workers())
+def _resolve_k(pbackend: Any, workers: int | None, *, restart: bool = False) -> int:
+    """Peer count for an epoch. ``workers=None`` reads a FRESH ``n_workers()`` every attempt; an
+    explicit ``workers`` is honored as-given on the first attempt but on a ``restart`` degrades to
+    ``min(workers, fresh n_workers())`` (plan §1.4) — re-asking for slots a shrunken cluster can no
+    longer seat would burn the restart budget on a doomed barrier."""
+    if workers is None:
+        return int(pbackend.n_workers())
+    if restart:
+        return min(int(workers), int(pbackend.n_workers()))
+    return int(workers)
 
 
 # ---- the reduce entry point (M38 hosted on parsl) -----------------------------------------------
@@ -346,12 +357,16 @@ def parsl_run_plan(
     inbox_maxsize: int | None = None,
     epoch_restarts_allowed: int = 1,
     barrier_timeout_s: float | None = None,
+    root_timeout_s: float = _ROOT_TIMEOUT_S,
     inject_recv_failures: dict[str, dict[str, int]] | None = None,
 ) -> TransportExecResult:
     """Run ``plan`` as an M38 peer reduction hosted on ``pbackend`` (a ``ParslBackend`` over HTEX).
     ``monitor`` is accepted for signature parity (peer-mode telemetry is emit=False for m47). Failure
     semantics: an exhausted send / worker death / no captured root restarts the whole run under a
-    fresh epoch up to ``epoch_restarts_allowed``, else an attributed ``StageError`` (§1.5)."""
+    fresh epoch up to ``epoch_restarts_allowed``, else an attributed ``StageError`` (§1.5).
+    ``root_timeout_s`` bounds the driver's wait for the reduction root — raise it for a legitimately
+    long reduction (m44 parity); the peer lost-done ``idle_deadline_s`` is DERIVED as
+    ``root_timeout_s + slack`` so it always stays ≥ the root wait (§1.4)."""
     tasks = sorted(plan.tasks, key=lambda t: t.key)
     n = len(tasks)
     witness = TransportWitness()
@@ -360,6 +375,7 @@ def parsl_run_plan(
         return TransportExecResult(plan.empty(), 0, 0, witness)
 
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
+    idle_deadline_s = root_timeout_s + _IDLE_SLACK_S  # derived: always ≥ the root wait (§1.4)
     budget_dir = _write_budget_files(inject_recv_failures)
     per_worker: dict[str, dict[str, int]] = {}
     last_exc: BaseException | None = None
@@ -367,7 +383,7 @@ def parsl_run_plan(
     for attempt in range(epoch_restarts_allowed + 1):
         nonce = uuid.uuid4().hex
         witness.epoch_nonces.append(nonce)
-        k = max(1, min(_resolve_k(pbackend, workers), n))
+        k = max(1, min(_resolve_k(pbackend, workers, restart=attempt > 0), n))
         worker_addrs = _worker_addrs(k)
         bounds = make_bounds(n, k)
         items = slice_items([t.partition for t in tasks], bounds, worker_addrs)
@@ -388,7 +404,8 @@ def parsl_run_plan(
                     "items": items[addr],
                     "process": plan.process,
                     "combine": plan.combine,
-                    "idle_deadline_s": _IDLE_DEADLINE_S,
+                    "inbox_maxsize": inbox_maxsize,
+                    "idle_deadline_s": idle_deadline_s,
                     "recv_failures": _peer_budget_files(budget_dir, addr, inject_recv_failures),
                 },
                 key=f"graphed-parsl-peer-{nonce}-{i}",
@@ -396,7 +413,7 @@ def parsl_run_plan(
             for i, addr in enumerate(worker_addrs)
         }
         errs, root, has_captured = _drive_reduce(
-            driver_ep, pbackend, futures, k, barrier_s, driver_counts, per_worker
+            driver_ep, pbackend, futures, k, barrier_s, driver_counts, per_worker, root_timeout_s
         )
         _merge_peer(per_worker, DRIVER, driver_counts)
         driver_ep.close()
@@ -423,6 +440,7 @@ def _drive_reduce(
     barrier_s: float,
     driver_counts: dict[str, int],
     per_worker: dict[str, dict[str, int]],
+    root_timeout_s: float = _ROOT_TIMEOUT_S,
 ) -> tuple[dict[str, BaseException], Any, bool]:
     """Barrier + registry, then collect the root while watching for a fast peer error; release the
     peers and harvest their futures. Returns ``(errs, root, has_captured_root)``."""
@@ -441,7 +459,7 @@ def _drive_reduce(
 
     root: Any = None
     got_root = False
-    deadline = time.monotonic() + _ROOT_TIMEOUT_S
+    deadline = time.monotonic() + root_timeout_s
     while not got_root and time.monotonic() < deadline:
         got = driver_ep.recv(timeout=0.1)
         if got is not None:

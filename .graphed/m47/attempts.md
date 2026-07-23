@@ -64,3 +64,17 @@ Gates after iteration 2: mypy --strict clean (39 files); ruff clean; full `tests
 (see the freeze-verification + coverage runs recorded below). Note: a spurious `ManagerLost` was
 observed only when TWO HTEX suites ran CONCURRENTLY on one machine (heartbeat starvation) — never in a
 sequential run; the CI job runs the suite sequentially.
+
+## Review remediation (team-lead completed after remediator stall; fixes authored by m47-remediator)
+Four design-lens findings fixed + CI settle: (1) join spill-key collision → driver-side global
+rekey at assemble (regression test_join_spill_key_collision: PRE-FIX FAILS 4096/8192 rows 7/14
+keys, POST-FIX PASSES — stash-flip verified twice); (2) inbox_maxsize wired through the peer spec
+to EscalatingHttpTransport (test_transport_peer_knobs); (3) _resolve_k(restart=) degrades an
+explicit workers to min(k, fresh n_workers()) on restart epochs; (4) root_timeout_s exposed on
+parsl_run_plan with idle_deadline_s DERIVED (root+slack, never double-hardcoded); (5) CI test-parsl
+settle: pkill -TERM workers + sleep before the coverage combine (review FU-2 flush race).
+Gates (team-lead, quiet machine): extra 0 fail; frozen m46+m47 green; parsl union 91% (gate exit
+0); dask 93%/1535 stmts exit 0; ruff+format clean; mypy --strict 39 files; packaging pins 9/9;
+frozen tree diff empty. Machine lesson recorded: hard-kill + purge IMMEDIATELY before the dask
+gate — TERM-flushed parsl workers land data files late and pytest-cov folds them (the 73%/2554
+contamination signature).

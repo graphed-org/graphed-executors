@@ -192,8 +192,8 @@ def _gather_join(
     value: dict[int, Any] = {}
     hashes: dict[int, str] = {}
     peak = spilled = rows = read = 0
-    next_key = spec["parts"]  # ponytail: per-peer spill keys collide only under multi-dest spill; the
-    #                           frozen budget scenario spills a single hot dest — global keying if that changes.
+    next_key = spec["parts"]  # local placeholder keys; the driver re-keys overflow into ONE global
+    #                           sequence at assemble (raw per-peer keys would collide across peers)
     for dest in sorted(assign):
         per_side = assign[dest]
         out = gather_join_body(
@@ -323,9 +323,9 @@ def _run_shuffle(
         nonce = uuid.uuid4().hex
         transport.epoch_nonces.append(nonce)
         k = (
-            max(1, min(_resolve_k(pbackend, workers), n_producer_bound))
+            max(1, min(_resolve_k(pbackend, workers, restart=attempt > 0), n_producer_bound))
             if n_producer_bound
-            else max(1, _resolve_k(pbackend, workers))
+            else max(1, _resolve_k(pbackend, workers, restart=attempt > 0))
         )
         worker_addrs = _worker_addrs(k)
         driver_ep = _open_driver_endpoint(nonce)
@@ -613,15 +613,27 @@ def transport_run_join(
     ) -> Any:
         value: dict[int, Any] = {}
         hashes: dict[int, str] = {}
+        overflow: list[tuple[Any, str]] = []  # spilled sub-partition (block, hash) pairs, driver-rekeyed
         peak = spilled = read = rows = 0
-        for res in results.values():
-            value.update(res["value"])
-            hashes.update(res["hashes"])
+        for addr in worker_addrs:  # deterministic producer order; peers own disjoint base dests
+            res = results.get(addr)
+            if res is None:
+                continue
+            res_value, res_hashes = res["value"], res["hashes"]
+            for key in sorted(res_value):
+                if key < parts:  # a base dest key — globally unique (owner = worker_addrs[dest % k])
+                    value[key], hashes[key] = res_value[key], res_hashes[key]
+                else:  # a per-peer overflow (spill) key: collect, then rekey into ONE global sequence
+                    overflow.append((res_value[key], res_hashes[key]))
             jw = res.get("join_witness") or {}
             peak = max(peak, jw.get("peak_join_bytes", 0))
             spilled += jw.get("join_spilled_partitions", 0)
             read += jw.get("join_chunks_read", 0)
             rows += jw.get("join_output_rows", 0)
+        next_key = parts  # spilled sub-partitions get fresh keys beyond the dest range (mirrors local)
+        for block, h in overflow:
+            value[next_key], hashes[next_key] = block, h
+            next_key += 1
         witness = ShuffleWitness(
             n_producer_tasks=max(min(k, n_left) if n_left else 0, min(k, n_right) if n_right else 0),
             broadcast_chosen=False,

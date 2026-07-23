@@ -153,6 +153,12 @@ jobs:
           pytest tests/frozen/m46 tests/frozen/m47 \
             --cov --cov-config=.coveragerc-parsl \
             --cov-branch --cov-fail-under=0
+          # settle: force any lingering HTEX pool workers to flush their subprocess coverage
+          # (sigterm=true in .coveragerc-parsl) and let the files land, so the combine folds ALL
+          # worker data. The prompt-combine raced late worker flushes (review FU-2) and a
+          # scheduling-unlucky run could fold fewer files and dip the union toward 90.
+          pkill -TERM -f process_worker_pool || true
+          sleep 3
           mv .coverage .coverage.driver
           coverage combine
           coverage report --show-missing --fail-under=90
