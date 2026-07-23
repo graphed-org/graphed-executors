@@ -99,7 +99,21 @@ Confirmed the local 88.45% was purely missing-pandas (m43 join-edges/relational 
 8. Sphinx -W → build succeeded (docs/parsl.rst + design section).
 
 ### Deviations from plan (measured justification)
-- None material. `_lazy.py` included (IT3) and used in ParslBackend.__init__ for the parsl type import (hinted ImportError + module stays parsl-free at load). `describe_failure` returns ("", str(exc)) — parsl exceptions carry no graphed task key; the runner's key_to_task supplies the partition (m47 worker-death is LENIENT). shim_spec dropped from `_parsl_task_shim(fn, *args)`: no frozen test pins the shim's internal signature and the WorkerEnv needs no driver-supplied spec (identity recomputed in-task, resources process-global, emit buffer per-task) — simpler + pickling-clean.
+- `_lazy.py` included (IT3) and used in ParslBackend.__init__ for the parsl type import (hinted ImportError + module stays parsl-free at load).
+- shim_spec dropped from `_parsl_task_shim(fn, *args)`: no frozen test pins the shim's internal signature and the WorkerEnv needs no driver-supplied spec (identity recomputed in-task, resources process-global, emit buffer per-task) — simpler + pickling-clean.
+
+## Iteration 3 — review remediation (design ACCEPT_WITH_FOLLOWUP, 2 majors)
+
+**MAJOR 1 — relay map phase was accidentally SEQUENTIAL.** `.result()` sat inside the submit comprehension (relay_engine.py repartition + both join sides), so it submitted map[i] then blocked on it before submitting map[i+1] — T-fold serial map compute with zero memory benefit (all _MapOuts retained anyway). FIXED: submit ALL map futures first, then resolve the barrier. Repartition: `map_futs=[submit(...)]; map_outs=[f.result() for f in map_futs]`. Join: submit left_futs + right_futs (both sides in flight), then resolve both. No frozen test pins ordering → no gate disturbed; results byte-identical (order-independent).
+
+**MAJOR 2 — describe_failure attribution was broken (empty key).** Prior code returned `("", str(exc))`; engine.py:389-391 does `key_to_task.get("")` → None → partition="" / frame.filename="". Measured: StageError.partition=='', frames[0].filename==''. Attribution could never work. FIXED: return `(label, label)` with `label = str(exc)` — parsl WorkerLost/ManagerLost `__str__` = "…loss of worker N on host H", a non-empty unit naming the dead worker. (Considered a host:worker_id parse from the real class attrs, but the frozen synthetic exceptions carry no attrs so those branches are structurally uncoverable by the frozen gate, and str(exc) already names worker+host — ponytail: dropped the parse.) m47's worker-death driver layers real partition context on top. Verified: WorkerLost(0,'node17') → StageError.partition/frame='Task failure due to loss of worker 0 on host node17', cause='worker <that> died'; synthetic/chain/None frozen arms unchanged.
+
+### Iteration-3 gate re-run
+- prek (ruff+format+mypy) → all Passed.
+- pytest tests/frozen/m46 → 51 passed, ×2 determinism (see below).
+- parsl coverage (.coveragerc-parsl) → 91.69% (relay_engine 93%, backend 90%).
+- dask coverage (.coveragerc-dask, pandas env) → unchanged 93.21% (tasks_engine untouched by the remediation).
+- whole tree + integrity re-checked; frozen tree still zero edits.
 
 ### Env note (for reviewer/CI)
 HTEX interchange launches via the `interchange.py` console script → the venv `bin` MUST be on PATH to run the parsl suite locally (`export PATH="$PWD/.venv/bin:$PATH"`). CI's activated venv does this. pandas is a test-dask runtime need (installed in CI); a local venv without it under-reports dask coverage (frozen join/transport tests skip).

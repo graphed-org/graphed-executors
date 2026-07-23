@@ -182,16 +182,23 @@ class ParslBackend:
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
         """Map a parsl ``WorkerLost``/``ManagerLost`` (matched by CLASS NAME anywhere in the exception
-        chain — never by parsl identity, so this module stays parsl-import-free at load) to a
+        chain — never by parsl identity, so this module stays parsl-import-free at load) to the
         ``(failing_key, last_worker)`` string 2-tuple the engine turns into an attributed
-        :class:`StageError`. parsl's exception carries no graphed task key, so the key is empty (the
-        engine's ``key_to_task`` map supplies the partition); anything unrelated returns ``None``."""
+        :class:`StageError`. Unlike a dask ``KilledWorker`` (whose ``.task`` is the graphed key that
+        ``key_to_task`` resolves to a partition), a parsl worker-loss exception carries no graphed
+        task key — so BOTH slots are the death message (``str(exc)``: parsl's ``WorkerLost`` /
+        ``ManagerLost`` render as "…loss of worker N on host H", naming the dead worker). The engine
+        then attributes to a NON-EMPTY, meaningful unit (``StageError.partition`` / ``frame.filename``
+        = the death message) rather than to an empty key; an m47 worker-death driver, which knows
+        which partitions the dead peer owned, layers its partition context on top. Anything unrelated
+        returns ``None``."""
         seen: set[int] = set()
         node: BaseException | None = exc
         while node is not None and id(node) not in seen:
             seen.add(id(node))
             if type(node).__name__ in _WORKER_DEATH_NAMES:
-                return "", str(node)
+                label = str(node) or type(node).__name__
+                return label, label
             node = node.__cause__ if node.__cause__ is not None else node.__context__
         return None
 

@@ -84,20 +84,21 @@ def relay_run_repartition(
     t = min(runner.backend.n_workers(), n_src) if n_src else 1
     nonce = uuid.uuid4().hex[:8]
 
-    map_outs = [
-        cast(
-            "_MapOut",
-            submit(
-                _dask_map_write,
-                backend,
-                [src_blocks[s] for s in owned],
-                parts,
-                salt,
-                key=_skey(nonce, "map", i),
-            ).result(),
+    # submit ALL producer maps first (so they run in parallel across the pool), THEN resolve the
+    # barrier: all _MapOuts are retained regardless, so resolving inside the submit loop would make
+    # map compute needlessly T-fold sequential.
+    map_futs = [
+        submit(
+            _dask_map_write,
+            backend,
+            [src_blocks[s] for s in owned],
+            parts,
+            salt,
+            key=_skey(nonce, "map", i),
         )
         for i, owned in enumerate(_assign(n_src, t))
     ]
+    map_outs = [cast("_MapOut", f.result()) for f in map_futs]
     driver_relay_bytes = sum(len(w) for mo in map_outs for w in mo.payload.values())
 
     # driver-local regroup: _dask_pick is a dict lookup, submitted NOWHERE (the T·P amplification the
@@ -188,42 +189,41 @@ def _relay_shuffle_join(
     t_l = min(runner.backend.n_workers(), n_left) if n_left else 0
     t_r = min(runner.backend.n_workers(), n_right) if n_right else 0
 
-    left_outs = (
+    # submit ALL map tasks (both sides) first so the whole map phase runs in parallel across the
+    # pool, THEN resolve the barrier — resolving inside the submit loops would make the left phase
+    # run fully before the right and each side T-fold sequential, for zero memory benefit.
+    left_futs = (
         [
-            cast(
-                "_MapOut",
-                submit(
-                    _dask_map_write,
-                    backend,
-                    [left_blocks[s] for s in owned],
-                    parts,
-                    salt,
-                    key=_skey(nonce, "lmap", i),
-                ).result(),
+            submit(
+                _dask_map_write,
+                backend,
+                [left_blocks[s] for s in owned],
+                parts,
+                salt,
+                key=_skey(nonce, "lmap", i),
             )
             for i, owned in enumerate(_assign(n_left, t_l))
         ]
         if t_l
         else []
     )
-    right_outs = (
+    right_futs = (
         [
-            cast(
-                "_MapOut",
-                submit(
-                    _dask_map_write,
-                    backend,
-                    [right_blocks[s] for s in owned],
-                    parts,
-                    salt,
-                    key=_skey(nonce, "rmap", i),
-                ).result(),
+            submit(
+                _dask_map_write,
+                backend,
+                [right_blocks[s] for s in owned],
+                parts,
+                salt,
+                key=_skey(nonce, "rmap", i),
             )
             for i, owned in enumerate(_assign(n_right, t_r))
         ]
         if t_r
         else []
     )
+    left_outs = [cast("_MapOut", f.result()) for f in left_futs]
+    right_outs = [cast("_MapOut", f.result()) for f in right_futs]
     driver_relay_bytes = sum(len(w) for mo in (*left_outs, *right_outs) for w in mo.payload.values())
 
     # F1 schema carriers for one-sided dests (None when a whole side is partitionless)
