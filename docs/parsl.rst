@@ -11,10 +11,6 @@ into it rather than repeating it.
 Every runnable snippet below was executed against a live 2-worker ``HighThroughputExecutor`` before
 being committed; the printed values in the comments are real outputs.
 
-.. contents::
-   :local:
-   :depth: 2
-
 
 Installing
 ----------
