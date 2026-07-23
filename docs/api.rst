@@ -11,4 +11,6 @@ for its functions and classes.
 
    graphed_executors.local
    graphed_executors.submit
+   graphed_executors.common
    graphed_executors.dask_backend
+   graphed_executors.parsl_backend

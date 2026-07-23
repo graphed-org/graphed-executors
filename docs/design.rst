@@ -574,13 +574,116 @@ free-threaded build (its ``py314t`` CI is commented out, "WIP - tests don't pass
 ``test-dask`` CI job pins GIL builds (py 3.12 + 3.14); the local executors keep their 3.14t story.
 
 
+.. _design-parsl-backend:
+
+How the parsl backend works
+---------------------------
+
+The parsl backend (:mod:`graphed_executors.parsl_backend`, behind the optional ``[parsl]`` extra)
+runs the same ``Plan`` and shuffle contracts over a `parsl <https://parsl-project.org>`_ executor,
+via the *same* :class:`~graphed_executors.submit.protocol.SubmitBackend` seam the dask backend uses.
+
+**Direct executor submit — no DFK.** :class:`~graphed_executors.parsl_backend.backend.ParslBackend`
+takes a **started** ``HighThroughputExecutor`` (or ``ThreadPoolExecutor``) and calls its public
+``executor.submit(func, resource_specification, *args)`` directly. It deliberately does *not* go
+through ``parsl.load`` / the DataFlowKernel: the DFK unwraps future args on the head node anyway, so
+it would add a global singleton and config-global retries/caching (which fight the determinism gate)
+for zero capability gain. :func:`~graphed_executors.parsl_backend.launch.start_htex` encodes the
+three integration moves a DFK normally performs (set ``run_dir``; create ``provider.script_dir``;
+``scale_out_facade(init_blocks)`` after ``start()``) and pins the fixed-blocks posture
+(``init_blocks == min_blocks == max_blocks``) — it is both the canonical recipe and the drift canary
+for parsl's weekly CalVer.
+
+**The capability floor, per instance.** Capabilities are derived from the executor *type*, honestly:
+``ParslBackend(HighThroughputExecutor)`` is the **all-seven-False "parsl floor"** — future args are
+resolved on the submit host (so ``peer_data_movement`` is False *even when* a peer-transport plane
+exists; reporting it True would falsely open the m43 ``_require_peer`` gate to head-node routing),
+broadcast reships per task, and there is no pinning / per-task retries / per-task resources /
+running-cancel / worker file cache. ``ParslBackend(ThreadPoolExecutor)`` is the
+:class:`~graphed_executors.submit.threadpool.ThreadBackend` shape (``peer_data_movement=True`` alone —
+same-process shared memory). Any other executor type is refused with a ``TypeError`` naming both
+verified classes — per-instance honesty means not vouching for an executor the plan has not verified.
+
+**The worker seam.** ``ParslBackend.submit`` resolves any future args driver-side (``.result()``),
+then wraps the task fn in a module-level shim (:mod:`graphed_executors.parsl_backend._shim`) — after
+any spy seam, so a submitted-fn-name witness records the raw fn. On the worker the shim installs a
+``WorkerEnv`` whose ``resources`` is a process-global ``LocalResources`` (so ``open_once`` file
+locality holds across the many tasks a reused worker runs), whose ``worker`` identity is recomputed
+in-task from parsl's own ``PARSL_WORKER_POOL_ID``/``PARSL_WORKER_RANK`` env vars, and whose ``emit``
+**buffers** events (parsl has no worker-to-driver event channel) to ride back with the task result
+and be dispatched driver-side at completion granularity. The module imports parsl nowhere at load
+(the ``_lazy`` accessor + the parsl-free shim), so importing the package leaves parsl out of
+``sys.modules``.
+
+**The relay shuffle engine.** HTEX resolves future args on the submit host, so the m43 as-tasks
+engine's peer gate (:func:`~graphed_executors.common.tasks_engine._require_peer`) correctly refuses
+it — a peer shuffle needs worker-to-worker data movement HTEX cannot do. The parsl backend instead
+ships the **relay engine** (:mod:`graphed_executors.common.relay_engine`), the honest head-node
+workflow: ``T = min(n_workers, n_src)`` producer maps submit ``_dask_map_write`` (the m43 body
+unchanged); the driver resolves the map payloads at a barrier (bulk data arrives at the submit host
+once), regroups each destination by calling ``_dask_pick`` **locally** (a dict lookup — zero pick
+tasks), and submits ``P`` gathers with the picked wire fragments as concrete args (data leaves the
+submit host once). The scheduler sees ``T + P`` tasks and zero picks — the optimal head-node shape
+(the m43 ``T·P`` pick tier would re-ship each producer's whole payload per destination). The task
+bodies, kernels, and result assembly are the *same objects* the dask shim gates, so
+``dest_block_hashes`` are byte-identical to the local and dask engines — only the pick tier moves
+driver-side. The whole-barrier driver residency (≈ total shuffle bytes) *is* head-node routing, made
+per-run observable by the ``RelayShuffleWitness`` (``head_node_routed=True`` + ``driver_relay_bytes``).
+A parsl ``ThreadPoolExecutor`` reports ``peer_data_movement=True``, so the m43 engine (moved verbatim
+to :mod:`graphed_executors.common.tasks_engine`, keeping its ``_dask_*`` names so the frozen Counter
+gates stay green) runs over *it* unchanged.
+
+**The peer-exchange transport engine.** The relay engine is honest but head-node-bound. For
+fixed-size pools where worker-to-worker dialability holds, the parsl backend also ships a **true
+peer-exchange engine** (opt-in via ``shuffle_method="transport"`` on an HTEX instance) that never
+routes bulk bytes through the driver. parsl exposes no worker-to-worker in-memory transfer — the
+DataFlowKernel resolves futures on the head node, and TaskVine's peer transfer is file-cache-only —
+so graphed builds its own overlay: ``k`` persistent peer tasks (one per worker slot; they
+gang-schedule by slot saturation, so no ``pin_to_worker`` is needed), each of which **mints its own**
+``EscalatingHttpTransport`` **endpoint in-task**, announces a ``hello`` to a driver-hosted rendezvous
+endpoint, and **blocks on a barrier until all k hellos arrive** before the driver broadcasts the
+assembled ``addr → host:port`` registry. No peer holds the address book — so no send can race a
+missing inbox — before every inbox exists (the pre-created-inbox obligation, subsumed by
+construction). Blocks then travel peer↔peer over the plane's ``/pull`` route, coalesced to one
+request per holder (the ``≤ k·k`` incast bound, witnessed by ``pull_requests_served``) and evicted
+after serve; the driver's endpoint sees only control traffic. The peer bodies are the *same* M38
+reduction and M39–M41 shuffle/join actors the local engine runs, hosted unchanged (the shuffle leg
+is a deferred import), so ``dest_block_hashes`` stay byte-identical to the local, relay, and dask
+engines: the engine you pick can never change a result.
+
+**"The cluster decides, not the broker."** Worker-to-worker reachability is a property parsl never
+guarantees (NAT, firewalls, multi-node overlays), so a **runtime reachability probe** runs at
+rendezvous time, before any data moves. ``on_unreachable="error"`` (the default) raises an attributed
+``StageError`` naming the unreachable pair; ``on_unreachable="fallback"`` transparently re-runs the
+relay engine on the same inputs and records ``witness.fallback_reason`` (observable, never silent).
+``probe_peer_reachability`` exposes the same probe as an optional pre-flight. Recovery is **whole-run
+epoch restart**: an exhausted escalating send, a timed-out pull, a lost peer, or a reduction that
+captures no root restarts the run under a fresh epoch nonce, re-reading the surviving worker set
+(``_resolve_k`` degrades a shrunken cluster to ``min(workers, live n_workers())`` so the restart pins
+onto survivors) up to ``epoch_restarts_allowed`` (default 1); an exhausted budget surfaces an
+attributed ``StageError`` naming the death — never a raw parsl exception, never a hang. The reduction
+counterpart ``parsl_run_plan`` runs a whole ``Plan`` as this k-peer reduction, bounding the driver's
+root wait with ``root_timeout_s`` and **deriving** the peer idle deadline as ``root_timeout_s + slack``
+so it always stays ≥ the root wait. Critically, ``peer_transport`` is a parsl_backend-private
+attribute (``True`` for HTEX, ``False`` for a ``ThreadPoolExecutor``), **not** a capability flag:
+advertising ``peer_data_movement=True`` would falsely open the m43 ``_require_peer`` gate to head-node
+routing, so the transport engine is reached explicitly and never by ``"auto"`` (no parsl vector
+carries both ``pin_to_worker`` and ``peer_data_movement``).
+
+**What stays Phase 2.** TaskVine's file-cache byte plane (``worker_file_cache``, native
+worker-to-worker file transfers), live M37 dashboard parity over parsl (worker events arrive at
+completion granularity today), and TLS on the graphed HTTP plane are the next milestone — see
+:doc:`improvements`.
+
+
 Phase 2 (deliberately not built)
 --------------------------------
 
-* **Distributed executors** (TaskVine / HTCondor / Slurm) and the **parsl** adapter — the ``Plan``
-  contract, the ``WorkerTransport`` seam, and the ``SubmitBackend`` protocol are built so they can be
-  written against later. The dask backend (above) is the first real distributed backend; parsl's
-  adapter (and the store data plane its head-node routing needs) stays Phase 2.
+* **Distributed executors** (TaskVine / HTCondor / Slurm) — the ``Plan`` contract, the
+  ``WorkerTransport`` seam, and the ``SubmitBackend`` protocol are built so they can be written
+  against later. The dask backend is the first real distributed backend and the parsl backend
+  (above) the second; both ship a peer-exchange transport shuffle engine (parsl additionally ships
+  the head-node relay for elastic or non-dialable pools).
 * NUMA-aware placement.
 * **Adaptive chunk-size policies** shipped as library code (the ``next_tasks`` hook exists;
   policies beyond tests are user-land for now).

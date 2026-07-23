@@ -7,11 +7,22 @@
 # suite that never exercises it) would make the job red-by-construction. fail_under 90 is the §B.3
 # diff-coverage gate on the new code. m43 extends the job's pytest path; this scope is unchanged
 # (all m43 code lives under dask_backend/, already named here).
+#
+# m46: the m43 as-tasks engine MOVED to `common/tasks_engine.py`, so the m43/m45 frozen suites now
+# execute its bodies THERE — the dask job is the one gate that keeps the moved code at >=90 (each
+# `common/` module gated by exactly ONE job; `common.relay_engine` has no dask-suite caller and would
+# sit at 0% — it gates on the parsl job). The `test-dask` pytest step now uses a bare `--cov` so this
+# `[run] source` is authoritative (a path-valued `--cov=` OVERRIDES config source, silently un-gating
+# the moved engine — plan §1.6 item 3, tests-B-cov-2).
 [run]
 branch = true
 source =
     graphed_executors.submit
     graphed_executors.dask_backend
+    graphed_executors.common.tasks_engine
+    graphed_executors.common.transport_run
+    graphed_executors.common.facade
+    graphed_executors.common.transport_tasks
 
 [report]
 fail_under = 90

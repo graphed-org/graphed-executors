@@ -4,7 +4,7 @@
 The transport engine's reader/disk budget counters (``fetch_spill_count`` / ``peak_fetch_bytes`` /
 ``bulk_fetch_count`` / ``cross_node_fetches`` / ``bytes_transferred`` / ``disk_backpressure_events`` /
 ``per_node_disk_bytes``) are computed by REPLAYING the imported ``_stage2_gather`` over block SIZES
-(``transport_shuffle._replay_reader_plane``), never re-implementing the accounting. This test pins that
+(``common.transport_tasks.replay_reader_plane`` since the m47 factoring), never re-implementing the accounting. This test pins that
 the replay equals a REAL local ``run_repartition`` on the same inputs/budgets — the guarantee the
 frozen ``test_transport_budget_parity`` relies on, checked here WITHOUT a dask cluster.
 
@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 from graphed.numpy import NumpyBackend
 
-from graphed_executors.dask_backend.transport_shuffle import _replay_reader_plane
+from graphed_executors.common.transport_tasks import replay_reader_plane
 from graphed_executors.local.shuffle import (
     ShuffleWitness,
     _assign,
@@ -102,7 +102,7 @@ def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budge
 
     manifests, size_of = _driver_manifests(be, src, PARTS, K, n_tasks)
     addrs = tuple(f"tcp://w{i}" for i in range(K))
-    replay = _replay_reader_plane(
+    replay = replay_reader_plane(
         manifests, PARTS, n_tasks, K, addrs, size_of, fetch_budget=fetch_budget, disk_budget=disk_budget
     )
     assert _reader_counters(replay) == _reader_counters(local.witness), (
@@ -121,11 +121,11 @@ def test_replay_detects_wrong_sizes() -> None:
     manifests, size_of = _driver_manifests(be, src, PARTS, K, n_tasks)
     addrs = tuple(f"tcp://w{i}" for i in range(K))
 
-    truth = _replay_reader_plane(
+    truth = replay_reader_plane(
         manifests, PARTS, n_tasks, K, addrs, size_of, fetch_budget=200, disk_budget=None
     )
     halved = {d: max(1, s // 2) for d, s in size_of.items()}
-    mutated = _replay_reader_plane(
+    mutated = replay_reader_plane(
         manifests, PARTS, n_tasks, K, addrs, halved, fetch_budget=200, disk_budget=None
     )
     assert (
