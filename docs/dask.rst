@@ -11,10 +11,6 @@ Every runnable snippet below was executed against a live ``LocalCluster`` before
 the printed values in the comments are real outputs. The batch-cluster sketches near the end are
 the one exception and are explicitly marked *illustrative*.
 
-.. contents::
-   :local:
-   :depth: 2
-
 
 Installing
 ----------

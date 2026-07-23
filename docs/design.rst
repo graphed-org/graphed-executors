@@ -9,10 +9,6 @@ tasks, deliberate stragglers, worker crashes), and its semantics — determinism
 completion order, straggler tolerance, errors that survive the process boundary — are the
 contract any future distributed executor must match.
 
-.. contents::
-   :local:
-   :depth: 2
-
 
 The Plan contract
 -----------------
