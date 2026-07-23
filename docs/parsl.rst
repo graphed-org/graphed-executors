@@ -233,7 +233,10 @@ wrapper.
 
 **Hard worker death** (SIGKILL / OOM / preemption) surfaces after parsl's watchdog detection as a
 ``parsl.executors.high_throughput.errors.WorkerLost``; the pool respawns the dead worker in place
-and stays usable. :meth:`~graphed_executors.parsl_backend.backend.ParslBackend.describe_failure`
+and stays usable. The detection window is parsl's ``heartbeat_period`` — default ≈ 30 s, so a
+SIGKILL takes that long to surface as a ``WorkerLost`` (and, under the transport engine, to trip the
+epoch restart). Pass ``start_htex(..., heartbeat_period=2)`` to compress it (measured ≈ 29.7 s → ≈
+1.65 s). :meth:`~graphed_executors.parsl_backend.backend.ParslBackend.describe_failure`
 recognises ``WorkerLost`` / ``ManagerLost`` **by class name anywhere in the exception chain** (never
 by parsl identity, so the module stays parsl-import-free at load) and returns a
 ``(key, worker)`` attribution tuple the engine turns into an attributed ``StageError``. Under the

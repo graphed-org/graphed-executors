@@ -633,11 +633,47 @@ A parsl ``ThreadPoolExecutor`` reports ``peer_data_movement=True``, so the m43 e
 to :mod:`graphed_executors.common.tasks_engine`, keeping its ``_dask_*`` names so the frozen Counter
 gates stay green) runs over *it* unchanged.
 
-**What stays Phase 2.** A true peer-exchange transport engine over HTEX worker processes (self-minted
-HTTP endpoints, a driver rendezvous barrier, a **runtime reachability probe** with
-``on_unreachable="error"|"fallback"``), the unified ``shuffle_method`` facade for parsl, TaskVine's
-file-cache byte plane (``worker_file_cache``), and live M37 dashboard parity are the next milestone —
-see :doc:`improvements`.
+**The peer-exchange transport engine.** The relay engine is honest but head-node-bound. For
+fixed-size pools where worker-to-worker dialability holds, the parsl backend also ships a **true
+peer-exchange engine** (opt-in via ``shuffle_method="transport"`` on an HTEX instance) that never
+routes bulk bytes through the driver. parsl exposes no worker-to-worker in-memory transfer — the
+DataFlowKernel resolves futures on the head node, and TaskVine's peer transfer is file-cache-only —
+so graphed builds its own overlay: ``k`` persistent peer tasks (one per worker slot; they
+gang-schedule by slot saturation, so no ``pin_to_worker`` is needed), each of which **mints its own**
+``EscalatingHttpTransport`` **endpoint in-task**, announces a ``hello`` to a driver-hosted rendezvous
+endpoint, and **blocks on a barrier until all k hellos arrive** before the driver broadcasts the
+assembled ``addr → host:port`` registry. No peer holds the address book — so no send can race a
+missing inbox — before every inbox exists (the pre-created-inbox obligation, subsumed by
+construction). Blocks then travel peer↔peer over the plane's ``/pull`` route, coalesced to one
+request per holder (the ``≤ k·k`` incast bound, witnessed by ``pull_requests_served``) and evicted
+after serve; the driver's endpoint sees only control traffic. The peer bodies are the *same* M38
+reduction and M39–M41 shuffle/join actors the local engine runs, hosted unchanged (the shuffle leg
+is a deferred import), so ``dest_block_hashes`` stay byte-identical to the local, relay, and dask
+engines: the engine you pick can never change a result.
+
+**"The cluster decides, not the broker."** Worker-to-worker reachability is a property parsl never
+guarantees (NAT, firewalls, multi-node overlays), so a **runtime reachability probe** runs at
+rendezvous time, before any data moves. ``on_unreachable="error"`` (the default) raises an attributed
+``StageError`` naming the unreachable pair; ``on_unreachable="fallback"`` transparently re-runs the
+relay engine on the same inputs and records ``witness.fallback_reason`` (observable, never silent).
+``probe_peer_reachability`` exposes the same probe as an optional pre-flight. Recovery is **whole-run
+epoch restart**: an exhausted escalating send, a timed-out pull, a lost peer, or a reduction that
+captures no root restarts the run under a fresh epoch nonce, re-reading the surviving worker set
+(``_resolve_k`` degrades a shrunken cluster to ``min(workers, live n_workers())`` so the restart pins
+onto survivors) up to ``epoch_restarts_allowed`` (default 1); an exhausted budget surfaces an
+attributed ``StageError`` naming the death — never a raw parsl exception, never a hang. The reduction
+counterpart ``parsl_run_plan`` runs a whole ``Plan`` as this k-peer reduction, bounding the driver's
+root wait with ``root_timeout_s`` and **deriving** the peer idle deadline as ``root_timeout_s + slack``
+so it always stays ≥ the root wait. Critically, ``peer_transport`` is a parsl_backend-private
+attribute (``True`` for HTEX, ``False`` for a ``ThreadPoolExecutor``), **not** a capability flag:
+advertising ``peer_data_movement=True`` would falsely open the m43 ``_require_peer`` gate to head-node
+routing, so the transport engine is reached explicitly and never by ``"auto"`` (no parsl vector
+carries both ``pin_to_worker`` and ``peer_data_movement``).
+
+**What stays Phase 2.** TaskVine's file-cache byte plane (``worker_file_cache``, native
+worker-to-worker file transfers), live M37 dashboard parity over parsl (worker events arrive at
+completion granularity today), and TLS on the graphed HTTP plane are the next milestone — see
+:doc:`improvements`.
 
 
 Phase 2 (deliberately not built)
@@ -646,8 +682,8 @@ Phase 2 (deliberately not built)
 * **Distributed executors** (TaskVine / HTCondor / Slurm) — the ``Plan`` contract, the
   ``WorkerTransport`` seam, and the ``SubmitBackend`` protocol are built so they can be written
   against later. The dask backend is the first real distributed backend and the parsl backend
-  (above) the second; the parsl **peer-transport** shuffle engine (beyond the head-node relay) stays
-  Phase 2.
+  (above) the second; both ship a peer-exchange transport shuffle engine (parsl additionally ships
+  the head-node relay for elastic or non-dialable pools).
 * NUMA-aware placement.
 * **Adaptive chunk-size policies** shipped as library code (the ``next_tasks`` hook exists;
   policies beyond tests are user-land for now).
