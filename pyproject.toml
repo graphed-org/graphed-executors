@@ -30,6 +30,9 @@ dev = [
   "ruff",
   "graphed[awkward,numpy]",
   "graphed-corpus",
+  # m49's frozen tree drives the varied-fill lowering end-to-end; a name-only entry resolves to the
+  # stale PyPI 0.0.1 release, so CI installs it from git first (the HISTOGRAM env var in ci.yml).
+  "graphed-histogram",
   "numpy>=1.24",
   "awkward>=2.6",
 ]
