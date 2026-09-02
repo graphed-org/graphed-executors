@@ -15,6 +15,10 @@ env:
   GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
+  # m49's frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
+  # fails SILENTLY: graphed-histogram IS on PyPI, so a missing line quietly installs the stale 0.0.1
+  # wheel and the job tests the wrong package. Needed in every job that collects tests/frozen.
+  HISTOGRAM: "graphed-histogram @ git+https://github.com/graphed-org/graphed-histogram@main"
 
 jobs:
   test:
@@ -35,7 +39,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}"
+          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" "${{ env.HISTOGRAM }}"
           python -m pip install -e ".[dev]"
       - uses: astral-sh/setup-uv@v5
       - name: Lint + types (pre-commit hooks via prek)
@@ -62,7 +66,7 @@ jobs:
       - shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}"
+          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" "${{ env.HISTOGRAM }}"
           python -m pip install -e ".[dev]"
           pytest tests/frozen
 
