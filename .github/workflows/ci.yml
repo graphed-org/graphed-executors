@@ -12,13 +12,13 @@ concurrency:
 
 env:
   # the former core/debug/frontend/numpy/awkward siblings are now one consolidated package
-  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"
+  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@m49-vary"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
   # m49's frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
   # fails SILENTLY: graphed-histogram IS on PyPI, so a missing line quietly installs the stale 0.0.1
   # wheel and the job tests the wrong package. Needed in every job that collects tests/frozen.
-  HISTOGRAM: "graphed-histogram @ git+https://github.com/graphed-org/graphed-histogram@main"
+  HISTOGRAM: "graphed-histogram @ git+https://github.com/graphed-org/graphed-histogram@m49-vary"
 
 jobs:
   test:
