@@ -1,26 +1,75 @@
 # Contributing to graphed-executors
 
-Part of the `graphed` project, governed by the gated three-role pipeline. The root
-[`graphed-project/CLAUDE.md`](https://github.com/graphed-org/graphed-project-mvp) and the project plan
-are authoritative; the plan always wins.
+Bug reports, fixes, new backend adapters, and doc improvements are all welcome. This page
+gets you from a clone to a green local run of everything CI checks.
 
-## Guardrails (M2)
+## Set up a development environment
 
-- A **trivial** backend proving the seam — 1-D numpy bags only, no HEP (that is `graphed-awkward`,
-  M3). `external_payload` flags opaque callables as a preservation risk (real hashing is M9).
-
-## Integrity rules — NON-NEGOTIABLE (plan A.7 / B.6)
-
-Never edit/skip/weaken `tests/frozen/**`; never lower a threshold or relax CI; never stub the thing
-under test. Dispute a frozen test via `.graphed/<Mx>/disputes/<test_id>.md`.
-
-## Local gates
+You need Python ≥ 3.11 and a Rust toolchain (`rustup` — https://rustup.rs). The `graphed`
+dependency is installed from git and compiles a Rust extension during install; without a
+toolchain the first `pip install` below fails.
 
 ```bash
-pip install "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"   # needs Rust
-pip install "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
+git clone https://github.com/graphed-org/graphed-executors
+cd graphed-executors
+python -m venv .venv && source .venv/bin/activate
+
+pip install "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"
+pip install "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus@main"
+pip install "graphed-histogram @ git+https://github.com/graphed-org/graphed-histogram@main"
 pip install -e ".[dev,docs]"
-ruff check . && ruff format --check . && mypy
-pytest tests/frozen/m2 --cov=graphed_executors --cov-branch   # 100%
+```
+
+Install `graphed-histogram` from git **before** `pip install -e ".[dev]"`, as shown. The
+`dev` extra names it, and if git hasn't already satisfied it pip silently resolves a stale
+PyPI release — everything imports, and the histogram tests exercise the wrong package.
+
+Working on a cluster backend? Add its extra:
+
+```bash
+pip install -e ".[dev,dask]"  && pip install pyarrow pandas   # dask backend
+pip install -e ".[dev,parsl]" && pip install pyarrow          # parsl backend
+```
+
+## Run the tests
+
+```bash
+pytest
+```
+
+Tests for the dask and parsl backends skip automatically when the extra isn't installed,
+so a plain `pytest` is green in any of the environments above. CI runs the suite on Linux
+(x86_64 and arm64), macOS, and Windows across all supported Python versions, with the dask
+and parsl suites in dedicated jobs.
+
+To see the coverage CI will enforce (90% line + branch on `graphed_executors`):
+
+```bash
+pytest --cov=graphed_executors --cov-branch --cov-report=term-missing
+```
+
+## Lint, types, docs
+
+```bash
+ruff check . && ruff format --check .
+mypy
 sphinx-build -W -b html docs docs/_build/html
 ```
+
+Or run the lint and type hooks exactly as CI does, in one shot:
+
+```bash
+uvx prek run --all-files
+```
+
+`prek install` sets the same checks up as a git pre-commit hook.
+
+## Propose a change
+
+1. Branch from `main` and keep the change focused — one behavior per PR.
+2. Cover new behavior with tests. Don't edit existing tests to make a change pass; add new
+   ones (under `tests/extra/` for backend-specific additions) and explain the behavior
+   change in the PR description.
+3. Make sure `pytest`, `ruff`, `mypy`, and the `sphinx-build -W` docs build are clean
+   locally — they are exactly what CI gates on.
+4. Open the PR against `main`. CI must be green before review.

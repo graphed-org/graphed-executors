@@ -1,690 +1,710 @@
 How graphed-executors works
-============================
+===========================
 
-``graphed-executors`` is the reference executor: it takes a ``graphed.core.Plan`` — process
-each partition, combine the partials, start from empty — and runs it on one machine with a
-thread pool or a process pool, producing one reduced result. "Reference" does not mean toy:
-this is the executor the integration suites run real analyses through (thousands of tiny
-tasks, deliberate stragglers, worker crashes), and its semantics — determinism under any
-completion order, straggler tolerance, errors that survive the process boundary — are the
-contract any future distributed executor must match.
+.. contents::
+   :local:
+
+You ran your analysis on four cores this morning. Tonight the same plan runs on four hundred,
+and next month a colleague reruns it on a machine you have never seen. Do the three runs agree
+to the last bit? Where does the merging actually happen, and what does it cost? And when worker
+47 dies at 3 a.m., what comes back to you?
+
+This page answers those three questions. It assumes you have already run something — start at
+:doc:`index` if you have not.
+
+Here is the whole first answer in one program. Nine partitions, one enormous partial result and
+eight tiny ones, so that the order the partials are added in is visible in the total:
+
+.. code-block:: python
+
+   import numpy as np
+   from graphed.core import Partition, Plan, Task
+   from graphed_executors.local import (
+       PinnedPoolExecutor,
+       ProcessPoolExecutor,
+       ThreadExecutor,
+       plan_tree,
+   )
+
+   def process(partition, resources):
+       i = partition.entry_start
+       return np.array([1e16 if i == 0 else 1.0])
+
+   def add(a, b):
+       return a + b
+
+   def zero():
+       return np.zeros(1, dtype=float)
+
+   if __name__ == "__main__":
+       tasks = tuple(Task(i, Partition("data", "Events", i, i + 1)) for i in range(9))
+       plan = Plan(process=process, combine=add, empty=zero, tasks=tasks)
+
+       combines, root = plan_tree(len(tasks))
+       print("combines (result, left, right):", combines)
+
+       # What a completion-order merge would give you, for two arrival orders.
+       partials = [process(t.partition, None) for t in tasks]
+       for order, name in ((partials, "arrived in order"), (partials[::-1], "arrived reversed")):
+           total = zero()
+           for p in order:
+               total = add(total, p)
+           print(f"{name:<24} {total.tobytes().hex()}  {float(total[0]):.17g}")
+
+       runs = {
+           "ThreadExecutor(1)": ThreadExecutor(max_workers=1),
+           "ThreadExecutor(8)": ThreadExecutor(max_workers=8),
+           "ProcessPoolExecutor(1)": ProcessPoolExecutor(max_workers=1),
+           "ProcessPoolExecutor(8)": ProcessPoolExecutor(max_workers=8),
+           "PinnedPoolExecutor(8)": PinnedPoolExecutor(max_workers=8),
+       }
+       for label, executor in runs.items():
+           value = executor.run(plan).value
+           print(f"{label:<24} {value.tobytes().hex()}  {float(value[0]):.17g}")
+
+.. code-block:: text
+
+   combines (result, left, right): [(9, 0, 1), (10, 2, 3), (11, 4, 5), (12, 6, 7), (13, 9, 10), (14, 11, 12), (15, 13, 14), (16, 15, 8)]
+   arrived in order         0080e03779c34143  10000000000000000
+   arrived reversed         0480e03779c34143  10000000000000008
+   ThreadExecutor(1)        0480e03779c34143  10000000000000008
+   ThreadExecutor(8)        0480e03779c34143  10000000000000008
+   ProcessPoolExecutor(1)   0480e03779c34143  10000000000000008
+   ProcessPoolExecutor(8)   0480e03779c34143  10000000000000008
+   PinnedPoolExecutor(8)    0480e03779c34143  10000000000000008
+
+Two arrival orders, two different answers. Five executors, one answer. The rest of this page is
+why.
 
 
-The Plan contract
------------------
+Why your result is the same on 1 worker and on 100
+--------------------------------------------------
 
-An executor consumes, and never interprets, four things::
+Floating-point addition is not associative. ``(a + b) + c`` and ``a + (b + c)`` are different
+numbers when the magnitudes are far apart, which in a real analysis they are — one busy file
+contributes a bin count of ten million while a sparse one contributes three. So the moment your
+partial results are merged in whatever order the workers happen to finish, your totals wobble
+between runs, and a "reproducible" analysis is reproducible only to within a few ulps you cannot
+predict.
 
-    Plan(process = f(partition, resources) -> R,    # one partition's work
-         combine = f(R, R) -> R,                    # associative merge
-         empty   = f() -> R,                        # the identity
-         tasks   = (Task(key, partition), ...))     # the fixed partition set
+The usual escape is to wait for every partition, then merge in index order. That is
+deterministic and it reintroduces a barrier: one slow file stalls the entire run.
 
-``process``/``combine``/``empty`` must be picklable for the process pool (module-level
-functions, ``functools.partial`` of them, or frozen dataclasses — the conventions every
-graphed writer/aggregator follows). ``resources.open_once(uri, opener)`` gives workers
-file-handle reuse: thread-local sets for the thread pool, a per-process global installed by the
-pool initializer for the process pool. An optional ``next_tasks`` hook switches the driver into
-adaptive mode (below).
+``plan_tree`` avoids the choice. Before any work is submitted, it lays out a binary merge tree
+over **leaf indices** — leaf 0 with leaf 1, leaf 2 with leaf 3, and so on up to a single root.
+That is the ``combines`` list printed above: ``(9, 0, 1)`` means "node 9 is leaves 0 and 1
+merged". Nothing in it mentions a worker, a machine, or a clock. ``tree_reduce`` then accepts
+leaf results **in whatever order they arrive** and fires each merge the instant both of its
+inputs exist.
 
-A minimal, runnable plan::
+Both properties fall out of the same structure:
 
-    import numpy as np
-    from graphed.core import Partition, Plan, Task
-    from graphed_executors.local import ProcessExecutor
+* **The answer does not depend on the cluster.** The grouping is a pure function of the number
+  of partitions, so one thread and eight processes reduce along identical paths and produce
+  identical bytes. Integer counts are exact under any grouping; float storages come out
+  byte-identical because the grouping is fixed, not because the arithmetic is forgiving.
+* **One slow file cannot stall the run.** A straggling partition blocks only the ``log n``
+  merges on its own path to the root. Every other subtree keeps reducing while it sleeps. There
+  is no barrier anywhere in the reduction.
 
-    def count(partition, resources):          # module-level: picklable
-        return np.asarray([partition.entry_stop - partition.entry_start])
-
-    def add(a, b):  return a + b
-    def zero():     return np.zeros(1, dtype=int)
-
-    if __name__ == "__main__":                # spawned workers re-import __main__
-        parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
-        plan  = Plan(process=count, combine=add, empty=zero,
-                     tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
-
-        ProcessExecutor(max_workers=4).run(plan).value     # -> array([700])
+The edge of this guarantee: the tree is a function of the partition *set*. Change how a
+dataset is split — different chunk sizes, a different file list, a repartition step in the
+middle — and you have changed which partials meet which, so a float total may move in its last
+bits. Reprocessing the same dataset the same way is bit-for-bit; reprocessing it differently is
+not, and no scheduler can make it so. For the same reason, a left-to-right fold over the same
+partials (a merge in arrival order, or a single-threaded accumulate) is a *different* grouping
+and lands on a different bit pattern, as the first two output lines show.
 
 
-The fixed combine tree: deterministic *and* straggler-tolerant
---------------------------------------------------------------
+What the pool asks of your four functions
+-----------------------------------------
 
-The heart of the package is ``plan_tree`` + ``tree_reduce``, and the design resolves a tension
-worth spelling out.
+A ``Plan`` is ``process``, ``combine``, ``empty`` and ``tasks``, and a runner uses all four
+without ever looking inside them. Two consequences are worth knowing before your first crash.
 
-*Naively*, you either combine results in completion order (fast, but floating-point results
-then depend on which worker finished first — non-deterministic), or you wait for all leaves
-and reduce in index order (deterministic, but one straggler stalls everything).
+**Your functions have to survive a trip to another process.** The process pools use the
+**spawn** start method rather than ``fork``: a forked CPython process inherits lock and
+allocator state that bites precisely when you scale up, and spawn is the one behaviour every
+platform shares. A spawned worker re-imports the module it was launched from and unpickles your
+callables, so ``process``/``combine``/``empty`` must be module-level functions, a
+``functools.partial`` of one, or a frozen dataclass — and a script must guard its entry point
+with ``if __name__ == "__main__":``. Thread pools share your address space and impose neither
+rule, which makes ``ThreadExecutor`` the fast way to debug a plan before you scale it out.
 
-The fixed tree does neither. ``plan_tree(n)`` builds a binary combine-tree **over leaf
-indices** — pairing (0,1), (2,3), … level by level — *before* anything runs. ``tree_reduce``
-then consumes leaf results in **whatever order they complete** and fires each combine the
-moment both of its inputs exist. Consequences:
+**Files open once per worker, not once per partition.** ``resources.open_once(uri, opener)``
+inside ``process`` hands back a handle the worker keeps for its lifetime: thread-local for the
+thread pool, a per-process global installed by the pool initializer for the process pools. Ten
+partitions of the same file on one worker open it once.
 
-* **Determinism**: the grouping is a pure function of the leaf count, so the result is
-  bit-for-bit identical regardless of completion order, worker count, or executor class. (For
-  float-summing combines this is what makes "deterministic per configuration" a theorem rather
-  than a hope; integer-counting combines are exact under any tree at all.)
-* **Straggler tolerance**: a slow partition blocks only the ``log n`` combines on its own
-  root-path; every other subtree reduces to completion meanwhile. There is no barrier. The
-  frozen suite pins this with a deliberately slow leaf and a probe asserting that combines
-  keep firing while it sleeps.
+An optional fifth element, ``next_tasks``, changes the shape of the run — see
+`Growing the work while the run is going`_.
 
-By default combines run on the driver thread as results arrive — fine when partials are small.
-``pooled_combines=True`` schedules the combines onto the *same worker pool* as the leaves
-(same fixed pairing, so results are unchanged), for workloads whose partials are heavy enough
-that a serial driver-side merge becomes the bottleneck — large histograms over many
-partitions, concatenated path lists, and the like.
 
-The two pools
--------------
+Why the tasks are few and large
+-------------------------------
 
-``ThreadExecutor`` and ``ProcessExecutor`` share one driver; they differ only in the
-``concurrent.futures`` pool and the resource plumbing. The process pool uses the **spawn**
-context deliberately: forked CPython processes inherit lock and allocator state that bites
-exactly when you scale, and spawn is the semantics every platform shares. The cost is an
-import-heavy worker startup, which leads to:
+The failure this package was built against is a scheduler that spends more time deciding what to
+run than running it. Every layer here is arranged so the interpreter and the scheduler see as
+few units of work as possible.
 
-**Persistent pools.** By default each ``run()`` spawns a fresh pool — the right default for
-isolation, and the pinned historical behavior. But a notebook running eight small plans, or a
-benchmark sweep running hundreds, pays that import-heavy spawn per plan and can end up *slower
-parallel than sequential*. ``ProcessExecutor(max_workers=4, persistent=True)`` keeps one pool
-across ``run()`` calls (worker state demonstrably survives between runs — that is the test),
-released by ``close()`` or context-manager exit, with lazy respawn afterwards::
+Partitions, not rows, are the unit: one task is an entry range of a file, doing a whole fused
+run of array operations. Reductions are scheduled as ``n - 1`` merges but only ``O(log n)`` of
+them are ever live at once, so a hundred thousand partitions do not become a hundred thousand
+resident intermediates. And a data exchange creates one producer task per *worker*, not one per
+source block — you will see that in the ``producer tasks`` count below, where six source blocks
+become one task on one worker and three on three.
 
-    with ProcessExecutor(max_workers=4, persistent=True) as ex:
-        for plan in plans:           # one spawn, amortized over every plan
-            results.append(ex.run(plan).value)
 
-Errors cross the boundary intact
---------------------------------
+Where your combines run, and what that costs
+--------------------------------------------
 
-A worker exception propagates to the driver as the exception it was. In particular a
-``graphed_debug.StageError`` — which is picklable by design — re-raises in the driver carrying
-the failing op, the user's source frames, and the failing partition. The executor adds nothing
-and strips nothing; "remote errors are opaque strings" is the legacy failure this stack was
-built against, and the integration suite pins the round trip.
+The obvious place to merge partial results is the driver: every worker ships its partial back to
+your submit node, which adds them up. That is fine while partials are small and terrible when
+they are not — a thousand workers each returning a large histogram makes your laptop the funnel
+for the entire run, and the data crosses the network twice.
 
-Adaptive plans
+So on the laptop pools and on dask, the merges run by default **across the workers, off the
+driver** (parsl is the exception, for a reason covered under `On a parsl pool`_). Each worker owns a
+contiguous range of leaves and reduces it locally; a partial that straddles a range boundary is
+handed worker-to-worker by ownership, where ownership of an interior node belongs to the worker
+holding its leftmost leaf. Because every node keeps its *global* position in the tree, moving
+the merges around never changes the grouping — the answer is bit-for-bit what a driver-side
+merge would have produced, floats included. The driver waits only for the root.
+
+Two knobs shape this:
+
+* ``comms="ipc"`` (the default) runs the peer merges over per-worker inbox queues on one
+  machine; ``comms="http"`` runs them over loopback sockets, the same shape a distributed
+  scheduler uses. ``comms=None`` puts the merges back on the driver.
+* ``pooled_combines=True`` keeps the driver in charge but pushes the merge calls onto the worker
+  pool. It is for heavy partials on the driver-side path, and it is refused outright — loudly,
+  not silently — when peer merging is on, because the two mean different things about who owns a
+  node.
+
+Picking a process pool
+~~~~~~~~~~~~~~~~~~~~~~
+
+Workers that talk to each other need addresses for each other, and an address here is an
+operating-system file descriptor. Two pools trade that cost differently, and you choose by
+naming the class — there is no silent switch at runtime.
+
+``ProcessPoolExecutor`` gives every worker the whole address book. It is simple and it is the
+fastest path up to roughly the per-process descriptor limit; that limit is what bounds it,
+because ``N`` workers each holding ``N`` inboxes is ``N²`` descriptors. The axis is your
+``ulimit -n``, not your core count: each worker holds about two descriptors per peer, and the
+warning fires once that would exceed about half the limit — around 224 workers where the limit
+is 1024, but already at 32 where it is 256.
+
+``PinnedPoolExecutor`` gives each worker only the addresses it will actually use: its own inbox,
+its merge targets, and a small set of peers it may steal work from. Those peers are laid out as
+a hypercube — a wiring in which every worker reaches every other in ``log N`` hops while holding
+only ``log N`` addresses — so the whole address book is ``N log N`` instead of ``N²``. Same
+results, bit for bit; smaller footprint.
+
+``ProcessPoolExecutor`` warns and names ``PinnedPoolExecutor`` when its worker count would
+strain the descriptor budget. It warns rather than switching, so the pool you get is always the
+one written at the call site. (``ProcessExecutor`` is a deprecated alias for
+``ProcessPoolExecutor``; use the explicit name.)
+
+Paying the spawn cost once
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Spawn means an import-heavy worker startup, and by default each ``run()`` builds a fresh pool.
+That is the right default for isolation and wrong for a notebook running eight small plans or a
+sweep running hundreds — pay a full pool spawn per plan and parallel can come out slower than
+sequential. ``persistent=True`` keeps one pool across ``run()`` calls, released by ``close()``
+or by leaving the ``with`` block:
+
+.. code-block:: python
+
+   import numpy as np
+   from graphed.core import Partition, Plan, Task
+   from graphed_executors.local import ProcessPoolExecutor
+
+   def count(partition, resources):
+       return np.asarray([partition.entry_stop - partition.entry_start])
+
+   def add(a, b):
+       return a + b
+
+   def zero():
+       return np.zeros(1, dtype=int)
+
+   def sweep(plans):
+       with ProcessPoolExecutor(max_workers=4, persistent=True) as ex:
+           return [ex.run(plan).value for plan in plans]   # one spawn, amortized
+
+   if __name__ == "__main__":
+       plans = [
+           Plan(process=count, combine=add, empty=zero,
+                tasks=tuple(Task(i, Partition("data", "Events", i * n, (i + 1) * n))
+                            for i in range(4)))
+           for n in (100, 200, 300)
+       ]
+       print(sweep(plans))
+
+   # [array([400]), array([800]), array([1200])]
+
+When an idle worker takes work from a busy one
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Partitions are never uniform: one file is a skim, the next is raw. An idle worker therefore
+takes **one** leaf from the far end of a busy peer's range, rather than half of it — taking half
+drains a victim geometrically once several thieves are idle and piles the work back up
+somewhere else. Stealing one at a time from a randomly chosen victim is the scheme with provable
+bounds on the time wasted stealing (Blumofe–Leiserson, as in Cilk).
+
+Stealing moves only the ``process`` work. The leaf's original owner still merges it — the thief
+ships the partial back — so the tree, and the answer, are untouched. An idle delay plus
+exponential backoff makes it cost nothing on balanced work while still rebalancing a genuine
+straggler. Pass ``steal=False`` to turn it off.
+
+
+Growing the work while the run is going
+---------------------------------------
+
+A plan with a ``next_tasks`` hook runs as a rolling fold instead of a fixed tree. The driver
+folds results as they complete and periodically calls ``next_tasks`` with the elapsed time,
+completed counts and errors so far; it answers with more partitions, or with a reason to stop.
+That is the path for deciding chunk sizes from observed throughput, and it costs you the fixed
+tree's bit-for-bit guarantee: the grouping now depends on what the run discovered. Use it when
+the partition set genuinely is not known up front, and the fixed tree everywhere else.
+
+
+What happens when a worker dies
+-------------------------------
+
+There are two ways a worker can fail, and they surface differently.
+
+**Your code raised.** The exception propagates to the driver as the exception it was. In
+particular ``graphed.debug.StageError`` — which is picklable, and reconstructs exactly — arrives
+carrying the operation that failed, the partition it was on, and your source frames, so
+``format_traceback`` still points at the line you wrote. Nothing is wrapped, nothing is
+stringified. "The remote error was an opaque string" is the failure this stack exists to avoid.
+
+**The process died.** A segfault, an OOM kill, or a preemption leaves no exception to propagate.
+On a cluster this arrives as a scheduler-level event — dask raises ``KilledWorker`` once a task
+has cost more than the allowed number of worker deaths — and the backend turns it into an
+attributed ``StageError`` naming the partition and the last worker that held it, rather than
+handing you the raw scheduler error. The attribution can be unfair when several tasks shared the
+dead worker, and the message says so.
+
+Retries are the underlying library's, not a second layer on top: ``dask_runner``'s ``retries``
+forwards to dask's per-task retries, which resubmit on another worker. There is no graphed-level
+retry loop to double up with it. The default is 3, so a deterministic exception in your
+``process`` is executed four times before the driver sees it; ``retries=0`` while debugging.
+
+.. _design-epoch-restart:
+
+When the exchange itself fails, the whole run restarts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A data exchange between workers is different: the blocks in flight are meaningless once one leg
+of it is broken, and half-repaired state is how a shuffle quietly produces a wrong answer. So
+the exchange engines do not patch — they restart the run, and they tag each attempt with a fresh
+generation number (an *epoch*) that workers check on every incoming block. A block from the
+abandoned attempt cannot be mistaken for a live one, because its epoch is no longer accepted.
+
+Four things trigger a restart: a peer-to-peer send that exhausts its retries
+(``TransportDeliveryError``), a block pull that times out against a slow or dead holder
+(``PullTimeoutError``), a peer reduction that finishes without capturing a root — which is
+raised rather than quietly returning ``empty()`` — and a worker death. The restart re-reads the
+surviving worker set so it pins onto workers that are still there. After
+``epoch_restarts_allowed`` attempts (default 1) you get an attributed ``StageError`` naming what
+died. You never get a raw scheduler exception, and you never get a hang.
+
+If you see ``PullTimeoutError`` on a legitimately huge batch rather than on a dead worker, raise
+``pull_timeout_s`` before you spend the restart budget. If you see ``TransportDeliveryError``,
+a worker is unreachable — check that the pool is on one routable network before retrying.
+
+
+Watching a run
 --------------
 
-A plan with ``next_tasks`` runs as a **running fold** instead of a fixed tree: the driver
-folds results as they complete and periodically consults ``next_tasks(ExecContext)`` — which
-sees elapsed time, completed counts, and errors — to obtain more partitions or a
-``StopReason``. This is the seam for timing-aware partitioning (grow chunk sizes as observed
-throughput stabilizes) without changing the executor; the fixed tree remains the path for
-known partition sets, where determinism matters most.
+Every executor takes an optional ``monitor=``. It is a passive observer implementing
+``graphed.core.execution.Monitor``; the executor knows nothing about rendering or transport and
+only emits a small vocabulary of ``TaskEvent`` records. ``graphed.debug.Dashboard`` is one
+consumer of them.
 
+One task is three events. The driver emits ``SUBMITTED`` when it hands the task to the pool; the
+worker emits ``STARTED`` before running it and exactly one of ``FINISHED`` or ``ERRORED`` after.
+Where the worker's two events go depends on the pool: thread workers call the monitor directly,
+while process workers append to a small in-process buffer that a per-worker daemon thread ships
+to the driver in batches, so no task ever pays an inter-process round trip on its critical path.
+A driver-side collector thread replays them into your monitor. A per-worker sampling profiler,
+if you supply one through the monitor's ``worker_profiler_factory``, rides the same channel.
 
-Live observability: the monitor seam (M37)
-------------------------------------------
+The property that makes this safe to leave on is that emission is **best-effort and drops when
+full**. A slow monitor never becomes back-pressure that changes task timing — which would in
+turn change what the adaptive path decides — and a monitor that raises is swallowed. A run's
+result and its merge count are byte-identical whether a monitor is attached, absent, or actively
+throwing.
 
-Every executor accepts an optional ``monitor=`` — a passive ``graphed.core.execution.Monitor`` that
-*watches* a run. It is the seam a live dashboard plugs into (see ``graphed-debug``'s ``Dashboard``),
-but the executor knows nothing about rendering or transport: it only emits a small, picklable
-``TaskEvent`` vocabulary.
-
-The lifecycle of one task is three events: the driver emits ``SUBMITTED`` when it hands the task to
-the pool; the worker emits ``STARTED`` before running it and exactly one of ``FINISHED`` / ``ERRORED``
-after. Where those worker events go differs by pool, and this is the interesting part:
-
-* **Thread pool** — workers share the driver's address space, so they call the monitor directly.
-* **Process pool** — workers cannot reach the driver's monitor object, so they push events onto a
-  bounded ``multiprocessing.Manager().Queue()``; a **driver-side collector daemon thread** drains it
-  and replays them into the monitor. (The driver still emits ``SUBMITTED`` locally.) A per-worker
-  statistical profiler, if one is supplied via the monitor's ``worker_profiler_factory``, rides the
-  same queue.
-
-The non-negotiable property is **passivity**: emission is best-effort and *drop-on-full*. If the
-monitor is slow or its queue is full, events are dropped — never buffered into back-pressure that
-would change task timing (and thus the adaptive ``next_tasks`` path) or stall a worker. A monitor that
-raises is swallowed. The upshot, pinned by the suite: a run's ``ExecResult.value`` and combine count
-are byte-identical whether or not a monitor (even a profiling one) is attached. Observability here is
-strictly a side channel, never part of the computation.
-
-
-Inter-worker comms: peer reduction + work-stealing (M38)
---------------------------------------------------------
-
-By default (``comms="ipc"``) the reduction runs **across the workers, off the driver**. The seam is
-:class:`graphed.core.execution.WorkerTransport` — an addressable, non-blocking, best-effort message
-channel — with two backends: **IPC** (``QueueTransport`` over ``multiprocessing.SimpleQueue`` inboxes,
-one per address, no ``Manager`` server in the data path) for a single machine, and **HTTP** (loopback
-``http.server`` + a discovery handshake; ``HttpTransport``) as the path a real distributed scheduler
-reuses. Determinism is *not* the transport's job; it is the reduction protocol's.
-
-The IPC path has **two worker pools, and you pick which by choosing the executor class** — there is no
-silent runtime switch. :class:`~graphed_executors.local.ProcessPoolExecutor` (the default; original M7
-behaviour) uses a full-registry pool: every worker *inherits the whole registry* (O(N²) fds — fine
-while N is well under the per-process fd limit, and the fast common path). :class:`~graphed_executors.local.PinnedPoolExecutor`
-uses a ``PinnedProcessPool`` of **identity-pinned** workers that each inherit ONLY their inbox + the
-O(log N) outboxes of their *overlay* peers (reduction targets + a symmetric **hypercube lifeline**
-graph + driver, ``worker_outbox_addresses``), so the registry is O(N log N), not O(N²). Both bound
-work-stealing to the lifelines, and both produce **bit-for-bit identical** results — only the
-communication footprint differs.
-
-**Which to use.** Default to ``ProcessPoolExecutor``: it is the simplest and is fastest up to roughly
-the fd limit. Reach for ``PinnedPoolExecutor`` on large many-core machines (>~128 cores, or any low
-``RLIMIT_NOFILE``), where the full registry's O(N²) descriptors would exhaust the limit. So you are not
-surprised, ``ProcessPoolExecutor`` *warns* (via the advisory predicate ``_exceeds_fd_budget``) and
-points you at ``PinnedPoolExecutor`` when its worker count would strain the budget — it warns rather
-than switching, so the pool in use is always the one named at the call site. ``ProcessExecutor`` remains
-as a **deprecated alias** for ``ProcessPoolExecutor``. (A *dynamic* cluster — workers joining/dying —
-needs a lazy-connect transport + multi-hop routing over this same overlay: the Phase-2 distributed
-runtime, which reuses ``worker_outbox_addresses``.)
-
-* **Peer reduction** (``_peer.py``). Each worker owns a contiguous **leaf range** and reduces it with
-  the lazy index tree (``_reduce.LazyReducer`` — the same fixed ``plan_tree``, computed by index
-  arithmetic, frontier-bounded so N can be huge with no O(N) pre-pass). Partials that straddle a range
-  boundary are handed **worker→worker** by ownership (a segment-tree merge: node ``(level,pos)`` is
-  owned by the worker holding its leftmost leaf; an odd node is shipped to its parent's owner). Every
-  node keeps its **global** ``(level,pos)`` identity, so distributing the *combines* never changes the
-  *grouping* — the result is **bit-for-bit identical to the old driver-hub path even for
-  non-associative float histograms**. The driver only collects the root (a ``done`` broadcast
-  terminates); a worker failure is detected promptly and re-raised intact (the M7 obligation). On the
-  real ADL benchmark this is within noise of the hub — the driver is no longer the combine bottleneck.
-* **Work-stealing**. An idle worker steals **one** leaf from a busy peer's far end
-  (Blumofe–Leiserson/Cilk — *not* steal-half, which under many idle thieves drains a victim
-  geometrically and over-concentrates work). Stealing redistributes only the ``process`` work — the
-  leaf's **owner still reduces it** (the thief ships the partial back), so the tree and the result are
-  unchanged. An idle delay + exponential backoff make it free on balanced loads (no spurious steals)
-  while rebalancing a genuine straggler.
-* **Parity with the hub.** Peer emits the full monitor lifecycle (SUBMITTED/STARTED/FINISHED/ERRORED +
-  the combine count) and runs the off-thread profiler, so the live dashboard — flamegraph included —
-  works under peer. ``comms=None`` selects the legacy driver-hub path (still used for
-  ``pooled_combines`` and the broadcast-cache tests); peer **refuses** ``pooled_combines`` loudly
-  rather than silently degrading to hub.
-
-
-.. _design-dask-backend:
-
-How the dask backend works
---------------------------
-
-The dask backend (``graphed_executors.dask_backend``, behind the optional ``[dask]`` extra) runs the
-**same** ``Plan`` on a ``dask.distributed`` cluster used as a *dumb scheduler* — no dask collections,
-no ``HighLevelGraph``, no dask-awkward. It ``client.submit``\ s opaque graphed callables with explicit
-keys and future-dependency edges, and inherits determinism, straggler tolerance, and intact errors
-from the local design rather than re-deriving them. It sits behind a small **common protocol** so a
-second library (parsl) can be adapted later without touching the engine.
-
-.. _design-submit-seam:
-
-The common seam: ``SubmitBackend`` + ``SubmitRunner``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-``graphed_executors.submit`` defines the portable intersection every submit-style library shares:
-
-* ``SubmitBackend`` — ``submit(fn, *args, key=…) -> future`` (future-valued args arrive **resolved**),
-  ``broadcast(payload, token=…)`` (a payload placed once, referenced by many tasks),
-  ``subscribe_events(topic, handler)`` (a driver-side monitor tap), ``cancel``, ``close``, and a
-  ``n_workers()``. Each backend advertises a per-**instance** ``SubmitCapabilities`` (seven flags:
-  peer data movement, scatter/broadcast, worker pinning, per-task retries, per-task resources,
-  running-cancel, worker file cache). The engine may use a capability only behind an
-  ``if backend.capabilities.X`` check, and both Plan paths are correct with **every flag false** —
-  that is the parsl floor. A flag states what the underlying *library* supports, not what the MVP
-  adapter wires: ``DaskBackend`` reports ``per_task_resources``/``pin_to_worker`` true (real dask
-  features) but its ``submit`` does **not** auto-forward a Plan's per-task ``resources`` — dask treats
-  ``resources=`` as a hard constraint, so an unsatisfiable request would stall the task forever;
-  enforcement on a resource-provisioned cluster is a future deployment-time opt-in.
-* ``SubmitRunner`` — one ``graphed.core.Executor`` over any ``SubmitBackend``. ``DaskBackend`` is the
-  first real backend; a stdlib ``ThreadBackend`` is the conformance second one, so the seam is
-  witnessed by *executing two backends against one frozen suite*, not by an import lint. Its flag set
-  differs from dask's on five of seven flags, proving the engine is correct across capability
-  variation.
-
-``plan_tree`` as a future graph
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The fixed path mirrors the local reduction topology **exactly**: leaves are ``process`` tasks;
-combines are submitted **up front** with future dependencies following the same ``plan_tree`` shape
-``(out, a, b)``, ``a < b``; the driver waits on the single root future. The grouping is fixed by
-*leaf index*, never by arrival time or worker count — so the result is bit-for-bit equal to
-``SequentialRunner`` and invariant to the worker count, inherited rather than re-proven. dask resolves
-each combine's future args on whichever worker runs it and fetches inputs **peer-to-peer**, so the
-combines run off the driver (the role ``PeerReducer`` plays locally); a slow leaf blocks only its own
-path to the root. Intermediate futures are released as their parent combine consumes them — an
-``O(log N)`` live frontier the scheduler enforces, the bound ``LazyReducer`` gives locally. This is
-*not* coffea's arrival-batched reduction, whose grouping varies with future-submission order (the
-source of its known reduce-time race); ``plan_tree`` keys every combine by index.
-
-Broadcast-once, keys, and determinism
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The pickled ``process`` (and ``combine``) ships **once** as an identity future
-(``client.submit(_identity, payload)`` — the coffea pattern, chosen over ``client.scatter`` whose
-worker-discovery timeout breaks on scale-to-zero clusters, and over closure-per-task which
-re-serializes the payload for every task). A worker-side token cache deserializes it **once per
-worker** however many tasks that worker runs. Every submit is ``pure=False`` with an explicit,
-namespaced, per-run-nonced key ``graphed-<plan-fp>-<nonce>-leaf|combine-<i>``: ``pure=False`` stops
-dask deduping distinct-byte-range I/O reads by content token; the ``graphed-`` prefix makes a
-user-string collision with a key impossible (dask/dask#9969); the nonce makes a second ``run()`` on
-one client re-execute instead of returning the first run's cached futures. A construction knob
-``replicate_broadcast=True`` spreads the payload's replicas (a mitigation for the coffea#1490
-single-worker-pinning suspicion; a frozen witness fails CI if leaves ever pin to one worker).
-
-The worker seam: ``RunContext`` + ``WorkerEnv`` + the plugin
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The engine's task functions are backend-neutral, yet on the worker a task needs the monitor topic,
-``open_once`` resources, and an event transport. Per-run state travels as an ordinary pickled
-``RunContext`` first argument; per-worker capability arrives via a ``WorkerEnv`` the **backend**
-installs by wrapping every submitted function in its own module-level shim
-(``dask_backend/_shim.py``). A ``GraphedWorkerPlugin`` (``name="graphed-worker"``, ``idempotent=True``,
-so re-registration is a no-op and *late-joining* elastic/jobqueue workers get ``setup`` too) holds one
-``LocalResources`` per worker, so a uri opens **once per dask worker** across its tasks — exactly the
-local ``open_once`` locality. All dask-touching code lives under ``dask_backend/`` and is imported only
-lazily (at ``DaskBackend`` construction) or by-reference (worker unpickle); ``submit/`` names dask
-nowhere, so it installs and runs with the base package.
-
-Errors and worker death
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-An ordinary worker exception round-trips intact: dask re-raises it driver-side and
-``StageError.__reduce__`` reconstructs it byte-for-byte, so ``format_traceback`` still points at the
-user's analysis line (the M6 obligation) with **zero** wrapping. A hard worker death — segfault, OOM,
-preemption — surfaces as a ``distributed.KilledWorker`` after ``distributed.scheduler.allowed-failures``
-deaths; the engine recognises it (via the backend's ``describe_failure``, staying dask-import-free)
-and raises an **attributed** ``StageError`` naming the partition and the last worker, with a message
-noting the blame can be unfair under co-located tasks — never an opaque scheduler string. Per-task
-retries map to dask's native ``retries=`` (resubmit on another worker); there is no second
-graphed-level retry loop (coffea zeroes its own under dask to avoid double-retrying — we follow).
-
-Live observability
-~~~~~~~~~~~~~~~~~~~~
-
-Monitoring rides dask's structured-event channel: ``Worker.log_event(topic, msg)`` on the worker,
-``Client.subscribe_topic(topic, handler)`` on the driver. Each run mints a namespaced
-``graphed-monitor-<nonce>`` topic, subscribed for the run and released in a ``finally`` after trailing
-events drain. ``SUBMITTED`` is emitted driver-side at submit; ``STARTED``/``FINISHED``/``ERRORED``
-worker-side as msgpack-safe scalar dicts. Emission is off the data path and swallow-on-error, so the
-reduced value is **byte-identical** whether a monitor is attached, detached, or actively raising (M37
-passivity) — telemetry never inflates the payload or breaks the run.
 
 .. _design-shuffle-graph:
 
-Shuffle and joins on dask
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Moving data between steps, and what it costs
+--------------------------------------------
 
-``dask_run_repartition`` / ``dask_run_join`` (``graphed_executors.dask_backend.shuffle``) express the
-M39–M41 exchange/join as a **native dask future graph** rather than running the local two-phase engine
-over a dask-backed store. The local engine computes every ``partition``/join kernel *in the driver* (its
-cluster duck-type only farms out block *storage*), so a dask-backed store would distribute storage but
-not compute — a driver CPU+NIC bottleneck. Instead the graph is::
+Some analyses need the data laid out differently partway through: grouped by event or object key
+before a per-group step, or joined against another dataset. That is an exchange, and an exchange
+is where a naive implementation falls over.
 
-    T = min(n_workers, n_src) producer futures   _dask_map_write   (worker-side coalesce + to_wire)
-    T·P pick futures                             _dask_pick        (runs on the holder; one block each)
-    P gather / gather-join futures               _dask_gather / _dask_gather_join
+The shape is two phases. Every producer task writes one block per destination partition; every
+destination then collects the blocks addressed to it. With ``T`` producers and ``P``
+destinations that is ``T × P`` transfers — and if each transfer is a file, a thousand producers
+feeding a thousand destinations is a million files open at once. That is why the number of
+producers is tied to the number of *workers* rather than to the number of source blocks, why a
+producer coalesces several sources into one block per destination, and why the engines carry
+explicit byte budgets rather than trusting RAM to hold.
 
-reusing the local per-task kernels verbatim (``_assign``, ``_coalesce_task``, ``_join_with_budget``,
-``broadcast_join_choice``) — no kernel is re-implemented. Under dask the future graph **is**
-completeness: a gather *depends on* its producers, the scheduler tracks who holds what, and workers
-fetch deps peer-to-peer. A backend without ``peer_data_movement`` (a parsl-HTEX-class head-node router)
-is refused with ``NotImplementedError`` before any work is submitted — routing every block through the
-driver is the pathology this design rejects.
+Every exchange hands back a counters object next to the result (``witness``) saying what it
+actually did — how many producer tasks ran, how much spilled, which route it took. Running one
+on a single machine, six source blocks into four destinations:
 
-**Cross-engine determinism contract.** ``_assign`` gives producer tasks contiguous ascending src ranges
-and gathers concatenate in ascending-task order, so a dest's rows assemble in ascending-src order
-regardless of worker count. Therefore ``dest_block_hashes`` (sha256 of each gathered block's wire bytes,
-computed worker-side) are **byte-identical across two dask runs AND equal to the local**
-``run_repartition``/``run_join`` **on identical inputs** — content-addressing across two independent
-engines pins the route, the merge order, and the wire serialization at once. The broadcast-vs-shuffle
-choice is keyed on ``parts`` (a plan-stable N), never the live worker count, so the same logical join
-makes the same choice on a 1- or 3-worker pool.
+.. code-block:: python
 
-**Retired mechanisms.** The M38/M39 announcement/manifest/steal machinery does not exist under dask —
-the scheduler already provides what it was built to construct:
+   import numpy as np
+   from graphed.numpy import NumpyBackend
+   from graphed_executors.local import run_repartition
 
-.. list-table::
-   :header-rows: 1
-   :widths: 42 58
+   ROW = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
 
-   * - M38/M39 mechanism
-     - Why retired under dask
-   * - Announcements / manifests / reliable push
-     - Gather completeness is the future graph, not droppable hints.
-   * - Work-stealing
-     - ``distributed`` owns stealing (``work-stealing: True``); a second layer would fight it.
-   * - ``WorkerTransport`` / ``QueueTransport`` / ``HttpTransport``
-     - dask comms move future data peer-to-peer.
-   * - Node Stores + disk budgets
-     - Block bytes live in worker memory with dask's own spill-to-``local_directory``.
+   def block(keys):
+       out = np.zeros(len(keys), dtype=ROW)
+       out["__joinkey__"] = np.asarray(keys, dtype=np.uint64)
+       out["v"] = np.arange(len(keys), dtype=np.int64)
+       return out
 
-Their witness counters are correspondingly absent from ``DaskShuffleWitness`` (which carries only
-``n_producer_tasks``, ``blocks_per_producer_task``, ``peak_writer_buffer_bytes``, ``broadcast_chosen``,
-the ``_join_with_budget`` spill counters, and ``producer_sites``/``gather_sites``). A worker holding
-stage-1 blocks that dies mid-shuffle is handled by the graph itself: the scheduler recomputes the lost
-producer from its inputs and the result is bit-for-bit unchanged.
+   src_blocks = [block(range(i * 50, i * 50 + 50)) for i in range(6)]
 
-**Preemption interplay with long shuffles.** The jobqueue preemption guidance below applies with one
-addition: a producer future recomputes from scratch if its worker dies, so on preemption-prone queues
-set ``--lifetime`` comfortably **above a single producer task's runtime** (and raise
-``allowed-failures``). Otherwise a worker evicted mid-shuffle forces its producer — and every gather
-depending on it — to recompute, turning a long shuffle into repeated work. This is deployment guidance,
-not a correctness gate: the result is bit-for-bit regardless.
+   for workers in (1, 3):
+       result = run_repartition(NumpyBackend(), src_blocks, parts=4, workers=workers)
+       print(
+           f"workers={workers}",
+           "producer tasks:", result.witness.n_producer_tasks,
+           "rows per dest:", {d: len(b) for d, b in sorted(result.value.items())},
+       )
+       print("           dest block hashes:",
+             {d: h[:12] for d, h in sorted(result.dest_block_hashes.items())})
+
+.. code-block:: text
+
+   workers=1 producer tasks: 1 rows per dest: {0: 73, 1: 84, 2: 79, 3: 64}
+              dest block hashes: {0: '92c450428ea0', 1: '290688d8c484', 2: '902bacbe965c', 3: '75de0dd7fb55'}
+   workers=3 producer tasks: 3 rows per dest: {0: 73, 1: 84, 2: 79, 3: 64}
+              dest block hashes: {0: '92c450428ea0', 1: '290688d8c484', 2: '902bacbe965c', 3: '75de0dd7fb55'}
+
+Three things to read off that output. Six source blocks became one producer task on one worker
+and three on three — producers scale with workers, not with inputs. Every destination's contents
+are a sha256 of its serialized bytes, so equality of those hashes *is* the determinism check:
+byte-identical bytes, not "close enough" rows. And the hashes are the same at one worker and at
+three, because producers are given contiguous ascending source ranges and each destination
+concatenates its fragments in ascending producer order. The merge order is decided by the plan,
+never by who finished first.
+
+That last property holds across engines as well as across worker counts. The single-machine
+engine, the two dask engines and the parsl engines all produce the same destination hashes on
+the same inputs, so the route you pick can change what a run costs but never what it computes.
+
+Two notes on the local entry point. ``run_repartition`` here computes every kernel in the driver
+process — the cluster it talks to is a stand-in that distributes block *storage*, so this is a
+correctness and development path, not a way to use a whole node. ``run_repartition_by_size``
+adds a target block size for when your key distribution is skewed. The relational join,
+``run_join``, is implemented in the same module but is not currently re-exported from
+``graphed_executors.local``; import it from ``graphed_executors.local.shuffle`` until it is.
 
 .. _design-transport-engine:
 
-Worker-transport engine (m44)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Letting workers exchange blocks directly
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The shuffle/join graph above lets the *scheduler* move blocks (a gather depends on its producers). The
-worker-transport engine (``graphed_executors.dask_backend.transport`` +
-``transport_peer``/``transport_shuffle``) is the alternative that implements graphed's M38
-``WorkerTransport`` **atop dask's own worker-to-worker comm layer** — the P2P-shuffle pattern: a
-``distributed.WorkerPlugin`` registers custom ops in ``worker.handlers`` and workers dial each other over
-``worker.rpc`` (the pooled ``ConnectionPool``). It hosts the M38 peer reduction and the M39–M41
-shuffle/join engine **on the workers**, moving bulk bytes worker→worker over a ``graphed_block_pull``
-handler — never through the driver — with an **O(T+P) scheduler graph** (``T`` pinned
-``_transport_map_task`` producers + ``P`` pinned ``_transport_gather_task``/``_transport_gather_join``
-consumers + an O(k) control tail): no ``T·P`` pick tier and no per-row task creation.
+On a cluster there are two ways to get a block from the worker that wrote it to the worker that
+needs it.
 
-Three design points carry the parity:
+The **scheduler-graph** route makes the exchange part of the task graph: a gather task depends on
+its producers, and the cluster's own scheduler tracks who holds what and fetches it. Completeness
+is not something the engine has to arrange — a gather cannot start before its inputs exist,
+because that is what a dependency edge means. If a worker dies, the scheduler recomputes the lost
+producer from its inputs and the result is unchanged. The cost is the ``T × P`` pick tier: one
+small task per (producer, destination) pair, so the scheduler sees a lot of tasks.
 
-- **Reader-plane budgets are a driver-side replay.** A per-*dest* gather cannot reproduce the reference
-  ``_stage2_gather``'s per-*node* shared-fetch-buffer counters (``fetch_spill_count`` /
-  ``peak_fetch_bytes``), yet the frozen goldens pin exact equality with the local engine *and* pin the
-  ``P`` gather-task count. Both hold because the reader/disk counters are computed by **replaying the
-  imported** ``_stage2_gather`` over block *sizes* at the barrier (a size-only backend + a
-  worker-address-keyed size-only cluster — ``_replay_reader_plane``), while the real bytes move
-  worker→worker through the ``P`` gather tasks. The kernel is reused verbatim, so the accounting tracks
-  the local engine bit-for-bit (``tests/extra/m44`` witnesses the replay-vs-real equality directly).
-- **Holder plane is bounded (F12).** A producer's per-dest wires live in the plugin's block store with a
-  ``holder_budget_bytes`` cap — a wire that pushes producer-local RAM over the cap spills to the worker's
-  local disk (``holder_spill_count``/``peak_holder_bytes``), so the producer store is never an unmanaged
-  memory pause/terminate trap. The block plane never routes bytes through the client.
-- **Failure = whole-run restart under a fresh epoch (§1.5).** Every run mints an epoch nonce; the plugin
-  refuses recv/pull for an unknown or purged epoch (the P2P ``run_id`` guard). The restart-worthy set is:
-  a lost peer send that exhausts its bounded at-least-once retry (``TransportDeliveryError``); a block-pull
-  that times out against a slow/dead holder (``PullTimeoutError`` — the pull ceiling is the caller-settable
-  ``pull_timeout_s``, so a legitimately large batch widens it before the restart budget burns); a peer
-  reduction that completes with **no captured root** (also a ``TransportDeliveryError`` — never a silent
-  ``plan.empty()``); and a worker death (``KilledWorker``). Any of these restarts the whole run under a new nonce (re-reading the surviving worker set
-  so the restart pins onto survivors) up to ``epoch_restarts_allowed``, then an attributed ``StageError``
-  naming the victim — never a raw ``KilledWorker`` and never a hang (a hard-timeout-guarded gate proves
-  it). Because setup can run during a nanny **restart**, the plugin's handler-seam canary is a *bounded*
-  self-RPC that falls back to a direct handler-dispatch check when the worker's server is not yet
-  accepting — a self-RPC that blocked startup would hang every subsequent ``client.run`` against the
-  restarted worker.
+The **worker-to-worker** route runs the exchange on the workers themselves. A plugin adds a pull
+handler to each worker; workers dial each other directly over the cluster's own worker-to-worker
+connections and never route bulk bytes through your driver. The scheduler sees ``T`` producers
+plus ``P`` consumers plus a short control tail — ``O(T + P)`` tasks instead of ``T × P``, with no
+per-row task creation. A destination coalesces its requests to one per holding worker, so a
+thousand readers never hit one worker with a thousand separate requests at the same instant.
 
-.. _design-budget-honesty:
+The blocks a producer is holding for other workers live in that worker's block store, capped by
+``holder_budget_bytes``: a block that would push the producer over the cap spills to that
+worker's local disk instead of growing its resident set until the nanny kills it. The bytes never
+pass through the client either way.
 
-Honesty about what the budgets and witnesses mean
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. _design-budget-scope:
 
-Three things are deliberately *not* what a first read might assume, and the frozen goldens are honest
-only because of them:
+What each budget actually limits
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- **The reader-plane budgets drive the driver-side accounting replay ONLY.** ``fetch_budget_bytes`` /
-  ``disk_budget_bytes`` bound (and are witnessed by) ``_replay_reader_plane``, which re-runs the imported
-  ``_stage2_gather`` accounting over block *sizes* at the barrier. They do **not** cap a live reader on a
-  worker: the real per-*dest* ``_transport_gather_task`` pulls its fragments, holds *one* dest resident,
-  concats, and returns — there is **no runtime reader-side fetch buffer and no runtime reader spill**. The
-  producer/holder plane *is* really bounded and really spills (``holder_budget_bytes`` → ``holder_spill_count``);
-  the reader budgets are an accounting model of the reference engine, not a runtime backpressure knob here.
-- **``DaskWorkerTransport.send`` retries INLINE, blocking the actor thread — unlike the Protocol.** The M38
-  ``WorkerTransport.send`` contract is non-blocking; this dask implementation instead does a bounded
-  at-least-once retry *synchronously* inside ``send`` (``SEND_RETRIES`` × ``SEND_ATTEMPT_TIMEOUT_S`` ≈ up to
-  ~25 s of wall time, plus backoff, blocking the seceded peer actor's task thread) before raising
-  ``TransportDeliveryError``. This is the deliberate trade: the un-editable ``_peer.py`` consumers ignore
-  ``send``'s bool, so at-least-once delivery has to be *inside* ``send`` or a dropped reduction message is
-  lost silently. It is correct but not the Protocol's latency profile.
-- **The bulk-fetch witnesses map to real RPCs only up to coalescing.** ``bulk_fetch_count`` /
-  ``cross_node_fetches`` come from the replay, which coalesces a dest's fragments per node; the real gather
-  coalesces per *holder* and issues one ``graphed_block_pull`` RPC per ``(dest, holder)``. So the witnessed
-  counts can **undercount** the real per-``(dest, holder)`` RPC total. The frozen bound (``≤ P·k``) stays
-  honest because ``k`` holders × ``P`` dests is the ceiling either way; the witness is a lower-bound-safe
-  model of the real bulk traffic, not a per-RPC ledger.
+Three things here are narrower, or slower, than their names suggest. Knowing which is which is
+the difference between tuning a run and thinking you tuned it.
 
-.. _design-m44-limitations:
+* **``holder_budget_bytes`` is a real cap on a real thing.** It bounds the blocks a producer is
+  holding for others, and exceeding it really does spill to that worker's disk — the spill count
+  and peak bytes come back in the counters.
+* **``fetch_budget_bytes`` and ``disk_budget_bytes`` are accounting, on the worker-to-worker
+  route.** Under that route a gather task pulls its fragments, holds one destination resident,
+  concatenates and returns; there is no live read-side fetch buffer and nothing spills on the
+  read side. The two budgets drive a driver-side model that reproduces the single-machine
+  engine's read-plane numbers so the counters stay comparable between engines. They are not
+  back-pressure here. On the single-machine engine they *are* live caps.
+* **A failed send blocks the worker that issued it.** Delivery is retried inside the ``send``
+  call itself — five attempts of five seconds each, plus backoff, so up to roughly half a minute
+  — before ``TransportDeliveryError`` is raised. It has to be inside the call, because a
+  reduction message dropped outside it would vanish with no trace. Budget for the latency; it is
+  not a hang.
 
-Known limitations (m44)
-^^^^^^^^^^^^^^^^^^^^^^^^^
+The bulk-transfer counters are likewise a model, not a per-request ledger: they group a
+destination's fragments per node, while the real gather groups them per holding worker, so the
+reported count can be lower than the number of requests actually issued. The ceiling — one
+request per (destination, holder) pair — holds either way.
 
-Recorded rather than fixed (all are phase-barriered — none can corrupt a result, and the reviewer raised
-them as nits, not blockers):
+.. _design-transport-limitations:
 
-- A gather that owns a fragment on its *own* worker still pulls it over a loopback ``graphed_block_pull``
-  RPC instead of reading the local store directly (a small self-pull cost, never a correctness issue).
-- The holder store lock is held across the spill *write* (disk IO under the lock); the serving handler
-  contends for it only during a spill, and a run is phase-barriered (all producers finish before any
-  gather), so it cannot stall a live pull today.
-- The per-epoch counter probe reads block-store sizes on the IO loop; on a very large store this is a small
-  loop-thread cost. Witness counters are per-worker dicts updated without a lock — safe only because the
-  phase barrier means no two task threads touch the same epoch's counters concurrently.
-- **Peer-mode M37 telemetry is not wired (``emit=False``).** ``transport_run_plan`` accepts ``monitor`` for
-  signature parity but does not emit peer-reduction telemetry over the transport — a Phase-2 follow-up.
-- A **zero-worker** cluster (or one where every root is withheld) no longer stalls: the R2 no-captured-root
-  raise turns it into an attributed ``StageError`` / restart, never a silent identity value or a hang.
+What the direct exchange does not do yet
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Determinism is unchanged from the shuffle graph: the same ascending-src merge makes
-``dest_block_hashes`` byte-identical to the local engine and across runs, and the peer reduction's fixed
-``(level, pos)`` ownership makes the reduced value bit-for-bit the ``SequentialRunner`` baseline. dask
-stays an optional extra: ``transport_peer``/``transport_shuffle`` import on the dask-free matrix (the
-``distributed``-touching code is deferred into function bodies).
+None of these can affect a result; each phase completes before the next begins.
+
+* A gather that happens to need a fragment already on its own worker still asks for it over a
+  loopback request instead of reading the local store. A small cost, never a wrong answer.
+* The block store's lock is held across a spill write, so the serving handler waits on disk
+  during a spill. Because producers all finish before any gather starts, this cannot delay a
+  live pull today.
+* Live run monitoring is not wired through the worker-to-worker route: it accepts ``monitor=``
+  for signature parity but does not emit events over the transport. Use the scheduler-graph
+  route if you want a live dashboard during a shuffle.
 
 .. _design-facade:
 
-Choosing an engine — the shuffle facade (m45)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Choosing a shuffle engine
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Two dask shuffle engines is one knob too many for most callers, so ``graphed_executors.dask_backend.api``
-is the **front door**: ``run_repartition`` / ``run_join`` take a single ``shuffle_method`` and dispatch
-over both. It is a thin dispatcher — zero engine logic — imported dask-free at module load like the
-engines it fronts.
+``run_repartition`` and ``run_join`` in ``graphed_executors.dask_backend`` (and their parsl
+counterparts) are the front door over both routes, with one knob. On dask, call
+``dask_transport_setup(client)`` once per client before the first exchange — it is idempotent,
+and it is what the worker-to-worker route needs, including when the default picks it for you.
 
-``shuffle_method`` takes three values:
+* ``shuffle_method="tasks"`` — always the scheduler-graph route.
+* ``shuffle_method="transport"`` — always the worker-to-worker route.
+* ``shuffle_method="auto"`` (the default) — the worker-to-worker route if the backend can both
+  pin a task to a named worker and move data between workers; otherwise the scheduler-graph
+  route.
 
-- ``"transport"`` — always the m44 worker-transport engine (the m44 pin/peer gate raises its own
-  ``NotImplementedError`` if the backend can't support it; the facade adds nothing).
-- ``"tasks"`` — always the m43 as-tasks future-graph engine.
-- ``"auto"`` (default) — **capability-static**: the transport engine iff the backend advertises BOTH
-  ``pin_to_worker`` and ``peer_data_movement``, else the as-tasks engine. Resolution is a pure function of
-  ``dbackend.capabilities`` — no size heuristics, and it does **not** inspect cluster elasticity.
+``"auto"`` reads the backend's declared capabilities and nothing else — no size heuristics, no
+look at the live cluster. That is what makes the choice reproducible: every worker resolves it
+identically from the plan, and two runs of the same plan take the same route.
 
-**Fixed vs adaptive clusters.** ``"auto"`` keys only on capabilities, not on whether workers come and go.
-The transport engine strict-pins tasks to specific workers, so on an *adaptive/elastic* cluster (workers
-joining and dying) prefer ``shuffle_method="tasks"`` explicitly — the as-tasks future graph lets the dask
-scheduler recompute lost stage-1 blocks, whereas a pinned owner that leaves forces a whole-run epoch
-restart. On a fixed cluster, ``"auto"`` (transport) minimises interpreter touchpoints.
+It also means ``"auto"`` does not know whether your cluster is elastic. **On a cluster where
+workers come and go, ask for ``"tasks"`` explicitly.** The worker-to-worker route pins tasks to
+specific workers, so an owner that leaves forces a whole-run restart, while the scheduler-graph
+route just recomputes the lost blocks. On a fixed pool, ``"auto"`` is the cheaper choice.
 
-**Knob honesty.** ``salt`` (and ``on`` / ``how`` / ``broadcast`` / ``mem_budget_bytes`` on joins) are
-common and forward on both paths — ``mem_budget_bytes`` bounds the join working set on *either* engine.
-The transport-only knobs (``n_tasks`` / ``fetch_budget_bytes`` / ``disk_budget_bytes`` /
-``holder_budget_bytes`` / ``pull_timeout_s`` / ``epoch_restarts_allowed`` on repartition;
-``holder_budget_bytes`` / ``pull_timeout_s`` / ``epoch_restarts_allowed`` on join) raise a ``ValueError``
-naming the knob if you set one while resolution lands on ``"tasks"`` — never a silent drop. Validation runs
-*after* resolution, so ``"auto"`` degrading to tasks with an explicit transport knob raises too. Callers
-needing ``monitor=`` / ``retries=`` use the still-public ``dask_run_*`` / ``transport_run_*`` entry points.
+Knobs that mean something on both routes — ``salt``, and ``on`` / ``how`` / ``broadcast`` /
+``mem_budget_bytes`` on joins — are forwarded either way. Set a worker-to-worker-only knob
+(``n_tasks``, the byte budgets, ``pull_timeout_s``, ``epoch_restarts_allowed``) on a run that
+resolves to the scheduler-graph route and you get a ``ValueError`` naming the knob, before
+anything is submitted. The check runs after resolution, so ``"auto"`` landing on the
+scheduler-graph route raises too — a knob you set is never quietly dropped.
 
-**Result shape + observability.** The facade returns the engine's own result unchanged — a union
-``ShuffleResult | TransportShuffleResult`` whose portable contract is the common triple
-``dest_block_hashes`` / ``value`` / ``witness``. The engine-specific extra is also a resolution witness: a
-result carrying ``.transport`` proves the transport engine ran, ``.partitions`` the as-tasks engine — handy
-for "why was ``auto`` slow on my adaptive cluster?".
+Both routes return the same portable triple: the destination block hashes, the value, and a
+counters object. The engine-specific extra doubles as proof of which route ran, which is the
+first thing to look at when ``"auto"`` was slower than you expected.
 
-What is *not* distributed here (checkpoint scope)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The dask backend executes ``execution.Plan``\ s and shuffle/join stages (see above).
-Checkpoint/resume is **out of scope**: ``run_resumable``/``run_shuffle_resumable`` are self-driving
-loops over a *local* content-addressed store, not ``Executor`` consumers, so
-``run_resumable(executor=dask_runner(...))`` does not exist. Journaled, resumable execution on dask
-needs a distributed content-addressed store and belongs with the Phase-2 store data plane.
+.. _design-one-engine-many-clusters:
+
+One engine, many clusters
+-------------------------
+
+The cluster libraries all offer roughly the same thing — submit a function, get a future — and
+differ in what else they can do. Rather than write an executor per library, there is one engine
+over a small protocol, ``graphed_executors.submit.SubmitBackend``: ``submit`` with an explicit
+key, ``broadcast`` to place a payload once, a driver-side event subscription, ``cancel`` and
+``close``.
+
+What varies between libraries is declared, per backend instance, as seven flags: can data move
+between workers, can a payload be scattered once, can a task be pinned to a named worker, are
+there per-task retries, per-task resources, cancellation of a running task, a worker-side file
+cache. The engine may use a capability only behind an explicit check, and **both execution paths
+are correct with all seven false** — that is the floor a new backend has to clear, not a
+target it has to reach.
+
+One more backend ships alongside the cluster ones. ``ThreadBackend``, from
+``graphed_executors.submit``, runs any plan through this engine with no extra dependencies at
+all — the quickest way to exercise the cluster code path from a notebook or a test. Its flags
+differ from dask's on five of seven, so running the same suite through both is what keeps the
+engine correct across capability variation rather than merely correct on dask.
+
+A flag says what the *library* supports, not what is wired today. ``DaskBackend`` reports
+per-task resources and worker pinning — dask really has them — but a plan's per-task resource
+hints are not forwarded to ``client.submit``, because dask treats a resource request as a hard
+constraint and an unsatisfiable one would park the task forever. Shape the cluster instead:
+make the workers uniform for the work you are sending.
+
+.. _design-dask-backend:
+
+On a dask cluster
+~~~~~~~~~~~~~~~~~
+
+``graphed_executors.dask_backend`` (the ``[dask]`` extra) runs the same ``Plan`` on a
+``dask.distributed`` cluster used as a plain scheduler — no dask collections, no high-level
+graph, no dask-awkward. It submits opaque callables with explicit keys and future-dependency
+edges, and inherits determinism, straggler tolerance and intact errors rather than re-deriving
+them. :doc:`dask` is the how-to; what follows is why the pieces are shaped the way they are.
+
+**The reduction is the same tree.** Leaves are ``process`` tasks; the merges are submitted up
+front with future dependencies in exactly the ``plan_tree`` shape. The driver waits on one root
+future. dask resolves each merge's arguments on whichever worker runs it and fetches inputs
+between workers, so the merges run off your submit node; a slow leaf blocks only its own path.
+Intermediates are released as their parent consumes them, so only ``O(log N)`` of them are live
+at once. The grouping is fixed by leaf index, never by submission or arrival order — which is the
+difference from an arrival-batched reduction, where the grouping varies with the order futures
+happen to be submitted.
+
+**Keys are explicit and unique per run.** Every submit carries a namespaced key of the form
+``graphed-<plan fingerprint>-<nonce>-leaf|combine-<i>``, submitted with ``pure=False``. The
+prefix makes a collision with one of your own key strings impossible; ``pure=False`` stops dask
+deduplicating two reads of *different* byte ranges that happen to hash alike; the per-run nonce
+makes a second ``run()`` on the same client actually re-execute instead of handing back the
+first run's cached futures.
+
+**Your pickled functions ship once.** ``process`` and ``combine`` are placed as a single
+identity future and referenced by every task, rather than re-serialized per task, and a
+worker-side token cache deserializes them once per worker however many tasks it runs. This is
+placement by submit rather than by ``scatter``, whose worker-discovery timeout misbehaves on a
+cluster that has scaled to zero. ``replicate_broadcast=True`` spreads the payload's replicas if
+you find leaves clustering onto the worker that first received it.
+
+**Files open once per worker.** A worker plugin holds one resource set per dask worker, so
+``open_once`` gives you the same file locality it does locally. It is registered idempotently, so
+workers that join late — an adaptive cluster, a batch queue trickling jobs in — get it too.
+
+**Monitoring rides dask's own event channel.** Workers log to a per-run namespaced topic, the
+driver subscribes for the duration and releases it in a ``finally`` once trailing events drain.
+As locally, emission is off the data path and errors are swallowed.
+
+Everything that touches dask lives under ``dask_backend`` and is imported lazily, so importing
+``graphed_executors`` on a machine without dask installed works fine.
 
 .. _design-deployment:
 
 Deployment recipes
-~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^
 
-The public seam is a **ready** ``distributed.Client`` — cluster construction (``LocalCluster``,
-``SLURMCluster``, ``LPCCondorCluster``) is out-of-band user code. Produce a client, hand it to
-``dask_runner``::
+The only thing the backend wants is a **ready** ``distributed.Client``. Building the cluster is
+yours; hand over the client and the rest is unchanged. The batch recipes below are
+site-dependent — the syntax is right, the values are yours:
 
-    import numpy as np
-    from distributed import Client, LocalCluster
-    from graphed.core import Partition, Plan, Task
-    from graphed_executors.dask_backend import dask_runner
+* **SLURM, via dask-jobqueue.** ``SLURMCluster(cores=…, memory=…, walltime=…, interface="ib0",
+  worker_extra_args=["--lifetime", "55m", "--lifetime-stagger", "4m"])``, then
+  ``cluster.scale(jobs=N)``. Jobs are not workers — ``scale`` converts by ``worker_processes``.
+  Point ``local_directory`` at node-local scratch, never a network mount. Size ``scale`` to the
+  plan and use ``adapt()`` only to absorb the tail.
+* **LPC HTCondor, via lpcjobqueue.** ``Client(LPCCondorCluster(ship_env=…, image=…))``, minding
+  the CVMFS singularity image, the shipped environment, the worker port band, and the
+  graceful-then-``condor_rm`` teardown. This is a pattern, not a dependency — nothing here
+  imports lpcjobqueue.
+* **Preemptible queues.** Set ``--lifetime`` strictly below the queue walltime so workers drain
+  themselves and migrate their in-memory keys to peers instead of being killed outright, add a
+  ``--lifetime-stagger``, and raise ``distributed.scheduler.allowed-failures`` to 5–10 so
+  innocent tasks on evicted workers are not blamed. With draining, in-flight leaves reroute and
+  the tree is unaffected, because the grouping is by index and not by worker.
+* **Preemption during a long exchange.** A producer recomputes from scratch if its worker dies,
+  so set ``--lifetime`` comfortably above a single producer's runtime. Otherwise a worker
+  evicted mid-exchange forces its producer — and every gather depending on it — to recompute.
+  This costs time, never correctness.
+* **Match versions.** Keep ``dask``, ``distributed`` and ``graphed`` the same on client and
+  workers; ``client.get_versions(check=True)`` tells you.
+* Use ``processes=True`` with one thread per worker for GIL-holding compiled stages, and
+  ``dashboard_address=":0"`` on a local cluster to avoid a port clash.
 
-    def count(partition, resources):          # module-level: picklable + spawn-safe
-        return np.asarray([partition.entry_stop - partition.entry_start])
-    def add(a, b):  return a + b
-    def zero():     return np.zeros(1, dtype=int)
-
-    if __name__ == "__main__":                # processes=True nannies re-import __main__
-        parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
-        plan  = Plan(process=count, combine=add, empty=zero,
-                     tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
-        with LocalCluster(n_workers=2, processes=True, threads_per_worker=1,
-                          dashboard_address=":0") as cluster, Client(cluster) as client:
-            with dask_runner(client) as runner:
-                runner.run(plan).value        # -> array([700])
-
-``processes=True`` + one thread per worker suits GIL-holding compiled HEP stages; the random dashboard
-port avoids ``EADDRINUSE``. Batch clusters follow the same "produce a Client" shape (recipes are
-**site-dependent** — syntax shown, not run in CI):
-
-* **SLURM (dask-jobqueue)** — ``SLURMCluster(cores=…, memory=…, walltime=…, interface="ib0",
-  worker_extra_args=["--lifetime", "55m", "--lifetime-stagger", "4m"])`` then
-  ``cluster.scale(jobs=N)`` (jobs ≠ workers — ``scale`` converts by ``worker_processes``).
-  ``local_directory`` must be node-local scratch, not a network mount. Size ``scale`` to the Plan and
-  use ``adapt()`` only to absorb the tail.
-* **LPC HTCondor (lpcjobqueue)** — ``Client(LPCCondorCluster(ship_env=…, image=…))``; mind the CVMFS
-  singularity image, the shipped venv, the worker port band, and the graceful-then-``condor_rm``
-  teardown. graphed-executors takes **no** lpcjobqueue (or coffea) dependency — this is a pattern.
-* **Preemption** — set ``--lifetime`` strictly below the queue walltime (workers self-drain via
-  ``close_gracefully``, migrating in-memory keys to peers instead of a hard kill) with a
-  ``--lifetime-stagger``, and raise ``distributed.scheduler.allowed-failures`` to 5–10 on
-  preemption-prone queues so innocent tasks on evicted workers are not blamed. With draining, in-flight
-  leaves reroute and the fixed tree is unaffected (grouping is by index, not worker). Keep the same
-  ``dask``/``distributed``/``graphed`` versions on client and workers (``client.get_versions(check=True)``).
-* **Per-task resources are not enforced yet.** Even on a resource-provisioned cluster (e.g. GPU
-  workers advertising ``resources={"GPU": 1}``), a Plan's per-task ``resources`` hints are dropped —
-  this adapter does not forward them to ``client.submit``, because an unsatisfiable request would
-  stall the task in no-worker state. Provisioning them is a future opt-in; today, pin resource-bound
-  work by shaping the cluster (all workers uniform) rather than by per-task hints.
-
-**Free-threaded 3.14t is not supported for the dask backend** — upstream ``distributed`` has no
-free-threaded build (its ``py314t`` CI is commented out, "WIP - tests don't pass yet"). The
-``test-dask`` CI job pins GIL builds (py 3.12 + 3.14); the local executors keep their 3.14t story.
-
+Free-threaded CPython (3.14t) is not available for the dask backend, because upstream
+``distributed`` has no free-threaded build yet. The local executors keep theirs.
 
 .. _design-parsl-backend:
 
-How the parsl backend works
----------------------------
+On a parsl pool
+~~~~~~~~~~~~~~~
 
-The parsl backend (:mod:`graphed_executors.parsl_backend`, behind the optional ``[parsl]`` extra)
-runs the same ``Plan`` and shuffle contracts over a `parsl <https://parsl-project.org>`_ executor,
-via the *same* :class:`~graphed_executors.submit.protocol.SubmitBackend` seam the dask backend uses.
+``graphed_executors.parsl_backend`` (the ``[parsl]`` extra) runs the same plans and the same
+exchange contracts over a parsl executor, through the same protocol. :doc:`parsl` is the how-to;
+the design points that matter are these.
 
-**Direct executor submit — no DFK.** :class:`~graphed_executors.parsl_backend.backend.ParslBackend`
-takes a **started** ``HighThroughputExecutor`` (or ``ThreadPoolExecutor``) and calls its public
-``executor.submit(func, resource_specification, *args)`` directly. It deliberately does *not* go
-through ``parsl.load`` / the DataFlowKernel: the DFK unwraps future args on the head node anyway, so
-it would add a global singleton and config-global retries/caching (which fight the determinism gate)
-for zero capability gain. :func:`~graphed_executors.parsl_backend.launch.start_htex` encodes the
-three integration moves a DFK normally performs (set ``run_dir``; create ``provider.script_dir``;
-``scale_out_facade(init_blocks)`` after ``start()``) and pins the fixed-blocks posture
-(``init_blocks == min_blocks == max_blocks``) — it is both the canonical recipe and the drift canary
-for parsl's weekly CalVer.
+**It submits to the executor directly.** ``ParslBackend`` takes a *started*
+``HighThroughputExecutor`` (or ``ThreadPoolExecutor``) and calls its ``submit`` — it does not go
+through parsl's DataFlowKernel. The DataFlowKernel resolves future arguments on the submit host
+anyway, so routing through it would add a process-global singleton and config-wide retries and
+caching, which fight the reproducibility guarantee, in exchange for nothing.
 
-**The capability floor, per instance.** Capabilities are derived from the executor *type*, honestly:
-``ParslBackend(HighThroughputExecutor)`` is the **all-seven-False "parsl floor"** — future args are
-resolved on the submit host (so ``peer_data_movement`` is False *even when* a peer-transport plane
-exists; reporting it True would falsely open the m43 ``_require_peer`` gate to head-node routing),
-broadcast reships per task, and there is no pinning / per-task retries / per-task resources /
-running-cancel / worker file cache. ``ParslBackend(ThreadPoolExecutor)`` is the
-:class:`~graphed_executors.submit.threadpool.ThreadBackend` shape (``peer_data_movement=True`` alone —
-same-process shared memory). Any other executor type is refused with a ``TypeError`` naming both
-verified classes — per-instance honesty means not vouching for an executor the plan has not verified.
+**Your merges run on your submit node, not between workers.** That same argument-resolution rule
+is why: a merge task is submitted with two partials as arguments, and HTEX pulls both to the
+submit host before the task is dispatched. The grouping and therefore the answer are unchanged —
+this is the fixed tree either way — but every leaf partial and every intermediate crosses your
+driver, so a parsl pool wants small partial results. Histograms are; per-event arrays are not.
 
-**The worker seam.** ``ParslBackend.submit`` resolves any future args driver-side (``.result()``),
-then wraps the task fn in a module-level shim (:mod:`graphed_executors.parsl_backend._shim`) — after
-any spy seam, so a submitted-fn-name witness records the raw fn. On the worker the shim installs a
-``WorkerEnv`` whose ``resources`` is a process-global ``LocalResources`` (so ``open_once`` file
-locality holds across the many tasks a reused worker runs), whose ``worker`` identity is recomputed
-in-task from parsl's own ``PARSL_WORKER_POOL_ID``/``PARSL_WORKER_RANK`` env vars, and whose ``emit``
-**buffers** events (parsl has no worker-to-driver event channel) to ride back with the task result
-and be dispatched driver-side at completion granularity. The module imports parsl nowhere at load
-(the ``_lazy`` accessor + the parsl-free shim), so importing the package leaves parsl out of
-``sys.modules``.
+**A parsl pool is the all-false capability floor.** HTEX resolves future arguments on the submit
+host, so it declares no worker-to-worker data movement, no pinning, no per-task retries or
+resources. That is the case the engine is built to be correct in, and it is why the default
+exchange route on parsl relays through your submit node: producers write, the driver takes
+delivery once at a barrier, regroups each destination locally, and hands ``P`` gathers their
+fragments as concrete arguments. The scheduler sees ``T + P`` tasks and no pick tier. The cost is
+real and is reported rather than hidden — the counters carry the fact that the driver relayed and
+how many bytes went through it.
 
-**The relay shuffle engine.** HTEX resolves future args on the submit host, so the m43 as-tasks
-engine's peer gate (:func:`~graphed_executors.common.tasks_engine._require_peer`) correctly refuses
-it — a peer shuffle needs worker-to-worker data movement HTEX cannot do. The parsl backend instead
-ships the **relay engine** (:mod:`graphed_executors.common.relay_engine`), the honest head-node
-workflow: ``T = min(n_workers, n_src)`` producer maps submit ``_dask_map_write`` (the m43 body
-unchanged); the driver resolves the map payloads at a barrier (bulk data arrives at the submit host
-once), regroups each destination by calling ``_dask_pick`` **locally** (a dict lookup — zero pick
-tasks), and submits ``P`` gathers with the picked wire fragments as concrete args (data leaves the
-submit host once). The scheduler sees ``T + P`` tasks and zero picks — the optimal head-node shape
-(the m43 ``T·P`` pick tier would re-ship each producer's whole payload per destination). The task
-bodies, kernels, and result assembly are the *same objects* the dask shim gates, so
-``dest_block_hashes`` are byte-identical to the local and dask engines — only the pick tier moves
-driver-side. The whole-barrier driver residency (≈ total shuffle bytes) *is* head-node routing, made
-per-run observable by the ``RelayShuffleWitness`` (``head_node_routed=True`` + ``driver_relay_bytes``).
-A parsl ``ThreadPoolExecutor`` reports ``peer_data_movement=True``, so the m43 engine (moved verbatim
-to :mod:`graphed_executors.common.tasks_engine`, keeping its ``_dask_*`` names so the frozen Counter
-gates stay green) runs over *it* unchanged.
+**There is a direct worker-to-worker route, and it is opt-in.** parsl exposes no in-memory
+transfer between workers, so graphed builds its own overlay when you ask for
+``shuffle_method="transport"``: one persistent task per worker slot, each minting an HTTP
+endpoint in-task, announcing itself to a rendezvous endpoint on the driver, and waiting on a
+barrier until every peer has announced before the driver broadcasts the assembled address book.
+No peer can send to an inbox that does not exist yet, because nobody has an address until all of
+them do. Blocks then move peer to peer, coalesced to one request per holder and evicted after
+serving; the driver's endpoint carries control traffic only.
 
-**The peer-exchange transport engine.** The relay engine is honest but head-node-bound. For
-fixed-size pools where worker-to-worker dialability holds, the parsl backend also ships a **true
-peer-exchange engine** (opt-in via ``shuffle_method="transport"`` on an HTEX instance) that never
-routes bulk bytes through the driver. parsl exposes no worker-to-worker in-memory transfer — the
-DataFlowKernel resolves futures on the head node, and TaskVine's peer transfer is file-cache-only —
-so graphed builds its own overlay: ``k`` persistent peer tasks (one per worker slot; they
-gang-schedule by slot saturation, so no ``pin_to_worker`` is needed), each of which **mints its own**
-``EscalatingHttpTransport`` **endpoint in-task**, announces a ``hello`` to a driver-hosted rendezvous
-endpoint, and **blocks on a barrier until all k hellos arrive** before the driver broadcasts the
-assembled ``addr → host:port`` registry. No peer holds the address book — so no send can race a
-missing inbox — before every inbox exists (the pre-created-inbox obligation, subsumed by
-construction). Blocks then travel peer↔peer over the plane's ``/pull`` route, coalesced to one
-request per holder (the ``≤ k·k`` incast bound, witnessed by ``pull_requests_served``) and evicted
-after serve; the driver's endpoint sees only control traffic. The peer bodies are the *same* M38
-reduction and M39–M41 shuffle/join actors the local engine runs, hosted unchanged (the shuffle leg
-is a deferred import), so ``dest_block_hashes`` stay byte-identical to the local, relay, and dask
-engines: the engine you pick can never change a result.
+**Reachability is checked, not assumed.** Whether two parsl workers can dial each other is a
+property of your site — NAT, firewalls, multi-node overlays — not of parsl. So a probe runs at
+rendezvous time, before any data moves. ``on_unreachable="error"`` (the default) raises an
+attributed ``StageError`` naming the unreachable pair; ``on_unreachable="fallback"`` re-runs the
+relay route on the same inputs and records why in the counters, so a fallback is never silent.
+``probe_peer_reachability`` runs the same check as a pre-flight. Recovery from a failure mid-run
+is the whole-run epoch restart described above.
 
-**"The cluster decides, not the broker."** Worker-to-worker reachability is a property parsl never
-guarantees (NAT, firewalls, multi-node overlays), so a **runtime reachability probe** runs at
-rendezvous time, before any data moves. ``on_unreachable="error"`` (the default) raises an attributed
-``StageError`` naming the unreachable pair; ``on_unreachable="fallback"`` transparently re-runs the
-relay engine on the same inputs and records ``witness.fallback_reason`` (observable, never silent).
-``probe_peer_reachability`` exposes the same probe as an optional pre-flight. Recovery is **whole-run
-epoch restart**: an exhausted escalating send, a timed-out pull, a lost peer, or a reduction that
-captures no root restarts the run under a fresh epoch nonce, re-reading the surviving worker set
-(``_resolve_k`` degrades a shrunken cluster to ``min(workers, live n_workers())`` so the restart pins
-onto survivors) up to ``epoch_restarts_allowed`` (default 1); an exhausted budget surfaces an
-attributed ``StageError`` naming the death — never a raw parsl exception, never a hang. The reduction
-counterpart ``parsl_run_plan`` runs a whole ``Plan`` as this k-peer reduction, bounding the driver's
-root wait with ``root_timeout_s`` and **deriving** the peer idle deadline as ``root_timeout_s + slack``
-so it always stays ≥ the root wait. Critically, ``peer_transport`` is a parsl_backend-private
-attribute (``True`` for HTEX, ``False`` for a ``ThreadPoolExecutor``), **not** a capability flag:
-advertising ``peer_data_movement=True`` would falsely open the m43 ``_require_peer`` gate to head-node
-routing, so the transport engine is reached explicitly and never by ``"auto"`` (no parsl vector
-carries both ``pin_to_worker`` and ``peer_data_movement``).
-
-**What stays Phase 2.** TaskVine's file-cache byte plane (``worker_file_cache``, native
-worker-to-worker file transfers), live M37 dashboard parity over parsl (worker events arrive at
-completion granularity today), and TLS on the graphed HTTP plane are the next milestone — see
-:doc:`improvements`.
+Because HTEX declares no worker-to-worker data movement, ``"auto"`` never selects the direct
+route on parsl — you reach it by asking for it. Declaring the capability just to force the
+choice would also tell the scheduler-graph engine that peer movement exists, and it would then
+route every block through your submit node believing otherwise.
 
 
-Phase 2 (deliberately not built)
---------------------------------
+Not supported yet
+-----------------
 
-* **Distributed executors** (TaskVine / HTCondor / Slurm) — the ``Plan`` contract, the
-  ``WorkerTransport`` seam, and the ``SubmitBackend`` protocol are built so they can be written
-  against later. The dask backend is the first real distributed backend and the parsl backend
-  (above) the second; both ship a peer-exchange transport shuffle engine (parsl additionally ships
-  the head-node relay for elastic or non-dialable pools).
-* NUMA-aware placement.
-* **Adaptive chunk-size policies** shipped as library code (the ``next_tasks`` hook exists;
-  policies beyond tests are user-land for now).
-* **Per-query resource hints** (memory-bound combinatoric stages want fewer concurrent
-  workers — observed empirically on trijet workloads; the executor currently treats all plans
-  alike).
+* **Checkpoint and resume on a cluster.** ``graphed.checkpoint.run_resumable`` and
+  ``run_shuffle_resumable`` are self-driving loops over a content-addressed store on the local
+  filesystem; they are not runners, so there is no ``run_resumable(executor=dask_runner(...))``.
+  Resumable execution on a cluster needs a distributed store first. Checkpoint locally, or
+  partition your run into pieces you can resubmit.
+* **TaskVine and Work Queue.** ``ParslBackend`` refuses executor types it has not verified
+  rather than guessing a capability vector, so those raise a ``TypeError`` naming the two
+  supported classes. Use HTEX.
+* **Direct HTCondor and SLURM submission.** There is no batch-system executor here; go through
+  dask-jobqueue, as in the recipes above, or a provider in your own parsl config.
+* **TLS on graphed's own HTTP exchange plane.** parsl's ``encrypted=True`` covers parsl's
+  channels, not this one. Keep an exchange inside a trusted network.
+* **Live monitoring during a parsl run.** Worker events are buffered and delivered when a task
+  completes, so a dashboard over parsl updates per task rather than continuously.
+* **Free-threaded CPython on the dask path**, as above.
+* **Convergence-based stopping.** ``next_tasks`` can stop a run on elapsed time, task counts or
+  errors; stopping when a measurement reaches a target precision is not implemented.
+* **Per-task resource hints and NUMA-aware placement.** Shape the cluster instead.
 
-See :doc:`improvements` for the live tracked list.
+:doc:`improvements` tracks these.
