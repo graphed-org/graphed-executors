@@ -1,9 +1,6 @@
 How graphed-executors works
 ===========================
 
-.. contents::
-   :local:
-
 You ran your analysis on four cores this morning. Tonight the same plan runs on four hundred,
 and next month a colleague reruns it on a machine you have never seen. Do the three runs agree
 to the last bit? Where does the merging actually happen, and what does it cost? And when worker
