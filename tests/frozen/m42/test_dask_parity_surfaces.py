@@ -15,6 +15,7 @@ install it alongside the dask extra."""
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import pathlib
 
@@ -112,9 +113,14 @@ def _toy_external_plan(*, bind_external: bool):
         store = graphed.core.GraphStore.deserialize(compiled.ir)
         (chash,) = [n["descriptor"]["content_hash"] for n in store.nodes() if n["kind"] == "external"]
         externals = {chash: times10}
-    return aggregate_plan(
+    plan = aggregate_plan(
         out, reduce=agg_reduce, combine=agg_combine, empty=agg_empty, externals=externals
     )
+    if not bind_external:
+        # aggregate_plan auto-wires evaluators from the recording session, so externals=None is not
+        # an unbound plan; strip them to exercise a genuinely unbound External.
+        plan = dataclasses.replace(plan, process=dataclasses.replace(plan.process, externals=()))
+    return plan
 
 
 def test_external_payload_resolves_worker_side_by_content_hash(client) -> None:
