@@ -1,32 +1,42 @@
-Future improvements
+Current limitations
 ===================
 
-Catalogued, not silently dropped (plan A.7 / Part F).
+What does not work yet, and what to do instead.
 
-- **Distributed executors** (TaskVine / HTCondor / Slurm) are Phase 2; this repo is single-machine
-  only. The execution contract and the **WorkerTransport seam (M38)** are built so a real distributed
-  adapter — reusing the HTTP backend's socket transport — can be written against them.
-- **In-worker tree combines** and **work-stealing** — **done (M38):** peer reduction runs the combines
-  across the workers off the driver (the default ``comms="ipc"``); an idle worker steals one leaf from
-  a busy peer (steal-one). Remaining follow-ups: (a) **HTTP + ThreadExecutor profiling under
-  free-threaded CPython 3.14t** — excluded from the witness under the GIL (the transport + sampler
-  threads contend and the off-thread sampler can starve; with no GIL they run in parallel, so revisit
-  when 3.14t is the norm); (b) **per-combine ``on_combine`` emission** for peer (the driver reports the
-  count today); (c) a **steal-half / bulk-transfer knob** for fine-grained workloads (steal-one is the
-  coarse-partition default).
-- **Precision-based stopping** (statistical convergence) is contracted but not yet implemented.
-- **parsl peer-transport shuffle engine** — **done (m47):** on an HTEX instance,
-  ``shuffle_method="transport"`` runs the shuffle / join / reduction over ``k`` persistent peer tasks
-  that mint self-hosted HTTP endpoints, self-rendezvous through a driver barrier, and move blocks
-  worker-to-worker over a coalesced ``/pull`` route — never through the driver. A **runtime
-  reachability probe** ("the cluster decides, not the broker") gates it with
-  ``on_unreachable="error"|"fallback"``, and the unified ``shuffle_method`` facade selects it. The
-  head-node **relay** engine (m46) remains the ``"auto"`` / ``"tasks"`` default for elastic or
-  non-dialable pools. Residual follow-up: peer-mode M37 telemetry is ``emit=False`` (see below).
-- **parsl TaskVine / WorkQueue instances** — the capability model reserves ``worker_file_cache`` for
-  a file-cache peer byte plane (native worker-to-worker transfers); ``ParslBackend`` refuses those
-  executor types today rather than guess a vector.
-- **Live M37 dashboard parity over parsl** — the parsl worker shim delivers monitor events at
-  completion granularity (buffered, dispatched on result unwrap); a live back-channel (e.g. the
-  HTEX radio sender) is Phase 2. **TLS on the head-node relay/transport HTTP plane** is likewise
-  deferred (parsl's own ``encrypted=True`` does not cover the graphed plane).
+- **No TaskVine or WorkQueue support, and no direct HTCondor/Slurm submission.**
+  ``ParslBackend`` accepts parsl's ``HighThroughputExecutor`` and ``ThreadPoolExecutor`` and
+  refuses any other executor type with a ``TypeError``. To run on a batch system, keep the
+  graphed side unchanged and let the pool layer do the submission: parsl's providers
+  (``SlurmProvider``, ``CondorProvider``) under an HTEX pool, or
+  `dask-jobqueue <https://jobqueue.dask.org/>`__ in front of the dask backend. :doc:`dask`
+  carries worked recipes for the dask side; on parsl the provider goes in your own parsl
+  config and you hand the started executor to ``parsl_runner`` exactly as in :doc:`parsl`.
+
+- **Stopping on statistical convergence is not implemented.**
+  ``graphed.core.execution.StopCondition`` ends a run on an event target
+  (``target_events``), a wall-clock budget (``max_wall_s``), or an error budget
+  (``max_errors``) — not on the precision of the result. Set an event target and check the
+  uncertainty yourself between runs.
+
+- **No checkpoint/resume on a cluster.** ``graphed.checkpoint.run_resumable`` and
+  ``run_shuffle_resumable`` drive a content-addressed store on the local filesystem; the dask
+  and parsl backends run a plan start to finish. If a long cluster run dies, it starts over —
+  when that cost matters, split the work into smaller plans and combine their results.
+
+- **No TLS on graphed's own exchange plane on parsl.** ``shuffle_method="transport"`` on a
+  parsl pool moves blocks over HTTP endpoints graphed mints in-task, and parsl's
+  ``encrypted=True`` protects parsl's own channels, not those. Use it on a trusted cluster
+  network, or stay on the default route, which relays through your submit node over parsl's
+  own channels. This does not arise on dask, where blocks ride ``distributed``'s worker
+  connections and inherit whatever the cluster's comms are configured with.
+
+- **Dashboard events over parsl arrive at task completion, not live.** parsl has no
+  worker-to-driver event stream, so a task's ``started``/``finished`` events are buffered on
+  the worker and delivered together when its result comes back. Every event still arrives and
+  the result is unaffected — you just can't watch a task while it is in flight. Relatedly, on
+  either backend the worker-to-worker exchange engine reports the combine count from the
+  driver rather than emitting one event per combine.
+
+- **No free-threaded CPython (3.14t) on the dask path.** ``distributed`` has no
+  free-threaded build. The local executors run on 3.14t; on a dask cluster, use standard
+  CPython.

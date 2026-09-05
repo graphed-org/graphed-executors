@@ -1,40 +1,40 @@
 # graphed-executors
 
-Pluggable **executor backends** for [`graphed`](https://github.com/graphed-org/graphed-mvp). The
-reference single-machine one is `graphed_executors.local` (milestone M7); future backends (e.g.
-distributed) are added as sibling subpackages under their own extras. The execution *contract* lives
-in `graphed-core` (`graphed_core.execution`: `Plan`, `Task`, `Partition`, `Executor`, `Monitor`,
-`WorkerTransport`); this repo implements it for one machine and is the executor the integration
-suites run real analyses through — thousands of tiny tasks, deliberate stragglers, worker crashes.
-Part of the [graphed-org](https://github.com/graphed-org) project.
+Runners for `graphed` plans: the same analysis runs on your laptop's threads or processes, on
+a dask cluster, or on a parsl HTEX pool — you change the runner, not the analysis.
 
-> Import from `graphed_executors.local`. `import graphed_exec_local` still works as a back-compat
-> alias (the pre-rename import path), but new code should use the namespaced form.
+- **The answer doesn't depend on where you ran it.** The order partial results are combined in
+  is fixed up front, so your totals — even float histograms — come out bit-for-bit identical on
+  1 worker or 100, threads or a cluster.
+- **One slow file can't stall the run.** Every other part of the result keeps combining while a
+  straggler finishes.
+- **A failure on a worker comes back on your machine** as the exception it was, pointing at the
+  analysis line you wrote — not an opaque string from another process.
 
-A `Plan` is four pieces the executor consumes but never interprets: `process(partition, resources)`
-does one partition's work, `combine(R, R)` merges two partials associatively, `empty()` is the
-identity, and `tasks` is the fixed partition set. The executor runs them to **one reduced result**.
+## Install
 
-## The executors
+```bash
+pip install graphed-executors            # laptop runners; pulls graphed
+pip install "graphed-executors[dask]"    # + the dask.distributed backend
+pip install "graphed-executors[parsl]"   # + the parsl backend
+```
 
-All executors share one driver and differ only in the worker pool and the resource plumbing:
+Installing from source builds `graphed`'s Rust core, so you need a Rust toolchain; a plain
+`pip install` from PyPI does not.
 
-- **`ThreadExecutor`** — a thread pool; workers share the driver's address space, `open_once`
-  resources are thread-local.
-- **`ProcessPoolExecutor`** — a **spawn**-based process pool (spawn deliberately: forked CPython
-  inherits lock/allocator state that bites at scale, and spawn is the semantics every platform and
-  free-threaded build shares). `open_once` resources are a per-process global installed by the pool
-  initializer; `process`/`combine`/`empty` must be picklable.
-- **`PinnedPoolExecutor`** — the same process semantics with a bounded peer-communication footprint
-  for large many-core machines (see below).
-- **`ProcessExecutor`** — a **deprecated alias** for `ProcessPoolExecutor`.
+## Your first run
+
+A plan is your analysis packaged for a runner: `process` does one chunk's work, `combine` merges
+two partial results, `empty` is the starting value, and `tasks` lists the chunks. Here is a
+minimal hand-made plan so you can see the whole loop; the next block gets one from a real
+analysis instead:
 
 ```python
 import numpy as np
-from graphed_core import Partition, Plan, Task
+from graphed.core import Partition, Plan, Task
 from graphed_executors.local import ProcessPoolExecutor
 
-def count(partition, resources):          # module-level => picklable
+def count(partition, resources):          # module-level, so workers can import it
     return np.asarray([partition.entry_stop - partition.entry_start])
 
 def add(a, b): return a + b
@@ -44,131 +44,175 @@ parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
 plan  = Plan(process=count, combine=add, empty=zero,
              tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
-ProcessPoolExecutor(max_workers=4).run(plan).value     # -> array([700])
+if __name__ == "__main__":
+    result = ProcessPoolExecutor(max_workers=4).run(plan)
+    print(result.value)                   # [700]
 ```
 
-## Deterministic *and* straggler-tolerant tree reduction
+### The same run, from a real analysis
 
-The heart of the package (`_reduce.py`): `plan_tree(n)` builds a fixed binary combine-tree **over
-leaf indices** before anything runs; `tree_reduce` then consumes leaf results in **whatever order
-they complete** and fires each combine the moment both inputs exist. This sidesteps the usual
-either/or — combine-in-completion-order (fast but float results depend on who finished first) versus
-wait-for-all-then-reduce (deterministic but a straggler stalls everything):
-
-- **Determinism** — the grouping is a pure function of the leaf count, so the result is bit-for-bit
-  identical regardless of completion order, worker count, or executor class.
-- **Straggler tolerance** — a slow partition blocks only the `log n` combines on its own root-path;
-  every other subtree reduces meanwhile. No barrier.
-
-By default combines run on the driver thread as results arrive. `pooled_combines=True` schedules them
-onto the same worker pool (same fixed pairing, identical result) for workloads whose partials are
-heavy enough that a serial driver-side merge becomes the bottleneck.
-
-## Inter-worker comms: peer reduction + work-stealing (M38)
-
-By **default** (`comms="ipc"`) the reduction runs **across the workers, off the driver**, over the
-`graphed_core.execution.WorkerTransport` seam (`_transport.py`) — an addressable, non-blocking,
-best-effort channel. Two backends: **IPC** (`QueueTransport` over `multiprocessing.SimpleQueue`
-inboxes, no `Manager` server in the data path) for one machine, and **HTTP** (loopback HTTP server +
-a discovery handshake) as the path a real distributed scheduler reuses.
-
-- **Peer reduction** (`_peer.py`) — each worker owns a contiguous leaf range and reduces it with the
-  lazy index tree (`LazyReducer`, the same fixed `plan_tree` computed by index arithmetic so N can be
-  huge with no O(N) pre-pass). Partials straddling a range boundary are handed worker→worker by
-  ownership. Every node keeps its **global** `(level, pos)` identity, so distributing the combines
-  never changes the grouping — **bit-for-bit identical to the driver-hub path**, even for
-  non-associative float histograms. The driver only collects the root.
-- **Work-stealing** (`steal=True`, peer only) — an idle worker steals **one** leaf from a busy peer's
-  far end (Blumofe–Leiserson, not steal-half). Only the `process` work moves; the leaf's owner still
-  reduces it, so the tree and the result are unchanged. Idle delay + exponential backoff make it free
-  on balanced loads.
-
-The two process executors differ **only** in the peer pool, chosen explicitly by class (no silent
-switch): `ProcessPoolExecutor` inherits the full registry into every worker (O(N²) fds — the right,
-fastest default up to roughly the fd limit), while `PinnedPoolExecutor` pins each worker to a bounded
-O(log N) overlay (reduction targets + a hypercube lifeline graph), giving an O(N log N) registry for
-large many-core machines or low `RLIMIT_NOFILE`. `ProcessPoolExecutor` *warns* and points you at
-`PinnedPoolExecutor` when its worker count would strain the fd budget — it warns rather than
-switching, so the pool in use is always the one named at the call site.
-
-`comms=None` selects the legacy driver-hub reduction (still the path for `pooled_combines`); peer
-**refuses** `pooled_combines` loudly rather than silently degrading to the hub.
-
-## Errors cross the boundary intact
-
-A worker exception propagates to the driver as the exception it was. A `graphed_debug.StageError` —
-picklable by design — re-raises in the driver carrying the failing op, the user's source frames, and
-the failing partition. "Remote errors are opaque strings" (plan §A.3 #8) is the legacy failure this
-stack was built against; the integration suite pins the round trip under both pools.
-
-## Adaptive plans
-
-A `Plan` with a `next_tasks` hook runs as a **running fold** instead of a fixed tree: the driver
-folds results as they complete and periodically consults `next_tasks(ExecContext)` — which sees
-elapsed time, completed counts, and errors — to obtain more partitions or a stop reason. This is the
-seam for timing-aware partitioning; the fixed tree remains the path for known partition sets, where
-determinism matters most.
-
-## Persistent pools and broadcast cache
-
-`persistent=True` keeps one process pool across `run()` calls (amortizing the import-heavy spawn over
-many plans — notebooks, sweeps), released by `close()` or context-manager exit with lazy respawn:
+You do not hand-build plans in practice. Fill a histogram with `graphed-histogram` and it exports
+one; the runner is the same call. Needs `graphed-histogram` and `graphed[parquet]`:
 
 ```python
-with ProcessPoolExecutor(max_workers=4, persistent=True) as ex:
-    for plan in plans:           # one spawn, amortized over every plan
-        results.append(ex.run(plan).value)
-```
-
-The process executors **ship the `process` callable to each worker once** (M31) and keep a
-**FIFO-bounded per-worker broadcast cache** (M31/M34) kept in lockstep with the driver's token set,
-so large shared payloads are not re-pickled per task.
-
-## Live observability: the monitor seam (M37)
-
-Every executor accepts an optional `monitor=` — a passive `graphed_core.execution.Monitor` that
-*watches* a run without changing it. Each task emits one `SUBMITTED` (driver-side), then `STARTED`,
-then exactly one of `FINISHED` / `ERRORED` (worker-side). The thread pool calls the monitor in
-process; the process/peer paths forward worker events over a bounded queue drained by a driver-side
-collector thread. Emission is **best-effort, drop-on-full** — a full queue or a slow monitor drops
-events and never back-pressures a worker — so the reduced result and the combine count are
-byte-identical whether or not a monitor (even a profiling one) is attached.
-
-The monitor is whatever you pass: a tiny recorder in a test, or the live
-[`graphed_debug.Dashboard`](https://github.com/graphed-org/graphed-debug-mvp) for a web view of a
-running analysis (flamegraph included; it works under the hub and the peer paths alike):
-
-```python
-from graphed_debug import Dashboard
+import awkward as ak
+import boost_histogram as bh
+import graphed_histogram as gh
+from graphed import Session
+from graphed.awkward import AwkwardBackend, from_parquet
 from graphed_executors.local import ProcessPoolExecutor
 
-with Dashboard(profile=True) as dash:
-    ProcessPoolExecutor(monitor=dash.monitor).run(plan)
+if __name__ == "__main__":
+    ak.to_parquet(ak.Array({"pt": [[40.0, 25.0], [55.0], [30.0, 60.0, 20.0],
+                                   [80.0], [15.0, 45.0], [70.0, 10.0]]}), "events.parquet")
+
+    session = Session(AwkwardBackend())
+    events = from_parquet(session, "events", "events.parquet", steps_per_file=3)
+
+    h = gh.boost.Histogram(bh.axis.Regular(4, 0.0, 100.0), storage=bh.storage.Int64())
+    h.fill(events.pt)                     # records the fill; nothing is read yet
+
+    plan = gh.plan({"jet_pt": h})         # your analysis, packaged for a runner
+    result = ProcessPoolExecutor(max_workers=4).run(plan)
+    print(gh.unpack(result.value)["jet_pt"].values())   # [3 4 3 1]
 ```
 
-## Install
+Swap `ProcessPoolExecutor` for `dask_runner(client)` or `parsl_runner(executor)` and the rest of
+the program is untouched. If your output is not a histogram, `graphed.aggregate_plan(*outputs,
+reduce=, combine=, empty=)` exports a plan the same way from any deferred `graphed` arrays.
 
-```bash
-pip install graphed-executors          # from PyPI (pulls graphed); import graphed_executors.local
+## The one thing that's different
+
+There is no `.compute()`. You build a plan (the `Plan`, `Task`, and `Partition` types live in
+`graphed.core`, not in this package) and hand it to a runner; `run(plan)` returns a result whose
+`.value` is the reduced answer. On process pools and clusters, `process`/`combine`/`empty` must
+be module-level functions the workers can import — a lambda or a notebook-cell closure works on
+`ThreadExecutor` only.
+
+## Which runner do I want?
+
+| You are running on | Use | Import from |
+|---|---|---|
+| One process, quick check, nothing picklable needed | `ThreadExecutor()` | `graphed_executors.local` |
+| Your laptop, all cores | `ProcessPoolExecutor(max_workers=N)` | `graphed_executors.local` |
+| A many-core machine where the worker count strains the open-file limit | `PinnedPoolExecutor` | `graphed_executors.local` |
+| A dask cluster (local, dask-jobqueue, Kubernetes, …) | `dask_runner(client)` | `graphed_executors.dask_backend` |
+| A parsl HTEX pool | `parsl_runner(executor)` | `graphed_executors.parsl_backend` |
+
+(`import graphed_exec_local` still works as a deprecated alias for `graphed_executors.local`;
+use the namespaced form in new code.)
+
+TaskVine and direct HTCondor/Slurm submission aren't supported; use dask-jobqueue or parsl's
+providers to reach those batch systems.
+
+### On a dask cluster
+
+Needs `graphed-executors[dask]`. Point it at any `distributed.Client` you already have and hand
+it the same `plan` from your first run:
+
+```python
+from distributed import Client
+from graphed_executors.dask_backend import dask_runner
+
+if __name__ == "__main__":                    # needed when Client() spawns a local cluster
+    client = Client(n_workers=2, dashboard_address=":0")  # or Client("tcp://scheduler:8786")
+    runner = dask_runner(client)              # registers graphed's worker plugin on your client
+    print(runner.run(plan).value)             # [700] — same plan, same answer
+    runner.close()                            # your client stays open; close it yourself
+    client.close()
 ```
 
-From source (development — builds graphed's Rust core):
+A failed task is retried on another worker three times before the error reaches you — that is
+dask's own per-task retry, and `retries=3` is already the default. Pass `retries=0` while you are
+debugging, so a deterministic bug in your `process` surfaces on the first attempt rather than the
+fourth. A worker that dies mid-task surfaces as an error naming the task and the worker address,
+not a hang.
 
-```bash
-pip install "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"  # needs Rust
-pip install -e ".[dev,docs]"
+### On a parsl pool
+
+Needs `graphed-executors[parsl]`. HTEX workers are separate processes that do **not** inherit
+your `sys.path`, so the plan's functions must live in a module they can import — not in your
+launch script. Put them in a file of their own:
+
+```python
+# my_tasks.py — importable by the workers
+import numpy as np
+
+def count(partition, resources):
+    return np.asarray([partition.entry_stop - partition.entry_start])
+
+def add(a, b):
+    return a + b
+
+def zero():
+    return np.zeros(1, dtype=int)
 ```
 
-## Develop
+then hand `parsl_runner` any **started** parsl `HighThroughputExecutor` (or
+`ThreadPoolExecutor`); `start_htex` spins one up locally if you don't have a config of your own:
 
-```bash
-uvx prek run --all-files        # ruff (lint + format) + mypy, via .pre-commit-config.yaml
-pytest tests/frozen             # the frozen acceptance suite
-sphinx-build -W -b html docs docs/_build/html
+```python
+from graphed.core import Partition, Plan, Task
+import my_tasks
+
+parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
+plan = Plan(process=my_tasks.count, combine=my_tasks.add, empty=my_tasks.zero,
+            tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
+
+if __name__ == "__main__":
+    from graphed_executors.parsl_backend import parsl_runner, start_htex, stop_htex
+
+    htex = start_htex(workers=8, run_dir="runinfo", heartbeat_period=2)
+    try:
+        with parsl_runner(htex) as runner:    # closing the runner does not stop your executor
+            print(runner.run(plan).value)     # [700]
+    finally:
+        stop_htex(htex)                       # reaps the interchange, manager and worker
+                                              # processes; skip it and you leak them, and
+                                              # their ports, on any exception
 ```
 
-`docs/design.rst` is the engineering walkthrough; `docs/api.rst` is the API reference, generated
-automatically from the package by `sphinx.ext.autosummary` so it never drifts from the code.
+Two things bite people on HTEX:
 
-Status: see `.graphed/state.json` and `CLAUDE.md`. Defers to the root `graphed-project/CLAUDE.md`;
-the project plan always wins.
+- **Workers don't inherit your `sys.path`.** Export `PYTHONPATH` (or install your package)
+  before starting the pool, so the workers can import `my_tasks`. A plan whose functions are
+  defined in the launch script itself doesn't fail fast — the run hangs.
+- **A killed worker takes ~30 s to notice at parsl's default heartbeat.** `heartbeat_period=2`
+  brings that to ~1.65 s, so a crash is reported (and the worker respawned) promptly.
+
+## Useful knobs on the laptop runners
+
+- `persistent=True` keeps the process pool alive across `run()` calls — worth it in notebooks
+  and parameter sweeps, where the spawn cost would otherwise repeat per plan. Use it as a
+  context manager: `with ProcessPoolExecutor(max_workers=4, persistent=True) as ex:` and call
+  `ex.run(plan)` once per plan inside.
+- Call `resources.open_once(uri, opener)` inside your `process` and the worker keeps that handle
+  for its lifetime, so ten partitions of one file on one worker open it once instead of ten
+  times. The dask backend gives you the same per-worker handle through its worker plugin.
+- Every runner accepts `monitor=` — an observer that receives one event per task submitted,
+  started, and finished, without changing the run. Pass `graphed.debug.Dashboard`'s monitor for
+  a live web view.
+
+The dashboard needs `pip install "graphed[dashboard]"`. Using the `plan` from your first run:
+
+```python
+from graphed.debug import Dashboard
+from graphed_executors.local import ProcessPoolExecutor
+
+if __name__ == "__main__":                    # a spawn pool re-imports this file
+    with Dashboard(profile=True) as dash:
+        result = ProcessPoolExecutor(max_workers=4, monitor=dash.monitor).run(plan)
+    print(result.value)                       # [700]
+```
+
+## Next
+
+- [How the executors work](docs/design.rst) — why the answer is identical everywhere, what
+  happens when a worker dies, and where your combines actually run on each runner.
+- [The dask backend](docs/dask.rst) and [the parsl backend](docs/parsl.rst) in depth,
+  including repartitioning and joins on a cluster.
+- [`graphed`](https://github.com/graphed-org/graphed) — build the analysis that produces a plan,
+  and export it with `graphed.aggregate_plan`.
+- [`graphed-histogram`](https://github.com/graphed-org/graphed-histogram) — deferred histogram
+  filling, and `graphed_histogram.plan` for the block above.
+- [API reference](docs/api.rst).

@@ -1,43 +1,42 @@
-Using the dask backend
-======================
+Running on a dask cluster
+=========================
 
-This page is the **how-to** for running graphed work on a ``dask.distributed`` cluster: installing
-the extra, running a ``Plan``, repartitioning and joining blocks through the one-knob shuffle
-facade, and deploying on batch clusters. For **how it works** — the future-graph topology, the
-worker-transport engine, keys, broadcast, and the determinism contract — read
-:ref:`design-dask-backend` in :doc:`design`; this page links into it rather than repeating it.
+You already have a ``dask.distributed`` cluster — a ``LocalCluster`` on your laptop, a
+``SLURMCluster``, an LPC HTCondor pool. Hand graphed a connected ``Client`` and it runs your plan
+there: same result, same combine order, same numbers as a sequential run.
 
-Every runnable snippet below was executed against a live ``LocalCluster`` before being committed;
-the printed values in the comments are real outputs. The batch-cluster sketches near the end are
-the one exception and are explicitly marked *illustrative*.
+This page is the how-to. For *why* the answer doesn't move when the worker count does, read
+:doc:`design`.
 
 
 Installing
 ----------
 
-The dask backend lives behind the ``[dask]`` optional extra::
+::
 
     pip install "graphed-executors[dask]"    # pulls dask[distributed]>=2026.6
 
-The base package stays dask-free: the local executors (:mod:`graphed_executors.local`) and the
-submit seam (:mod:`graphed_executors.submit`) install and run without it, and even *importing*
-:mod:`graphed_executors.dask_backend` leaves ``distributed`` out of ``sys.modules`` — the import
-is deferred until you actually construct a backend, so the hinted ``ImportError`` (install the
-extra) fires at construction, not at import.
+Only the dask paths need the extra. The laptop executors and the code that runs a plan over any
+backend install and work without it, and importing :mod:`graphed_executors.dask_backend` does not
+pull ``distributed`` into your process — that happens when you build a backend, so a missing
+extra tells you at construction with a message naming the install.
 
-Keep the same ``dask``/``distributed``/``graphed`` versions on the client and the workers
-(``client.get_versions(check=True)`` verifies). **Free-threaded CPython (3.14t) is not supported
-for the dask backend** — upstream ``distributed`` has no free-threaded build yet; the local
-executors keep their 3.14t support.
+Two things worth checking before a long run:
+
+* Client and workers need the same ``dask``, ``distributed`` and ``graphed`` versions —
+  ``client.get_versions(check=True)`` says so in one line.
+* **Free-threaded CPython (3.14t) does not work with the dask backend.** Upstream ``distributed``
+  has no free-threaded build. The laptop executors do run on 3.14t.
 
 
-Quickstart: run a Plan
+Your first cluster run
 ----------------------
 
-The public seam is a **ready** ``distributed.Client`` — you build the cluster however your site
-does (``LocalCluster`` here; SLURM/HTCondor below), and hand the client to
-:func:`~graphed_executors.dask_backend.backend.dask_runner`, which registers the per-worker plugin
-and returns a :class:`~graphed_executors.submit.engine.SubmitRunner`::
+You build the cluster; graphed consumes the ``Client``.
+:func:`~graphed_executors.dask_backend.backend.dask_runner` installs graphed's per-worker plugin
+and hands you back a runner:
+
+.. code-block:: python
 
     import numpy as np
     from distributed import Client, LocalCluster
@@ -45,7 +44,7 @@ and returns a :class:`~graphed_executors.submit.engine.SubmitRunner`::
     from graphed.core import Partition, Plan, Task
     from graphed_executors.dask_backend import dask_runner
 
-    def count(partition, resources):          # module-level: picklable
+    def count(partition, resources):
         return np.asarray([partition.entry_stop - partition.entry_start])
 
     def add(a, b):
@@ -58,66 +57,145 @@ and returns a :class:`~graphed_executors.submit.engine.SubmitRunner`::
         parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
         plan = Plan(process=count, combine=add, empty=zero,
                     tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
-        with LocalCluster(n_workers=2, threads_per_worker=1, processes=False,
-                          dashboard_address=":0") as cluster, Client(cluster) as client:
+        with (
+            LocalCluster(n_workers=2, threads_per_worker=1, processes=True,
+                         dashboard_address=":0") as cluster,
+            Client(cluster) as client,
+        ):
             with dask_runner(client) as runner:
                 result = runner.run(plan)
-        print(result.value)                        # [700]
-        print(result.n_partitions, result.n_combines)   # 7 6
 
-Notes that save debugging time:
+        print(result.value)
+        print(result.n_partitions, result.n_combines)
 
-* ``process``/``combine``/``empty`` must be **module-level** (or ``functools.partial`` of
-  module-level, or frozen dataclasses) — they are pickled to the workers. Guard the driver code
-  with ``if __name__ == "__main__":`` when workers run as separate processes.
-* ``processes=False`` keeps this example fast and self-contained; on a real cluster prefer
-  process workers with ``threads_per_worker=1`` for GIL-holding compiled HEP stages, and
-  ``dashboard_address=":0"`` to dodge ``EADDRINUSE`` (see :ref:`design-deployment`).
-* ``dask_runner(client, retries=3)`` forwards ``retries`` to dask's **native** per-task retries
-  (resubmit on another worker); there is deliberately no second graphed-level retry loop.
-* ``runner.close()`` (or the ``with`` exit) does **not** close your client — you own the cluster.
-* The result is a ``graphed.core.ExecResult``: ``.value`` (the reduced result — bit-for-bit equal
-  to a sequential run, invariant to worker count and completion order), ``.n_partitions``, and
-  ``.n_combines``.
+Prints::
 
-A ``Plan`` with ``next_tasks`` runs on the adaptive path exactly as it does locally; worker
-exceptions — including a picklable ``graphed.debug.StageError`` pointing at the user's analysis
-line — re-raise in the driver intact (see `Failure semantics`_).
+    [700]
+    7 6
 
-The same engine without dask
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``Plan``, ``Task``, ``Partition`` and the ``ExecResult`` you get back all live in ``graphed.core``,
+not in this package. ``result.value`` is the reduced result — bit-for-bit equal to a sequential
+run, whatever the worker count and whatever order the tasks finished in — alongside
+``.n_partitions`` and ``.n_combines``.
 
-``SubmitRunner`` is one engine over *any* :class:`~graphed_executors.submit.protocol.SubmitBackend`;
-the stdlib :class:`~graphed_executors.submit.threadpool.ThreadBackend` runs the identical Plan with zero extra
-dependencies — useful for tests and as the conformance floor an adapter author starts from
-(:ref:`design-submit-seam`)::
+Four things that save an afternoon:
+
+* ``process`` / ``combine`` / ``empty`` are pickled to the workers, so define them at module level
+  (a ``functools.partial`` of a module-level function, or a frozen dataclass, is fine too), and
+  guard your driver code with ``if __name__ == "__main__":``.
+* On a real cluster prefer process workers with ``threads_per_worker=1`` — HEP stages hold the
+  GIL inside compiled kernels — and ``dashboard_address=":0"`` so a second run doesn't collide on
+  the dashboard port.
+* ``dask_runner`` forwards ``retries`` to dask's own per-task retry, which resubmits on another
+  worker, and there is no second retry loop on top of it. **It defaults to 3**, so a
+  deterministic exception in your ``process`` runs four times before it reaches you — pass
+  ``retries=0`` while debugging and it surfaces on the first attempt.
+* Leaving the ``with`` block closes the runner, not your client. You built the cluster; you own it.
+
+A plan with ``next_tasks`` runs on the adaptive path here exactly as it does on your laptop. A
+worker exception comes back intact — see `When things fail`_.
+
+Run the same plan with no extra dependencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The runner is one engine over any backend, and
+:class:`~graphed_executors.submit.threadpool.ThreadBackend` is a backend built on the standard
+library alone. Same plan, same tree, same value, nothing installed:
+
+.. code-block:: python
+
+    import numpy as np
 
     from graphed.core import Partition, Plan, Task
     from graphed_executors.submit import SubmitRunner, ThreadBackend
 
+    def count(partition, resources):
+        return np.asarray([partition.entry_stop - partition.entry_start])
+
+    def add(a, b):
+        return a + b
+
+    def zero():
+        return np.zeros(1, dtype=int)
+
+    parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
+    plan = Plan(process=count, combine=add, empty=zero,
+                tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
+
     with SubmitRunner(ThreadBackend(max_workers=4)) as runner:
-        print(runner.run(plan).value)          # same value, same combine tree
+        result = runner.run(plan)
+
+    print(result.value, result.n_partitions, result.n_combines)
+
+Prints::
+
+    [700] 7 6
+
+Useful when you want to reproduce a cluster result on a machine with nothing installed, or to
+check whether a failure is yours or the cluster's.
 
 
-Repartition and joins: the shuffle facade
------------------------------------------
+Repartitioning and joining
+--------------------------
 
-Two distributed shuffle engines ship with the backend — the **as-tasks** future-graph engine and
-the **worker-transport** engine (:ref:`design-shuffle-graph`, :ref:`design-transport-engine`).
-The front door is :func:`~graphed_executors.dask_backend.api.run_repartition` /
-:func:`~graphed_executors.dask_backend.api.run_join`, which select an engine with a single
-``shuffle_method`` knob:
+Redistributing blocks by key — for a repartition or a join — is the one operation that moves bulk
+data between workers. Two engines can do it, and you pick between them with one word:
+``shuffle_method``.
 
-* ``"transport"`` — always the worker-transport engine (m44).
-* ``"tasks"`` — always the as-tasks engine (m43).
-* ``"auto"`` (default) — **capability-static**: transport iff the backend advertises *both*
-  ``pin_to_worker`` and ``peer_data_movement`` (a plain ``DaskBackend`` does), else tasks.
-  Resolution is a pure function of ``backend.capabilities`` — it does **not** inspect cluster
-  elasticity, so adaptive-cluster users pass ``shuffle_method="tasks"`` explicitly (below).
+Before any run that moves blocks worker-to-worker, register the transport plugin once per client
+with :func:`~graphed_executors.dask_backend.transport.dask_transport_setup`. It is idempotent, and
+it is also what the default (``"auto"``) needs on a plain ``DaskBackend``:
 
-Before any transport-engine run, register the transport plugin once per client with
-:func:`~graphed_executors.dask_backend.transport.dask_transport_setup` (idempotent). Executed
-end-to-end::
+.. code-block:: python
+
+    import numpy as np
+    from distributed import Client, LocalCluster
+
+    from graphed.numpy import NumpyBackend
+    from graphed_executors.dask_backend import DaskBackend, run_repartition
+    from graphed_executors.dask_backend.transport import dask_transport_setup
+
+    def make_block(keys, field="v", values=None):
+        dt = np.dtype([("__joinkey__", np.uint64), (field, np.int64)])
+        block = np.zeros(len(keys), dtype=dt)
+        block["__joinkey__"] = np.asarray(keys, dtype=np.uint64)
+        block[field] = np.arange(len(keys)) if values is None else np.asarray(values)
+        return block
+
+    if __name__ == "__main__":
+        src = [make_block([0, 1, 2, 3, 4, 5, 6, 7]),
+               make_block([7, 6, 5, 4, 3, 2, 1, 0]),
+               make_block([100, 200, 300, 400])]
+        with (
+            LocalCluster(n_workers=2, threads_per_worker=1, processes=True,
+                         dashboard_address=":0") as cluster,
+            Client(cluster) as client,
+        ):
+            dask_transport_setup(client)
+            dbackend = DaskBackend(client)
+
+            auto = run_repartition(NumpyBackend(), src, 4, dbackend=dbackend)
+            tasks = run_repartition(NumpyBackend(), src, 4, dbackend=dbackend,
+                                    shuffle_method="tasks")
+
+        print(hasattr(auto, "transport"), hasattr(tasks, "partitions"))
+        print(auto.dest_block_hashes == tasks.dest_block_hashes)
+        print({d: len(b) for d, b in sorted(auto.value.items())})
+
+Prints::
+
+    True True
+    True
+    {0: 5, 1: 7, 2: 6, 3: 2}
+
+That middle line is the point of the whole section. Both engines — and the single-machine engine
+on your laptop — produce **byte-identical output blocks** on identical inputs, so switching
+engines can never change an analysis result. Only the cost changes.
+
+Joins go through the same door, and ``mem_budget_bytes`` bounds the working set on either engine:
+duplicated output partitions spill instead of piling up.
+
+.. code-block:: python
 
     import numpy as np
     from distributed import Client, LocalCluster
@@ -134,88 +212,68 @@ end-to-end::
         return block
 
     if __name__ == "__main__":
-        src = [make_block([0, 1, 2, 3, 4, 5, 6, 7]),
-               make_block([7, 6, 5, 4, 3, 2, 1, 0]),
-               make_block([100, 200, 300, 400])]
-        with LocalCluster(n_workers=2, threads_per_worker=1, processes=False,
-                          dashboard_address=":0") as cluster, Client(cluster) as client:
-            dask_transport_setup(client)     # transport-engine precondition, once per client
-            dbackend = DaskBackend(client)
-
-            auto = run_repartition(NumpyBackend(), src, 4, dbackend=dbackend)
-            tasks = run_repartition(NumpyBackend(), src, 4, dbackend=dbackend,
-                                    shuffle_method="tasks")
-
-            assert hasattr(auto, "transport")     # "auto" resolved to the transport engine
-            assert hasattr(tasks, "partitions")   # the as-tasks engine ran
-            assert auto.dest_block_hashes == tasks.dest_block_hashes  # byte-identical engines
-            print({d: len(b) for d, b in sorted(auto.value.items())})
-            # {0: 5, 1: 7, 2: 6, 3: 2}
-
-The final assertion is the headline property, pinned by the frozen suites: **both engines — and
-the local single-machine engine — produce byte-identical** ``dest_block_hashes`` on identical
-inputs, so switching engines can never change an analysis result.
-
-A join goes through the same door. ``on`` / ``how`` / ``broadcast`` / ``salt`` /
-``mem_budget_bytes`` are common to both engines — ``mem_budget_bytes`` bounds the join's working
-set on *either* path (duplicated output partitions spill instead of accumulating)::
-
         left = [make_block([0, 1, 2, 3, 4, 5], "lval", [10, 11, 12, 13, 14, 15]),
                 make_block([1, 1, 2, 2, 13, 13], "lval", [22, 23, 24, 25, 32, 33])]
         right = [make_block([0, 0, 1, 2, 3, 5], "rval", [100, 101, 102, 103, 104, 105]),
                  make_block([3, 3, 2, 17, 17, 4], "rval", [106, 107, 108, 116, 117, 111])]
-        joined = run_join(NumpyBackend(), left, right, 2,
-                          on=("__joinkey__",), how="inner", dbackend=dbackend,
-                          mem_budget_bytes=1 << 20)
-        print(sum(len(block) for block in joined.value.values()))   # 16
+        with (
+            LocalCluster(n_workers=2, threads_per_worker=1, processes=True,
+                         dashboard_address=":0") as cluster,
+            Client(cluster) as client,
+        ):
+            dask_transport_setup(client)
+            dbackend = DaskBackend(client)
+            joined = run_join(NumpyBackend(), left, right, 2,
+                              on=("__joinkey__",), how="inner", dbackend=dbackend,
+                              mem_budget_bytes=1 << 20)
+            print(sum(len(block) for block in joined.value.values()))
 
-``broadcast=None`` (the default) lets the pinned cost rule choose broadcast-vs-shuffle, keyed on
-``parts`` — never the live worker count — so the same logical join makes the same choice on any
-cluster size; ``True``/``False`` honour a plan-recorded choice.
+            try:
+                run_repartition(NumpyBackend(), left, 4, dbackend=dbackend,
+                                shuffle_method="tasks", holder_budget_bytes=1 << 20)
+            except ValueError as exc:
+                print(f"ValueError: {exc}")
+
+Prints::
+
+    16
+    ValueError: holder_budget_bytes applies only to shuffle_method='transport' (resolved: 'tasks')
+
+That second half matters as much as the first: a knob only one engine honours is a loud error when
+the other engine is the one that ran, never a silent no-op. The check runs *after* the engine is
+chosen, so ``"auto"`` landing on the other engine raises too.
+
+``broadcast=None`` (the default) lets graphed decide broadcast-vs-shuffle from the plan — from
+``parts``, never from the live worker count — so the same logical join makes the same choice on a
+4-worker cluster and a 400-worker one. Pass ``True`` or ``False`` to record the choice yourself.
 
 Reading the result
 ~~~~~~~~~~~~~~~~~~
 
-The facade returns the chosen engine's own result — a union of
-``graphed_executors.local.shuffle.ShuffleResult`` (tasks) and
-``graphed_executors.dask_backend._transport_run.TransportShuffleResult`` (transport). The
-**portable contract** is the common triple every caller should code against:
+Whichever engine ran, code against these three attributes:
 
-* ``.dest_block_hashes`` — ``{dest_pid: sha256-of-wire-bytes}``, the content-addressed identity of
-  each output block (equal across engines and runs);
-* ``.value`` — ``{dest_pid: block}``, the gathered output blocks;
-* ``.witness`` — the shuffle witness counters (spills, buffer peaks, broadcast choice).
+* ``.value`` — ``{dest_pid: block}``, the output blocks.
+* ``.dest_block_hashes`` — ``{dest_pid: sha256}`` of each output block's serialized bytes. This is
+  what is equal across engines and across runs.
+* ``.witness`` — counters describing what the run actually did: spills, buffer peaks, whether the
+  join broadcast.
 
-The engine-specific extra doubles as **resolution observability**: a result with a ``.transport``
-attribute proves the transport engine ran (its ``TransportWitness`` carries the transport-plane
-counters), one with ``.partitions`` proves the as-tasks engine ran — the first thing to check when
-asking "why was ``auto`` slow on my adaptive cluster?".
+Each engine adds one attribute of its own, which is how you tell after the fact which one ran:
+``.transport`` means blocks moved worker-to-worker, ``.partitions`` means they moved as ordinary
+tasks. That is the first thing to check when ``"auto"`` was slower than you expected.
 
-Knob honesty
-~~~~~~~~~~~~
-
-Setting a transport-only knob while resolution lands on ``"tasks"`` is a loud, named error —
-never a silent drop. Validation runs *after* resolution, so ``"auto"`` degrading to tasks with an
-explicitly-set transport knob raises too::
-
-        run_repartition(NumpyBackend(), src, 4, dbackend=dbackend,
-                        shuffle_method="tasks", holder_budget_bytes=1 << 20)
-    # ValueError: holder_budget_bytes applies only to shuffle_method='transport' (resolved: 'tasks')
-
-The facade always builds its runner internally. Callers who need ``monitor=`` or ``retries=`` on a
-shuffle use the still-public direct entry points —
+If you need ``monitor=`` or ``retries=`` on a shuffle, call the engines directly —
 :func:`~graphed_executors.dask_backend.shuffle.dask_run_repartition` /
-:func:`~graphed_executors.dask_backend.shuffle.dask_run_join` (tasks, taking a ``runner=``) and
+:func:`~graphed_executors.dask_backend.shuffle.dask_run_join` take a ``runner=``, and
 :func:`~graphed_executors.dask_backend.transport_shuffle.transport_run_repartition` /
-:func:`~graphed_executors.dask_backend.transport_shuffle.transport_run_join` (transport, taking
-``dbackend=``).
+:func:`~graphed_executors.dask_backend.transport_shuffle.transport_run_join` take a ``dbackend=``.
+The one-knob front door always builds its own runner.
 
 
-Choosing an engine
-------------------
+Choosing a shuffle engine
+-------------------------
 
-Both engines are byte-identical to each other and to the local engine; the choice is purely about
-cluster shape and scale (rationale: :ref:`design-facade`).
+Since both engines give the same bytes, the choice is entirely about the shape of your cluster.
 
 .. list-table::
    :header-rows: 1
@@ -225,28 +283,39 @@ cluster shape and scale (rationale: :ref:`design-facade`).
      - ``shuffle_method``
      - Why
    * - Fixed-size cluster, large shuffles
-     - ``"auto"`` (→ transport)
-     - O(T+P) scheduler graph, bulk bytes move worker→worker over the transport, no T·P pick
-       tier — minimal interpreter/scheduler touchpoints.
-   * - Adaptive / elastic cluster (workers join and leave)
+     - ``"auto"`` (→ worker-to-worker)
+     - Bulk bytes go straight from the worker that produced them to the worker that needs them.
+       The scheduler sees a graph that grows with the number of tasks plus the number of outputs,
+       not their product, so it is not the bottleneck at scale.
+   * - Adaptive or elastic cluster (workers join and leave)
      - ``"tasks"`` explicitly
-     - The future graph lets the dask scheduler *recompute* a lost producer from its inputs; the
-       transport engine strict-pins tasks, so a departed owner forces a whole-run epoch restart.
-   * - Backend without ``pin_to_worker`` + ``peer_data_movement``
+     - Blocks move as ordinary dask tasks, so when a worker leaves the scheduler simply recomputes
+       its blocks from their inputs. The worker-to-worker engine pins tasks to specific workers,
+       so a departing worker costs a whole-run restart.
+   * - A backend that can't pin tasks, but can move data peer-to-peer
      - ``"auto"`` (→ tasks)
-     - ``"auto"`` degrades to the engine that can run; forcing ``"transport"`` raises the engine's
-       own ``NotImplementedError`` before any work is submitted.
+     - ``"auto"`` picks the engine that can actually run there. Forcing ``"transport"`` raises
+       ``NotImplementedError`` before anything is submitted.
+   * - A backend that can't move data peer-to-peer at all
+     - neither engine here
+     - ``"auto"`` sends it to ``"tasks"``, and that engine refuses it up front with
+       ``NotImplementedError`` — it moves blocks between workers too. That shape needs an
+       exchange relayed through the submit node, which is what the parsl backend provides; see
+       :doc:`parsl`.
    * - Small shuffles, no preference
      - ``"auto"``
-     - Either engine finishes quickly; the default picks for you.
+     - Either finishes quickly; let the default pick.
+
+``"auto"`` reads the backend's declared capabilities and nothing else. It does **not** notice that
+your cluster is adaptive — that is the one case where you should say ``"tasks"`` yourself.
 
 
 Budgets and knobs
 -----------------
 
-``salt`` (skew mitigation, folded into the pinned route hash) is common to both operations and
-engines. On joins, ``on`` / ``how`` / ``broadcast`` / ``mem_budget_bytes`` are common as above.
-The transport-only knobs, and what each one actually bounds:
+``salt`` (for skew mitigation) works on both operations and both engines. On joins, so do ``on``,
+``how``, ``broadcast`` and ``mem_budget_bytes``. These are the knobs the worker-to-worker engine
+adds, and what each one actually bounds:
 
 .. list-table::
    :header-rows: 1
@@ -255,66 +324,88 @@ The transport-only knobs, and what each one actually bounds:
    * - Knob
      - What it bounds
    * - ``n_tasks``
-     - The producer-task count T (default ``min(n_workers, n_src)``).
+     - How many producer tasks write blocks (default: ``min(n_workers, n_src)``). Each producer
+       writes one block per output partition, so this is one side of the transfer count.
    * - ``holder_budget_bytes``
-     - Producer-plane retention: a producer's per-dest wires live in the worker plugin's block
-       store under this cap; overflow **really spills** to the worker's local disk
-       (``holder_spill_count`` / ``peak_holder_bytes`` in the witness).
+     - How many bytes of produced blocks a worker keeps in memory before spilling them to its
+       local disk. Overflow really does hit disk; the witness reports it as
+       ``holder_spill_count`` and ``peak_holder_bytes``.
    * - ``fetch_budget_bytes`` / ``disk_budget_bytes``
-     - The **reader-plane accounting replay** — see the honesty note below.
+     - The read side's accounting — see the note below for what these do and don't do.
    * - ``pull_timeout_s``
-     - The per-holder block-pull ceiling. A legitimately large batch should *widen* this rather
-       than burn the restart budget on spurious timeouts.
+     - How long one worker waits for a block from another. If your blocks are legitimately large,
+       widen this rather than letting spurious timeouts eat your restart budget.
    * - ``epoch_restarts_allowed``
-     - How many whole-run epoch restarts a failure may trigger before the run surfaces an
-       attributed ``StageError`` (facade default: 1).
+     - How many times a failure may restart the whole shuffle before it gives up and raises
+       (default: 1). See `When things fail`_.
 
 .. note::
 
-   **Honesty about the reader budgets.** ``fetch_budget_bytes`` / ``disk_budget_bytes`` bound —
-   and are witnessed by — a driver-side *replay* of the reference engine's reader accounting over
-   block sizes, which is how the transport engine's witness counters stay exactly equal to the
-   local engine's. They do **not** throttle a live reader on a worker: the real per-dest gather
-   pulls its fragments, holds one dest resident, concatenates, and returns. The producer-plane
-   ``holder_budget_bytes`` *is* a real runtime bound with real spill. Details:
-   :ref:`design-budget-honesty`.
+   **What the read budgets actually limit.** ``fetch_budget_bytes`` and ``disk_budget_bytes``
+   bound a driver-side accounting pass over block sizes — which is how this engine's counters stay
+   exactly equal to the single-machine engine's — and they are reported in the witness. They do
+   **not** throttle a worker while it is pulling: the real gather fetches its fragments, holds one
+   output partition resident, concatenates and returns. ``holder_budget_bytes`` on the write side
+   *is* a live runtime bound with real spilling. If you are trying to cap memory on a shuffle,
+   ``holder_budget_bytes`` is the knob.
 
 
-Failure semantics
------------------
+When things fail
+----------------
 
-**Ordinary worker exceptions** round-trip intact on every path: a picklable
-``graphed.debug.StageError`` re-raises in the driver still pointing at the user's analysis line —
-never an opaque scheduler string.
+**An exception in your code** comes back whole. A ``graphed.debug.StageError`` pickles across the
+worker boundary and re-raises in your driver still pointing at the line in your analysis that
+raised it — not an opaque scheduler string.
 
-**Hard worker death** (segfault, OOM, preemption) surfaces as ``distributed.KilledWorker`` after
-``distributed.scheduler.allowed-failures`` deaths; the engine recognises it via the backend's
-``describe_failure`` and raises an **attributed** ``StageError`` naming the partition and the last
-worker (with a caveat that blame can be unfair under co-located tasks).
+**A worker that dies hard** — segfault, OOM, preemption — reaches dask as
+``distributed.KilledWorker`` once it has died ``distributed.scheduler.allowed-failures`` times.
+graphed turns that into a ``StageError`` naming the partition and the last worker that held it.
+Under co-located tasks the blame can land on an innocent partition, so treat the attribution as a
+strong hint rather than a verdict.
 
-The two shuffle engines diverge on recovery, and this is the fixed-vs-adaptive trade above:
+The two shuffle engines recover differently, and this is the same fixed-versus-elastic fork as
+above:
 
-* **Tasks engine** — recovery is dask's: a worker dying mid-shuffle loses its producer's blocks,
-  the scheduler recomputes that producer from its inputs, and the result is bit-for-bit unchanged.
-  Per-task ``retries`` (via a ``SubmitRunner``) map to dask's native resubmit.
-* **Transport engine** — failure means **whole-run restart under a fresh epoch**: an exhausted
-  peer delivery (``TransportDeliveryError``), a timed-out block pull (``PullTimeoutError``), a
-  peer reduction finishing with no captured root, or a ``KilledWorker`` each restart the run under
-  a new epoch nonce, re-reading the surviving worker set so the restart pins onto survivors, up to
-  ``epoch_restarts_allowed``. Exhausting that budget raises an attributed ``StageError`` naming
-  the victim — never a raw ``KilledWorker``, and never a hang. Stale workers from a previous epoch
-  are refused by the plugin's epoch guard.
+* **Blocks as tasks** — recovery is dask's own. A dying worker loses its blocks, the scheduler
+  recomputes them from their inputs, and the result is unchanged bit for bit. Per-task ``retries``
+  map onto dask's native resubmit.
+* **Worker-to-worker** — the whole shuffle restarts on the surviving workers. A delivery that ran
+  out of attempts (``TransportDeliveryError``), a block pull that timed out
+  (``PullTimeoutError``), or a ``KilledWorker`` each trigger one restart, up to
+  ``epoch_restarts_allowed``. What to do about each: a ``PullTimeoutError`` on large blocks means
+  raise ``pull_timeout_s``; a ``TransportDeliveryError`` or repeated ``KilledWorker`` means the
+  cluster is shedding workers, so switch to ``shuffle_method="tasks"``. Restarts are tagged with a
+  fresh run generation, so leftover blocks from the failed attempt can never be mistaken for good
+  ones, and exhausting the budget raises an attributed ``StageError`` naming the victim — never a
+  raw ``KilledWorker`` and never a hang.
 
 
-Monitoring
-----------
+Watching a run
+--------------
 
-Pass a passive ``graphed.core.execution.Monitor`` to ``dask_runner`` and the run streams the M37
-``TaskEvent`` lifecycle (``submitted`` driver-side; ``started`` / ``finished`` / ``errored``
-worker-side) over dask's structured-event channel, on a per-run namespaced topic. Executed::
+Pass any object with the ``graphed.core.execution.Monitor`` shape to ``dask_runner`` and you get
+one event per task as it is submitted, starts, finishes or errors, delivered over dask's
+structured-event channel on a topic private to that run:
+
+.. code-block:: python
+
+    import numpy as np
+    from distributed import Client, LocalCluster
+
+    from graphed.core import Partition, Plan, Task
+    from graphed_executors.dask_backend import dask_runner
+
+    def count(partition, resources):
+        return np.asarray([partition.entry_stop - partition.entry_start])
+
+    def add(a, b):
+        return a + b
+
+    def zero():
+        return np.zeros(1, dtype=int)
 
     class ListMonitor:
-        """Passive observer: collects TaskEvents; must never raise or block."""
+        """Collects task events. A monitor must never raise or block the run."""
 
         def __init__(self):
             self.events = []
@@ -331,34 +422,46 @@ worker-side) over dask's structured-event channel, on a per-run namespaced topic
         def worker_profiler_factory(self):
             return None
 
-    monitor = ListMonitor()
-    with dask_runner(client, monitor=monitor) as runner:
-        result = runner.run(plan)             # result.value identical with or without it
-    print(sorted({phase for phase, _k, _w in monitor.events}))
-    # ['finished', 'started', 'submitted']
+    if __name__ == "__main__":
+        parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
+        plan = Plan(process=count, combine=add, empty=zero,
+                    tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
+        monitor = ListMonitor()
+        with (
+            LocalCluster(n_workers=2, threads_per_worker=1, processes=True,
+                         dashboard_address=":0") as cluster,
+            Client(cluster) as client,
+        ):
+            with dask_runner(client, monitor=monitor) as runner:
+                result = runner.run(plan)
 
-Monitoring is **passive by contract**: emission is off the data path and swallow-on-error, so the
-reduced value is byte-identical whether the monitor is attached, detached, or actively raising.
-Adapter authors get the same tap through ``SubmitBackend.subscribe_events(topic, handler)``.
+        print(result.value)
+        print(sorted({phase for phase, _key, _worker in monitor.events}))
 
-.. note::
+Prints::
 
-   **Documented limitation:** the transport engine's peer-reduction path
-   (``transport_run_plan``) accepts ``monitor=`` for signature parity but does **not** emit
-   peer-mode telemetry over the transport yet (``emit=False``) — a Phase-2 follow-up
-   (:ref:`design-m44-limitations`).
+    [700]
+    ['finished', 'started', 'submitted']
+
+Watching costs you nothing: emission sits off the data path and swallows its own errors, so
+``result.value`` is byte-identical whether a monitor is attached, absent, or actively raising on
+every event. If you are writing your own backend, the same tap is
+``SubmitBackend.subscribe_events(topic, handler)``.
+
+One gap: the worker-to-worker engine's peer-reduction path accepts ``monitor=`` for signature
+parity but does not emit events over the transport yet.
 
 
 Deploying on batch clusters
 ---------------------------
 
-The backend consumes a **ready** ``Client``; cluster construction is out-of-band user code, so
-any launcher that yields a ``distributed.Client`` works unchanged. The sketches below are
-**illustrative — they require a batch cluster and are not executed in CI**; the tested guidance
-behind them (lifetimes, ``allowed-failures``, ``local_directory``, version pinning) lives in
-:ref:`design-deployment`.
+graphed consumes a connected ``Client`` and nothing else, so any launcher that produces one works
+unchanged. The two sketches below **need a real batch cluster — they are recipes, not runnable
+examples.** The guidance around them is what matters.
 
-SLURM via `dask-jobqueue <https://jobqueue.dask.org>`_ (illustrative)::
+SLURM via `dask-jobqueue <https://jobqueue.dask.org>`_:
+
+.. code-block:: python
 
     from dask_jobqueue import SLURMCluster
     from distributed import Client
@@ -373,8 +476,9 @@ SLURM via `dask-jobqueue <https://jobqueue.dask.org>`_ (illustrative)::
     with Client(cluster) as client, dask_runner(client) as runner:
         result = runner.run(plan)
 
-Fermilab LPC HTCondor via `lpcjobqueue <https://github.com/CoffeaTeam/lpcjobqueue>`_
-(illustrative)::
+Fermilab LPC HTCondor via `lpcjobqueue <https://github.com/CoffeaTeam/lpcjobqueue>`_:
+
+.. code-block:: python
 
     from distributed import Client
     from lpcjobqueue import LPCCondorCluster
@@ -385,36 +489,39 @@ Fermilab LPC HTCondor via `lpcjobqueue <https://github.com/CoffeaTeam/lpcjobqueu
     with Client(cluster) as client, dask_runner(client) as runner:
         result = runner.run(plan)
 
-``graphed-executors`` takes no dependency on either package — these are patterns, not APIs. On
-preemption-prone queues: set ``--lifetime`` strictly below the walltime so workers self-drain and
-migrate their keys instead of dying hard, raise ``allowed-failures`` to 5–10, and for long
-shuffles keep the lifetime comfortably above a single producer task's runtime so an eviction does
-not force repeated recomputation.
+``graphed-executors`` depends on neither package — these are patterns, not APIs. On queues that
+preempt:
 
-For **broadcast joins on elastic or preemption-prone clusters**, also pass
+* Set ``--lifetime`` strictly below the walltime so workers drain and migrate their keys instead
+  of dying hard.
+* Raise ``allowed-failures`` to 5–10.
+* For long shuffles, keep the lifetime comfortably above one producer task's runtime, or an
+  eviction forces the same work to be recomputed over and over.
+
+**Broadcast joins on elastic or preemption-prone clusters need one more flag:**
 ``dask_runner(client, replicate_broadcast=True)``. A broadcast join places the small side as a
-single future that every task references, and ``distributed`` drops the last replica of a key when
-the worker holding it leaves (down-scale or eviction) — which would fail every dependent task
-(coffea#1490). The flag calls ``client.replicate()`` on that future so it survives a lost holder; it
-defaults to ``False`` (one copy, lowest memory), which is correct on a fixed-size cluster that never
-loses the holder. It is a ``DaskBackend`` / ``dask_runner`` constructor knob, not per-shuffle — the
-broadcast-vs-shuffle *choice* still follows the pinned cost rule via ``broadcast=`` on the join
-(``graphed`` prefers a placed identity future over ``client.scatter``, whose hardcoded
-worker-discovery timeout breaks scale-to-zero).
+single future every task references, and ``distributed`` drops the last replica of a key when the
+worker holding it leaves — down-scale or eviction — which fails every dependent task
+(`coffea#1490 <https://github.com/scikit-hep/coffea/issues/1490>`_). The flag replicates that
+future so it survives a lost holder. It defaults to ``False``, which is one copy and the lowest
+memory, and is correct on a fixed cluster that never loses the holder. It is a constructor knob,
+not a per-shuffle one — whether a join broadcasts at all is still decided from the plan via
+``broadcast=``.
 
 
-Known limitations
+Not supported yet
 -----------------
 
-* **Per-task resources are advisory-dropped.** ``DaskBackend.submit`` accepts ``resources=`` but
-  does not forward it — dask treats it as a *hard* constraint, so an unsatisfiable request would
-  pin the task in no-worker state forever. Enforcement on a resource-provisioned cluster is a
-  future opt-in (an ``enforce_resources``-style knob); today, shape the cluster uniformly instead.
-* **The transport engine is hostile to adaptive down-scaling.** Strict worker pins mean a departed
-  owner costs a whole-run epoch restart; pass ``shuffle_method="tasks"`` on elastic clusters.
-* **No free-threaded (3.14t) support** — upstream ``distributed`` has no free-threaded build; the
-  local executors keep theirs.
-* **Peer-mode transport telemetry is not wired** (``emit=False``), per the monitoring note above.
-* **Checkpoint/resume is out of scope on dask**: ``run_resumable`` / ``run_shuffle_resumable`` are
-  self-driving loops over a *local* content-addressed store, not ``Executor`` consumers — a
-  distributed store data plane is Phase 2.
+* **Per-task resource requests are accepted and ignored.** ``DaskBackend.submit`` takes
+  ``resources=`` but does not forward it, because dask treats resources as a hard constraint and
+  an unsatisfiable request would park the task in no-worker state forever. Shape the cluster
+  uniformly instead; opt-in enforcement is future work.
+* **The worker-to-worker engine and adaptive down-scaling do not mix.** Its worker pins mean a
+  departing owner costs a whole-run restart. Pass ``shuffle_method="tasks"`` on elastic clusters.
+* **No free-threaded (3.14t) support**, because ``distributed`` has no free-threaded build. The
+  laptop executors do support it.
+* **No peer-mode telemetry** from the worker-to-worker reduction path, as noted under
+  `Watching a run`_.
+* **No checkpoint/resume on a cluster.** ``run_resumable`` and ``run_shuffle_resumable`` drive
+  themselves over a content-addressed store on the local filesystem; there is no distributed store
+  behind them yet.
