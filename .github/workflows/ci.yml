@@ -188,3 +188,15 @@ jobs:
           # docs only needs runtime deps + sphinx; the dev-extra backends are not on PyPI.
           python -m pip install -e ".[docs]"
           sphinx-build -W -b html docs docs/_build/html
+
+  # The single check the ruleset requires for the merge queue: matrix legs would each need
+  # naming there, and advisory (continue-on-error) jobs are left out on purpose.
+  ci-required:
+    name: ci required
+    if: always()
+    needs: [test, test-dask, test-parsl, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: every needed job succeeded
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
