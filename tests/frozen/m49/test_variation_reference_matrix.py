@@ -48,13 +48,17 @@ def test_the_fifteen_references_are_pairwise_distinct() -> None:
     assert len(set(prints.values())) == len(A.MATRIX)
 
 
-def test_every_output_carries_exactly_its_own_five_labels() -> None:
-    """§6.1a/§2.4: the two families stay siblings, so each output carries `1 + |S| + |W|` labels and
-    no cross-product term, and no family leaks onto an output its `vary` never reached."""
+def test_every_output_carries_exactly_its_own_nine_labels() -> None:
+    """§6.1a/§2.4 under m53's dependency fanout: the weight family reads the JES-shifted kinematics,
+    so each output carries `1 + |S| + |W| + |S|·|W|` labels — the joint `w__s` universes are minted,
+    not silently taken at nominal JES — and no family leaks onto an output its `vary` never reached."""
     unpacked, _source, _combines = _run(A.MATRIX_PARTITIONS)
-    assert sorted(unpacked["ttbar_4j1b"]) == ["btag_down", "btag_up", "jes_down", "jes_up", "nominal"]
-    assert sorted(unpacked["ttbar_4j2b"]) == ["btag_down", "btag_up", "jes_down", "jes_up", "nominal"]
-    assert sorted(unpacked["ttgamma"]) == ["jes_down", "jes_up", "nominal", "pho_down", "pho_up"]
+    ttbar = ["btag_down", "btag_down__jes_down", "btag_down__jes_up", "btag_up", "btag_up__jes_down",
+             "btag_up__jes_up", "jes_down", "jes_up", "nominal"]
+    assert sorted(unpacked["ttbar_4j1b"]) == ttbar
+    assert sorted(unpacked["ttbar_4j2b"]) == ttbar
+    assert sorted(unpacked["ttgamma"]) == ["jes_down", "jes_up", "nominal", "pho_down", "pho_down__jes_down",
+                                          "pho_down__jes_up", "pho_up", "pho_up__jes_down", "pho_up__jes_up"]
 
 
 def test_the_matrix_really_crossed_a_process_boundary() -> None:
