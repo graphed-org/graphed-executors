@@ -229,8 +229,15 @@ class _InboxServer(ThreadingHTTPServer):
 
 class HttpTransport:
     """HTTP transport over loopback. Each endpoint serves an inbox at ``/msg`` and ships outbound
-    messages from a background sender thread (so ``send`` is non-blocking). Build a connected set with
-    :func:`build_http_transports`, which assigns ports and wires the registry."""
+    messages from background sender threads (so ``send`` is non-blocking). Build a connected set with
+    :func:`build_http_transports`, which assigns ports and wires the registry.
+
+    One sender thread PER DESTINATION, created on first use. A single shared sender would deliver in
+    global order, so a destination that has stopped answering (a crashed worker whose server is mid-
+    shutdown accepts the connection and never responds) holds every later message hostage for its
+    retries — including the driver's ``done`` for the workers that are still alive, which is exactly
+    what the teardown waits on. Per destination, order is still preserved and a dead peer delays only
+    its own messages."""
 
     def __init__(self, address: str, *, host: str = "127.0.0.1", maxsize: int = _DEFAULT_MAXSIZE) -> None:
         self.address = address
@@ -238,16 +245,16 @@ class HttpTransport:
         self.host = str(self._server.server_address[0])
         self.port = int(self._server.server_address[1])
         self._registry: dict[str, tuple[str, int]] = {}
-        self._out: queue.Queue[tuple[str, object] | None] = queue.Queue(maxsize=maxsize)
+        self._maxsize = maxsize
+        self._lanes: dict[str, tuple[queue.Queue[object], threading.Thread]] = {}
+        self._lock = threading.Lock()  # guards _lanes and the two counters below
         self.deliveries = 0  # POSTs that got a response (witness/diagnostic)
         self.drops = 0  # messages dropped after exhausting retries
         self._stop = threading.Event()
         self._srv_thread = threading.Thread(
             target=self._server.serve_forever, name=f"gx-http-{address}", daemon=True
         )
-        self._send_thread = threading.Thread(target=self._sender, name=f"gx-http-send-{address}", daemon=True)
         self._srv_thread.start()
-        self._send_thread.start()
 
     def set_registry(self, registry: dict[str, tuple[str, int]]) -> None:
         self._registry = dict(registry)
@@ -259,10 +266,25 @@ class HttpTransport:
         if dest not in self._registry or dest == self.address:
             return False
         try:
-            self._out.put_nowait((dest, message))  # non-blocking; the sender thread does the POST
+            self._lane(dest).put_nowait(message)  # non-blocking; the lane's thread does the POST
             return True
         except queue.Full:
             return False
+
+    def _lane(self, dest: str) -> queue.Queue[object]:
+        with self._lock:
+            lane = self._lanes.get(dest)
+            if lane is None:
+                q: queue.Queue[object] = queue.Queue(maxsize=self._maxsize)
+                t = threading.Thread(
+                    target=self._sender,
+                    args=(dest, q),
+                    name=f"gx-http-send-{self.address}-{dest}",
+                    daemon=True,
+                )
+                lane = self._lanes[dest] = (q, t)
+                t.start()
+            return lane[0]
 
     def broadcast(self, message: object) -> None:
         for dest in self.peers():
@@ -285,15 +307,14 @@ class HttpTransport:
             if self._stop.is_set():
                 return None
 
-    def _sender(self) -> None:
+    def _sender(self, dest: str, lane: queue.Queue[object]) -> None:
         while not self._stop.is_set():
             try:
-                item = self._out.get(timeout=0.1)
+                message = lane.get(timeout=0.1)
             except queue.Empty:
                 continue
-            if item is None:
+            if message is None:
                 break
-            dest, message = item
             target = self._registry.get(dest)
             if target is None:
                 continue
@@ -313,19 +334,26 @@ class HttpTransport:
                     if self._stop.is_set():
                         break
                     time.sleep(0.01 * (attempt + 1))
-            if delivered:
-                self.deliveries += 1
-            else:
-                self.drops += 1
+            with self._lock:
+                if delivered:
+                    self.deliveries += 1
+                else:
+                    self.drops += 1
 
     def close(self) -> None:
-        # Sentinel FIRST, `_stop` only after the sender has drained (or the bound expired): setting
+        # Sentinel FIRST, `_stop` only after the lanes have drained (or the bound expired): setting
         # `_stop` up front made the sender's loop condition false with messages still queued, silently
         # dropping them. Once `_stop` is set the in-retry check abandons the rest, which is what keeps
-        # this bounded when a destination is unreachable rather than merely refusing.
-        with contextlib.suppress(Exception):
-            self._out.put_nowait(None)
-        self._send_thread.join(CLOSE_DRAIN_S)
+        # this bounded when a destination is unreachable rather than merely refusing. The lanes drain
+        # concurrently, so the bound is shared, not paid once per destination.
+        with self._lock:
+            lanes = list(self._lanes.values())
+        for q, _ in lanes:
+            with contextlib.suppress(Exception):
+                q.put_nowait(None)
+        deadline = time.monotonic() + CLOSE_DRAIN_S
+        for _, t in lanes:
+            t.join(max(0.0, deadline - time.monotonic()))
         self._stop.set()
         with contextlib.suppress(Exception):
             self._server.shutdown()

@@ -13,11 +13,14 @@ regression leg (160 KB, a blocking write) — which is what makes each test disc
 from __future__ import annotations
 
 import contextlib
+import faulthandler
 import multiprocessing as mp
 import os
 import signal
+import tempfile
 import time
 from collections.abc import Callable, Container, Sequence
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -66,9 +69,13 @@ def plan(n_floats: int, weights: Sequence[int], boom: Container[int] = ()) -> Pl
     return Plan(process=process, combine=combine, empty=empty, tasks=tasks)
 
 
-def _entry(target: Callable[..., None], args: tuple[Any, ...]) -> None:
+def _entry(target: Callable[..., None], args: tuple[Any, ...], dump_path: str) -> None:
     with contextlib.suppress(AttributeError, OSError):
         os.setsid()  # posix: own process group, so a wedged child's worker processes die with it
+    # every thread's stack, shortly before the parent gives up: a wedge on a CI runner is otherwise
+    # just "no exit after 40s" with nothing to say where the driver was parked
+    dump = open(dump_path, "w")  # noqa: SIM115 — must outlive this frame for the watchdog thread
+    faulthandler.dump_traceback_later(TIMEOUT_S - 5.0, file=dump)
     target(*args)
 
 
@@ -84,10 +91,20 @@ def _kill_tree(child: mp.process.BaseProcess) -> None:
 
 def run_in_child(scenario: str, target: Callable[..., None], args: tuple[Any, ...]) -> None:
     """Run ``target(*args)`` in a spawn child; fail naming ``scenario`` if it does not finish."""
-    child = mp.get_context("spawn").Process(target=_entry, args=(target, args))
+    fd, dump_path = tempfile.mkstemp(prefix="graphed-wedge-", suffix=".txt")
+    os.close(fd)
+    child = mp.get_context("spawn").Process(target=_entry, args=(target, args, dump_path))
     child.start()
     child.join(TIMEOUT_S)
-    if child.is_alive():
+    wedged = child.is_alive()
+    if wedged:
         _kill_tree(child)
-        pytest.fail(f"{scenario}: WEDGED — no exit after {TIMEOUT_S:.0f}s (a blocking peer pipe write)")
+    stacks = Path(dump_path).read_text()
+    with contextlib.suppress(OSError):
+        os.unlink(dump_path)
+    if wedged:
+        pytest.fail(
+            f"{scenario}: WEDGED — no exit after {TIMEOUT_S:.0f}s (a blocking peer pipe write)\n"
+            f"child threads at {TIMEOUT_S - 5:.0f}s:\n{stacks}"
+        )
     assert child.exitcode == 0, f"{scenario}: child exited {child.exitcode}"
