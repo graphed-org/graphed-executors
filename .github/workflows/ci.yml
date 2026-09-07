@@ -48,6 +48,8 @@ jobs:
         run: uvx prek@0.4.5 run --all-files --show-diff-on-failure
       - name: Pytest + coverage gate (>=90%)
         run: pytest tests/frozen --cov=graphed_executors --cov-branch --cov-report=term-missing
+      - name: Pytest m41 peer-reduction deadlock guards (gating)
+        run: pytest tests/extra/m41 -q
 
   # Free-threaded / bleeding-edge Pythons (plan A.5): genuinely exercises concurrency under no-GIL.
   # Experimental + non-blocking (awkward wheels may lag on 3.14 / 3.14t).

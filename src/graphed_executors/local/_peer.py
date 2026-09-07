@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import bisect
 import contextlib
+import queue
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
@@ -50,6 +52,11 @@ STEAL_DELAY = 0.01
 # denial traffic alone — even with zero successful steals — measurably slowed uniform runs). A
 # successful steal resets the backoff, so a genuine straggler is still drained promptly.
 MAX_STEAL_BACKOFF = 0.1
+# How long an exiting endpoint waits for its queued sends to land. A healthy send completes in
+# microseconds (every live peer and the driver are reading); the bound exists only for the crash case,
+# where a peer stopped reading for good and the parked pipe write can never complete — the actor must
+# still return so the pool can be torn down, and the driver must still reach its own teardown.
+OUTBOX_EXIT_WAIT_S = 5.0
 # Serialize the off-thread profiler at most ~1/s (its sampler keeps running continuously; only the
 # flush + ship is throttled), never per leaf — the M37 R20.7 discipline.
 PROFILE_FLUSH_INTERVAL = 1.0
@@ -295,6 +302,84 @@ def collect_peer_root(
 # ---- executor-facing helpers: per-worker actor + cross-process transport setup --------------
 
 
+class _Outbox:
+    """One daemon thread per endpoint that performs EVERY send on the caller's behalf.
+
+    The IPC inbox write is **synchronous** (``PipeInbox`` over ``SimpleQueue``, no feeder thread), so a
+    message larger than the OS pipe buffer (~64 KB) — any real reduction partial — parks the writer
+    until the peer reads. A caller that sends on its own thread is not reading its own inbox while
+    parked, and work-stealing supplies the sideways/upward edge that closes a wait cycle: a thief
+    returning a ``leaf`` UP while the owner sends a ``node`` DOWN, or a tiny ``steal_req`` stuck on the
+    victim inbox's write lock behind a third worker's big write. Enqueueing instead keeps the actor in
+    ``poll``/``recv``, so every inbox of a LIVE peer stays drained. One thread ⇒ send order preserved.
+
+    A peer that CRASHED, though, never reads again, and a write already parked in its pipe cannot be
+    interrupted. So the thread is a daemon and :meth:`close` waits only a bounded time: whoever is
+    shutting down returns on schedule and the abandoned write dies with the process. That is the whole
+    guarantee — sends are asynchronous and exit is bounded, NOT that every queued message is delivered
+    when a peer has stopped reading."""
+
+    def __init__(self, transport: Any) -> None:
+        self._t = transport
+        self._q: queue.Queue[tuple[str, Any] | None] = queue.Queue()
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(
+            target=self._run, name=f"graphed-outbox-{getattr(transport, 'address', '')}", daemon=True
+        )
+        self._thread.start()
+
+    def send(self, dest: str, message: Any) -> None:
+        # deliberately no bool: the transport's own accepted/dropped verdict happens later, on the
+        # outbox thread, so there is nothing truthful to hand back here.
+        self._q.put((dest, message))
+
+    def _run(self) -> None:
+        while True:
+            item = self._q.get()
+            if item is None:
+                return
+            if self._error is not None:
+                continue  # transport already failed: keep draining so the caller's exit wait can't block
+            try:
+                self._t.send(*item)
+            except BaseException as exc:  # re-raised in the caller once the queue is drained
+                self._error = exc
+
+    def close(self, timeout: float) -> BaseException | None:
+        """Stop the thread, waiting at most ``timeout`` for the queued sends to land (the ``root`` and
+        the final events must land on a healthy exit). Returns a send failure for the caller to raise."""
+        self._q.put(None)
+        if timeout > 0:
+            self._thread.join(timeout)
+        return self._error
+
+
+def release_workers(transport: Any) -> None:
+    """Deliver the reduction's ``done`` OFF the caller's thread, one thread per destination.
+
+    Same blocking-write hazard as :class:`_Outbox`, seen from the driver: a worker that crashed stops
+    reading its inbox, a peer's parked partial still holds that inbox's cross-process write lock, and
+    the driver's own ``done`` then waits on the lock forever — with the worker error already in hand
+    and the pool teardown one line away. Per destination, not one broadcast thread, because that one
+    thread would park on the dead worker and leave every LIVE worker behind it unreleased — which is
+    what the teardown is waiting for. A live worker is polling, so it is released immediately.
+
+    An :class:`HttpTransport` already buffers every send onto its own sender thread, so there the
+    release is enqueued on THIS thread instead: a helper thread could otherwise enqueue *after* the
+    caller's ``close()`` has drained the outbound queue, losing the release exactly when it is needed."""
+
+    def fire(dest: str) -> None:
+        with contextlib.suppress(Exception):  # e.g. a registry closed under us during teardown
+            transport.send(dest, ("done",))
+
+    inline = isinstance(transport, HttpTransport)
+    for dest in transport.peers():
+        if inline:
+            fire(dest)
+        else:
+            threading.Thread(target=fire, args=(dest,), name=f"graphed-release-{dest}", daemon=True).start()
+
+
 def slice_items(
     partitions: Sequence[Partition], bounds: list[int], worker_addresses: tuple[str, ...]
 ) -> dict[str, list[tuple[int, Partition]]]:
@@ -331,17 +416,22 @@ def process_and_reduce(
     into the reduction (a thief ships the computed partial back as a ``leaf`` message), so the fixed
     tree and the result are **unchanged**: stealing moves *where* a leaf is computed, never *where* it
     reduces. The loop interleaves a non-blocking inbox drain between leaves, so a busy worker answers
-    steal requests and the hot path (``process``) is never blocked on transport I/O (the R20.7 rule).
+    steal requests; every send is handed to the :class:`_Outbox` thread, so the actor never blocks
+    writing to a peer (the R20.7 rule) and its own inbox is always being drained — the property that
+    makes a send cycle between peers impossible for partials larger than the OS pipe buffer. The
+    actor also RETURNS in bounded time: a peer that crashed stops reading, so the exit wait for queued
+    sends is capped (``OUTBOX_EXIT_WAIT_S``) and an abandoned write dies with the worker process.
 
     ``resources`` (its ``open_once`` cache) is supplied by the caller; ``close_resources=False`` keeps
     it open across runs (a persistent pool reusing file handles, like the hub path)."""
-    reducer: PeerReducer[R] = PeerReducer(address, transport, n, bounds, worker_addresses, combine)
+    outbox = _Outbox(transport)  # the reducer's node/root sends go through it too
+    reducer: PeerReducer[R] = PeerReducer(address, outbox, n, bounds, worker_addresses, combine)
     mine: deque[tuple[int, Partition]] = deque(items)  # leaves to PROCESS (own + stolen)
     seen: set[tuple[int, int]] = set()  # dedup settled nodes/leaves (a reliable transport may retry)
     # victims this worker may steal from: the bounded lifeline overlay when given (O(log N), so the IPC
     # registry stays sub-quadratic), else every peer (the in-process / full-mesh case).
     peers = steal_peers if steal_peers is not None else tuple(a for a in worker_addresses if a != address)
-    stats = {"steals": 0, "given": 0, "processed": 0}
+    stats = {"steals": 0, "given": 0, "asked": 0, "processed": 0}  # asked: steal-requests I sent
     victim = 0
     idle_since: float | None = None  # when this worker ran out of local work (gates the steal delay)
     backoff = STEAL_DELAY  # current wait between steal-requests; grows on denial, resets on a grant
@@ -359,7 +449,7 @@ def process_and_reduce(
 
     def ship_events() -> None:
         if events:
-            transport.send(DRIVER, ("events", events.copy()))  # the driver forwards them to the monitor
+            outbox.send(DRIVER, ("events", events.copy()))  # the driver forwards them to the monitor
             events.clear()
 
     # off-thread profiler parity with the hub: a worker samples its task thread and ships the flamegraph
@@ -373,7 +463,7 @@ def process_and_reduce(
 
     def ship_profile(payload: bytes | None) -> None:
         if payload:
-            transport.send(DRIVER, ("profile", address, payload))
+            outbox.send(DRIVER, ("profile", address, payload))
 
     def owner(leaf: int) -> str:
         return worker_addresses[worker_of(leaf, bounds)]
@@ -404,9 +494,9 @@ def process_and_reduce(
             thief = payload[1]
             if steal and len(mine) > 1:
                 stats["given"] += 1
-                transport.send(thief, ("steal_resp", [mine.pop()]))
+                outbox.send(thief, ("steal_resp", [mine.pop()]))
             else:
-                transport.send(thief, ("steal_resp", []))
+                outbox.send(thief, ("steal_resp", []))
         elif tag == "steal_resp":
             granted = payload[1]
             mine.extend(granted)
@@ -450,7 +540,7 @@ def process_and_reduce(
                 if owner(leaf) == address:
                     settle_leaf(leaf, partial)  # my leaf -> reduce here
                 else:
-                    transport.send(owner(leaf), ("leaf", leaf, partial))  # stolen -> back to its owner
+                    outbox.send(owner(leaf), ("leaf", leaf, partial))  # stolen -> back to its owner
             elif steal and peers:
                 # no local work: request a steal once idle past STEAL_DELAY, then back off on each
                 # denial so a balanced run's reduction tail isn't flooded with steal-requests.
@@ -458,7 +548,8 @@ def process_and_reduce(
                 if idle_since is None:
                     idle_since, next_steal_at, backoff = now, now + STEAL_DELAY, STEAL_DELAY
                 if now >= next_steal_at:
-                    transport.send(peers[victim % len(peers)], ("steal_req", address))
+                    outbox.send(peers[victim % len(peers)], ("steal_req", address))
+                    stats["asked"] += 1
                     victim += 1
                     next_steal_at = now + backoff
                     backoff = min(backoff * 2, MAX_STEAL_BACKOFF)
@@ -474,9 +565,17 @@ def process_and_reduce(
         if profiler is not None:
             with contextlib.suppress(Exception):
                 ship_profile(profiler.stop())  # final sample tree + join the sampler thread
+        send_error = outbox.close(OUTBOX_EXIT_WAIT_S)  # let the queued sends land, but never hang here
+    except BaseException:
+        # this run is already failing: don't wait on sends to a peer that may never read again, and
+        # don't let a send failure displace the actor's own exception.
+        outbox.close(0.0)
+        raise
     finally:
         if close_resources:
             resources.close()
+    if send_error is not None:
+        raise send_error
     return {
         "n_combines": reducer.n_combines,
         "peer_sends": reducer.peer_sends,

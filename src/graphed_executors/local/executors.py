@@ -62,6 +62,7 @@ from ._peer import (
     pinned_peer_init,
     pooled_peer_actor,
     process_and_reduce,
+    release_workers,
     slice_items,
     worker_outbox_addresses,
 )
@@ -846,9 +847,20 @@ class _ProcessExecutorBase(_BaseExecutor):
         items: dict[str, list[tuple[int, Partition]]],
     ) -> R:
         ctx = multiprocessing.get_context("spawn")
-        if (self._comms or "ipc") == "http":
-            return self._peer_http(plan, n, w, bounds, worker_addrs, items, ctx)
-        return self._peer_ipc(plan, n, w, bounds, worker_addrs, items, ctx)
+        try:
+            if (self._comms or "ipc") == "http":
+                return self._peer_http(plan, n, w, bounds, worker_addrs, items, ctx)
+            return self._peer_ipc(plan, n, w, bounds, worker_addrs, items, ctx)
+        except BaseException:
+            # A failed run leaves messages in flight that a bounded exit deliberately abandoned: a
+            # peer's >64 KB partial parked in the crashed worker's pipe, the driver's own `done`.
+            # They land AFTER run() returns, so a reused pool cannot be cleaned by draining at the
+            # start of the next run — that run would take the stale `done` as its first message and
+            # its worker would leave the actor before reducing anything. Drop the persistent peer
+            # state instead; the next run respawns. Bounded because ``_collect_peer`` releases the
+            # workers on every exit: the surviving actors return within ``OUTBOX_EXIT_WAIT_S``.
+            self._close_peer()
+            raise
 
     def _peer_ipc(
         self,
@@ -1026,31 +1038,35 @@ class _ProcessExecutorBase(_BaseExecutor):
         never form, so we must detect it PROMPTLY (not after the 300s safety timeout) and re-raise it
         intact (a picklable ``StageError``, M6 obligation). Also records each worker's witness stats."""
         if n == 0:
-            driver_t.broadcast(("done",))
+            release_workers(driver_t)
             self._last_peer_witness = [f.result() for f in futs]
             return plan.empty()
         deadline = time.monotonic() + 300.0
         root: Any = _PEER_PENDING
-        while root is _PEER_PENDING:
-            got = driver_t.recv(timeout=0.05)
-            if got is not None and got[1][0] == "root":
-                root = got[1][1]
-                break
-            if got is not None:
-                self._forward_peer_events(got[1])  # worker STARTED/FINISHED/ERRORED -> monitor
-            for f in futs:  # a dead worker -> re-raise the real cause now, not 300s from now
-                if f.done() and f.exception() is not None:
-                    driver_t.broadcast(("done",))
-                    f.result()
-            # PinnedProcessPool backstop: a HARD worker crash ships no error + leaves its Future
-            # unresolved, so the future check above can't see it — detect the dead process directly.
-            if pool is not None and not getattr(pool, "workers_alive", lambda: True)():
-                driver_t.broadcast(("done",))
-                raise RuntimeError("a peer worker process died before producing the root")
-            if time.monotonic() >= deadline:
-                driver_t.broadcast(("done",))
-                raise TimeoutError("peer reduction did not produce a root within 300s")
-        driver_t.broadcast(("done",))
+        try:
+            while root is _PEER_PENDING:
+                got = driver_t.recv(timeout=0.05)
+                if got is not None and got[1][0] == "root":
+                    root = got[1][1]
+                    break
+                if got is not None:
+                    self._forward_peer_events(got[1])  # worker STARTED/FINISHED/ERRORED -> monitor
+                for f in futs:  # a dead worker -> re-raise the real cause now, not 300s from now
+                    if f.done() and f.exception() is not None:
+                        f.result()
+                # PinnedProcessPool backstop: a HARD worker crash ships no error + leaves its Future
+                # unresolved, so the future check above can't see it — detect the dead process directly.
+                if pool is not None and not getattr(pool, "workers_alive", lambda: True)():
+                    raise RuntimeError("a peer worker process died before producing the root")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("peer reduction did not produce a root within 300s")
+        except BaseException:
+            # EVERY exit releases the workers — including a KeyboardInterrupt delivered while parked
+            # in ``recv``. An unreleased actor waits for ``done`` forever, and the pool shutdown that
+            # follows (the non-persistent ``finally``, the persistent discard) then never returns.
+            release_workers(driver_t)
+            raise
+        release_workers(driver_t)
         if self.monitor is None:
             # Fast path (no monitor): workers see ``done`` immediately (the transport wakes on the
             # message) and return, so BLOCK on the futures' completion instead of polling ``f.done()``
