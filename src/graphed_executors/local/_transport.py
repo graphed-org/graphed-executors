@@ -28,6 +28,7 @@ import ipaddress
 import pickle
 import queue
 import socket
+import socketserver
 import threading
 import time
 import urllib.error
@@ -211,6 +212,16 @@ class _InboxServer(ThreadingHTTPServer):
         super().__init__(addr, _Handler)
         self._inbox: deque[tuple[str, object]] = deque()
         self._lock = threading.Lock()
+
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind resolves the bound host with socket.getfqdn — a reverse DNS lookup
+        # that blocks for tens of seconds where the resolver has no answer for loopback (macOS CI
+        # runners: every driver AND worker transport stalled in it, so the handshake timed out).
+        # Nothing here reads server_name; the bound address is all a peer needs.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
 
     def _deliver(self, item: tuple[str, object]) -> None:
         with self._lock:
