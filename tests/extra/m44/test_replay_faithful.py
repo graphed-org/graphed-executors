@@ -44,10 +44,10 @@ def _blocks(copies: int = 4) -> list[object]:
         [42, 43, 44, 45, 46, 47, 48, 49],
         [3, 3, 3, 3, 5, 5, 5, 5],
     ]
-    out = []
+    out: list[object] = []
     for keys in key_lists:
         allk = list(keys) * copies
-        blk = np.zeros(len(allk), dtype=dt)
+        blk: np.ndarray = np.zeros(len(allk), dtype=dt)
         blk["__joinkey__"] = np.array(allk, dtype=np.uint64)
         blk["v"] = np.arange(len(allk), dtype=np.int64)
         out.append(blk)

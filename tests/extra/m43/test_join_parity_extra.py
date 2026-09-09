@@ -21,10 +21,12 @@ build rows would diverge from the independent local engine's content-addressed b
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 import numpy as np
 import pytest
+from graphed.core.execution import JoinBackend
 
 from graphed_executors.dask_backend import dask_run_join
 from graphed_executors.local.shuffle import run_join
@@ -32,21 +34,21 @@ from graphed_executors.local.shuffle import run_join
 pytest.importorskip("distributed")
 
 
-def _numpy_backend():  # type: ignore[no-untyped-def]
+def _numpy_backend() -> Any:
     from graphed.numpy import NumpyBackend  # noqa: PLC0415  (hard dep, kept local per the frozen-suite idiom)
 
     return NumpyBackend()
 
 
-def _awkward_backend():  # type: ignore[no-untyped-def]
+def _awkward_backend() -> Any:
     pytest.importorskip("awkward")
     from graphed.awkward import AwkwardBackend  # noqa: PLC0415  (optional backend: importorskip'd above)
 
     return AwkwardBackend()
 
 
-def _backends() -> list[object]:
-    out: list[object] = [_numpy_backend()]
+def _backends() -> list[JoinBackend[Any, Any]]:
+    out: list[JoinBackend[Any, Any]] = [_numpy_backend()]
     with contextlib.suppress(Exception):
         out.append(_awkward_backend())
     return out
@@ -56,7 +58,9 @@ BACKENDS = _backends()
 BACKEND_IDS = [type(b).__name__ for b in BACKENDS]
 
 
-def _make_side(backend: object, keys: Sequence[int], field: str, values: Sequence[int]) -> object:
+def _make_side(
+    backend: JoinBackend[Any, Any], keys: Sequence[int], field: str, values: Sequence[int]
+) -> object:
     """A 2-column (``__joinkey__`` + ``field``) block for whichever backend, via awkward's dict ctor
     or a numpy structured array (mirrors the frozen harness ``make_side``, kept self-contained)."""
     if type(backend).__name__ == "AwkwardBackend":
@@ -69,14 +73,14 @@ def _make_side(backend: object, keys: Sequence[int], field: str, values: Sequenc
             }
         )
     dt = np.dtype([("__joinkey__", np.uint64), (field, np.int64)])
-    block = np.zeros(len(keys), dtype=dt)
+    block: np.ndarray = np.zeros(len(keys), dtype=dt)
     block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
     block[field] = np.array(list(values), dtype=np.int64)
     return block
 
 
 @pytest.fixture(scope="module")
-def client():  # type: ignore[no-untyped-def]
+def client() -> Iterator[Any]:
     import distributed  # noqa: PLC0415  (importorskip'd at module top)
 
     with (
@@ -89,7 +93,7 @@ def client():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture()
-def runner(client):  # type: ignore[no-untyped-def]
+def runner(client: Any) -> Any:
     from graphed_executors.dask_backend import DaskBackend  # noqa: PLC0415  (lazy dask imports)
     from graphed_executors.dask_backend.plugin import GraphedWorkerPlugin  # noqa: PLC0415
     from graphed_executors.submit import SubmitRunner  # noqa: PLC0415
@@ -99,7 +103,7 @@ def runner(client):  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(params=BACKENDS, ids=BACKEND_IDS)
-def backend(request):  # type: ignore[no-untyped-def]
+def backend(request: pytest.FixtureRequest) -> Any:
     return request.param
 
 
@@ -107,7 +111,7 @@ PARTS = 4
 
 
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
-def test_broadcast_noninner_matches_local(backend, how, runner) -> None:  # type: ignore[no-untyped-def]
+def test_broadcast_noninner_matches_local(backend: JoinBackend[Any, Any], how: str, runner: Any) -> None:
     """Tiny build + multi-block probe with a left-only key (13 -> an unmatched build row -> the
     once-only tail) and a right-only key (17). Forced broadcast so the large side is never shuffled;
     dask must equal local ``run_join(broadcast=True)`` content-addressed blocks."""
@@ -128,7 +132,9 @@ def test_broadcast_noninner_matches_local(backend, how, runner) -> None:  # type
 
 
 @pytest.mark.parametrize("how", ["left", "outer"])
-def test_broadcast_empty_probe_matches_local_no_crash(backend, how, runner) -> None:  # type: ignore[no-untyped-def]
+def test_broadcast_empty_probe_matches_local_no_crash(
+    backend: JoinBackend[Any, Any], how: str, runner: Any
+) -> None:
     """G3 regression: forced broadcast with a NONEMPTY build and an EMPTY probe under left/outer. The
     local engine guards its never-matched-build tail with ``if unmatched and right_blocks:`` and
     degrades gracefully; the dask port must match, not ``IndexError`` on ``right_blocks[0]``.
@@ -143,7 +149,9 @@ def test_broadcast_empty_probe_matches_local_no_crash(backend, how, runner) -> N
 
 
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
-def test_shuffle_pure_one_sided_dests_match_local(backend, how, runner) -> None:  # type: ignore[no-untyped-def]
+def test_shuffle_pure_one_sided_dests_match_local(
+    backend: JoinBackend[Any, Any], how: str, runner: Any
+) -> None:
     """Keys chosen (verified via the backend's own ``partition``) so left routes to dests {0,3} and
     right to dest {1} — DISJOINT, so dest 0/3 are pure build-only and dest 1 pure probe-only,
     exercising the ``_dask_gather_join`` schema-carrier null-fill (F1). Cross-engine content-addressed
@@ -163,7 +171,9 @@ def test_shuffle_pure_one_sided_dests_match_local(backend, how, runner) -> None:
 
 
 @pytest.mark.parametrize("how", ["left", "right"])
-def test_shuffle_partitionless_side_matches_local(backend, how, runner) -> None:  # type: ignore[no-untyped-def]
+def test_shuffle_partitionless_side_matches_local(
+    backend: JoinBackend[Any, Any], how: str, runner: Any
+) -> None:
     """An entirely empty side (carrier ``None``): the present rows survive. ``how=right`` keeps the
     probe with an empty build; ``how=left`` keeps the build with an empty probe. Forced shuffle so
     the (auto-broadcast-on-empty-build) cost choice does not intervene."""

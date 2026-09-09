@@ -15,7 +15,9 @@ whole run onto the survivors instead of leaking a bare timeout as an opaque ``St
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from graphed.core.execution import SequentialRunner
@@ -87,9 +89,10 @@ def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(monkeypatch: pytes
     import graphed_executors.dask_backend.transport_peer as tp  # noqa: PLC0415
 
     seen: dict[str, float] = {}
-    real = tp.collect_peer_root
+    # re-exported implicitly from local._peer; the monkeypatch below needs THIS module's binding
+    real = tp.collect_peer_root  # type: ignore[attr-defined]
 
-    def _recording(driver_ep: object, empty: object, n: int, *, timeout_s: float) -> object:
+    def _recording(driver_ep: object, empty: Callable[[], Any], n: int, *, timeout_s: float) -> object:
         seen["timeout_s"] = timeout_s  # record the forwarded ceiling, then run the real collector
         return real(driver_ep, empty, n, timeout_s=timeout_s)
 
@@ -186,7 +189,7 @@ def test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join(
 
         def flaky_wait(n_workers: int, timeout: float | None = None) -> None:
             state["refreshed"] = True  # the stale cache refreshes only once the client waits on workers
-            return real_wait(n_workers, timeout)
+            real_wait(n_workers, timeout)
 
         monkeypatch.setattr(client, "scheduler_info", flaky_info)
         monkeypatch.setattr(client, "wait_for_workers", flaky_wait)

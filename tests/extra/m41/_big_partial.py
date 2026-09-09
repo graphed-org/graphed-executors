@@ -17,16 +17,17 @@ import faulthandler
 import multiprocessing as mp
 import os
 import signal
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Container, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
 from graphed.core import Partition, Plan, Task
-from graphed.core.execution import LocalResources
+from graphed.core.execution import WorkerResources
 
 BIG, SMALL = 20_000, 2_500  # float64 entries per partial: 160 KB vs 20 KB
 TIMEOUT_S = 40.0
@@ -39,16 +40,16 @@ def _work(partition: Partition, n_floats: int) -> np.ndarray:
     return np.ones(n_floats, dtype=np.float64)
 
 
-def process_big(partition: Partition, resources: LocalResources) -> np.ndarray:
+def process_big(partition: Partition, resources: WorkerResources) -> np.ndarray:
     return _work(partition, BIG)
 
 
-def process_small(partition: Partition, resources: LocalResources) -> np.ndarray:
+def process_small(partition: Partition, resources: WorkerResources) -> np.ndarray:
     return _work(partition, SMALL)
 
 
 def combine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    return a + b
+    return cast(np.ndarray, a + b)
 
 
 def empty_big() -> np.ndarray:
@@ -70,8 +71,9 @@ def plan(n_floats: int, weights: Sequence[int], boom: Container[int] = ()) -> Pl
 
 
 def _entry(target: Callable[..., None], args: tuple[Any, ...], dump_path: str) -> None:
-    with contextlib.suppress(AttributeError, OSError):
-        os.setsid()  # posix: own process group, so a wedged child's worker processes die with it
+    if sys.platform != "win32":  # own process group, so a wedged child's workers die with it
+        with contextlib.suppress(OSError):
+            os.setsid()
     # every thread's stack, shortly before the parent gives up: a wedge on a CI runner is otherwise
     # just "no exit after 40s" with nothing to say where the driver was parked
     dump = open(dump_path, "w")  # noqa: SIM115 — must outlive this frame for the watchdog thread
@@ -81,10 +83,12 @@ def _entry(target: Callable[..., None], args: tuple[Any, ...], dump_path: str) -
 
 def _kill_tree(child: mp.process.BaseProcess) -> None:
     """POSIX: kill the child AND its worker processes — a wedged pool's workers outlive their driver.
-    Windows has no process groups here (``os.setsid``/``killpg`` raise inside the suppress), so it
-    degrades to killing the child only and the orphaned workers are left to the OS."""
-    with contextlib.suppress(AttributeError, OSError):
-        os.killpg(child.pid, signal.SIGKILL)  # `_entry` made the child its own group leader
+    Windows has no process groups here, so it degrades to killing the child only and the orphaned
+    workers are left to the OS."""
+    assert child.pid is not None  # set once the child is started; killpg needs a real pid
+    if sys.platform != "win32":
+        with contextlib.suppress(OSError):
+            os.killpg(child.pid, signal.SIGKILL)  # `_entry` made the child its own group leader
     child.kill()
     child.join(5)
 
