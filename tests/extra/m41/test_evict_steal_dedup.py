@@ -16,6 +16,8 @@ The fix defers eviction to once-per-unique-digest after all refs are pulled. Thi
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from graphed.numpy import NumpyBackend
 
@@ -28,7 +30,7 @@ _ROWS = 4
 
 
 def _identical_block() -> np.ndarray:
-    b = np.zeros(_ROWS, dtype=_DTYPE)
+    b: np.ndarray = np.zeros(_ROWS, dtype=_DTYPE)
     b["__joinkey__"] = np.full(_ROWS, _HOT, dtype=np.uint64)
     b["v"] = np.ones(
         _ROWS, dtype=np.int64
@@ -36,7 +38,7 @@ def _identical_block() -> np.ndarray:
     return b
 
 
-def test_steal_colocated_byte_identical_blocks_do_not_crash_evict(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_steal_colocated_byte_identical_blocks_do_not_crash_evict(tmp_path: Path) -> None:
     be = NumpyBackend()
     src = [_identical_block() for _ in range(_N)]  # all rows -> one hot dest, all blocks byte-identical
 
@@ -46,7 +48,7 @@ def test_steal_colocated_byte_identical_blocks_do_not_crash_evict(tmp_path) -> N
         parts=4,
         workers=3,
         comms="ipc",
-        store_root=tmp_path,
+        store_root=str(tmp_path),
         steal=True,
         faults=ShuffleFaults(force_steal=True),  # co-locate stolen (identical) blocks on a thief holder
     )

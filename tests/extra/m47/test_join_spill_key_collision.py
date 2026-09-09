@@ -49,7 +49,7 @@ KEY_A, KEY_B = 0, 2  # scenario-guarded below to land on different-parity dests
 
 def _dest_of(be: object, key: int) -> int:
     dt = np.dtype([("__joinkey__", np.uint64), ("lval", np.int64)])
-    block = np.zeros(1, dtype=dt)
+    block: np.ndarray = np.zeros(1, dtype=dt)
     block["__joinkey__"] = key
     for dest, sub in enumerate(be.partition(block, "__joinkey__", PARTS)):  # type: ignore[attr-defined]
         if len(sub):
@@ -79,7 +79,7 @@ def test_two_peer_spilled_join_is_row_exact() -> None:
         adapter.make_side([KEY_A] * N, "rval", list(range(1000, 1000 + N))),
         adapter.make_side([KEY_B] * N, "rval", list(range(2000, 2000 + N))),
     ]
-    row_bytes = be.estimated_bytes(left[0]) // N + be.estimated_bytes(right[0]) // N  # type: ignore[attr-defined]
+    row_bytes = be.estimated_bytes(left[0]) // N + be.estimated_bytes(right[0]) // N
     budget = (N * N * row_bytes) // 8
 
     local = run_join(be, left, right, PARTS, broadcast=False, mem_budget_bytes=budget)

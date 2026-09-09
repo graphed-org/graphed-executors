@@ -111,7 +111,25 @@ exclude = ["tests/frozen/**"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src"]
+files = ["src", "tests"]
+# The test tree has no __init__.py, so without explicit_package_bases every test file would be a
+# bare basename and `module = ["tests.frozen.*"]` below could not match it. The repo root as a
+# package base gives them dotted names instead (tests.frozen.m40.foo). The two tests/extra dirs with
+# sibling helper modules are bases as well, so `import _big_partial` resolves the way pytest's
+# prepend import mode resolves it; the frozen dirs must NOT be, since a base there would put their
+# files back on bare basenames and un-match the override.
+mypy_path = ["src", ".", "tests/extra/m41", "tests/extra/m54"]
+explicit_package_bases = true
+
+# Read-only helpers under tests/frozen/{m44,m47} that tests/extra imports by bare basename: pytest
+# puts them on sys.path, mypy knows them only as tests.frozen.mXX.<name>. They stay type-checked
+# under those dotted names; only the import site is Any.
+[[tool.mypy.overrides]]
+module = [
+  "transport_harness",
+  "parsl_transport_harness",
+]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
@@ -142,3 +160,27 @@ module = [
 ]
 ignore_missing_imports = true
 follow_imports = "skip"
+
+# tests/frozen/** is read-only under the §A.7 integrity rule, so the strict-mode diagnostics the
+# acceptance suites trip are disabled here rather than annotated away in place. This is NOT
+# ignore_errors: any code outside this list still fails the frozen tree. src/** and tests/extra/**
+# stay fully strict. To re-derive the list, comment this block out and re-run mypy.
+[[tool.mypy.overrides]]
+module = ["tests.frozen.*"]
+disable_error_code = [
+  "arg-type",
+  "assignment",
+  "attr-defined",
+  "import-not-found",
+  "import-untyped",
+  "index",
+  "misc",
+  "no-any-return",
+  "no-untyped-call",
+  "no-untyped-def",
+  "operator",
+  "type-arg",
+  "type-var",
+  "unused-ignore",
+  "var-annotated",
+]
