@@ -25,7 +25,8 @@ Install
    pip install "graphed-executors[dask]"          # + a dask.distributed cluster
    pip install "graphed-executors[parsl]"         # + a parsl pool
 
-``graphed`` comes along as a dependency; building it needs a Rust toolchain.
+``graphed`` comes along as a dependency. It ships wheels, so a plain install needs nothing extra;
+installing it from source builds its Rust core, which needs a Rust toolchain.
 
 Your first run
 --------------
