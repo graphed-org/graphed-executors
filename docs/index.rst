@@ -182,12 +182,14 @@ Where to go next
    parsl
    api
    improvements
+   changelog
 
 * :doc:`design` — why your result is reproducible, where your merges run, and what happens
   when a worker dies.
 * :doc:`dask` and :doc:`parsl` — install, a worked run, the knobs, and the failures you will
   actually hit.
 * :doc:`api` — the reference, grouped by what you are doing.
+* :doc:`changelog` — what each release gives you that the last one did not.
 
 .. note::
 
