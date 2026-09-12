@@ -12,7 +12,7 @@ build:
 
 python:
   install:
-    # 1) `graphed`, taken from git in docs/requirements.txt to match the CI docs job's env.GRAPHED.
+    # 1) `graphed`, taken from git in docs/requirements.txt (RTD's own pin; CI pins separately).
     - requirements: docs/requirements.txt
     # 2) graphed-executors itself + its docs toolchain (sphinx, furo). `graphed` is already satisfied
     #    by step 1, so pip does not try to fetch the bare `graphed` dependency from PyPI.
