@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graphed-executors"
-version = "0.0.1"
+version = "0.0.2"
 description = "graphed executors: pluggable executor backends for a graphed.core.Plan; the reference single-machine one is graphed_executors.local (thread/process pools, tree reduction, open_once)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,9 +15,10 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
-# graphed-core (the execution contract) + graphed-debug (StageError) + graphed (Session); from git.
-dependencies = ["graphed"]
+# graphed carries the execution contract (Plan/Task/Partition), Session, and StageError.
+dependencies = ["graphed>=0.0.2"]
 
 [project.optional-dependencies]
 # the backends + corpus are only needed to exercise realistic HEP analyses end-to-end in the suite
@@ -28,11 +29,13 @@ dev = [
   "hypothesis",
   "mypy",
   "ruff",
-  "graphed[awkward,numpy]",
+  "graphed[awkward,numpy]>=0.0.2",
   "graphed-corpus",
-  # m49's frozen tree drives the varied-fill lowering end-to-end; a name-only entry resolves to the
-  # stale PyPI 0.0.1 release, so CI installs it from git first (the HISTOGRAM env var in ci.yml).
-  "graphed-histogram",
+  # the frozen tree drives the varied-fill lowering end-to-end, which needs surfaces added after
+  # 0.0.1 — hence the floor. CI installs this and graphed from pinned commits on main instead (the
+  # HISTOGRAM / GRAPHED env vars in ci.yml), so an upstream merge cannot redden a frozen suite with
+  # no local change.
+  "graphed-histogram>=0.0.2",
   "numpy>=1.24",
   "awkward>=2.6",
 ]
@@ -106,7 +109,11 @@ known-first-party = ["graphed_executors", "graphed_exec_local"]
 # test stays fully format-enforced, and `ruff check` (real lint) still covers the frozen files. This
 # extends the M39 I001 exemption above to the formatter; see `.graphed/m41/disputes/frozen_format.md`.
 # Remove once the frozen files are re-tagged format-clean.
-exclude = ["tests/frozen/**"]
+# Markdown is excluded too: ruff formats python blocks inside .md, which would reflow the README's
+# examples (aligned trailing comments, deliberate one-liners) into something less readable. The
+# prek hooks only ever pass python/pyi files to the formatter, so this keeps a bare
+# `ruff format --check .` — the command CONTRIBUTING gives — agreeing with what CI runs.
+exclude = ["tests/frozen/**", "*.md"]
 
 [tool.mypy]
 python_version = "3.12"
