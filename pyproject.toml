@@ -32,10 +32,11 @@ dev = [
   "graphed[awkward,numpy]>=0.0.2",
   "graphed-corpus",
   # the frozen tree drives the varied-fill lowering end-to-end, which needs surfaces added after
-  # 0.0.1 — hence the floor. CI installs this and graphed from pinned commits on main instead (the
-  # HISTOGRAM / GRAPHED env vars in ci.yml), so an upstream merge cannot redden a frozen suite with
-  # no local change.
-  "graphed-histogram>=0.0.2",
+  # histogram 0.0.1. No floor here: the two packages' dev extras would otherwise require each
+  # other's next release before either can be cut. CI installs this and graphed from pinned
+  # commits on main instead (the HISTOGRAM / GRAPHED env vars in ci.yml), so an upstream merge
+  # cannot redden a frozen suite with no local change.
+  "graphed-histogram",
   "numpy>=1.24",
   "awkward>=2.6",
 ]
