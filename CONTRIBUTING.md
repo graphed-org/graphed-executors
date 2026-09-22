@@ -43,10 +43,13 @@ so a plain `pytest` is green in any of the environments above. CI runs the suite
 (x86_64 and arm64), macOS, and Windows across all supported Python versions, with the dask
 and parsl suites in dedicated jobs.
 
-To see the coverage CI will enforce (90% line + branch on `graphed_executors`):
+Coverage policy: every source file must be >= 90% line+branch covered on its own
+(`scripts/coverage_gate.py`, never lowered), and every PR must be >= 98% diff-covered against
+`main` (`diff-cover`, gating on the merge-queue run). To see what CI will enforce:
 
 ```bash
 pytest --cov=graphed_executors --cov-branch --cov-report=term-missing
+coverage json -o coverage.json && python scripts/coverage_gate.py coverage.json 90
 ```
 
 ## Lint, types, docs
