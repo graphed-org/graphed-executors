@@ -51,8 +51,12 @@ coverage scope: the main matrix gates `local/` and `submit/`, `test-dask` gates 
 `common/relay_engine.py` and `common/http_plane.py`. To see what CI will enforce:
 
 ```bash
-pytest --cov=graphed_executors --cov-branch --cov-report=term-missing
+# two sessions, as CI runs them: the frozen suite alone, then tests/extra appended
+pytest tests/frozen --cov=graphed_executors --cov-branch --cov-report=term-missing
+pytest tests/extra --cov=graphed_executors --cov-branch --cov-append --cov-report=term-missing
 coverage json -o coverage.json && python scripts/coverage_gate.py coverage.json 90
+# the delta gate (CI adds --exclude for the dask/parsl-scoped files)
+coverage xml -o coverage.xml && diff-cover coverage.xml --compare-branch=origin/main --fail-under=98
 ```
 
 ## Lint, types, docs
