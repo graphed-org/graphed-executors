@@ -152,13 +152,11 @@ jobs:
           if git cat-file -e origin/main:scripts/coverage_gate.py 2>/dev/null; then
             diff-cover coverage.xml --compare-branch=origin/main --fail-under=98 \
               --include "src/graphed_executors/submit/*.py" "src/graphed_executors/dask_backend/*.py" \
-              "src/graphed_executors/common/tasks_engine.py" "src/graphed_executors/common/transport_run.py" \
-              "src/graphed_executors/common/facade.py" "src/graphed_executors/common/transport_tasks.py"
+              "src/graphed_executors/common/*.py"
           else
             diff-cover coverage.xml --compare-branch=origin/main \
               --include "src/graphed_executors/submit/*.py" "src/graphed_executors/dask_backend/*.py" \
-              "src/graphed_executors/common/tasks_engine.py" "src/graphed_executors/common/transport_run.py" \
-              "src/graphed_executors/common/facade.py" "src/graphed_executors/common/transport_tasks.py"
+              "src/graphed_executors/common/*.py"
           fi
 
   # The parsl executor backend (graphed_executors.parsl_backend) + the relay engine live behind the

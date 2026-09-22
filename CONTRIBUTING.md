@@ -45,9 +45,10 @@ and parsl suites in dedicated jobs.
 
 Coverage policy: every source file must be >= 90% line+branch covered on its own
 (`scripts/coverage_gate.py`, never lowered), and every PR must be >= 98% diff-covered against
-`main` (`diff-cover`, gating on the merge-queue run). `common/__init__.py` is a docstring-only
-module (no branch logic) and is exempt from the per-file gate; it is not in any job's coverage
-scope. To see what CI will enforce:
+`main` (`diff-cover`, gating on the merge-queue run). Every source file is in exactly one job's
+coverage scope: the main matrix gates `local/` and `submit/`, `test-dask` gates `dask_backend/`,
+`submit/` and `common/` (bar the two parsl-gated modules), `test-parsl` gates `parsl_backend/`,
+`common/relay_engine.py` and `common/http_plane.py`. To see what CI will enforce:
 
 ```bash
 pytest --cov=graphed_executors --cov-branch --cov-report=term-missing
