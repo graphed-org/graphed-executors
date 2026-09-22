@@ -50,8 +50,15 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Lint + types (pre-commit hooks via prek)
         run: uvx prek@0.4.5 run --all-files --show-diff-on-failure
-      - name: Pytest (frozen + extra) + whole-package coverage (>=90%)
-        run: pytest tests/frozen tests/extra --cov=graphed_executors --cov-branch --cov-report=term-missing
+      # Two sessions, not one: the frozen suite keeps the single-session shape `main` is gated in.
+      # Folding tests/extra into the same session is the only change this branch makes to this job,
+      # and it reddened the m40 tracemalloc corroboration on the macOS py3.11 runner while the same
+      # job stayed green on main (dispatch run 35751955286). The extra suite appends to the same
+      # coverage data, so the per-file gate below still sees both.
+      - name: Pytest (frozen) + whole-package coverage (>=90%)
+        run: pytest tests/frozen --cov=graphed_executors --cov-branch --cov-report=term-missing
+      - name: Pytest (extra) + coverage append
+        run: pytest tests/extra --cov=graphed_executors --cov-branch --cov-append --cov-report=term-missing
       - name: Per-file coverage gate (>=90% each)
         shell: bash
         run: |
@@ -147,7 +154,9 @@ jobs:
           git fetch origin main
           coverage xml --rcfile=.coveragerc-dask -o coverage.xml
           # `--include` is glob.glob, not fnmatch (diff_cover 10.6.0 diff_reporter._is_path_excluded):
-          # these patterns must expand to real checkout-relative paths, mirroring .coveragerc-dask's source.
+          # these patterns must expand to real checkout-relative paths, mirroring .coveragerc-dask's
+          # source. The two parsl-gated `common/` modules are omitted from this job's coverage, so
+          # diff-cover finds no lines for them here and the parsl job's step is their only gate.
           # ponytail: self-retiring guard, see the main job's step for why.
           if git cat-file -e origin/main:scripts/coverage_gate.py 2>/dev/null; then
             diff-cover coverage.xml --compare-branch=origin/main --fail-under=98 \
