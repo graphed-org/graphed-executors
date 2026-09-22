@@ -26,10 +26,14 @@ def main() -> int:
             under.append((name, pct))
 
     print(f"\n{len(files)} files checked, threshold {threshold}%")
+    if not files:
+        # an empty report is a mis-scoped job, not a pass
+        print(f"FAIL: {path} reports zero files - the coverage scope is empty or wrong")
+        return 1
     if under:
         print(f"\n{len(under)} file(s) below {threshold}%:")
         for name, pct in under:
-            print(f"  {name}: {pct:.2f}%")
+            print(f"FAIL: {name} {pct:.2f}% < {threshold}%")
         return 1
     return 0
 
