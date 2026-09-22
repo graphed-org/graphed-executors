@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import multiprocessing
 import queue
+import signal
+import sys
 import time
 
 import pytest
@@ -25,6 +27,10 @@ def _pp_echo(x: int) -> tuple[str | None, int]:
 
 def _pp_sleep_boom() -> None:
     raise ValueError("boom")
+
+
+def _pp_sleep(seconds: float) -> None:
+    time.sleep(seconds)
 
 
 class _FlakyResultQueue:
@@ -87,12 +93,20 @@ def test_shutdown_without_wait_terminates_still_running_workers() -> None:
     pool = PinnedProcessPool(1, ctx, _pp_init, [("a",)])
     try:
         assert pool.workers_alive()
-        pool.shutdown(wait=False)  # skips the join loop; the worker is still alive -> terminate()
+        # occupy the worker inside fn(*args) so it cannot reach call_q.get() and see the sentinel
+        # before shutdown checks is_alive() — without this the worker can race the sentinel and exit
+        # cleanly (exitcode 0), which is indistinguishable from terminate() to a bare is_alive() check.
+        pool.submit(_pp_sleep, 5.0, worker=0)
+        time.sleep(0.5)  # let the worker enter time.sleep before shutdown fires
+        pool.shutdown(wait=False)  # skips the join loop; the worker is still mid-call -> terminate()
     finally:
-        # a second, waiting shutdown would be a no-op (already closed) — just confirm the process died
         for p in pool._procs:
             p.join(timeout=10)
             assert not p.is_alive()
+            if sys.platform == "win32":
+                assert p.exitcode != 0  # TerminateProcess exit code, not the clean-exit 0
+            else:
+                assert p.exitcode == -signal.SIGTERM  # a sentinel-driven clean exit would be 0
 
 
 def test_reap_tolerates_a_result_for_an_unknown_call_id() -> None:
