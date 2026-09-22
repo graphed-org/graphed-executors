@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-distributed = pytest.importorskip("distributed")
+pytest.importorskip("distributed")
 
 from graphed_executors.dask_backend import transport as T
 from graphed_executors.dask_backend._transport_run import DRIVER, PLUGIN_NAME
@@ -217,7 +217,9 @@ def test_overlay_bounds_the_outbox_and_broadcast_skips_the_driver(tmp_path: Path
     assert endpoint.peers() == (_PEER, DRIVER)
     assert spec.peers_of("tcp://127.0.0.1:9999") == (), "an address outside the overlay may send nowhere"
     endpoint.broadcast("hello")
-    assert [dest for dest, _payload in worker.sent] == [_PEER], "broadcast is peer-only; driver rides log_event"
+    assert [dest for dest, _payload in worker.sent] == [_PEER], (
+        "broadcast is peer-only; driver rides log_event"
+    )
     assert worker.events == [], "no driver traffic from a broadcast"
     endpoint.close()  # per-epoch state dies with the driver purge, not with the endpoint
 
@@ -237,11 +239,11 @@ def test_root_send_rides_log_event_and_arms_the_none_safe_root_witness(tmp_path:
 # ---- task-side helpers: the missing plugin, the pre-created inbox, the pull classifier ----------
 def test_a_missing_plugin_is_a_loud_error_on_the_task_side(tmp_path: Path, monkeypatch: Any) -> None:
     worker = _Worker(str(tmp_path))
-    monkeypatch.setattr(distributed, "get_worker", lambda: worker)
+    monkeypatch.setattr("distributed.get_worker", lambda: worker)
     with pytest.raises(RuntimeError, match="plugin is not registered"):
         T._get_plugin()
     plugin, worker2, spec = _ready(tmp_path)
-    monkeypatch.setattr(distributed, "get_worker", lambda: worker2)
+    monkeypatch.setattr("distributed.get_worker", lambda: worker2)
     assert T.open_endpoint(spec)._plugin is plugin
 
 
@@ -268,7 +270,7 @@ def test_a_lost_holder_is_classified_never_read_as_zero_rows(
     tmp_path: Path, monkeypatch: Any, reply: Any, exc: type[Exception], match: str
 ) -> None:
     worker = _Worker(str(tmp_path), reply=reply)
-    monkeypatch.setattr(distributed, "get_worker", lambda: worker)
+    monkeypatch.setattr("distributed.get_worker", lambda: worker)
     # the task-thread -> IO-loop bridge is dask's; the classifier under test is the coroutine body.
     monkeypatch.setattr(T, "sync", lambda _loop, fn, *a: asyncio.run(fn(*a)))
     with pytest.raises(exc, match=match):
@@ -277,7 +279,7 @@ def test_a_lost_holder_is_classified_never_read_as_zero_rows(
 
 def test_pull_blocks_coalesces_one_rpc_per_holder(tmp_path: Path, monkeypatch: Any) -> None:
     worker = _Worker(str(tmp_path), reply=lambda ds: {"wires": [f"w-{d}".encode() for d in ds]})
-    monkeypatch.setattr(distributed, "get_worker", lambda: worker)
+    monkeypatch.setattr("distributed.get_worker", lambda: worker)
     monkeypatch.setattr(T, "sync", lambda _loop, fn, *a: asyncio.run(fn(*a)))
     assert T.pull_blocks("e1", _PEER, ["a", "b"]) == [b"w-a", b"w-b"]
     assert worker.sent == [(_PEER, ("a", "b"))], "a batch is ONE rpc (the incast bound), not one per digest"
