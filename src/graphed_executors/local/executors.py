@@ -433,6 +433,8 @@ class _BaseExecutor:
         self._comms = comms
         self._steal = steal
         self._last_peer_witness: list[dict[str, int]] = []
+        # Per-run state lives on the instance (kept pool, peer registry, broadcast tokens).
+        self._run_lock = threading.Lock()
         # STRICT: peer reduction (comms set) emits monitor events + fires on_combine, but it CANNOT run
         # pooled combines (its whole model is off-driver combines — `pooled_combines` is a hub-only
         # mechanism). Rather than SILENTLY falling back to the hub path (hub-mode sneaking into a run
@@ -514,13 +516,16 @@ class _BaseExecutor:
         self.close()
 
     def run(self, plan: Plan[R]) -> ExecResult[R]:
-        if plan.next_tasks is not None:
-            return self._run_adaptive(plan)
-        if self._comms is not None:
-            return self._run_peer(plan)
-        if self._pooled_combines:
-            return self._run_fixed_pooled(plan)
-        return self._run_fixed(plan)
+        """Run ``plan`` to its reduced result. One plan runs at a time per executor; a concurrent
+        caller waits for the running plan to finish."""
+        with self._run_lock:
+            if plan.next_tasks is not None:
+                return self._run_adaptive(plan)
+            if self._comms is not None:
+                return self._run_peer(plan)
+            if self._pooled_combines:
+                return self._run_fixed_pooled(plan)
+            return self._run_fixed(plan)
 
     def _run_peer(self, plan: Plan[R]) -> ExecResult[R]:
         """M38 peer reduction: partition the leaves into contiguous per-worker ranges and reduce them

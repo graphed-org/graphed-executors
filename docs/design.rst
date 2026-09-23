@@ -242,6 +242,9 @@ or by leaving the ``with`` block:
 
    # [array([400]), array([800]), array([1200])]
 
+An executor runs one plan at a time: a second ``run()`` from another thread waits until the first
+returns, because the kept pool and the peer state belong to the executor, not to the run.
+
 When an idle worker takes work from a busy one
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
