@@ -465,7 +465,11 @@ class SubmitRunner:
             for task in batch:
                 if monitor is not None and monitor_topic is not None:
                     emit_task(monitor, self._submitted_event(task))
-            window.held.extend(batch)
+            if control is None:  # the default path skips the window per batch
+                for task in batch:
+                    start(task)
+            else:
+                window.held.extend(batch)
 
         def start(task: Task) -> None:
             nonlocal seq
@@ -524,7 +528,7 @@ class SubmitRunner:
 
     def _fill(self, window: _Window[T], in_flight: int, start: Callable[[T], None]) -> None:
         """Start the held work the window releases; a full window holding work re-reads the slots and
-        widens, so workers that joined since the last read are used."""
+        resizes, so workers that joined since the last read are used."""
         while True:
             items = window.take(in_flight)
             for item in items:
@@ -533,9 +537,10 @@ class SubmitRunner:
             if not window.held or in_flight < window.size:
                 return
             size = self._task_slots()
-            if size <= window.size:
+            grew = size > window.size
+            window.size = size  # follows each re-read, so a shrunk pool narrows the window too
+            if not grew:
                 return
-            window.size = size
 
     def _result(self, fut: SubmitFuture, key_to_task: dict[str, Task]) -> object:
         """Resolve a future, translating a backend worker-death signal (``KilledWorker``) into an

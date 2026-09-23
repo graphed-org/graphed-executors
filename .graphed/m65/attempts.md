@@ -89,3 +89,13 @@ The interleaved A/B (`graphed-workdir/lanes/debug/probes/a3_adapt_ab.py`, base =
 src`) showed the uncontrolled adaptive run slower by ~1.5 ms min / 2.7 ms median over 4000 tasks: the
 loop called `_fill` and `window.cancelled()` per completion. Both are now skipped when they cannot act
 (`_fill` only while `window.held`, `cancelled()` only with a control); the rerun is inside noise.
+
+### Iteration 4 — review r1 repairs
+
+M1: the uncontrolled adaptive `refill` starts each batch directly instead of routing it through the
+window, so a `next_tasks` that drips batches no longer pays `_fill`/`take` per completion.
+A/B `graphed-workdir/lanes/debug/reviews/a3i1_default_ab.py 20 base=<git archive freeze-m65a3 src>
+head=installed`: output in `graphed-workdir/lanes/debug/impl/a3.4-ab.out`. L2: `_fill` sets
+`window.size` to every re-read and loops only when it grew, so a shrunk pool narrows the window
+(`reviews/a3i1_shrink.py` peak 4 -> 1). L1: design.rst says only SubmitRunner and the local
+executors take `control=`; the dask/parsl runners get the attribute set.

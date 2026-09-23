@@ -396,8 +396,8 @@ Pausing and cancelling a run
 ----------------------------
 
 A monitor watches; a ``graphed.core.RunControl`` steers. Every local executor and ``SubmitRunner``
-(``dask_runner``, ``parsl_runner``) takes ``control=`` (or has its public ``control`` attribute set, which is what
-``Dashboard(control=True).attach(executor)`` does) and follows the contract in graphed's
+takes ``control=``; the runner ``dask_runner`` and ``parsl_runner`` return has its public ``control``
+attribute set instead, which is what ``Dashboard(control=True).attach(executor)`` does. Each follows the contract in graphed's
 *Pausing and cancelling a run*: pause starts no new task, cancel starts none, waits for what
 was submitted and returns the fold of the tasks that completed with
 ``stopped=StopReason.CANCELLED``, and a failure while it drains raises as it would without a
