@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 import m65a_probe as mp
 import pytest
-from graphed.core import Partition, RunControl, RunState, StopReason, TaskPhase
+from graphed.core import Partition, RunControl, RunState, StopReason
 from graphed.core.execution import LocalResources
 
 from graphed_executors.local import ProcessPoolExecutor, _peer, executors
@@ -41,7 +42,9 @@ def test_the_root_timeout_message_follows_the_constant(route: str, monkeypatch: 
         run.result(30)
 
 
-def test_a_cancel_after_the_root_leaves_a_persistent_pool_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_cancel_after_the_root_leaves_a_persistent_pool_clean(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     told: list[RunState] = []
     relay = _peer.PeerControl.relay
 
@@ -51,20 +54,22 @@ def test_a_cancel_after_the_root_leaves_a_persistent_pool_clean(monkeypatch: pyt
         return paused
 
     monkeypatch.setattr(_peer.PeerControl, "relay", spy)
+    entered, release = str(tmp_path / "entered"), str(tmp_path / "release")
     ctl = RunControl()
-    rec = mp.Recorder()
-
-    def cancel_on_the_last_leaf(event: Any, on_task: Any = rec.on_task) -> None:
-        on_task(event)
-        if event.phase is TaskPhase.FINISHED and event.key == mp.N - 1:
-            ctl.cancel()
-
-    rec.on_task = cancel_on_the_last_leaf
-    with ProcessPoolExecutor(max_workers=2, persistent=True, monitor=rec, control=ctl) as ex:
-        ex.run(mp.make_plan(mp.Probe()))
-        ex.control = ex.monitor = None
+    # Leaf 19 (w0's last, which forms the root) is held until the cancel has gone out.
+    probe = mp.Probe(hold_key=19, entered_path=entered, release_path=release)
+    with ProcessPoolExecutor(max_workers=2, persistent=True, steal=False, control=ctl) as ex:
+        run = mp.Background(lambda: ex.run(mp.make_plan(probe)))
+        assert mp._await_file(entered)
+        ctl.cancel()
+        deadline = time.monotonic() + 10
+        while RunState.CANCELLED not in told and time.monotonic() < deadline:
+            time.sleep(0.01)
+        mp.touch(release)
+        run.result()
+        ex.control = None
         again = mp.Background(lambda: ex.run(mp.make_plan(mp.Probe()))).result(30)
-    assert RunState.CANCELLED in told  # the cancel went out to the workers of the first run
+    assert RunState.CANCELLED in told  # the cancel reached the workers of the first run
     assert (again.value, again.stopped) == (ONES, StopReason.EXHAUSTED)
 
 
