@@ -154,6 +154,10 @@ class LazyReducer(Generic[R]):
         if len(present) > self.max_frontier:
             self.max_frontier = len(present)
 
+    def frontier(self) -> list[tuple[int, R]]:
+        """The parked nodes as ``(first leaf, value)`` in leaf order: the root alone once every leaf is in."""
+        return sorted(((pos << level, v) for (level, pos), v in self._present.items()), key=lambda p: p[0])
+
     def result(self) -> R:
         """The reduced value. Valid once all ``n`` leaves have been fed (the root has formed)."""
         if self.n == 0:
