@@ -99,3 +99,10 @@ head=installed`: output in `graphed-workdir/lanes/debug/impl/a3.4-ab.out`. L2: `
 `window.size` to every re-read and loops only when it grew, so a shrunk pool narrows the window
 (`reviews/a3i1_shrink.py` peak 4 -> 1). L1: design.rst says only SubmitRunner and the local
 executors take `control=`; the dask/parsl runners get the attribute set.
+
+### Iteration 5 — review r2 repair (M1')
+
+`run()` sends an uncontrolled adaptive run to `_run_adaptive` exactly as at `freeze-m65a3`; the
+windowed loop is `_run_adaptive_windowed(control: RunControl)`, with its `control is None` branches
+gone, mirroring the fixed split. A/B `reviews/a3i1_default_ab.py 60`, both leg orders with a base2
+leg (base = `git archive freeze-m65a3 src`): `graphed-workdir/lanes/debug/impl/a3.5-ab.out`.
