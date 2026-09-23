@@ -133,6 +133,7 @@ jobs:
           pytest tests/frozen/m42 tests/frozen/m43 tests/frozen/m44 tests/frozen/m45 \
             tests/frozen/m63/test_m63_submit_dask.py \
             tests/frozen/m65/test_m65a3_control_dask.py tests/frozen/m65/test_m65a3_control_submit.py \
+            tests/frozen/m65/test_m65a3_control_stop.py \
             tests/extra/m43 tests/extra/m44 \
             --cov-config=.coveragerc-dask \
             --cov-branch --cov \

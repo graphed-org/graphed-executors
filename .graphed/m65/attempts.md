@@ -106,3 +106,14 @@ executors take `control=`; the dask/parsl runners get the attribute set.
 windowed loop is `_run_adaptive_windowed(control: RunControl)`, with its `control is None` branches
 gone, mirroring the fixed split. A/B `reviews/a3i1_default_ab.py 60`, both leg orders with a base2
 leg (base = `git archive freeze-m65a3 src`): `graphed-workdir/lanes/debug/impl/a3.5-ab.out`.
+
+### Iteration 6 — review r3 repair (H1, owner ruling 'refreeze approved')
+
+Dispute `disputes/test_m65a3_controlled_stop.md` ruled; witness `tests/frozen/m65/test_m65a3_control_stop.py`
+(tag `freeze-m65a3-fixup`). `test-dask` now runs it beside the two A3 files, so its diff-cover reaches
+the windowed stop exit. No src change. Diff-cover outputs (`graphed-workdir/lanes/debug/impl/`):
+`a3.6-diffcover.out` (the three A3 frozen files vs `freeze-m65a3`) and `a3.6-dask-diffcover.out`
+(the test-dask job's command vs `origin/main`), both exit 0 with only the stray-callback `continue`
+missing. `a3.6-stop-mutant.out`: the windowed `reason = None` mutant fails the new test.
+`a3.6-dask-job.log` had one m44 worker-death HARD TIMEOUT under load (455 s wall vs 170 s);
+it passes alone 3/3 and the job rerun `a3.6-dask-job-2.log` is 312 passed.
