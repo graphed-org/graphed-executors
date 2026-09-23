@@ -284,10 +284,14 @@ class SubmitRunner:
                         emit_task(monitor, _event_from_dict(d))  # swallows a raising monitor (passivity)
 
                 unsub = self.backend.subscribe_events(monitor_topic, handler)
-            if plan.next_tasks is not None:
-                return self._run_adaptive(plan, monitor, control, run_nonce, monitor_topic, events_seen)
-            if control is not None:
+            if control is not None:  # the default path never meets a window
+                if plan.next_tasks is not None:
+                    return self._run_adaptive_windowed(
+                        plan, monitor, control, run_nonce, monitor_topic, events_seen
+                    )
                 return self._run_fixed_windowed(plan, monitor, control, run_nonce, monitor_topic, events_seen)
+            if plan.next_tasks is not None:
+                return self._run_adaptive(plan, monitor, run_nonce, monitor_topic, events_seen)
             return self._run_fixed(plan, monitor, run_nonce, monitor_topic, events_seen)
         finally:
             if unsub is not None:
@@ -437,7 +441,6 @@ class SubmitRunner:
         self,
         plan: Plan[R],
         monitor: Monitor | None,
-        control: RunControl | None,
         run_nonce: str,
         monitor_topic: str | None,
         events_seen: list[int],
@@ -456,7 +459,72 @@ class SubmitRunner:
         results: list[tuple[int, R]] = []
         stopped: StopReason | None = None
         seq = 0
-        window: _Window[Task] = _Window(control, self._task_slots() if control is not None else 0)
+
+        def refill() -> None:
+            nonlocal seq
+            batch = next_tasks(exec_ctx)  # DONE == None
+            if not batch:
+                return
+            for task in batch:
+                if monitor is not None and monitor_topic is not None:
+                    emit_task(monitor, self._submitted_event(task))
+                dask_key = _key(plan_fp, run_nonce, "leaf", seq)
+                key_to_task[dask_key] = task  # F2b: attribute a KilledWorker to this chunk (not the key)
+                fut = backend.submit(
+                    _leaf_task, ctx, phandle, ptoken, task, key=dask_key, retries=self._retries
+                )
+                seq += 1
+                outstanding[fut] = (task.key, task.partition.n_entries)
+                fut.add_done_callback(done_q.put)  # backend-neutral as_completed (queue.Queue)
+
+        try:
+            refill()
+            while outstanding:
+                fut = done_q.get()
+                if fut not in outstanding:  # a cancelled/duplicate callback
+                    continue
+                key, n_entries = outstanding.pop(fut)
+                results.append((key, cast(R, self._result(fut, key_to_task))))  # F2b: real map, not {}
+                exec_ctx.n_done += 1
+                exec_ctx.events_done += n_entries
+                reason = plan.stop.reason(exec_ctx) if plan.stop else None
+                if reason is not None:
+                    stopped = reason
+                    backend.cancel(list(outstanding))  # best-effort; cancel_running=False backend no-ops
+                    break
+                refill()
+
+            value, n_combines = running_fold(iter(results), plan.combine, plan.empty)
+            return ExecResult(value, exec_ctx.n_done, n_combines, stopped or StopReason.EXHAUSTED)
+        finally:
+            if monitor_topic is not None:  # F2a: drain trailing worker events (2 per consumed leaf)
+                _wait_until(lambda: events_seen[0] >= 2 * exec_ctx.n_done, _DRAIN_TIMEOUT_S)
+
+    def _run_adaptive_windowed(
+        self,
+        plan: Plan[R],
+        monitor: Monitor | None,
+        control: RunControl,
+        run_nonce: str,
+        monitor_topic: str | None,
+        events_seen: list[int],
+    ) -> ExecResult[R]:
+        """``_run_adaptive`` with each ``next_tasks`` batch held in a :class:`_Window`."""
+        assert plan.next_tasks is not None
+        backend = self.backend
+        next_tasks = plan.next_tasks
+        plan_fp, ppayload = _fingerprint(plan.process)
+        ctx = RunContext(run_nonce, monitor_topic, self._profiler_payload(monitor))
+        ptoken = f"{plan_fp}-{run_nonce}"
+        phandle = backend.broadcast(ppayload, token=ptoken)
+        exec_ctx = ExecContext()
+        done_q: queue.Queue[SubmitFuture] = queue.Queue()
+        outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
+        key_to_task: dict[str, Task] = {}  # F2b: dask key -> Task, so a worker death names the partition
+        results: list[tuple[int, R]] = []
+        stopped: StopReason | None = None
+        seq = 0
+        window: _Window[Task] = _Window(control, self._task_slots())
 
         def refill() -> None:
             batch = next_tasks(exec_ctx)  # DONE == None
@@ -465,11 +533,7 @@ class SubmitRunner:
             for task in batch:
                 if monitor is not None and monitor_topic is not None:
                     emit_task(monitor, self._submitted_event(task))
-            if control is None:  # the default path skips the window per batch
-                for task in batch:
-                    start(task)
-            else:
-                window.held.extend(batch)
+            window.held.extend(batch)
 
         def start(task: Task) -> None:
             nonlocal seq
@@ -488,7 +552,6 @@ class SubmitRunner:
                 if not outstanding and not window.held:
                     break
                 if not outstanding:  # paused with nothing running
-                    assert control is not None  # an uncontrolled window holds nothing
                     control.wait()
                     continue
                 try:
@@ -501,7 +564,7 @@ class SubmitRunner:
                 results.append((key, cast(R, self._result(fut, key_to_task))))  # F2b: real map, not {}
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
-                if control is not None and window.cancelled():  # then no next_tasks and no stop exit
+                if window.cancelled():  # then no next_tasks and no stop exit
                     continue
                 reason = plan.stop.reason(exec_ctx) if plan.stop else None
                 if reason is not None:
