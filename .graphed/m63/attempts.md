@@ -22,3 +22,8 @@ Hosts: `_BaseExecutor` (+ `_ProcessExecutorBase` forwards), `SubmitRunner`; `das
 `parsl_runner` forward `max_in_flight`; `close()` drains first. CI: the m63 dask/parsl files join
 the `test-dask`/`test-parsl` pytest lines. Whole frozen m63 suite (thread, process, pinned,
 ThreadBackend, dask, parsl, serialized) passes, first attempt.
+
+## Iteration 4 — A4: docs
+
+design.rst "Recording the next plan while this one runs" (executed example, output matches the
+comment), one sentence each in api.rst / dask.rst / parsl.rst; `sphinx-build -W` clean.
