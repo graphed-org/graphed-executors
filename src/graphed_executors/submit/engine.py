@@ -23,6 +23,7 @@ import time
 import uuid
 from collections import OrderedDict
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
@@ -38,6 +39,7 @@ from graphed.core.execution import (
 )
 from graphed.debug import SourceFrame, StageError
 
+from graphed_executors._plan_queue import PlanQueue
 from graphed_executors.local._reduce import plan_tree, running_fold
 
 from .protocol import SubmitBackend, SubmitFuture
@@ -226,7 +228,15 @@ class SubmitRunner:
     """A :class:`graphed.core.Executor` over any :class:`SubmitBackend`. ``run`` dispatches to the
     adaptive path when the plan carries ``next_tasks``, else the fixed ``plan_tree`` future graph."""
 
-    def __init__(self, backend: SubmitBackend, *, monitor: Monitor | None = None, retries: int = 3) -> None:
+    def __init__(
+        self,
+        backend: SubmitBackend,
+        *,
+        monitor: Monitor | None = None,
+        retries: int = 3,
+        max_in_flight: int = 2,
+    ) -> None:
+        self._plans = PlanQueue(self.run, max_in_flight)
         self.backend = backend
         self.monitor = monitor  # read once at each run's start (Dashboard.attach assigns it)
         self._retries = retries
@@ -237,7 +247,19 @@ class SubmitRunner:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
+    @property
+    def max_in_flight(self) -> int:
+        return self._plans.max_in_flight
+
+    def submit(self, plan: Plan[R]) -> Future[ExecResult[R]]:
+        """Queue ``plan`` and return a future of its :meth:`run` result without waiting for it.
+        Plans run one at a time in submit order; this blocks while ``max_in_flight`` submitted plans
+        are unfinished."""
+        return self._plans.submit(plan)
+
     def close(self) -> None:
+        """Finish every submitted plan, then close the backend."""
+        self._plans.close()
         self.backend.close()
 
     def run(self, plan: Plan[R]) -> ExecResult[R]:

@@ -52,6 +52,7 @@ from graphed.core.execution import (
 )
 from graphed.debug import StageError
 
+from .._plan_queue import PlanQueue
 from ._peer import (
     http_driver_handshake,
     http_peer_actor,
@@ -413,7 +414,9 @@ class _BaseExecutor:
         monitor: Monitor | None = None,
         comms: str | None = "ipc",
         steal: bool = True,
+        max_in_flight: int = 2,
     ):
+        self._plans = PlanQueue(self.run, max_in_flight)
         self.max_workers = max_workers if max_workers is not None else (os.cpu_count() or 1)
         self._on_combine = on_combine  # test hook: called per tree-reduce combine with #leaves so far
         self._pooled_combines = pooled_combines
@@ -502,8 +505,20 @@ class _BaseExecutor:
             self._kept_pool = self._pool()
         yield self._kept_pool  # kept alive for the next run()
 
+    @property
+    def max_in_flight(self) -> int:
+        return self._plans.max_in_flight
+
+    def submit(self, plan: Plan[R]) -> Future[ExecResult[R]]:
+        """Queue ``plan`` and return a future of its :meth:`run` result without waiting for it.
+        Plans run one at a time in submit order; this blocks while ``max_in_flight`` submitted plans
+        are unfinished."""
+        return self._plans.submit(plan)
+
     def close(self) -> None:
-        """Release a persistent pool (idempotent); a later run() lazily respawns."""
+        """Finish every submitted plan, then release a persistent pool (idempotent); a later run()
+        or submit() lazily respawns."""
+        self._plans.close()
         if self._kept_pool is not None:
             self._kept_pool.shutdown(wait=True)
             self._kept_pool = None
@@ -803,6 +818,7 @@ class _ProcessExecutorBase(_BaseExecutor):
         monitor: Monitor | None = None,
         comms: str | None = "ipc",
         steal: bool = True,
+        max_in_flight: int = 2,
     ):
         super().__init__(
             max_workers,
@@ -812,6 +828,7 @@ class _ProcessExecutorBase(_BaseExecutor):
             monitor=monitor,
             comms=comms,
             steal=steal,
+            max_in_flight=max_in_flight,
         )
         self._mgr: SyncManager | None = None
         self._event_q: object | None = None
