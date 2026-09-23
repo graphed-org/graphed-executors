@@ -228,7 +228,7 @@ class SubmitRunner:
 
     def __init__(self, backend: SubmitBackend, *, monitor: Monitor | None = None, retries: int = 3) -> None:
         self.backend = backend
-        self._monitor = monitor
+        self.monitor = monitor  # read once at each run's start (Dashboard.attach assigns it)
         self._retries = retries
 
     def __enter__(self) -> SubmitRunner:
@@ -242,7 +242,7 @@ class SubmitRunner:
 
     def run(self, plan: Plan[R]) -> ExecResult[R]:
         run_nonce = uuid.uuid4().hex[:8]
-        monitor = self._monitor
+        monitor = self.monitor
         monitor_topic = f"graphed-monitor-{run_nonce}" if monitor is not None else None
         events_seen = [0]
         unsub: Callable[[], None] | None = None
@@ -256,8 +256,8 @@ class SubmitRunner:
             unsub = self.backend.subscribe_events(monitor_topic, handler)
         try:
             if plan.next_tasks is not None:
-                return self._run_adaptive(plan, run_nonce, monitor_topic, events_seen)
-            return self._run_fixed(plan, run_nonce, monitor_topic, events_seen)
+                return self._run_adaptive(plan, monitor, run_nonce, monitor_topic, events_seen)
+            return self._run_fixed(plan, monitor, run_nonce, monitor_topic, events_seen)
         finally:
             if unsub is not None:
                 unsub()
@@ -265,16 +265,20 @@ class SubmitRunner:
     # ---- fixed path: plan_tree as the future graph (plan §1.2.1) ----
 
     def _run_fixed(
-        self, plan: Plan[R], run_nonce: str, monitor_topic: str | None, events_seen: list[int]
+        self,
+        plan: Plan[R],
+        monitor: Monitor | None,
+        run_nonce: str,
+        monitor_topic: str | None,
+        events_seen: list[int],
     ) -> ExecResult[R]:
         backend = self.backend
-        monitor = self._monitor
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
         n = len(tasks)
         if n == 0:
             return ExecResult(plan.empty(), 0, 0, StopReason.EXHAUSTED)
         plan_fp, ppayload = _fingerprint(plan.process)
-        ctx = RunContext(run_nonce, monitor_topic, self._profiler_payload())
+        ctx = RunContext(run_nonce, monitor_topic, self._profiler_payload(monitor))
         ptoken = f"{plan_fp}-{run_nonce}"
         phandle = backend.broadcast(ppayload, token=ptoken)
         key_to_task: dict[str, Task] = {}
@@ -307,14 +311,18 @@ class SubmitRunner:
     # ---- adaptive path + stop (plan §1.2.4) ----
 
     def _run_adaptive(
-        self, plan: Plan[R], run_nonce: str, monitor_topic: str | None, events_seen: list[int]
+        self,
+        plan: Plan[R],
+        monitor: Monitor | None,
+        run_nonce: str,
+        monitor_topic: str | None,
+        events_seen: list[int],
     ) -> ExecResult[R]:
         assert plan.next_tasks is not None
         backend = self.backend
-        monitor = self._monitor
         next_tasks = plan.next_tasks
         plan_fp, ppayload = _fingerprint(plan.process)
-        ctx = RunContext(run_nonce, monitor_topic, self._profiler_payload())
+        ctx = RunContext(run_nonce, monitor_topic, self._profiler_payload(monitor))
         ptoken = f"{plan_fp}-{run_nonce}"
         phandle = backend.broadcast(ppayload, token=ptoken)
         exec_ctx = ExecContext()
@@ -412,11 +420,10 @@ class SubmitRunner:
             task.partition.n_entries,
         )
 
-    def _profiler_payload(self) -> bytes | None:
+    def _profiler_payload(self, monitor: Monitor | None) -> bytes | None:
         # Worker-side statistical sampling is not wired for the dask backend in m42 (no frozen test
         # exercises on_profile); the RunContext field is populated per the §1.1 contract so the seam
         # is ready, but the shim does not start a profiler. ponytail: wire when a profile test lands.
-        monitor = self._monitor
         if monitor is None:
             return None
         factory = monitor.worker_profiler_factory()

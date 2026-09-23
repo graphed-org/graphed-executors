@@ -7,3 +7,9 @@ Frozen suite `tests/frozen/m63/` (tag `freeze-m63`). Plan: lane `plan-A.md` (A1â
 
 `_BaseExecutor.run` holds an instance `threading.Lock`. `test_m63_run_serialized.py`: the five
 run-beside-run / persistent-pool legs pass; the submit leg waits on A3 (`submit` missing).
+
+## Iteration 2 â€” A2: `SubmitRunner.monitor` public, read once per run
+
+`self.monitor` replaces `self._monitor`; `run` reads it once and passes it to `_run_fixed`,
+`_run_adaptive` and `_profiler_payload`. Probe: `r.monitor = m; r.run(fixed_plan(7))` on
+`ThreadBackend(2)` gives 6 `SUBMITTED` (was 0 on main).

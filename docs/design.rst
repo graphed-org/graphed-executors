@@ -325,6 +325,8 @@ Every executor takes an optional ``monitor=``. It is a passive observer implemen
 ``graphed.core.execution.Monitor``; the executor knows nothing about rendering or transport and
 only emits a small vocabulary of ``TaskEvent`` records. ``graphed.debug.Dashboard`` is one
 consumer of them.
+The monitor is also a public ``monitor`` attribute on every executor and runner, read when a plan
+starts, so ``Dashboard.attach(executor)`` (which assigns it) reaches the next plan anywhere.
 
 One task is three events. The driver emits ``SUBMITTED`` when it hands the task to the pool; the
 worker emits ``STARTED`` before running it and exactly one of ``FINISHED`` or ``ERRORED`` after.
