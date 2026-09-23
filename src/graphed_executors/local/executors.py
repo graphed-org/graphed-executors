@@ -428,6 +428,8 @@ class _BaseExecutor:
             OrderedDict()
         )  # M31/M34: primed tokens, FIFO-bounded in lockstep with each worker cache
         self.monitor = monitor  # M37: a passive dashboard observer (None => no instrumentation)
+        # the running plan's snapshot: a reassignment mid-run reaches the next plan, not this one
+        self._run_monitor: Monitor | None = None
         # M38: comms=None -> the hub reduction (driver combines); "ipc"/"http" -> PEER reduction
         # (combines run across the workers over that transport, off the driver). Result is identical
         # (same fixed plan_tree grouping); peer just relocates the combines. steal=True (peer only)
@@ -465,7 +467,7 @@ class _BaseExecutor:
         """Wrap the subclass submit with a driver-side SUBMITTED emission (M37). Worker-side STARTED/
         FINISHED/ERRORED come from the worker entry; here we record the moment of submission."""
         raw = self._raw_submit(pool, process)
-        monitor = self.monitor
+        monitor = self._run_monitor
         if monitor is None:
             return raw
 
@@ -489,9 +491,9 @@ class _BaseExecutor:
         """The tree-reduce combine callback: the legacy test hook AND the dashboard monitor (M37)."""
         if self._on_combine is not None:
             self._on_combine(leaves_done)
-        if self.monitor is not None:
+        if self._run_monitor is not None:
             with contextlib.suppress(Exception):
-                self.monitor.on_combine(leaves_done)
+                self._run_monitor.on_combine(leaves_done)
 
     @contextlib.contextmanager
     def _acquired_pool(self) -> Iterator[_PoolExecutor]:
@@ -534,6 +536,7 @@ class _BaseExecutor:
         """Run ``plan`` to its reduced result. One plan runs at a time per executor; a concurrent
         caller waits for the running plan to finish."""
         with self._run_lock:
+            self._run_monitor = self.monitor
             if plan.next_tasks is not None:
                 return self._run_adaptive(plan)
             if self._comms is not None:
@@ -558,10 +561,10 @@ class _BaseExecutor:
         bounds = make_bounds(n, w)
         worker_addrs = tuple(f"w{i}" for i in range(w))
         items = slice_items([t.partition for t in tasks], bounds, worker_addrs)
-        if self.monitor is not None:  # driver-side SUBMITTED (worker-side STARTED/FINISHED/ERRORED stream in)
+        if self._run_monitor is not None:  # driver-side SUBMITTED; workers stream the rest
             for t in tasks:
                 emit_task(
-                    self.monitor,
+                    self._run_monitor,
                     TaskEvent(
                         TaskPhase.SUBMITTED,
                         t.key,
@@ -579,7 +582,7 @@ class _BaseExecutor:
     def _peer_profiler_factory(self) -> Callable[[], WorkerProfiler] | None:
         """The picklable per-worker profiler factory (M37), or None — so peer workers profile exactly
         like the hub path and ``Dashboard(profile=True)`` works under peer (no silent loss)."""
-        return self.monitor.worker_profiler_factory() if self.monitor is not None else None
+        return self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
 
     def _forward_peer_events(self, payload: tuple[Any, ...]) -> bool:
         """If ``payload`` is a worker monitor-event batch (task lifecycle) or a profile sample-tree,
@@ -587,11 +590,11 @@ class _BaseExecutor:
         messages). Best-effort (M37 passivity) — a raising monitor never breaks the run."""
         if payload[0] == "events":
             for ev in payload[1]:
-                emit_task(self.monitor, ev)
+                emit_task(self._run_monitor, ev)
             return True
-        if payload[0] == "profile" and self.monitor is not None:
+        if payload[0] == "profile" and self._run_monitor is not None:
             with contextlib.suppress(Exception):
-                self.monitor.on_profile(payload[1], payload[2])
+                self._run_monitor.on_profile(payload[1], payload[2])
             return True
         return False
 
@@ -714,7 +717,7 @@ class ThreadExecutor(_BaseExecutor):
     def _raw_submit(
         self, pool: _PoolExecutor, process: Callable[[Partition, LocalResources], object]
     ) -> Callable[[Task], Future[object]]:
-        return lambda task: pool.submit(_thread_task, process, task, self.monitor)
+        return lambda task: pool.submit(_thread_task, process, task, self._run_monitor)
 
     def _peer_execute(
         self,
@@ -744,7 +747,7 @@ class ThreadExecutor(_BaseExecutor):
                     items[addr],
                     LocalResources(),  # fresh per worker thread (closed when the actor returns)
                     steal=self._steal,
-                    emit=self.monitor is not None,
+                    emit=self._run_monitor is not None,
                     profiler_factory=self._peer_profiler_factory(),
                 )
             except BaseException as exc:  # a thread exception is otherwise lost -> capture + propagate
@@ -967,7 +970,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                         plan.combine,
                         items[a],
                         self._steal,
-                        self.monitor is not None,
+                        self._run_monitor is not None,
                         factory,
                         worker=i,
                     )
@@ -986,7 +989,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                         plan.combine,
                         items[a],
                         self._steal,
-                        self.monitor is not None,
+                        self._run_monitor is not None,
                         factory,
                     )
                     for a in worker_addrs
@@ -1041,7 +1044,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                     plan.combine,
                     items[a],
                     self._steal,
-                    self.monitor is not None,
+                    self._run_monitor is not None,
                     factory,
                 )
                 for a in worker_addrs
@@ -1089,7 +1092,7 @@ class _ProcessExecutorBase(_BaseExecutor):
             release_workers(driver_t)
             raise
         release_workers(driver_t)
-        if self.monitor is None:
+        if self._run_monitor is None:
             # Fast path (no monitor): workers see ``done`` immediately (the transport wakes on the
             # message) and return, so BLOCK on the futures' completion instead of polling ``f.done()``
             # on a 20 ms cadence. That poll granularity was a fixed ~20-30 ms tail on EVERY run — under
@@ -1117,7 +1120,7 @@ class _ProcessExecutorBase(_BaseExecutor):
         return cast(R, root)
 
     def _pool(self) -> _PoolExecutor:
-        factory = self.monitor.worker_profiler_factory() if self.monitor is not None else None
+        factory = self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
         return _StdProcessPool(
             max_workers=self.max_workers,
             mp_context=multiprocessing.get_context("spawn"),
@@ -1150,7 +1153,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                 self._stop_collector()
 
     def _ensure_collector(self) -> None:
-        if self.monitor is None:
+        if self._run_monitor is None:
             return
         if self._mgr is None:  # one manager + queue for this executor's lifetime
             self._mgr = multiprocessing.get_context("spawn").Manager()
@@ -1180,7 +1183,7 @@ class _ProcessExecutorBase(_BaseExecutor):
             self._dispatch(item)
 
     def _dispatch(self, item: tuple[str, object]) -> None:
-        monitor = self.monitor
+        monitor = self._run_monitor
         if monitor is None:
             return
         kind, payload = item
