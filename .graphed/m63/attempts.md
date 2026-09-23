@@ -39,3 +39,13 @@ comment), one sentence each in api.rst / dask.rst / parsl.rst; `sphinx-build -W`
   (`parsl_backend/backend.py` 91.89); diff 2 lines, 100 %.
 - Full `tests/frozen tests/extra` with extras installed: 832 passed (baseline 759 + 73 m63).
 - `mypy` (repo strict config) over `src tests`: clean. `sphinx-build -W`: clean.
+
+## Iteration 6 — review r1 F1: one monitor snapshot per local run
+
+`_BaseExecutor.run` sets `self._run_monitor = self.monitor` under the run lock; every run-path
+read (`_prepare`, `_combine_cb`, peer SUBMITTED/forwarding/profiler factory, thread submit, process
+pool factory, the persistent collector's `_dispatch`) reads the snapshot. Class search: the only
+other `run(self, plan` host, `SubmitRunner`, already snapshots. `tests/extra/m63/test_monitor_snapshot.py`
+(thread peer/hub, process peer/hub-collector): 4 pass; with the fix stashed, 4 fail. design.rst
+adds the interpreter-exit trap (L1). Gates (`impl/exec_gates.sh`, `impl/exec_gates.r1.out`): all
+exit 0; `local/executors.py` 93.45 %; frozen-only diff 78/78 lines, dask 18/18, parsl 2/2.
