@@ -385,11 +385,11 @@ Where the executor looks at the control depends on who merges:
   worker hands the driver its finished pieces of the merge tree, and the driver merges them.
   A peer run's root deadline counts only time spent running, so a long pause never times it out.
 
-A cancelled run's total is the fixed merge tree over the tasks that finished: every merge whose
-two inputs completed runs, and the pieces left over are added in leaf order. A run never
-cancelled gives exactly the total it gives without a control on the fixed and peer routes. An
-adaptive plan adds its partials in the order they finish, with or without a control, so its total
-is reproducible only when the partials add exactly (integers, counts).
+On the fixed-tree and peer routes, a cancelled run's total is the fixed merge tree over the tasks
+that finished: every merge whose two inputs completed runs, and the pieces left over are added in
+leaf order; a run never cancelled gives exactly the total it gives without a control. On the
+adaptive route, a cancelled run's total, like an uncancelled one's, adds the partials in the order
+they finish, so it is reproducible only when the partials add exactly (integers, counts).
 
 
 .. _design-shuffle-graph:
