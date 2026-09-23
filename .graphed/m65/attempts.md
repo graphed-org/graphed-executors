@@ -44,6 +44,14 @@ Deviations from the plan text:
 Extra tests (`tests/extra/m65/test_a2_peer_control.py`), each failing on a mutant: the paused deadline
 (no reset → `TimeoutError within 3.0s`), the timeout message (literal `300s`; no release → run past
 30 s), the driver fold (first-leaf fold without the tree → `…78.2 != …78.1`), the idempotent handlers
-(no grant dedup → processed 2; cancel twice → two `cancelled`). The persistent late-cancel test
-witnesses a cancel relayed on the root-first path; no single-point mutant fails it, because the reuse
-`_drain_queue` also clears a late tag.
+(no grant dedup → processed 2; cancel twice → two `cancelled`).
+
+### Iteration 3 — A2.3 CI pin, docs; the late-cancel test made deterministic
+
+`GRAPHED` pinned to graphed PR-A1's head `61bde20`; `docs/design.rst` "Pausing and cancelling a run"
+(example executed: `cancelled True running`, 3/3); `docs/improvements.rst` names the transport-peer
+routes as uncontrolled. The persistent late-cancel extra test cancelled on key 39's FINISHED, which
+under `-n 8` load sometimes arrived after the root, so no tag went out. It now holds leaf 19 (w0's
+last, which forms the root) until the spy sees the cancel relayed, then releases it: the root forms
+after the cancel. A driver that ignores a root once it has relayed a cancel fails it
+(`TimeoutError`).
