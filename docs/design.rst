@@ -287,10 +287,12 @@ it. Every executor and runner here has it — the local pools and ``SubmitRunner
 
    # [array([400]), array([800]), array([1200])]
 
-Two traps. Calling ``submit`` or ``.result()`` from a monitor callback or from inside a plan's
+Three traps. Calling ``submit`` or ``.result()`` from a monitor callback or from inside a plan's
 ``process`` on the same executor waits on its own driver thread and never returns. And
 ``ThreadExecutor``/``ThreadBackend`` overlap recording with running only where the kernels
-release the GIL; a process pool or a cluster overlaps regardless.
+release the GIL; a process pool or a cluster overlaps regardless. A process pool fails plans still
+unwaited at interpreter exit, so take every ``.result()``, call ``close()`` or leave the ``with``
+block first.
 
 When an idle worker takes work from a busy one
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
