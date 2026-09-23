@@ -117,3 +117,8 @@ the windowed stop exit. No src change. Diff-cover outputs (`graphed-workdir/lane
 missing. `a3.6-stop-mutant.out`: the windowed `reason = None` mutant fails the new test.
 `a3.6-dask-job.log` had one m44 worker-death HARD TIMEOUT under load (455 s wall vs 170 s);
 it passes alone 3/3 and the job rerun `a3.6-dask-job-2.log` is 312 passed.
+
+### Iteration 7 — residual fold (L3)
+
+`origin/main` (A2 squash `0b085f1`) merged with `-s ours`: its tree equals `lane/debug`'s, so the merge
+changes no file. CI `GRAPHED` re-pinned from `61bde20` to graphed `c551533` (the A1 squash on main). No src change.
