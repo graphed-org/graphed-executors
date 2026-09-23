@@ -27,3 +27,15 @@ ThreadBackend, dask, parsl, serialized) passes, first attempt.
 
 design.rst "Recording the next plan while this one runs" (executed example, output matches the
 comment), one sentence each in api.rst / dask.rst / parsl.rst; `sphinx-build -W` clean.
+
+## Iteration 5 — gates (logs: lane `impl/exec-R*.log`, script `impl/exec_gates.sh`)
+
+- Main-job stand-in (dask/distributed/parsl blocked in `sys.modules`): `tests/frozen tests/extra`
+  pass; per-file gate ok (`_plan_queue.py` 100, `local/executors.py` 93.43, `submit/engine.py`
+  93.17); diff gate from `tests/frozen` alone: 63 changed lines, 100 %.
+- test-dask job (m63 dask file added): pass; per-file ok (`submit/engine.py` 97.48,
+  `dask_backend/backend.py` 100); diff 18 lines, 100 %.
+- test-parsl job (m63 parsl file added): pass; combined report ≥ 90; per-file ok
+  (`parsl_backend/backend.py` 91.89); diff 2 lines, 100 %.
+- Full `tests/frozen tests/extra` with extras installed: 832 passed (baseline 759 + 73 m63).
+- `mypy` (repo strict config) over `src tests`: clean. `sphinx-build -W`: clean.
