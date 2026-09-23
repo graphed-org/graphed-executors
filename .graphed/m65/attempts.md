@@ -20,3 +20,30 @@ the pooled `ready` nodes by first leaf, through one `_folded`. Adaptive: `t0` at
 timeout wake calls neither `next_tasks` nor `stop`; once a check sees CANCELLED the loop drains without
 the stop exit. Extra tests (`tests/extra/m65/test_a2_hub_window.py`) fail on a mutant without the timed
 wake (next STARTED 0.74 s after resume) and on one stamping `t0` at batch time (1.66 s duration).
+
+### Iteration 2 — A2.2 peer routes (m65 frozen 97/97, three serial runs 97/97)
+
+Worker (`process_and_reduce`): `pause`/`resume` set a flag; the loop pops no leaf and sends no steal
+while paused or cancelled. `cancel` acts once: clears `mine`, sends `("cancelled", address, processed,
+reducer.hand_in())`; `PeerReducer.hand_in` returns the parked nodes and switches `settle` to forwarding
+every later node to the driver as `("item", level, pos, value)`. Driver: one `PeerControl` in `_peer.py`
+serves both loops (`relay` per poll through one `_Outbox` per worker, inline on HTTP; `take` dedups
+items by node and folds through a driver `LazyReducer` then `frontier()`; `close` before `done`).
+`_run_peer` waits in `control.wait()` after SUBMITTED, before any actor. `_PEER_ROOT_TIMEOUT_S`,
+reset on every paused poll; the message reads it at call time.
+Deviations from the plan text:
+- r2 L1 said to dedup `steal_resp` by reusing `seen` keyed `(0, leaf)`. That drops a leaf a thief hands
+  back to its owner (the owner's own settle then finds `(0, leaf)` seen) and a leaf granted to the same
+  thief twice. Each grant instead carries a victim-scoped id `(-1 - victim index, given#)`, a negative
+  level no node key uses, kept in the same `seen`.
+- The driver's "first `cancelled` per address" check was dropped: the worker sends one, a retried copy
+  is identical, and re-applying it is idempotent (a mutant without the check passes every test).
+- Dead `n == 0` branches in both driver loops removed (`_run_peer` returns before them). The thread
+  driver now broadcasts `done` before raising its `TimeoutError`; without it the `finally` joins each
+  unreleased actor for 30 s.
+Extra tests (`tests/extra/m65/test_a2_peer_control.py`), each failing on a mutant: the paused deadline
+(no reset → `TimeoutError within 3.0s`), the timeout message (literal `300s`; no release → run past
+30 s), the driver fold (first-leaf fold without the tree → `…78.2 != …78.1`), the idempotent handlers
+(no grant dedup → processed 2; cancel twice → two `cancelled`). The persistent late-cancel test
+witnesses a cancel relayed on the root-first path; no single-point mutant fails it, because the reuse
+`_drain_queue` also clears a late tag.
