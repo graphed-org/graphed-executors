@@ -82,3 +82,10 @@ loop returns the empty EXHAUSTED result; probed).
 `test_m65a3_control_parsl.py`; design.rst names SubmitRunner in the run-control opener and adds its
 bullet (slots, timed wake, merges after inputs, `replicate_broadcast=True` on dask, control read per
 plan).
+
+### Iteration 3 — default-path trim
+
+The interleaved A/B (`graphed-workdir/lanes/debug/probes/a3_adapt_ab.py`, base = `git archive 5e519c6
+src`) showed the uncontrolled adaptive run slower by ~1.5 ms min / 2.7 ms median over 4000 tasks: the
+loop called `_fill` and `window.cancelled()` per completion. Both are now skipped when they cannot act
+(`_fill` only while `window.held`, `cancelled()` only with a control); the rerun is inside noise.

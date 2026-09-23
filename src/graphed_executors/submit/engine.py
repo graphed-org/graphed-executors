@@ -393,7 +393,8 @@ class SubmitRunner:
 
         try:
             while True:
-                self._fill(window, sent - done, start)
+                if window.held:
+                    self._fill(window, sent - done, start)
                 if not node_of and not window.held:
                     break
                 if not node_of:  # paused with nothing running
@@ -478,7 +479,8 @@ class SubmitRunner:
         try:
             refill()
             while True:
-                self._fill(window, len(outstanding), start)
+                if window.held:  # an empty window has nothing to start or drop
+                    self._fill(window, len(outstanding), start)
                 if not outstanding and not window.held:
                     break
                 if not outstanding:  # paused with nothing running
@@ -495,7 +497,7 @@ class SubmitRunner:
                 results.append((key, cast(R, self._result(fut, key_to_task))))  # F2b: real map, not {}
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
-                if window.cancelled():  # no next_tasks and no stop exit once a check saw the cancel
+                if control is not None and window.cancelled():  # then no next_tasks and no stop exit
                     continue
                 reason = plan.stop.reason(exec_ctx) if plan.stop else None
                 if reason is not None:
