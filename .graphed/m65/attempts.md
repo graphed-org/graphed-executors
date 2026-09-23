@@ -55,3 +55,30 @@ under `-n 8` load sometimes arrived after the root, so no tag went out. It now h
 last, which forms the root) until the spy sees the cancel relayed, then releases it: the root forms
 after the cancel. A driver that ignores a root once it has relayed a cancel fails it
 (`TimeoutError`).
+
+## A3 (plan-A3.md, frozen `freeze-m65a3` = `273e420`)
+
+Run: `pytest tests/frozen/m65/test_m65a3_control_{submit,dask,parsl}.py` (parsl: venv `bin` on `PATH`).
+
+### Iteration 1 — A3.1 SubmitRunner honours the control (A3 frozen 40/40 first run)
+
+`control=` and public `control`, read once per run beside `monitor`; entry check before subscribe;
+CANCELLED reset in `run()`'s `finally`. A2's `_Window` is the dispatch point (imported from
+`local.executors`); `_fill` runs `take`, and when the window is full with work held re-reads
+`_task_slots()` (`task_slots()` via `getattr`, else `n_workers()`, floored at 1) and widens. The loop
+waits on `done_q` with `_PAUSED_WAKE_S` while `window.held`, else blocks; paused with nothing
+outstanding it blocks in `control.wait()`. Controlled fixed path is a separate `_run_fixed_windowed`
+(uncontrolled `_run_fixed` untouched): SUBMITTED up front, combines submitted in `(out, a, b)` order
+once both input futures completed, failures surfaced by `exception()` then `_result`, cancel folds the
+completed nodes by first leaf. Adaptive: batches go to `window.held`; `window.cancelled()` before the
+stop check; `stopped` never assigned in engine.py. `DaskBackend.task_slots` = sum of `nthreads`;
+`ParslBackend.task_slots` = connected HTEX workers or TPE `max_threads`, no wait.
+Deviation: the controlled fixed path has no `n == 0` return (`plan_tree(0)` is `([], None)` and the
+loop returns the empty EXHAUSTED result; probed).
+
+### Iteration 2 — A3.2 CI legs and docs
+
+`test-dask` runs `test_m65a3_control_{dask,submit}.py`, `test-parsl` runs
+`test_m65a3_control_parsl.py`; design.rst names SubmitRunner in the run-control opener and adds its
+bullet (slots, timed wake, merges after inputs, `replicate_broadcast=True` on dask, control read per
+plan).
