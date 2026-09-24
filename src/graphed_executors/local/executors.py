@@ -502,6 +502,35 @@ class _Window(Generic[T]):
         return wait(futures, timeout=timeout, return_when=FIRST_COMPLETED)[0]
 
 
+class _RunLeaves:
+    """A complete_events hub run's leaves: only the unresolved futures are held, so a leaf's result
+    is never kept alive by the settle."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.pending: set[Future[object]] = set()
+        self.submitted = 0
+        self.cancelled = 0  # exact at the settle: only the driver cancels, and cancel() calls back
+
+    def add(self, fut: Future[object]) -> None:
+        with self._lock:
+            self.submitted += 1
+            self.pending.add(fut)
+        fut.add_done_callback(self._done)  # outside the lock: a done future calls back at once
+
+    def _done(self, fut: Future[object]) -> None:
+        with self._lock:
+            self.pending.discard(fut)
+            self.cancelled += fut.cancelled()
+
+    def settle(self) -> int:
+        """Wait for every leaf; return how many were not cancelled."""
+        with self._lock:
+            pending = list(self.pending)
+        wait(pending)
+        return self.submitted - self.cancelled
+
+
 class _BaseExecutor:
     """Shared driver. Subclasses supply the worker pool + the (picklable) worker entry point.
 
@@ -542,7 +571,7 @@ class _BaseExecutor:
         self._run_push: Callable[[], Monitor] | None = None  # the monitor's per-worker factory
         self._run_lean = False
         self._run_keys: list[int] | None = None  # a peer run's task keys, when not 0..n-1
-        self._run_leaves: list[Future[object]] | None = None  # a complete_events hub run's leaves
+        self._run_leaves: _RunLeaves | None = None  # a complete_events hub run's leaves
         # M38: comms=None -> the hub reduction (driver combines); "ipc"/"http" -> PEER reduction
         # (combines run across the workers over that transport, off the driver). Result is identical
         # (same fixed plan_tree grouping); peer just relocates the combines. steal=True (peer only)
@@ -586,7 +615,7 @@ class _BaseExecutor:
 
         def submit(task: Task) -> Future[object]:
             fut = raw(task)
-            leaves.append(fut)
+            leaves.add(fut)
             return fut
 
         return submit
@@ -656,7 +685,7 @@ class _BaseExecutor:
 
     @contextlib.contextmanager
     def _acquired_pool(self) -> Iterator[_PoolExecutor]:
-        self._run_leaves = [] if complete_events(self._run_monitor) else None
+        self._run_leaves = _RunLeaves() if complete_events(self._run_monitor) else None
         if not self._persistent:
             self._broadcast_tokens = OrderedDict()  # a fresh pool: nothing is primed yet
             with self._pool() as pool, self._settled(pool):  # settle before the shutdown's exit flush
@@ -679,13 +708,14 @@ class _BaseExecutor:
         try:
             yield pool
         except Exception:
-            wait(leaves)
-            self._await_run_events(leaves)
+            self._await_run_events(leaves.settle())
             raise
-        wait(leaves)
-        self._await_run_events(leaves)
+        else:
+            self._await_run_events(leaves.settle())
+        finally:
+            self._run_leaves = None
 
-    def _await_run_events(self, leaves: list[Future[object]]) -> None:
+    def _await_run_events(self, target: int) -> None:
         """Wait until the leaves' events have reached the monitor. A thread worker calls ``on_task``
         before its future resolves, so here the future wait was the whole wait."""
 
@@ -1465,9 +1495,8 @@ class _ProcessExecutorBase(_BaseExecutor):
             if not self._persistent:
                 self._stop_collector()
 
-    def _await_run_events(self, leaves: list[Future[object]]) -> None:
+    def _await_run_events(self, target: int) -> None:
         if self._run_push is None:  # the collector serves this run: count its terminals in
-            target = sum(not f.cancelled() for f in leaves)
             _wait_until(lambda: self._hub_terms >= target, _HUB_EVENT_DRAIN_S)
         self._kept_settled = True
 

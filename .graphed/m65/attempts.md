@@ -226,10 +226,22 @@ collector, whose final drain delivers the tail to the previous monitor. Peer: `c
 `OUTBOX_EXIT_WAIT_S` for queued sends and discards a send error; `_collect_peer` on an `Exception` exit
 after `release_workers` reads the gate and forwards `recv(timeout=0.05)` batches until one is empty or
 `ERROR_EVENT_DRAIN_S = 0.5` passes. New `tests/extra/m65/test_c_nonpersistent_hub.py` (the
-non-persistent five-run guard, plan-C test 12 / C r4 L2): passes 3/3 with C, fails 6/6 on stock source.
+non-persistent five-run guard, plan-C test 12 / C r4 L2): passes 3/3 with C; on stock source it fails stochastically (6/6 with a stash of src, 1/3 in review r1's `ci1_np_guard_stock.py`).
 
 Deviation from the owner decision (unitDecisions.C item 1, "only for the driver-bound sends"): the actor
 waits for every queued send, peers' included, bounded by `OUTBOX_EXIT_WAIT_S`, and `_Outbox` is
 unchanged. Plan u5 dropped the driver-only filter on review r5's measurement
 (`probes/cu5_peer_nokeep.out`: the unfiltered wait reads the failing key `errored` on every peer row);
 a send parked on a peer that stopped reading can hold the failing actor for the bound.
+
+### Iteration 2 — impl review r1 M1: the settle holds no leaf result
+
+`_run_leaves` kept every leaf future, so a complete_events hub run held every leaf result through the
+run and past `close()`. It is now a `_RunLeaves`: a done callback drops each future from a pending set
+and counts cancellations (exact at the settle: only the driver thread cancels, and `cancel()` calls
+back before returning); `settle()` waits on the pending snapshot and returns submitted − cancelled,
+which `_await_run_events(target)` takes in place of the leaf list; `_settled` drops the tracker in a
+`finally`. Searched the C diff for other per-run state holding futures or results: single occurrence.
+New `tests/extra/m65/test_c_leaf_retention.py` (weakref-counted leaf/combine results, ThreadExecutor(2,
+comms=None, persistent=True), N=200): 4/4 pass; on the pre-fix src 4/4 fail (200 alive after run on
+fixed/pooled/window; window peak 206 vs plain 9). ci.yml pin comment now names PR-C.
