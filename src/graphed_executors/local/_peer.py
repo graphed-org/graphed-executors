@@ -428,6 +428,8 @@ class PeerControl(Generic[R]):
         """Send the workers the control's state if it changed; True while PAUSED."""
         state = self._control.state
         if state is not self._told and self._told is not RunState.CANCELLED:
+            import sys as _sys
+            print(f"[diag relay] {self._told} -> {state} to {self._workers}", file=_sys.stderr, flush=True)
             self._told = state
             if not self._outboxes and not isinstance(self._t, HttpTransport):
                 self._outboxes = {dest: _Outbox(self._t) for dest in self._workers}
@@ -596,8 +598,12 @@ def process_and_reduce(
                 stats["steals"] += len(granted)
         elif tag == "pause":
             paused = True
+            import sys as _sys
+            print(f"[diag worker {address}] pause", file=_sys.stderr, flush=True)
         elif tag == "resume":
             paused = False
+            import sys as _sys
+            print(f"[diag worker {address}] resume", file=_sys.stderr, flush=True)
         elif tag == "cancel" and not cancelled:
             # Between leaves, so nothing is in flight here: hand in the count and the parked nodes.
             cancelled = True

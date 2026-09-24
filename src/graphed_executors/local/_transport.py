@@ -350,6 +350,10 @@ class HttpTransport:
                     self.deliveries += 1
                 else:
                     self.drops += 1
+            tag = message[0] if isinstance(message, tuple) and message and isinstance(message[0], str) else None
+            if tag in ("pause", "resume", "registry", "root", "done", "hello", "cancel"):
+                import sys as _sys
+                print(f"[diag xport {self.address}->{dest}] {tag} delivered={delivered} attempts_target={target}", file=_sys.stderr, flush=True)
 
     def close(self) -> None:
         # Sentinel FIRST, `_stop` only after the lanes have drained (or the bound expired): setting
