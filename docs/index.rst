@@ -83,6 +83,23 @@ What you get for free
 
 :doc:`design` explains why each of these holds.
 
+While a run is going
+--------------------
+
+* **Record the next plan while this one runs.** ``submit(plan)`` on any runner returns a
+  ``concurrent.futures.Future`` at once; ``.result()`` is what ``run(plan)`` returns. Plans run
+  one at a time, in the order you submitted them.
+* **Watch it, pause it, cancel it.** Every runner takes a ``monitor=`` that sees each task start
+  and finish, and a ``graphed.core.RunControl`` that pauses, resumes or cancels the run. A
+  cancelled run hands back the merge of the tasks that finished. ``graphed.debug.Dashboard``
+  (``pip install "graphed[dashboard]"``) puts both in your browser; ``control=True`` adds the
+  buttons.
+* **Let the workers report for themselves.** On a large pool, a dashboard monitor built with
+  ``per_worker=True`` has every worker process send its events straight to the dashboard instead
+  of through your submit node.
+
+:doc:`design` covers each, including which runs a pause or cancel reaches.
+
 Which runner do I want?
 -----------------------
 

@@ -180,7 +180,7 @@ Two things bite people on HTEX:
 - **A killed worker takes ~30 s to notice at parsl's default heartbeat.** `heartbeat_period=2`
   brings that to ~1.65 s, so a crash is reported (and the worker respawned) promptly.
 
-## Useful knobs on the laptop runners
+## Useful knobs
 
 - `persistent=True` keeps the process pool alive across `run()` calls — worth it in notebooks
   and parameter sweeps, where the spawn cost would otherwise repeat per plan. Use it as a
@@ -189,20 +189,26 @@ Two things bite people on HTEX:
 - Call `resources.open_once(uri, opener)` inside your `process` and the worker keeps that handle
   for its lifetime, so ten partitions of one file on one worker open it once instead of ten
   times. The dask backend gives you the same per-worker handle through its worker plugin.
+- `submit(plan)`, on every runner here, returns a `concurrent.futures.Future` straight away, so
+  you can record and compile the next plan while this one runs; `.result()` is what `run(plan)`
+  would have returned. Plans still run one at a time, in the order you submitted them.
 - Every runner accepts `monitor=` — an observer that receives one event per task submitted,
-  started, and finished, without changing the run. Pass `graphed.debug.Dashboard`'s monitor for
-  a live web view.
+  started, and finished, without changing the run — and a `graphed.core.RunControl` that pauses,
+  resumes or cancels it. A cancelled run returns the merge of the tasks that finished.
 
-The dashboard needs `pip install "graphed[dashboard]"`. Using the `plan` from your first run:
+`graphed.debug.Dashboard` gives you both in the browser: a live view of the run, and with
+`control=True` pause, resume and cancel buttons. It needs `pip install "graphed[dashboard]"`.
+Using the `plan` from your first run:
 
 ```python
 from graphed.debug import Dashboard
 from graphed_executors.local import ProcessPoolExecutor
 
 if __name__ == "__main__":                    # a spawn pool re-imports this file
-    with Dashboard(profile=True) as dash:
-        result = ProcessPoolExecutor(max_workers=4, monitor=dash.monitor).run(plan)
-    print(result.value)                       # [700]
+    with Dashboard(profile=True, control=True) as dash:
+        print("open", dash.url)               # the page updates while the plan runs
+        result = dash.attach(ProcessPoolExecutor(max_workers=4)).run(plan)
+    print(result.value, result.stopped)       # [700] exhausted ("cancelled" after a cancel)
 ```
 
 ## Next
