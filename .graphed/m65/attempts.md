@@ -151,3 +151,17 @@ leaves finished before it went out: fails on the old tree (join expires), passes
 `src/graphed_executors/local` for other `prebuffered` consumers: the settle-only actor is the only other
 one and already unpacks. The test's pause never reaches this route (`_run_peer` waits at entry before
 any actor exists), so the hang was an ordinary monitored proc-http run; nothing in A3 touches it.
+
+## B (plan-B.md, frozen `freeze-m65b` = `6c82849`; graphed `b5a2a71`)
+
+### Iteration 1 — B3 hub routes: lean events, lazy labels, per-worker push
+
+`_run_with_emit` drops STARTED and the label in lean mode; `_thread_task` and `_proc_task_shared` call
+`process` directly when there is nothing to emit (no monitor; no buffer and no push monitor).
+`_proc_init(profiler_factory, event_q, *, monitor_factory, lean)` stops and joins a live drain thread,
+assigns every worker global, builds the push monitor before registering `_proc_drain_final`, and
+`_proc_drain_final` sends the exit profile to that monitor. The driver reads `worker_monitor_factory`/
+`lean_events` once per run; the hub pool gets them through a `functools.partial` initializer and no
+event queue, the collector is skipped when pushing, and a kept (persistent) pool is respawned when the
+pickled push factory or the lean flag changes (test 12b). Hub frozen legs (tests 11 hub/pooled/adaptive,
+12 proc-hub, 12b hub, 14) pass; test 14 then m37 `test_inprocess_paths.py` pass in one process.
