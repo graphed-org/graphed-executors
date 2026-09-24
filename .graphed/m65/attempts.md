@@ -183,3 +183,13 @@ for `ctx.events_per_leaf` events per leaf. B frozen executors files 31/31 plus t
 files so that job's `submit/**` diff-cover sees the in-process worker-side `engine.py` lines. The
 design page's "Watching a run" states lean events and per-worker push; improvements notes live parsl
 events under push.
+
+### Iteration 4 — review r1 repair (L1; H1 lands in graphed)
+
+A kept hub pool is respawned when anything its initializer fixes changes — the push and profiler
+factories, the lean flag, and whether it feeds the collector (`_pool_init` is the one source for both
+the pool and the key); the old key named only push and lean, so a pool built for an unmonitored run
+kept `event_q=None` and a later monitored run saw no worker events. New
+`tests/extra/m65/test_b_kept_pool_init.py` fails on the old key (no FINISHED) and passes. `GRAPHED`
+re-pinned to graphed `lane/debug-b`'s head, which carries the H1 server fix. The cross-run
+misdelivery of a kept pool's trailing events into the next run's monitor is unchanged.
