@@ -52,7 +52,7 @@ jobs:
           PYTHONFAULTHANDLER: "1"
         run: |
           pytest tests/frozen tests/extra --cov=graphed_executors --cov-branch --cov-report=term-missing \
-            -p no:cacheprovider -o faulthandler_timeout=28 --durations=25 -rA || true
+            -p no:cacheprovider -o faulthandler_timeout=28 --durations=25 -rA -s -o log_cli=true -o log_cli_level=DEBUG || true
 
   test-dask:
     name: test-dask py${{ matrix.python }}
