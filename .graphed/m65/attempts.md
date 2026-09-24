@@ -135,3 +135,19 @@ submit + stop, m63 thread and m42 frozen files pass twice on 3.14t. Searched `sr
 for other list-cell counters written from callbacks: single occurrence. The py3.13 failures on the
 same run are `test_m65a2_control_routes.py::test_paused_at_entry_holds_the_run[proc-http]` (local
 HTTP hub route, untouched by A3; the pre-existing hang class from the journal); re-sampled by the push.
+
+### Iteration 8 — PR #24 CI: HTTP peer hand-offs that beat a worker's registry were parked
+
+`test ubuntu py3.13` (x86 and arm) timed out `test_m65a2_control_routes.py::test_paused_at_entry_holds_the_run
+[proc-http]` on every attempt while the test alone passed. Instrumented the transport on a scratch branch
+(every tag on send and receive, a worker-side `faulthandler` dump): all 40 leaves finished, w1's three
+subtree `node` hand-offs reached w0 44 ms before w0's own `registry` did, then both workers traded
+steal requests until the join expired. `http_peer_actor` keeps such early messages as `(sender, payload)`
+pairs, but `process_and_reduce` handed each pair to `handle`, whose tag match then saw the sender name
+and dropped it; the sibling settle-only actor unpacks the pair. Reproduced on macOS by delaying w0's
+registry (deterministic hang); the fix unpacks the pairs. Regression test `tests/extra/m65/
+test_a2_http_prebuffer.py` monkeypatches the handshake to delay w0's registry and witnesses that w1's own
+leaves finished before it went out: fails on the old tree (join expires), passes 3/3 on the fix. Searched
+`src/graphed_executors/local` for other `prebuffered` consumers: the settle-only actor is the only other
+one and already unpacks. The test's pause never reaches this route (`_run_peer` waits at entry before
+any actor exists), so the hang was an ordinary monitored proc-http run; nothing in A3 touches it.
