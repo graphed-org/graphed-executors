@@ -48,6 +48,7 @@ from graphed.core.execution import (
     TaskEvent,
     TaskPhase,
     WorkerProfiler,
+    complete_events,
     emit_task,
     lean_events,
     partition_label,
@@ -57,6 +58,7 @@ from graphed.debug import StageError
 
 from .._plan_queue import PlanQueue
 from ._peer import (
+    ERROR_EVENT_DRAIN_S,
     OUTBOX_EXIT_WAIT_S,
     PeerControl,
     http_driver_handshake,
@@ -145,6 +147,9 @@ _PEER_MONITOR_DRAIN_POLL_S = 0.002
 # A paused hub route with tasks running wakes this often, so a resume refills the free slots without
 # waiting for a running task to end.
 _PAUSED_WAKE_S = 0.05
+# How long a complete_events hub run waits, after its leaf futures are done, for their terminal events
+# to cross the process collector (forty drain ticks); read at call time.
+_HUB_EVENT_DRAIN_S = 2.0
 
 # M37: every statistical profiler we start (thread-local or per-process) is registered here so a
 # single atexit handler can stop it — its background sampler thread must be joined before the worker's
@@ -450,6 +455,13 @@ def _combine_task(combine: Callable[[object, object], object], a: object, b: obj
     return combine(a, b)
 
 
+def _wait_until(predicate: Callable[[], bool], timeout_s: float) -> None:
+    """Bounded off-path poll (never an assertion): drain trailing worker events before unsubscribe."""
+    deadline = time.monotonic() + timeout_s
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+
 class _Window(Generic[T]):
     """The dispatch point of a hub route (plan-A2 A2-1): held items go out through at most ``size``
     slots, and only while the control is RUNNING; without a control every held item goes at once."""
@@ -488,6 +500,35 @@ class _Window(Generic[T]):
             return set()
         timeout = _PAUSED_WAKE_S if self._paused else None  # the state take() saw, so a resume still wakes
         return wait(futures, timeout=timeout, return_when=FIRST_COMPLETED)[0]
+
+
+class _RunLeaves:
+    """A complete_events hub run's leaves: only the unresolved futures are held, so a leaf's result
+    is never kept alive by the settle."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.pending: set[Future[object]] = set()
+        self.submitted = 0
+        self.cancelled = 0  # exact at the settle: only the driver cancels, and cancel() calls back
+
+    def add(self, fut: Future[object]) -> None:
+        with self._lock:
+            self.submitted += 1
+            self.pending.add(fut)
+        fut.add_done_callback(self._done)  # outside the lock: a done future calls back at once
+
+    def _done(self, fut: Future[object]) -> None:
+        with self._lock:
+            self.pending.discard(fut)
+            self.cancelled += fut.cancelled()
+
+    def settle(self) -> int:
+        """Wait for every leaf; return how many were not cancelled."""
+        with self._lock:
+            pending = list(self.pending)
+        wait(pending)
+        return self.submitted - self.cancelled
 
 
 class _BaseExecutor:
@@ -530,6 +571,7 @@ class _BaseExecutor:
         self._run_push: Callable[[], Monitor] | None = None  # the monitor's per-worker factory
         self._run_lean = False
         self._run_keys: list[int] | None = None  # a peer run's task keys, when not 0..n-1
+        self._run_leaves: _RunLeaves | None = None  # a complete_events hub run's leaves
         # M38: comms=None -> the hub reduction (driver combines); "ipc"/"http" -> PEER reduction
         # (combines run across the workers over that transport, off the driver). Result is identical
         # (same fixed plan_tree grouping); peer just relocates the combines. steal=True (peer only)
@@ -561,12 +603,29 @@ class _BaseExecutor:
         Threads share memory (no delivery); processes broadcast the process once (M31)."""
         raise NotImplementedError
 
+    def _leaf_submit(
+        self, pool: _PoolExecutor, process: Callable[[Partition, LocalResources], object]
+    ) -> Callable[[Task], Future[object]]:
+        """``_raw_submit``'s callable, keeping each leaf future for the settle when the run's monitor
+        asks for complete events (a base cannot wrap what a subclass's ``_raw_submit`` returns)."""
+        raw = self._raw_submit(pool, process)
+        leaves = self._run_leaves
+        if leaves is None:
+            return raw
+
+        def submit(task: Task) -> Future[object]:
+            fut = raw(task)
+            leaves.add(fut)
+            return fut
+
+        return submit
+
     def _prepare(
         self, pool: _PoolExecutor, process: Callable[[Partition, LocalResources], object]
     ) -> Callable[[Task], Future[object]]:
         """Wrap the subclass submit with a driver-side SUBMITTED emission (M37). Worker-side STARTED/
         FINISHED/ERRORED come from the worker entry; here we record the moment of submission."""
-        raw = self._raw_submit(pool, process)
+        raw = self._leaf_submit(pool, process)
         monitor = self._run_monitor
         if monitor is None:
             return raw
@@ -626,15 +685,49 @@ class _BaseExecutor:
 
     @contextlib.contextmanager
     def _acquired_pool(self) -> Iterator[_PoolExecutor]:
+        self._run_leaves = _RunLeaves() if complete_events(self._run_monitor) else None
         if not self._persistent:
             self._broadcast_tokens = OrderedDict()  # a fresh pool: nothing is primed yet
-            with self._pool() as pool:
+            with self._pool() as pool, self._settled(pool):  # settle before the shutdown's exit flush
                 yield pool
             return
         if self._kept_pool is None:
             self._broadcast_tokens = OrderedDict()  # newly (re)spawned workers hold no cache
             self._kept_pool = self._pool()
-        yield self._kept_pool  # kept alive for the next run()
+        with self._settled(self._kept_pool):
+            yield self._kept_pool  # kept alive for the next run()
+
+    @contextlib.contextmanager
+    def _settled(self, pool: _PoolExecutor) -> Iterator[_PoolExecutor]:
+        """On a normal or ``Exception`` exit of a complete_events run, wait for its leaf futures, then
+        for their events; a ``KeyboardInterrupt`` leaves at once."""
+        leaves = self._run_leaves
+        if leaves is None:
+            yield pool
+            return
+        try:
+            yield pool
+        except Exception:
+            self._await_run_events(leaves.settle())
+            raise
+        else:
+            self._await_run_events(leaves.settle())
+        finally:
+            self._run_leaves = None
+
+    def _await_run_events(self, target: int) -> None:
+        """Wait until the leaves' events have reached the monitor. A thread worker calls ``on_task``
+        before its future resolves, so here the future wait was the whole wait."""
+
+    def _switch_in(self, monitor: Monitor | None) -> None:
+        """Called in ``run()`` before ``monitor`` becomes the run's monitor; the thread hub binds each
+        leaf's monitor at submit, so nothing earlier can reach it."""
+
+    def _release_kept_pool(self) -> None:
+        if self._kept_pool is not None:
+            self._kept_pool.shutdown(wait=True)
+            self._kept_pool = None
+            self._broadcast_tokens = OrderedDict()  # respawned workers will need re-priming
 
     @property
     def max_in_flight(self) -> int:
@@ -650,10 +743,7 @@ class _BaseExecutor:
         """Finish every submitted plan, then release a persistent pool (idempotent); a later run()
         or submit() lazily respawns."""
         self._plans.close()
-        if self._kept_pool is not None:
-            self._kept_pool.shutdown(wait=True)
-            self._kept_pool = None
-            self._broadcast_tokens = OrderedDict()  # respawned workers will need re-priming
+        self._release_kept_pool()
 
     def __enter__(self) -> _BaseExecutor:
         return self
@@ -665,6 +755,7 @@ class _BaseExecutor:
         """Run ``plan`` to its reduced result. One plan runs at a time per executor; a concurrent
         caller waits for the running plan to finish."""
         with self._run_lock:
+            self._switch_in(self.monitor)
             self._run_monitor = self.monitor
             self._run_push = worker_monitor_factory(self.monitor)
             self._run_lean = lean_events(self.monitor)
@@ -765,7 +856,7 @@ class _BaseExecutor:
 
         window = _Window(control, self.max_workers, enumerate(tasks))
         with self._acquired_pool() as pool:
-            submit = self._raw_submit(pool, plan.process)
+            submit = self._leaf_submit(pool, plan.process)
             self._emit_submitted(tasks)
             node_of: dict[Future[object], int] = {}
             ready: dict[int, R] = {}
@@ -822,7 +913,7 @@ class _BaseExecutor:
         )
         window = _Window(control, self.max_workers, enumerate(tasks))
         with self._acquired_pool() as pool:
-            submit = self._raw_submit(pool, plan.process)
+            submit = self._leaf_submit(pool, plan.process)
             self._emit_submitted(tasks)
             leaf_of: dict[Future[object], int] = {}
             while True:
@@ -845,7 +936,7 @@ class _BaseExecutor:
         window: _Window[Task] = _Window(control, self.max_workers)
 
         with self._acquired_pool() as pool:
-            submit = self._raw_submit(pool, plan.process)
+            submit = self._leaf_submit(pool, plan.process)
 
             def refill() -> None:
                 batch = next_tasks(ctx)  # DONE == None
@@ -911,6 +1002,7 @@ class ThreadExecutor(_BaseExecutor):
         # built once by the driver and handed to each worker thread directly.
         transports = build_transports(self._comms or "ipc", ("driver", *worker_addrs))
         witness: dict[str, dict[str, int]] = {}
+        complete = complete_events(self._run_monitor)
         errors: dict[str, BaseException] = {}  # a worker thread's exception (captured, then re-raised)
 
         def actor(addr: str) -> None:
@@ -930,6 +1022,7 @@ class ThreadExecutor(_BaseExecutor):
                     profiler_factory=self._peer_profiler_factory(),
                     lean=self._run_lean,
                     keys=self._run_keys,
+                    complete=complete,
                 )
             except BaseException as exc:  # a thread exception is otherwise lost -> capture + propagate
                 errors[addr] = exc
@@ -1028,6 +1121,10 @@ class _ProcessExecutorBase(_BaseExecutor):
         )
         self._mgr: SyncManager | None = None
         self._kept_init: tuple[bytes, bool] | None = None  # the kept hub pool's initializer identity
+        # False while a kept pool whose workers ship to the collector may still deliver an earlier
+        # run's events: from each hub entry until a complete_events run's event wait returns
+        self._kept_settled = True
+        self._hub_terms = 0  # terminal events the collector handed to a monitor this hub run
         self._event_q: object | None = None
         self._collector: threading.Thread | None = None
         self._collector_stop: threading.Event | None = None
@@ -1171,6 +1268,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                         self._run_push,  # the pinned pool takes no task keywords
                         self._run_lean,
                         self._run_keys,
+                        complete_events(self._run_monitor),
                         worker=i,
                     )
                     for i, a in enumerate(worker_addrs)
@@ -1193,6 +1291,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                         monitor_factory=self._run_push,
                         lean=self._run_lean,
                         keys=self._run_keys,
+                        complete=complete_events(self._run_monitor),
                     )
                     for a in worker_addrs
                 ]
@@ -1252,6 +1351,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                     monitor_factory=self._run_push,
                     lean=self._run_lean,
                     keys=self._run_keys,
+                    complete=complete_events(self._run_monitor),
                 )
                 for a in worker_addrs
             ]
@@ -1299,13 +1399,22 @@ class _ProcessExecutorBase(_BaseExecutor):
                     raise TimeoutError(
                         f"peer reduction did not produce a root within {_PEER_ROOT_TIMEOUT_S}s"
                     )
-        except BaseException:
+        except BaseException as exc:
             # EVERY exit releases the workers — including a KeyboardInterrupt delivered while parked
             # in ``recv``. An unreleased actor waits for ``done`` forever, and the pool shutdown that
             # follows (the non-persistent ``finally``, the persistent discard) then never returns.
             if ctl is not None:
                 ctl.close(0.0)
             release_workers(driver_t)
+            if isinstance(exc, Exception) and complete_events(self._run_monitor):
+                # the failing actor's last batch can land after the future check saw its failure
+                with contextlib.suppress(Exception):
+                    deadline = time.monotonic() + ERROR_EVENT_DRAIN_S
+                    while time.monotonic() < deadline:
+                        got = driver_t.recv(timeout=0.05)
+                        if got is None:
+                            break
+                        self._forward_peer_events(got[1])
             raise
         if ctl is not None:  # a queued tag lands in this run's inboxes before `done`
             ctl.close(OUTBOX_EXIT_WAIT_S)
@@ -1367,11 +1476,14 @@ class _ProcessExecutorBase(_BaseExecutor):
         # a kept pool whose initializer fixed other than what this run needs is respawned
         self._ensure_collector()
         factory, event_q, push, lean = self._pool_init()
-        init = (pickle.dumps((factory, push, lean)), event_q is not None)
+        event_q_used = event_q is not None
+        init = (pickle.dumps((factory, push, lean)), event_q_used)
         if init != self._kept_init and self._kept_pool is not None:
             self._kept_pool.shutdown(wait=True)
             self._kept_pool = None
         self._kept_init = init
+        self._hub_terms = 0
+        self._kept_settled = not event_q_used
         try:
             with super()._acquired_pool() as pool:
                 yield pool
@@ -1382,6 +1494,18 @@ class _ProcessExecutorBase(_BaseExecutor):
             # stay alive across runs or those trailing events are lost — close() stops it.
             if not self._persistent:
                 self._stop_collector()
+
+    def _await_run_events(self, target: int) -> None:
+        if self._run_push is None:  # the collector serves this run: count its terminals in
+            _wait_until(lambda: self._hub_terms >= target, _HUB_EVENT_DRAIN_S)
+        self._kept_settled = True
+
+    def _switch_in(self, monitor: Monitor | None) -> None:
+        # a kept pool that may still ship an earlier run's events hands them to the previous monitor
+        # (the collector's final drain) and is respawned, so the incoming complete_events run gets none
+        if complete_events(monitor) and self._kept_pool is not None and not self._kept_settled:
+            self._release_kept_pool()
+            self._stop_collector()
 
     def _ensure_collector(self) -> None:
         if self._run_monitor is None or self._run_push is not None:  # pushing workers bypass it
@@ -1428,6 +1552,9 @@ class _ProcessExecutorBase(_BaseExecutor):
             elif kind == "profile":
                 worker, data = cast("tuple[str, bytes]", payload)
                 monitor.on_profile(worker, data)
+        # counted whether on_task returned or raised, never before it returns
+        if kind == "task" and cast("TaskEvent", payload).phase in (TaskPhase.FINISHED, TaskPhase.ERRORED):
+            self._hub_terms += 1
 
     def _stop_collector(self) -> None:
         if self._collector is not None and self._collector_stop is not None:

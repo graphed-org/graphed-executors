@@ -45,7 +45,7 @@ from graphed.debug import SourceFrame, StageError
 
 from graphed_executors._plan_queue import PlanQueue
 from graphed_executors.local._reduce import plan_tree, running_fold
-from graphed_executors.local.executors import _PAUSED_WAKE_S, _Window
+from graphed_executors.local.executors import _PAUSED_WAKE_S, _wait_until, _Window
 
 from .protocol import SubmitBackend, SubmitFuture
 
@@ -251,13 +251,6 @@ def _event_from_dict(d: dict[str, object]) -> TaskEvent:
         n_entries=cast("int", d["n_entries"]),
         error=cast("str | None", d.get("error")),
     )
-
-
-def _wait_until(predicate: Callable[[], bool], timeout_s: float) -> None:
-    """Bounded off-path poll (never an assertion): drain trailing worker events before unsubscribe."""
-    deadline = time.monotonic() + timeout_s
-    while not predicate() and time.monotonic() < deadline:
-        time.sleep(0.005)
 
 
 class SubmitRunner:

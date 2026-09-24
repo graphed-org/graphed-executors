@@ -406,6 +406,13 @@ turn change what the adaptive path decides — and a monitor that raises is swal
 result and its merge count are byte-identical whether a monitor is attached, absent, or actively
 throwing.
 
+A monitor that carries ``complete_events = True`` (``graphed.debug.RunRecorder`` does) opts out of
+that for completeness. On the hub routes it holds a run's events by the time ``run()`` returns or
+raises, and a failed hub run first finishes the leaves it submitted, queued or running. On the peer
+routes, a run failed by a raising task delivers that task's events before it raises; a crashed
+worker ships none. A kept process pool that an earlier run, watched by another monitor or none, may
+still be shipping events from is shut down and respawned before such a run starts.
+
 
 Pausing and cancelling a run
 ----------------------------
