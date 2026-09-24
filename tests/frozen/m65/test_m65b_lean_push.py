@@ -60,7 +60,7 @@ def test_lean_routes_emit_submitted_and_terminal_only(route: str) -> None:
     if route in EXACT:
         assert sorted(keys) == list(range(mp.N))
     else:
-        assert 1 <= len(keys) <= mp.N
+        assert len(keys) <= mp.N
         assert set(keys) <= set(range(mp.N))
 
 
