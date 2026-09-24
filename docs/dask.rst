@@ -331,7 +331,7 @@ adds, and what each one actually bounds:
        writes one block per output partition, so this is one side of the transfer count.
    * - ``holder_budget_bytes``
      - How many bytes of produced blocks a worker keeps in memory before spilling them to its
-       local disk. Overflow really does hit disk; the witness reports it as
+       local disk. Overflow really does hit disk; ``.witness`` reports it as
        ``holder_spill_count`` and ``peak_holder_bytes``.
    * - ``fetch_budget_bytes`` / ``disk_budget_bytes``
      - The read side's accounting — see the note below for what these do and don't do.
@@ -346,7 +346,7 @@ adds, and what each one actually bounds:
 
    **What the read budgets actually limit.** ``fetch_budget_bytes`` and ``disk_budget_bytes``
    bound a driver-side accounting pass over block sizes — which is how this engine's counters stay
-   exactly equal to the single-machine engine's — and they are reported in the witness. They do
+   exactly equal to the single-machine engine's — and they are reported in ``.witness``. They do
    **not** throttle a worker while it is pulling: the real gather fetches its fragments, holds one
    output partition resident, concatenates and returns. ``holder_budget_bytes`` on the write side
    *is* a live runtime bound with real spilling. If you are trying to cap memory on a shuffle,
