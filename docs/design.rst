@@ -385,20 +385,21 @@ to the driver in batches, so no task ever pays an inter-process round trip on it
 A driver-side collector thread replays them into your monitor. A per-worker sampling profiler,
 if you supply one through the monitor's ``worker_profiler_factory``, rides the same channel.
 
-Two capabilities a monitor may opt into change that path (graphed's ``lean_events`` and
-``worker_monitor_factory`` helpers read them once per run). A monitor with ``lean_events = True``
-gets no ``STARTED`` and a terminal event with an empty ``partition``, so no worker formats a label;
-the driver's ``SUBMITTED`` still carries it. A monitor whose ``worker_monitor_factory()`` returns a
-picklable factory has each worker process build its own monitor from it, once per process and
-factory, and send its task events and profile trees there instead of through the driver: the hub
-process pool passes the factory to its pool initializer and starts no collector (a persistent pool is
-respawned when anything its initializer fixes changes: the push or profiler factory, the lean flag,
-or whether it feeds the collector), each peer actor builds one per run, and
-``SubmitRunner`` workers (dask, parsl, or the ``ThreadBackend``'s threads) keep one per process and
-the driver skips the event topic. ``ThreadExecutor`` workers share the driver's process and keep
-calling the driver's monitor. ``NetworkMonitor(url, lean=True, per_worker=True)`` in
-``graphed.debug`` is the dashboard's monitor with both. With no monitor attached, workers build no
-event and format no label.
+Two opt-in switches trim what watching costs; ``graphed.debug.NetworkMonitor(url, lean=True,
+per_worker=True)`` is the dashboard's monitor with both, and graphed's debugging guide says what
+each one trades away in the figures you see.
+
+* **Lean events** (a monitor carrying ``lean_events = True``): each worker sends one event per
+  task, the ``FINISHED`` or ``ERRORED``, and formats no partition label. The driver's
+  ``SUBMITTED`` still carries the label.
+* **A connection per worker** (a monitor whose ``worker_monitor_factory()`` returns a picklable
+  factory): every worker process — in a process pool, on a peer route, or in a dask or parsl run —
+  builds its own monitor from the factory and sends its task events and profile trees straight
+  to the dashboard instead of through your driver, which keeps the ``SUBMITTED`` events.
+  ``ThreadExecutor`` workers share the driver's process and keep calling the driver's monitor. A
+  kept pool (``persistent=True``) is restarted when the monitoring it was started with changes.
+
+With no monitor attached, workers build no event and format no label.
 
 The property that makes this safe to leave on is that emission is **best-effort and drops when
 full**. A slow monitor never becomes back-pressure that changes task timing — which would in
@@ -406,12 +407,12 @@ turn change what the adaptive path decides — and a monitor that raises is swal
 result and its merge count are byte-identical whether a monitor is attached, absent, or actively
 throwing.
 
-A monitor that carries ``complete_events = True`` (``graphed.debug.RunRecorder`` does) opts out of
-that for completeness. On the hub routes it holds a run's events by the time ``run()`` returns or
-raises, and a failed hub run first finishes the leaves it submitted, queued or running. On the peer
-routes, a run failed by a raising task delivers that task's events before it raises; a crashed
-worker ships none. A kept process pool that an earlier run, watched by another monitor or none, may
-still be shipping events from is shut down and respawned before such a run starts.
+A report of a run needs every event, not most of them. ``graphed.debug.RunRecorder`` asks for
+that (it carries ``complete_events = True``), and the executors then deliver a run's events by the
+time ``run()`` returns or raises. On the hub routes a failed run first finishes the tasks it had
+already handed out; on the peer routes, a run failed by a raising task delivers that task's events
+before it raises. A crashed worker ships nothing. A kept process pool that may still be shipping
+an earlier run's events is shut down and respawned before such a run starts.
 
 
 Pausing and cancelling a run
@@ -452,27 +453,25 @@ which prints::
 
 Where the executor looks at the control depends on who merges:
 
-* **Hub** (``comms=None``, with or without ``pooled_combines``) and **adaptive** plans: without a
-  control every task goes to the pool at once. With one, the driver hands out at most
-  ``max_workers`` tasks at a time and refills a slot as a task finishes, only while the control
-  is ``RUNNING``, so a pause holds everything not yet handed out. A process pool may already
-  have queued up to ``max_workers`` of them, and those still start.
-* **Peer** (``comms="ipc"``/``"http"``, and ``PinnedPoolExecutor``): the driver passes each state
-  change to every worker, and a worker acts on it between two of its own tasks. On a cancel each
-  worker hands the driver its finished pieces of the merge tree, and the driver merges them.
-  A peer run's root deadline counts only time spent running, so a long pause never times it out.
-* **SubmitRunner** (thread, dask and parsl backends), fixed and adaptive plans: with a control, the driver
-  hands out at most as many tasks as the backend has task slots (``task_slots()`` where the backend has it:
-  the dask cluster's threads, the connected parsl HTEX workers or the parsl thread pool's size;
-  else ``n_workers()``), and at least one, so a pool that starts with no workers runs one task
-  until workers join. While it holds tasks the driver wakes every 50 ms and, when every slot is
-  busy, reads the slot count again, so it widens as workers join and a resume starts tasks without
-  waiting for one to finish. A merge is submitted only once both of its inputs have finished. On
-  dask every task depends on the broadcast plan function, and dask runs a task where its input
-  lives, so a controlled dask run should use ``dask_runner(client, replicate_broadcast=True)``;
-  without it, tasks queue on the worker holding the broadcast while other slots stay idle. Like
-  ``monitor``, ``control`` is read when a plan starts, so assigning it mid-run takes effect from
-  the next plan.
+* **Hub and adaptive runs** (``comms=None``, with or without ``pooled_combines``, or a plan with
+  ``next_tasks``): with a control, the driver hands out at most ``max_workers`` tasks at a time
+  and refills a slot only while the control is ``RUNNING``, so a pause holds everything not yet
+  handed out. A process pool may already have queued up to ``max_workers`` of them, and those
+  still start.
+* **Peer runs** (``comms="ipc"``/``"http"``, and ``PinnedPoolExecutor``): every worker hears each
+  pause, resume and cancel and acts on it between two of its own tasks. On a cancel each worker
+  hands the driver its finished pieces of the merge tree, and the driver merges them. A long pause
+  never times a peer run out.
+* **SubmitRunner** (thread, dask and parsl backends): the driver hands out at most as many tasks
+  as the backend has task slots — at least one — and widens as workers join, so a resume starts
+  tasks without waiting for one to finish. A merge is submitted once both its inputs have
+  finished. On dask, give a controlled run ``dask_runner(client, replicate_broadcast=True)``:
+  every task reads the plan's functions from one broadcast copy, and dask runs a task where its
+  input lives, so without replicas the tasks queue on the worker holding that copy while other
+  slots stay idle.
+
+Like ``monitor``, ``control`` is read when a plan starts, so assigning it mid-run takes effect from
+the next plan.
 
 On the fixed-tree and peer routes, a cancelled run's total is the fixed merge tree over the tasks
 that finished: every merge whose two inputs completed runs, and the pieces left over are added in
@@ -828,11 +827,12 @@ route every block through your submit node believing otherwise.
 Not supported yet
 -----------------
 
-* **Checkpoint and resume on a cluster.** ``graphed.checkpoint.run_resumable`` and
-  ``run_shuffle_resumable`` are self-driving loops over a content-addressed store on the local
-  filesystem; they are not runners, so there is no ``run_resumable(executor=dask_runner(...))``.
-  Resumable execution on a cluster needs a distributed store first. Checkpoint locally, or
-  partition your run into pieces you can resubmit.
+* **Resuming a killed cluster run.** A dask or parsl run that dies starts over.
+  ``graphed.checkpoint.run_resumable`` and ``run_shuffle_resumable`` resume — against a local
+  directory or a store at a URL any machine can reach — but they drive the partitions themselves,
+  one at a time; they are not runners, so there is no ``run_resumable(executor=dask_runner(...))``.
+  Use them where surviving a crash matters more than wall time, or split your run into pieces you
+  can resubmit.
 * **TaskVine and Work Queue.** ``ParslBackend`` refuses executor types it has not verified
   rather than guessing a capability vector, so those raise a ``TypeError`` naming the two
   supported classes. Use HTEX.
@@ -840,8 +840,12 @@ Not supported yet
   dask-jobqueue, as in the recipes above, or a provider in your own parsl config.
 * **TLS on graphed's own HTTP exchange plane.** parsl's ``encrypted=True`` covers parsl's
   channels, not this one. Keep an exchange inside a trusted network.
-* **Live monitoring during a parsl run.** Worker events are buffered and delivered when a task
-  completes, so a dashboard over parsl updates per task rather than continuously.
+* **Live monitoring during a parsl run, by default.** Worker events are buffered and delivered
+  when a task completes, so a dashboard over parsl updates per task rather than continuously —
+  unless the monitor gives each worker its own connection (``per_worker=True``) and the workers
+  can reach the dashboard.
+* **Pausing or cancelling the worker-to-worker routes.** ``transport_run_plan``,
+  ``parsl_run_plan`` and the exchange engines take no control; interrupt such a run instead.
 * **Free-threaded CPython on the dask path**, as above.
 * **Convergence-based stopping.** ``next_tasks`` can stop a run on elapsed time, task counts or
   errors; stopping when a measurement reaches a target precision is not implemented.
