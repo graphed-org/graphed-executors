@@ -165,3 +165,14 @@ assigns every worker global, builds the push monitor before registering `_proc_d
 event queue, the collector is skipped when pushing, and a kept (persistent) pool is respawned when the
 pickled push factory or the lean flag changes (test 12b). Hub frozen legs (tests 11 hub/pooled/adaptive,
 12 proc-hub, 12b hub, 14) pass; test 14 then m37 `test_inprocess_paths.py` pass in one process.
+
+### Iteration 2 — B4 peer actors and SubmitRunner
+
+`process_and_reduce` and the four actors take `monitor_factory`, `lean` and `keys`: a factory builds
+the actor's own monitor, which receives its task events and profile trees instead of `("events", …)`/
+`("profile", …)` to the driver; lean drops STARTED and the label; events carry `keys[leaf]`. `_run_peer`
+passes the sorted task keys only when a monitor is attached and they are not `0..n-1` (the pinned pool
+takes positional task arguments only). `SubmitRunner` builds one `RunContext` per run in `run()` with
+two appended defaulted fields (pickled factory, lean); workers push through `_WORKER_MONITORS` under
+`_WORKER_MONITORS_LOCK`; with push the driver neither subscribes nor waits, and the four drain sites wait
+for `ctx.events_per_leaf` events per leaf. B frozen executors files 31/31 plus the dask file pass.

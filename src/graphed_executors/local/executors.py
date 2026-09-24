@@ -529,6 +529,7 @@ class _BaseExecutor:
         self._run_monitor: Monitor | None = None
         self._run_push: Callable[[], Monitor] | None = None  # the monitor's per-worker factory
         self._run_lean = False
+        self._run_keys: list[int] | None = None  # a peer run's task keys, when not 0..n-1
         # M38: comms=None -> the hub reduction (driver combines); "ipc"/"http" -> PEER reduction
         # (combines run across the workers over that transport, off the driver). Result is identical
         # (same fixed plan_tree grouping); peer just relocates the combines. steal=True (peer only)
@@ -701,6 +702,9 @@ class _BaseExecutor:
         worker_addrs = tuple(f"w{i}" for i in range(w))
         items = slice_items([t.partition for t in tasks], bounds, worker_addrs)
         self._emit_submitted(tasks)  # worker-side STARTED/FINISHED/ERRORED stream in
+        self._run_keys = None
+        if self._run_monitor is not None and any(t.key != i for i, t in enumerate(tasks)):
+            self._run_keys = [t.key for t in tasks]  # workers emit keys[leaf]
         # A thread actor starts its first leaf before the driver's first poll, so no tag could hold a
         # run entered paused: it waits here, before any actor exists.
         if control is not None and control.wait() is RunState.CANCELLED:
@@ -924,6 +928,8 @@ class ThreadExecutor(_BaseExecutor):
                     steal=self._steal,
                     emit=self._run_monitor is not None,
                     profiler_factory=self._peer_profiler_factory(),
+                    lean=self._run_lean,
+                    keys=self._run_keys,
                 )
             except BaseException as exc:  # a thread exception is otherwise lost -> capture + propagate
                 errors[addr] = exc
@@ -1160,6 +1166,9 @@ class _ProcessExecutorBase(_BaseExecutor):
                         self._steal,
                         self._run_monitor is not None,
                         factory,
+                        self._run_push,  # the pinned pool takes no task keywords
+                        self._run_lean,
+                        self._run_keys,
                         worker=i,
                     )
                     for i, a in enumerate(worker_addrs)
@@ -1179,6 +1188,9 @@ class _ProcessExecutorBase(_BaseExecutor):
                         self._steal,
                         self._run_monitor is not None,
                         factory,
+                        monitor_factory=self._run_push,
+                        lean=self._run_lean,
+                        keys=self._run_keys,
                     )
                     for a in worker_addrs
                 ]
@@ -1235,6 +1247,9 @@ class _ProcessExecutorBase(_BaseExecutor):
                     self._steal,
                     self._run_monitor is not None,
                     factory,
+                    monitor_factory=self._run_push,
+                    lean=self._run_lean,
+                    keys=self._run_keys,
                 )
                 for a in worker_addrs
             ]
