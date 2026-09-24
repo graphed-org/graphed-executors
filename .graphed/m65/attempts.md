@@ -193,3 +193,8 @@ kept `event_q=None` and a later monitored run saw no worker events. New
 `tests/extra/m65/test_b_kept_pool_init.py` fails on the old key (no FINISHED) and passes. `GRAPHED`
 re-pinned to graphed `lane/debug-b`'s head, which carries the H1 server fix. The cross-run
 misdelivery of a kept pool's trailing events into the next run's monitor is unchanged.
+
+### Iteration 5 — review r2 fold (N2)
+
+The `GRAPHED` pin comment names PR-B's head, and the pin moves to graphed `lane/debug-b`'s new head
+(one Perspective update per ingest frame).
