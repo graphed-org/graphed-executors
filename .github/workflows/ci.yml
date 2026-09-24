@@ -47,14 +47,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" "${{ env.HISTOGRAM }}"
           python -m pip install -e ".[dev]"
-      - name: Diagnostic - the proc-http paused-at-entry test alone, thread dumps at 25 s
+      - name: Diagnostic - the real suite command with thread dumps at 28 s and durations
         env:
           PYTHONFAULTHANDLER: "1"
         run: |
-          for i in 1 2 3; do
-            pytest "tests/frozen/m65/test_m65a2_control_routes.py" -k "paused_at_entry_holds_the_run and proc-http" \
-              -p no:cacheprovider -s -o faulthandler_timeout=25 -o log_cli=true -o log_cli_level=DEBUG || true
-          done
+          pytest tests/frozen tests/extra --cov=graphed_executors --cov-branch --cov-report=term-missing \
+            -p no:cacheprovider -o faulthandler_timeout=28 --durations=25 -rA || true
 
   test-dask:
     name: test-dask py${{ matrix.python }}
