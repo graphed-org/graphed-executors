@@ -19,6 +19,7 @@ import contextvars
 import hashlib
 import pickle
 import queue
+import threading
 import time
 import uuid
 from collections import OrderedDict
@@ -272,6 +273,7 @@ class SubmitRunner:
         control = self.control
         monitor_topic = f"graphed-monitor-{run_nonce}" if monitor is not None else None
         events_seen = [0]
+        seen_lock = threading.Lock()  # handlers run on worker threads; += is not atomic without the GIL
         unsub: Callable[[], None] | None = None
         try:
             if control is not None and control.state is RunState.CANCELLED:
@@ -279,7 +281,8 @@ class SubmitRunner:
             if monitor is not None and monitor_topic is not None:
 
                 def handler(events: list[dict[str, object]]) -> None:
-                    events_seen[0] += len(events)
+                    with seen_lock:
+                        events_seen[0] += len(events)
                     for d in events:
                         emit_task(monitor, _event_from_dict(d))  # swallows a raising monitor (passivity)
 

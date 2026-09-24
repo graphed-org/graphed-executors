@@ -122,3 +122,16 @@ it passes alone 3/3 and the job rerun `a3.6-dask-job-2.log` is 312 passed.
 
 `origin/main` (A2 squash `0b085f1`) merged with `-s ours`: its tree equals `lane/debug`'s, so the merge
 changes no file. CI `GRAPHED` re-pinned from `61bde20` to graphed `c551533` (the A1 squash on main). No src change.
+
+### Iteration 7 — PR #24 CI: the monitored-run drain counter raced without the GIL
+
+`test (experimental) py3.14t` hung `test_pause_stops_dispatch_then_resume_completes[fixed|adaptive]`
+(run() past the 30 s join). Reproduced on a local 3.14t venv (2 hangs in 3 drives of the body);
+`faulthandler` put the runner thread in the trailing-event `_wait_until` with all 40 tasks finished.
+Cause: `ThreadBackend` calls the subscribed handler on its worker threads and `events_seen[0] += n`
+is a read-modify-write, so without the GIL increments were lost and the drain waited out
+`_DRAIN_TIMEOUT_S`. The handler now increments under a lock; 12/12 drives complete, and the A3
+submit + stop, m63 thread and m42 frozen files pass twice on 3.14t. Searched `src/graphed_executors`
+for other list-cell counters written from callbacks: single occurrence. The py3.13 failures on the
+same run are `test_m65a2_control_routes.py::test_paused_at_entry_holds_the_run[proc-http]` (local
+HTTP hub route, untouched by A3; the pre-existing hang class from the journal); re-sampled by the push.
