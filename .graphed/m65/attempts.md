@@ -176,3 +176,10 @@ takes positional task arguments only). `SubmitRunner` builds one `RunContext` pe
 two appended defaulted fields (pickled factory, lean); workers push through `_WORKER_MONITORS` under
 `_WORKER_MONITORS_LOCK`; with push the driver neither subscribes nor waits, and the four drain sites wait
 for `ctx.events_per_leaf` events per leaf. B frozen executors files 31/31 plus the dask file pass.
+
+### Iteration 3 — B5 CI pin and docs
+
+`GRAPHED` pinned to graphed `lane/debug-b`'s head; the `test-dask` line gains the two B submit/dask
+files so that job's `submit/**` diff-cover sees the in-process worker-side `engine.py` lines. The
+design page's "Watching a run" states lean events and per-worker push; improvements notes live parsl
+events under push.
