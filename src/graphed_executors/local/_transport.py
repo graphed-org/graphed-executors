@@ -192,8 +192,14 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
-        with contextlib.suppress(Exception):
+        import sys as _sys, time as _time
+        try:
             sender, message = pickle.loads(body)
+        except Exception as exc:
+            print(f"[diag inbox {_time.monotonic():.3f} {getattr(self.server, 'diag_address', '?')}] UNPICKLE-FAIL {type(exc).__name__}: {exc} len={length}", file=_sys.stderr, flush=True)
+        else:
+            tag = message[0] if isinstance(message, tuple) and message and isinstance(message[0], str) else type(message).__name__
+            print(f"[diag inbox {_time.monotonic():.3f} {getattr(self.server, 'diag_address', '?')}] {tag} from {sender}", file=_sys.stderr, flush=True)
             self.server._deliver((sender, message))  # type: ignore[attr-defined]
         self.send_response(200)
         self.end_headers()
@@ -253,6 +259,7 @@ class HttpTransport:
     def __init__(self, address: str, *, host: str = "127.0.0.1", maxsize: int = _DEFAULT_MAXSIZE) -> None:
         self.address = address
         self._server = _InboxServer((host, 0))
+        self._server.diag_address = address  # type: ignore[attr-defined]
         self.host = str(self._server.server_address[0])
         self.port = int(self._server.server_address[1])
         self._registry: dict[str, tuple[str, int]] = {}
@@ -328,6 +335,8 @@ class HttpTransport:
                 break
             target = self._registry.get(dest)
             if target is None:
+                import sys as _sys
+                print(f"[diag xport {self.address}->{dest}] DROP-NO-REGISTRY {message[0] if isinstance(message, tuple) else message!r}", file=_sys.stderr, flush=True)
                 continue
             body = pickle.dumps((self.address, message))
             url = f"http://{target[0]}:{target[1]}/msg"
@@ -351,9 +360,8 @@ class HttpTransport:
                 else:
                     self.drops += 1
             tag = message[0] if isinstance(message, tuple) and message and isinstance(message[0], str) else None
-            if tag in ("pause", "resume", "registry", "root", "done", "hello", "cancel"):
-                import sys as _sys
-                print(f"[diag xport {self.address}->{dest}] {tag} delivered={delivered} attempts_target={target}", file=_sys.stderr, flush=True)
+            import sys as _sys, time as _time
+            print(f"[diag xport {_time.monotonic():.3f} {self.address}->{dest}] {tag} delivered={delivered} target={target} drops={self.drops}", file=_sys.stderr, flush=True)
 
     def close(self) -> None:
         # Sentinel FIRST, `_stop` only after the lanes have drained (or the bound expired): setting

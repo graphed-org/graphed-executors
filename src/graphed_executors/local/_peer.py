@@ -863,6 +863,9 @@ def http_peer_actor(
     """Module-level (picklable) HTTP actor for ``ProcessExecutor``: bind a loopback server, announce
     ``(host, port)`` to the driver, wait for the assembled registry (buffering any node hand-offs that
     race ahead), then process + peer-reduce. Proves the transport works across real processes."""
+    import faulthandler as _fh, sys as _sys, os as _os
+    _fh.dump_traceback_later(25.0, repeat=False, file=_sys.stderr)
+    print(f"[diag actor {address} pid={_os.getpid()}] start", file=_sys.stderr, flush=True)
     transport = HttpTransport(address)
     transport.set_registry({DRIVER: (driver_host, driver_port)})
     transport.send(DRIVER, ("hello", address, transport.host, transport.port))
@@ -878,6 +881,7 @@ def http_peer_actor(
         else:
             prebuffered.append((got[0], payload))  # a node/done that raced ahead — keep it
     transport.set_registry(registry)
+    print(f"[diag actor {address}] registry {registry}", file=_sys.stderr, flush=True)
     try:
         return process_and_reduce(
             address,
@@ -896,6 +900,8 @@ def http_peer_actor(
             close_resources=False,
         )
     finally:
+        _fh.cancel_dump_traceback_later()
+        print(f"[diag actor {address}] closing deliveries={transport.deliveries} drops={transport.drops}", file=_sys.stderr, flush=True)
         transport.close()
 
 
