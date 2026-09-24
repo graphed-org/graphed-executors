@@ -1025,7 +1025,7 @@ class _ProcessExecutorBase(_BaseExecutor):
             max_in_flight=max_in_flight,
         )
         self._mgr: SyncManager | None = None
-        self._kept_push: tuple[bytes | None, bool] = (None, False)  # what the kept hub pool pushes to
+        self._kept_init: tuple[bytes, bool] | None = None  # the kept hub pool's initializer identity
         self._event_q: object | None = None
         self._collector: threading.Thread | None = None
         self._collector_stop: threading.Event | None = None
@@ -1335,14 +1335,19 @@ class _ProcessExecutorBase(_BaseExecutor):
         self._last_peer_witness = [f.result() for f in futs]  # propagate any error even on success
         return out
 
-    def _pool(self) -> _PoolExecutor:
+    def _pool_init(self) -> tuple[Any, Any, Any, bool]:
+        """What the worker initializer fixes: profiler factory, event queue, push factory, lean."""
         factory = self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
         push = self._run_push
+        return factory, None if push is not None else self._event_q, push, self._run_lean
+
+    def _pool(self) -> _PoolExecutor:
+        factory, event_q, push, lean = self._pool_init()
         return _StdProcessPool(
             max_workers=self.max_workers,
             mp_context=multiprocessing.get_context("spawn"),
-            initializer=functools.partial(_proc_init, monitor_factory=push, lean=self._run_lean),
-            initargs=(factory, None if push is not None else self._event_q),
+            initializer=functools.partial(_proc_init, monitor_factory=push, lean=lean),
+            initargs=(factory, event_q),
         )
 
     def _raw_submit(
@@ -1357,14 +1362,14 @@ class _ProcessExecutorBase(_BaseExecutor):
 
     @contextlib.contextmanager
     def _acquired_pool(self) -> Iterator[_PoolExecutor]:
-        # the initializer fixes a worker's push monitor and lean flag, so a kept pool that would push
-        # this run somewhere else is respawned
-        push = (pickle.dumps(self._run_push) if self._run_push is not None else None, self._run_lean)
-        if push != self._kept_push and self._kept_pool is not None:
+        # a kept pool whose initializer fixed other than what this run needs is respawned
+        self._ensure_collector()
+        factory, event_q, push, lean = self._pool_init()
+        init = (pickle.dumps((factory, push, lean)), event_q is not None)
+        if init != self._kept_init and self._kept_pool is not None:
             self._kept_pool.shutdown(wait=True)
             self._kept_pool = None
-        self._kept_push = push
-        self._ensure_collector()
+        self._kept_init = init
         try:
             with super()._acquired_pool() as pool:
                 yield pool

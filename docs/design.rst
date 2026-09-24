@@ -392,7 +392,8 @@ the driver's ``SUBMITTED`` still carries it. A monitor whose ``worker_monitor_fa
 picklable factory has each worker process build its own monitor from it, once per process and
 factory, and send its task events and profile trees there instead of through the driver: the hub
 process pool passes the factory to its pool initializer and starts no collector (a persistent pool is
-respawned when the factory or the lean flag changes), each peer actor builds one per run, and
+respawned when anything its initializer fixes changes: the push or profiler factory, the lean flag,
+or whether it feeds the collector), each peer actor builds one per run, and
 ``SubmitRunner`` workers (dask, parsl, or the ``ThreadBackend``'s threads) keep one per process and
 the driver skips the event topic. ``ThreadExecutor`` workers share the driver's process and keep
 calling the driver's monitor. ``NetworkMonitor(url, lean=True, per_worker=True)`` in
