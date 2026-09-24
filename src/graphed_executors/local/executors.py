@@ -966,6 +966,8 @@ class ThreadExecutor(_BaseExecutor):
             driver_t.broadcast(("done",))
             for t in threads:
                 t.join(timeout=30.0)
+            for a in worker_addrs:  # an HTTP lane still POSTs a returned actor's last events
+                transports[a].close()
             for _sender, payload in driver_t.poll():  # drain trailing monitor events the workers shipped
                 self._forward_peer_events(payload)
             if errors:

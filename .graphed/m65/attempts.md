@@ -198,3 +198,12 @@ misdelivery of a kept pool's trailing events into the next run's monitor is unch
 
 The `GRAPHED` pin comment names PR-B's head, and the pin moves to graphed `lane/debug-b`'s new head
 (one Perspective update per ingest frame).
+
+### Iteration 6 — thread-http trailing events
+
+The r2 fold's gate run failed `test_peer_events_carry_task_keys[thread-http-default]` (one FINISHED
+missing) under a loaded machine. Cause (pre-existing since the thread peer drain): a returned actor's
+HTTP lane can still be POSTing its last events when the driver joins the threads and polls once. The
+driver now closes the worker transports (draining their lanes, bounded by `CLOSE_DRAIN_S`) before that
+poll. New `tests/extra/m65/test_b_http_trailing_events.py` slows w1's event POSTs; it fails on the old
+drain and passes.
