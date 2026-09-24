@@ -207,3 +207,29 @@ HTTP lane can still be POSTing its last events when the driver joins the threads
 driver now closes the worker transports (draining their lanes, bounded by `CLOSE_DRAIN_S`) before that
 poll. New `tests/extra/m65/test_b_http_trailing_events.py` slows w1's event POSTs; it fails on the old
 drain and passes.
+
+## C (plan-C.md C-8, frozen `freeze-m65c` = `4f1c09f`)
+
+### Iteration 1 — C3 complete events per run (executors C frozen 16/16 first run)
+
+Gated on `complete_events(self._run_monitor)` alone. Hub: `_BaseExecutor._leaf_submit` keeps each leaf
+future (the four hub loops and `_prepare` call it); `_settled`, one helper around both
+`_acquired_pool` branches and inside the pool context, waits on a normal or `Exception` exit for the
+leaf futures, then `_await_run_events` (a no-op on the thread hub). The process base counts terminal
+`task` items in `_dispatch` after `on_task` returns or raises (outside the `suppress`), resets the
+count at each `_acquired_pool` entry, waits until it reaches the leaves not cancelled, bounded by
+`_HUB_EVENT_DRAIN_S = 2.0` read at call time (`_wait_until` moved from `submit/engine.py`), and marks
+the kept pool settled. `run()` calls `_switch_in(monitor)` before the monitor switch; the process
+base releases an unsettled kept pool (`_release_kept_pool`, factored out of `close()`) and stops the
+collector, whose final drain delivers the tail to the previous monitor. Peer: `complete` flag through
+`process_and_reduce` and its four actors (positional on the pinned pool); the exception path waits
+`OUTBOX_EXIT_WAIT_S` for queued sends and discards a send error; `_collect_peer` on an `Exception` exit
+after `release_workers` reads the gate and forwards `recv(timeout=0.05)` batches until one is empty or
+`ERROR_EVENT_DRAIN_S = 0.5` passes. New `tests/extra/m65/test_c_nonpersistent_hub.py` (the
+non-persistent five-run guard, plan-C test 12 / C r4 L2): passes 3/3 with C, fails 6/6 on stock source.
+
+Deviation from the owner decision (unitDecisions.C item 1, "only for the driver-bound sends"): the actor
+waits for every queued send, peers' included, bounded by `OUTBOX_EXIT_WAIT_S`, and `_Outbox` is
+unchanged. Plan u5 dropped the driver-only filter on review r5's measurement
+(`probes/cu5_peer_nokeep.out`: the unfiltered wait reads the failing key `errored` on every peer row);
+a send parked on a peer that stopped reading can hold the failing actor for the bound.
