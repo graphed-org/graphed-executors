@@ -1,6 +1,41 @@
 What changed
 ============
 
+Unreleased
+----------
+
+These need a ``graphed`` newer than 0.0.5.
+
+Record the next plan while this one runs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``submit(plan)`` on every executor and runner returns a ``concurrent.futures.Future`` at once;
+  ``.result()`` is what ``run(plan)`` returns. Plans run one at a time in submit order, and
+  ``max_in_flight`` (default 2, forwarded by ``dask_runner`` and ``parsl_runner``) bounds how many
+  are submitted and unfinished (#22).
+* A runner reads its ``monitor`` once per run, so swapping the monitor while plans are queued no
+  longer sends a running plan's events to the new one, and ``Dashboard.attach`` now reaches a
+  ``SubmitRunner`` (#22).
+
+Pause, resume and cancel
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``ThreadExecutor``, ``ProcessPoolExecutor`` and ``PinnedPoolExecutor`` take ``control=``, a
+  ``graphed.core.RunControl``, on every route (#23), and ``SubmitRunner`` — so the dask and parsl
+  runners — honours one too (#24). A pause starts no new task until you resume; a cancel lets
+  running tasks finish and returns the merge of those that completed, with
+  ``stopped=StopReason.CANCELLED``. ``Dashboard(control=True).attach(runner)`` wires the buttons.
+
+Watching a run
+~~~~~~~~~~~~~~
+
+* The executors and ``SubmitRunner`` honour a monitor's lean events and per-worker connections:
+  with ``graphed.debug.NetworkMonitor(url, lean=True, per_worker=True)`` each worker process sends
+  its own events to the dashboard, one per task (#27).
+* A monitor that asks for every event (``graphed.debug.RunRecorder`` does) gets all of a run's
+  events by the time ``run()`` returns or raises, so a report taken then covers that run alone
+  (#28).
+
 0.0.3
 -----
 
