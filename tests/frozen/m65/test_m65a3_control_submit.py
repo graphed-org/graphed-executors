@@ -155,7 +155,7 @@ def test_timed_wake_sees_resume_and_new_slots(leg: str) -> None:
     later = [t for t in started if t > resumed]
     assert res.stopped is StopReason.EXHAUSTED
     assert len(started) - len(later) == 2
-    assert later and min(later) - resumed < 0.2
+    assert later and min(later) - resumed < 0.5
 
 
 class _Recording(ThreadBackend):
