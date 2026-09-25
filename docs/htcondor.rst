@@ -299,8 +299,9 @@ exit code decides whether HTCondor runs it again:
 On a spooled site (the LPC, lxplus) the completed job stays in the queue after ``result()``, so
 call ``handle.remove()``; it also stops a job that is still running. ``wait()`` returns only on
 done, failed or removed, so ``wait(timeout=None)`` does not return while the job is held: pass a
-``timeout``, or check ``status()`` for ``held``. Everything a pilot cannot import (a lambda, a function defined
-in ``__main__``) is refused before anything is written or submitted, as for ``htcondor_runner``.
+``timeout``, or check ``status()`` for ``held``. Everything a pilot cannot import (a lambda, a
+function defined in ``__main__``) is refused before anything is written or submitted, as for
+``htcondor_runner``.
 
 
 The arguments you will change
