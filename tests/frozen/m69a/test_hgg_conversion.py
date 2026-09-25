@@ -81,11 +81,13 @@ def recorded_events(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 @pytest.mark.parametrize("kind", FIXTURES)
 def test_the_events_are_coffea_nanoevents(
-    kind: str, analysis: ModuleType, recorded_events: list[Any], tmp_path: Path
+    kind: str, runner: Any, analysis: ModuleType, recorded_events: list[Any], tmp_path: Path
 ) -> None:
     uri, dataset = FIXTURES[kind]
-    analysis.plan(str(uri), ranges=RANGES, dataset=dataset, year=h.YEAR, out=str(tmp_path))
+    plan = analysis.plan(str(uri), ranges=RANGES, dataset=dataset, year=h.YEAR, out=str(tmp_path))
     assert recorded_events
+    # both runners execute in-process, so events a task builds eagerly are recorded too
+    runner.run(plan)
     for events in recorded_events:
         assert isinstance(events, GraphedNanoArray)
         assert hasattr(events.Photon, "metric_table") and hasattr(events.Photon, "delta_r")
