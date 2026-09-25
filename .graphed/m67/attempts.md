@@ -46,3 +46,11 @@ Baseline at 613aaa7 (`pytest tests/frozen tests/extra`, macOS py3.12): 711 passe
   0 failed; the live m67 module skips without bindings. Per-file coverage (m66+m67 frozen + extra, subprocesses
   measured with an absolute `COVERAGE_FILE`): driver.py 100%, driverless.py 100%, launch.py 95%, sites.py 100%,
   every file ≥ 90% (`scripts/coverage_gate.py`). Frozen m67 alone: driver.py 93%, driverless.py 93%.
+
+## Iteration 3 — commit 3, CI leg + docs
+- `test-htcondor` runs `tests/frozen/m67 tests/extra/m67` beside m66, with `COVERAGE_FILE` absolute: a driver
+  subprocess runs in a job scratch dir, and a relative data file landed its coverage there (driver.py read 80%
+  locally before, 93% frozen-only after). The main matrix already runs the non-live m67 files on every OS.
+- Docs: `htcondor.rst` "Running without a login session", `design.rst` "Driverless" paragraph, changelog entry.
+  Sphinx `-W` clean locally; the example calls bind against the real signatures. The live legs (a)–(d) and the
+  lxplus/LPC site checks are unmeasured here (no bindings on macOS, Docker broken): CI's test-htcondor measures (a)–(d).

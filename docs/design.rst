@@ -858,6 +858,16 @@ pilots as a file only you can read — never in the job's arguments or environme
 see with ``condor_q -long`` — and every request is signed with it. The server checks the signature
 before it reads the request's contents; a request without it is refused unread.
 
+**Driverless: the driver is a job too.** ``submit_driverless`` ships the runtime ``Plan`` as a
+stdlib pickle, with ``run.json`` naming the pilots, site and limits, in one job whose entry point
+builds the same ``HTCondorRunner`` there — over pilots in its own slot, or over pilot jobs it
+submits to the schedd your session chose, found by name through the collector because a job has no
+local schedd. Nothing about the run changes but where the driver lives, so the answer is the same
+bit for bit. The plan is pickled, not written as a ``DurablePlan``: no executor accepts that, and
+the job needs the plan's functions, which the pickle names. The exit code says who fails the run: a
+plan error (3) is deterministic and ends HTCondor's retries, anything else (1) is retried. A
+``RunHandle`` is five fields of JSON, so another session can pick the run up.
+
 Not supported yet
 -----------------
 

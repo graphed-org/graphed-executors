@@ -248,8 +248,9 @@ jobs:
           fi
 
   # The direct HTCondor backend (graphed_executors.htcondor_backend) needs the htcondor bindings, which
-  # ship Linux wheels only, and a pool: this job installs a personal HTCondor and runs the m66 suite
-  # against it. Local pilots inherit COVERAGE_PROCESS_START and self-measure as in test-parsl.
+  # ship Linux wheels only, and a pool: this job installs a personal HTCondor and runs the m66 and m67
+  # suites against it. Local pilots and drivers inherit COVERAGE_PROCESS_START and self-measure as in
+  # test-parsl; COVERAGE_FILE is absolute because a driver runs in a job scratch dir, not the workspace.
   test-htcondor:
     name: test-htcondor py3.12
     runs-on: ubuntu-latest
@@ -280,14 +281,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" "${{ env.HISTOGRAM }}"
           python -m pip install -e ".[dev,htcondor]"
-      - name: Pytest frozen m66 on the pool + scoped coverage gate (>=90%)
+      - name: Pytest frozen m66 + m67 on the pool + scoped coverage gate (>=90%)
         # a bare `--cov` keeps the rcfile's source; a path-valued one overrides it (see test-parsl)
         env:
           COVERAGE_PROCESS_START: ${{ github.workspace }}/.coveragerc-htcondor
           COVERAGE_RCFILE: ${{ github.workspace }}/.coveragerc-htcondor
+          COVERAGE_FILE: ${{ github.workspace }}/.coverage
         run: |
           python -c "import sysconfig, pathlib; pathlib.Path(sysconfig.get_path('purelib'), 'graphed_subcov.pth').write_text('import coverage; coverage.process_startup()\n')"
-          pytest tests/frozen/m66 tests/extra/m66 \
+          pytest tests/frozen/m66 tests/extra/m66 tests/frozen/m67 tests/extra/m67 \
             --cov --cov-config=.coveragerc-htcondor \
             --cov-branch --cov-fail-under=0
           mv .coverage .coverage.driver
