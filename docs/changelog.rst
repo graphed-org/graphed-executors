@@ -1,10 +1,10 @@
 What changed
 ============
 
-Unreleased
-----------
+0.0.4
+-----
 
-These need a ``graphed`` newer than 0.0.5.
+Requires ``graphed`` 0.0.6 or later.
 
 Record the next plan while this one runs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
