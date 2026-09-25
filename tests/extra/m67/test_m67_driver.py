@@ -1,7 +1,7 @@
 """m67 driver-entry and launcher paths the frozen suite does not reach: the host fallback, an outcome
 that does not pickle, the default schedd's name, ``service_hosts`` with worker ports alone, the exit
-pilot cluster in ``driver.log``, the exit
-code of a run whose workers were lost, a failing close, and the entry run under ``-W error``."""
+code of a run whose workers were lost, a failing close, the entry run under ``-W error``, and the
+pilot cluster in ``driver.log``."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import pickle
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,7 +19,15 @@ from typing import Any
 import pytest
 from graphed.core.execution import ExecResult, Partition, Plan, Task
 
-from graphed_executors.htcondor_backend import CondorPilots, SiteProfile, driver, launch, server
+from graphed_executors.htcondor_backend import (
+    CondorPilots,
+    HTCondorBackend,
+    SiteProfile,
+    backend,
+    driver,
+    launch,
+    server,
+)
 from graphed_executors.htcondor_backend.driverless import DRIVER_MODULE
 from graphed_executors.htcondor_backend.sites import SITES
 
@@ -88,6 +97,10 @@ def fail(partition, resources):
     raise ValueError("negative pt")
 
 
+def ok(partition, resources):
+    return "x"
+
+
 def concat(a, b):
     return a + b
 
@@ -97,12 +110,7 @@ def empty():
 """
 
 
-@pytest.mark.parametrize(
-    ("process", "code", "cause"), [("die", 1, "KilledWorker"), ("fail", 3, "ValueError")]
-)
-def test_lost_workers_exit_1_and_a_plan_error_exits_3(
-    process: str, code: int, cause: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def write_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, process: str) -> None:
     monkeypatch.setattr(server, "LEASE_S", 2.0)
     (tmp_path / "m67_exit_plan.py").write_text(PLAN_MODULE)
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -117,15 +125,50 @@ def test_lost_workers_exit_1_and_a_plan_error_exits_3(
     (tmp_path / "plan.pkl").write_bytes(pickle.dumps(plan))
     run = {"pilots": "local", "site": "generic", "n_pilots": 2, "min_pilots": 1, "retries": 0}
     (tmp_path / "run.json").write_text(json.dumps({**run, "max_in_flight": 2}))
+
+
+@pytest.mark.parametrize(
+    ("process", "code", "cause"), [("die", 1, "KilledWorker"), ("fail", 3, "ValueError")]
+)
+def test_lost_workers_exit_1_and_a_plan_error_exits_3(
+    process: str, code: int, cause: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_job(tmp_path, monkeypatch, process)
     assert driver.main([str(tmp_path)]) == code
     ok, err = pickle.loads((tmp_path / "result.pkl").read_bytes())
     assert ok is False and getattr(err, "cause_type", type(err).__name__) == cause, err
 
 
+def test_pilots_lost_after_the_driver_waits_exit_1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_job(tmp_path, monkeypatch, "ok")
+    wait = HTCondorBackend.wait_for_pilots
+    waits: list[int] = []
+
+    def wait_then_lose_all(self: HTCondorBackend, n: int, timeout: float = backend.N_WORKERS_WAIT_S) -> int:
+        waits.append(n)
+        if len(waits) > 1:  # a second wait sees no pilot; cut its timeout so it fails fast
+            return wait(self, n, timeout=3.0)
+        live = wait(self, n, timeout)
+        assert isinstance(self.launcher, launch.LocalPilots)
+        for proc in self.launcher._procs:
+            proc.kill()
+            proc.wait()
+        while self._server.live_pilots():
+            time.sleep(0.05)
+        return live
+
+    monkeypatch.setattr(HTCondorBackend, "wait_for_pilots", wait_then_lose_all)
+    assert driver.main([str(tmp_path)]) == 1
+    ok, err = pickle.loads((tmp_path / "result.pkl").read_bytes())
+    assert ok is False and getattr(err, "cause_type", None) == "KilledWorker", err
+
+
 class ClosingRunner:
     def __init__(self, outcome: object) -> None:
         self.outcome = outcome
-        self.backend = SimpleNamespace(wait_for_pilots=lambda n: n)
+
+    def wait_for_pilots(self) -> int:
+        return 1
 
     def run(self, plan: object) -> object:
         if isinstance(self.outcome, Exception):

@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
                 plan = pickle.load(f)
             runner = _runner(run, job, log)
             try:
-                live = runner.backend.wait_for_pilots(int(run["min_pilots"]))
+                live = runner.wait_for_pilots()
                 print(f"{live} pilots live after {time.monotonic() - start:.1f}s", file=log, flush=True)
                 try:
                     result, code = runner.run(plan), EXIT_DONE
