@@ -13,7 +13,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 
-FLOAT_COL = "mass"
+FLOAT_COL = "PTJ0"
 INT_COL = "NJ"
 
 
