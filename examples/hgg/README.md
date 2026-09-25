@@ -38,8 +38,9 @@ plan = analysis.plan(fileset, year="2024", out="out")
 value = SequentialRunner().run(plan).value   # {"MC": {...}, "DataC_2024": {...}}
 ```
 
-Data and MC record different graphs; `graphed.collate` runs both in the one plan. Each dataset's
-`dataset_plan` also runs on its own, and a dict union of those values is the same result.
+Data and MC record different graphs; `graphed.collate` runs both in the one plan. `plan` over one
+dataset, `plan({dataset: files})`, also runs on its own, and a dict union of those values is the
+same result.
 
 Each part goes to `out/<dataset>/nominal/<file stem>_Events_<start>-<stop>.parquet`. That is the
 original's name, except that the original begins it with the file's UUID and this begins it with
