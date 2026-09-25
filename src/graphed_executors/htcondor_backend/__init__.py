@@ -7,13 +7,19 @@ Importing this package imports no bindings: ``CondorPilots.start`` does, on firs
 
 from __future__ import annotations
 
+from .backend import HTCondorBackend, HTCondorRunner, htcondor_runner
 from .launch import CondorPilots, LocalPilots, PilotLauncher
+from .server import WorkerLost
 from .sites import SITES, SiteProfile
 
 __all__ = [
     "SITES",
     "CondorPilots",
+    "HTCondorBackend",
+    "HTCondorRunner",
     "LocalPilots",
     "PilotLauncher",
     "SiteProfile",
+    "WorkerLost",
+    "htcondor_runner",
 ]

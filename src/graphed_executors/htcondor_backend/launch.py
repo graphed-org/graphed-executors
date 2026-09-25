@@ -26,9 +26,10 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from .server import POLL_S
 from .sites import SITES, WEIGHT_ATTRS, SiteProfile, choose_schedd, counts_as_alive
 
-CLOSE_WAIT_S = 20.0  # every pilot has polled /next, and seen the server's 410, by then
+CLOSE_WAIT_S = 2 * POLL_S  # every pilot has polled /next, and seen the server's 410, by then
 
 SECRET_FILE = "graphed-secret"
 ENV_FILE = "env.tgz"

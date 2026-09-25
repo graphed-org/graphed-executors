@@ -28,3 +28,21 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
   includes `tests/extra/m66` (the test-parsl precedent runs its extra dir in the scoped job).
 - Local: test_htcondor_sites.py + packaging pins + extra → 26 passed. The rest of m66 still fails at the
   accessor for the server/backend names (commit 3).
+
+## Iteration 3 — commit 3, task server + pilot + backend
+- `server.py`: TaskServer (HMAC hex signature checked before `pickle.loads` on every route; `/hello`, `/beat`,
+  `/next` long poll, `/result`), the dep rule (a task queues when its `_ParslFuture` args are done; a failed or
+  cancelled dep fails it with that exception), first lease only → `set_running_or_notify_cancel`, requeue once
+  then `WorkerLost(key, pilot)`, no-pilots-left failure once the launcher reports 0 alive, `settle` outside the
+  Condition's lock, close → notify_all → 410. `allow_reuse_address` is False on Windows only (the r3 premise
+  is Windows' SO_REUSEADDR; on POSIX it only skips TIME_WAIT, which back-to-back servers in the port range need).
+- `pilot.py`: hello, daemon beat thread, pull loop; 410 → exit 0; 403 → prints "wrong secret file", exit 2;
+  driver unreachable for a lease → exit 1; an unpicklable exception comes back as a RuntimeError with the traceback.
+- `backend.py`: HTCondorBackend (all-False caps, `n_workers()` = live pilots, `wait_for_pilots`, `describe_failure`,
+  ExitStack so a refused `launcher.start` releases the port), `_require_importable` (pickle + a `find_class` probe
+  refusing `__main__`), HTCondorRunner (min_pilots=1 wait before the first run), `htcondor_runner`.
+- `CLOSE_WAIT_S = 2 * server.POLL_S` now lives in launch.py, its only reader.
+- `tests/extra/m66/test_m66_server.py`: cancelled queued task + idle poll, stale/unusable result + close, port
+  range exhausted, pilot exit 1 after its driver vanishes. Discrimination: with the cancelled-task drop removed,
+  the cancel witness fails; with collector failover replaced by a raise, both failover witnesses fail.
+- Local (macOS, py3.12): `pytest tests/frozen/m66 tests/extra/m66` → 56 passed, 1 skipped (live pool: no bindings).
