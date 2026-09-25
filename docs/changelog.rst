@@ -17,7 +17,8 @@ Run on an HTCondor pool
   the run needs no login session: its pilots run in the job's own slot (``pilots="local"``, the
   LPC's way) or as jobs it submits (``pilots="condor"``, e.g. lxplus). The ``RunHandle`` it returns
   reports the job's status, waits, and fetches the result, and saves to JSON for a later session.
-  ``SiteProfile`` gains ``worker_ports`` and ``service_ports``. See :doc:`htcondor`.
+  ``SiteProfile`` gains ``worker_ports``, ``service_ports`` and ``jobs_can_submit``. See
+  :doc:`htcondor`.
 
 0.0.4
 -----

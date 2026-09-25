@@ -259,24 +259,47 @@ Later, from any session on the same pool:
     print(handle.status())                      # queued, running, held, done, failed or removed
     handle.wait(timeout=3600)                   # returns on done, failed or removed
     result = handle.result()                    # the ExecResult; a failed run re-raises its error
+    handle.remove()                             # the LPC and lxplus keep a completed job queued
 
 Where the pilots run depends on ``pilots=``:
 
 * ``pilots="local"`` (the default) asks for one slot with ``n_pilots`` CPUs and runs the pilots
-  inside it as subprocesses of the driver. This is the choice on the **LPC**, whose jobs cannot
-  submit jobs; size ``request_memory_mb`` for all of them together.
+  inside it as subprocesses of the driver. This is the only choice on the **LPC**, whose jobs
+  cannot submit jobs (``SiteProfile.jobs_can_submit``); size ``request_memory_mb`` for all of
+  them together.
 * ``pilots="condor"`` has the driver job submit ``n_pilots`` pilot jobs of its own, to the schedd
   your session chose, and host its task server on one of the site's ``worker_ports`` (10000–10100
   on every built-in site). On **lxplus** the pilots need a submit directory the schedd reads, so
   ``log_dir`` must lie under ``/afs``; anything else is refused. A site without ``worker_ports`` refuses
   ``pilots="condor"``.
 
-The job brings back ``result.pkl`` and ``driver.log`` (the pilot count and pids, timings, and any
-traceback); on the LPC and lxplus they are spooled and ``result()`` retrieves them into
-``log_dir``. ``logs()`` returns the driver's log files that have come back. The job exits 0 when the
-plan ran, 3 when the plan itself raised — never retried, since it would raise again — and
-1 for anything else, such as pilots that could not start; exit 1 is retried twice.
-``handle.remove()`` removes the job. Everything a pilot cannot import (a lambda, a function defined
+The job brings back ``result.pkl`` and ``driver.log`` (the pilots' pids or the pilot cluster,
+timings, and any traceback); on the LPC and lxplus they are spooled and ``result()`` retrieves
+them into ``log_dir``. ``logs()`` returns the driver's log files that have come back. The job's
+exit code decides whether HTCondor runs it again:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 72 20
+
+   * - Exit
+     - Meaning
+     - Retried
+   * - 0
+     - The plan ran.
+     - No
+   * - 1
+     - Anything another attempt may get past: the run's workers were lost (every pilot preempted,
+       say), pilots could not start, or the driver failed before or after the run.
+     - Twice
+   * - 3
+     - The plan's own code raised; it would raise again.
+     - No
+
+On a spooled site (the LPC, lxplus) the completed job stays in the queue after ``result()``, so
+call ``handle.remove()``; it also stops a job that is still running. ``wait()`` returns only on
+done, failed or removed, so ``wait(timeout=None)`` does not return while the job is held: pass a
+``timeout``, or check ``status()`` for ``held``. Everything a pilot cannot import (a lambda, a function defined
 in ``__main__``) is refused before anything is written or submitted, as for ``htcondor_runner``.
 
 

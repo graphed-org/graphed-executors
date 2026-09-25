@@ -865,7 +865,8 @@ submits to the schedd your session chose, found by name through the collector be
 local schedd. Nothing about the run changes but where the driver lives, so the answer is the same
 bit for bit. The plan is pickled, not written as a ``DurablePlan``: no executor accepts that, and
 the job needs the plan's functions, which the pickle names. The exit code says who fails the run: a
-plan error (3) is deterministic and ends HTCondor's retries, anything else (1) is retried. A
+plan error (3) is deterministic and ends HTCondor's retries; anything else (1), lost workers
+included, is retried. A
 ``RunHandle`` is five fields of JSON, so another session can pick the run up.
 
 Not supported yet
