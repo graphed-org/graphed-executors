@@ -1,9 +1,17 @@
-"""Build the m69a NanoAOD v15 diphoton fixtures from coffea's ``tests/samples/nano_tt_v15.root``.
+"""Build the m69a NanoAOD v15 diphoton fixtures.
 
-``python make_hgg_fixture.py SRC DST`` writes the MC fixture: every branch of SRC, with two loose photons
-and the mainAnalysis diphoton triggers injected into events 0-59. ``--data`` drops the generator branches
-(``GenPart_*``, ``GenVtx_*``, ``LHE*``, ``genWeight``) and sets run/lumi from the 2024 golden JSON next to
-this file: events 30-59 lie in uncertified lumis of a certified run, every other event is certified.
+``python make_hgg_fixture.py --slice 0 200 SRC nano_hgg_v15.root`` writes the MC fixture: entries 0-200,
+every branch, of the CMS sample
+``/store/mc/RunIII2024Summer24NanoAODv15/GluGluH-Hto2G_Par-M-125_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/NANOAODSIM/150X_mcRun3_2024_realistic_v2-v2/120000/acebfb52-a25b-48bc-b9f6-80fe54a98d56.root``
+(SRC), real H->gg events with nothing injected.
+
+``python make_hgg_fixture.py SRC DST``, with SRC coffea's ``tests/samples/nano_tt_v15.root``, writes every
+branch of SRC with two loose photons and the mainAnalysis diphoton triggers injected into events 0-59.
+``--data`` then drops the generator branches (``GenPart_*``, ``GenVtx_*``, ``LHE*``, ``genWeight``) and sets
+run/lumi from the 2024 golden JSON next to this file: events 30-59 lie in uncertified lumis of a certified
+run, every other event is certified; that is the data fixture ``nano_hgg_v15_data.root``.
+
+The output embeds its own file name, so a rebuild is byte-identical only under the same basename.
 """
 
 import argparse
@@ -33,9 +41,9 @@ class _FixedClock(datetime.datetime):
         return CREATED
 
 
-def read_collections(src):
+def read_collections(src, entry_start=None, entry_stop=None):
     tree = uproot.open(src)["Events"]
-    arr = tree.arrays()
+    arr = tree.arrays(entry_start=entry_start, entry_stop=entry_stop)
     names = tree.keys()
     colls = sorted(
         {n[1:] for n in names if n.startswith("n") and any(k.startswith(n[1:] + "_") for k in names)}
@@ -113,6 +121,8 @@ def write(dst, out):
     # a fixed clock and file UUID make the output a pure function of SRC
     datetime.datetime = _FixedClock
     fixed_uuid = uuid.UUID(int=SEED)
+    # uproot.recreate keeps a longer existing file's tail
+    pathlib.Path(dst).unlink(missing_ok=True)
     with uproot.recreate(dst, uuid_function=lambda: fixed_uuid, compression=None) as f:
         f.mktree("Events", {k: ak.type(v).content for k, v in out.items()}, counter_name=lambda c: "n" + c)
         f["Events"].extend(out)
@@ -124,10 +134,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("src")
     ap.add_argument("dst")
-    ap.add_argument("--data", action="store_true")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--data", action="store_true")
+    mode.add_argument("--slice", nargs=2, type=int, metavar=("START", "STOP"))
     args = ap.parse_args()
-    out, names = read_collections(args.src)
-    inject_diphotons(out, names)
+    if args.slice:
+        out, _ = read_collections(args.src, *args.slice)
+    else:
+        out, names = read_collections(args.src)
+        inject_diphotons(out, names)
     if args.data:
         make_data(out)
     write(args.dst, out)
