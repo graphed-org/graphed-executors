@@ -21,3 +21,9 @@ arrow_options={"extensionarray": False})], reduce=Counters(slots), combine=accum
 `/…;cycle`. `run_local.py` builds a stepped fileset; `validate_real.py` runs ONE plan over both
 files and judges each part by `compare_part` and each dataset's totals against the accumulated
 oracle counters — on the committed fixtures: every part IDENTICAL, DIFFERENCES 0.
+
+## C3 — docs
+
+`examples/hgg/README.md` (fileset example, executed on the fixtures: 4 parts, both datasets'
+counters), `docs/hgg.rst` (the one-plan shape; the table's counters, writer and part-name rows;
+the MC fixture is now the 2024 GluGluH slice), `docs/changelog.rst`. `sphinx-build -W` clean.
