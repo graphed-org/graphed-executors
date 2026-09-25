@@ -74,3 +74,15 @@ Baseline at 613aaa7 (`pytest tests/frozen tests/extra`, macOS py3.12): 711 passe
   extra, 118 passed, subprocesses combined): driver.py 100%, driverless.py 100%, sites.py 100%, launch.py 95%,
   backend.py 94%, every file >= 90%; diff-cover vs origin/main on htcondor_backend 100% (234 lines, 0 missing).
   Sphinx -W clean; mypy --strict clean; precommit gate ok.
+
+## Iteration 5 — impl-r2 Low folds
+- cfcf9f6 L2: `HTCondorRunner.wait_for_pilots()` waits for `min_pilots` and marks the runner waited; the driver calls
+  it, so `run()` no longer waits a second time. Pilots lost after the driver's wait fail the run's tasks as
+  `KilledWorker` (exit 1, retried) instead of timing out a second wait inside `run()` (exit 3). New extra test
+  `test_pilots_lost_after_the_driver_waits_exit_1` kills every local pilot after the first wait returns. One-edit
+  revert (driver back to `runner.backend.wait_for_pilots(...)`, scratch clone): `assert 3 == 1`; fix leg passes.
+- cfcf9f6 L1: the extra driver test's module docstring lists the tested paths once.
+- 3e5eb28 L3: `design.rst` exit-code paragraph and `htcondor.rst` held-wait paragraph reflowed to width 100.
+- Gates: `pytest tests/frozen tests/extra` 766 passed, 11 skipped. test-htcondor replica 119 passed; per file:
+  `__init__`/driver/driverless/pilot/sites 100%, backend 95%, launch 95%, server 99%; coverage_gate ok.
+  diff-cover vs origin/main eefc0f3: 239 lines, 0 missing, 100%. Sphinx -W, mypy, precommit ok.
