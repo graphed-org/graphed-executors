@@ -63,7 +63,8 @@ class RunHandle:
         ads = list(schedd.query(constraint=constraint, projection=STATUS_ATTRS))
         in_queue = bool(ads)
         if not in_queue:
-            ads = list(schedd.history(constraint, STATUS_ATTRS))
+            # without a match bound the schedd scans its whole history; a driver cluster has one proc
+            ads = list(schedd.history(constraint, STATUS_ATTRS, match=1))
         if not ads:
             raise RuntimeError(
                 f"cluster {self.cluster} is neither in the queue of {self.schedd} nor its history"

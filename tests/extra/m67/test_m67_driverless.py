@@ -16,11 +16,13 @@ class Schedd:
     def __init__(self, location: Any = None, queue: list[Any] | None = None) -> None:
         self.location = location
         self.queue = queue or []
+        self.history_calls: list[tuple[str, list[str], int]] = []
 
     def query(self, constraint: str, projection: list[str]) -> list[Any]:
         return self.queue
 
-    def history(self, constraint: str, projection: list[str]) -> list[Any]:
+    def history(self, constraint: str, projection: list[str], match: int = -1) -> list[Any]:
+        self.history_calls.append((constraint, projection, match))
         return []
 
 
@@ -36,11 +38,18 @@ def fake_htcondor(pool: str, queue: list[Any], located: list[Any]) -> Any:
             return {"Name": name, "via": self.node}
 
     kinds = SimpleNamespace(Schedd="schedd")
+    schedds: list[Schedd] = []
+
+    def make_schedd(ad: Any = None) -> Schedd:
+        schedds.append(Schedd(ad, queue))
+        return schedds[-1]
+
     return SimpleNamespace(
         param={"FERMIHTC_REMOTE_POOL": pool},
         Collector=Collector,
         DaemonType=kinds,
-        Schedd=lambda ad=None: Schedd(ad, queue),
+        Schedd=make_schedd,
+        schedds=schedds,
     )
 
 
@@ -74,6 +83,7 @@ def test_a_job_neither_queued_nor_in_history_is_an_error(
     monkeypatch.setattr(launch, "_htcondor", lambda: fake)
     with pytest.raises(RuntimeError, match="cluster 7 is neither in the queue of s1 nor its history"):
         handle(tmp_path).status()
+    assert [call[2] for call in fake.schedds[-1].history_calls] == [1]
 
 
 @pytest.mark.parametrize(("ad", "status"), [({"JobStatus": 6}, "running"), ({"JobStatus": 4}, "failed")])
