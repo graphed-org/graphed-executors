@@ -178,7 +178,8 @@ def test_a_malformed_signature_header_is_refused(capfd: pytest.CaptureFixture[st
             conn.sendall(
                 b"POST /hello HTTP/1.1\r\nHost: x\r\nX-Graphed-Sig: \xe9\r\nContent-Length: 0\r\n\r\n"
             )
-            reply = b"".join(iter(lambda: conn.recv(4096), b""))  # to EOF: closing early resets the server's write
+            # to EOF: closing early resets the server's write
+            reply = b"".join(iter(lambda: conn.recv(4096), b""))
     finally:
         ts.close()
         ts.shutdown()
