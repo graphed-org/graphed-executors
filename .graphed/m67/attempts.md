@@ -54,3 +54,23 @@ Baseline at 613aaa7 (`pytest tests/frozen tests/extra`, macOS py3.12): 711 passe
 - Docs: `htcondor.rst` "Running without a login session", `design.rst` "Driverless" paragraph, changelog entry.
   Sphinx `-W` clean locally; the example calls bind against the real signatures. The live legs (a)–(d) and the
   lxplus/LPC site checks are unmeasured here (no bindings on macOS, Docker broken): CI's test-htcondor measures (a)–(d).
+
+## Iteration 4 — rebase onto main + review/site-check folds
+- Rebased onto origin/main eefc0f3 (#34 squash of m66; its tree equals 613aaa7's, so no conflicts); frozen commit
+  8cfb843, `freeze-m67` moved there with its message. `git diff 713a624 8cfb843 -- tests/frozen/m67` and
+  `git diff origin/main HEAD -- tests/frozen/m66` are empty.
+- db3971e `RunHandle._poll` passes `match=1` to `schedd.history` (lxplus bigbird26 scans its whole history without it).
+- 74fee50 driver: a `StageError` whose `cause_type` is `KilledWorker` exits 1 (owner D6 ruling: lost workers are
+  retried), any other run error 3; a failing `runner.close()` is logged and keeps the outcome; `driver.log` names the
+  pilot cluster under `pilots="condor"`; the job file names moved to `launch`, so the package no longer imports
+  `driver` and `python -W error -m …driver <dir>` prints nothing to stderr.
+- 0d29aa1 `SiteProfile.jobs_can_submit` (default True, False for lpc); `submit_driverless` refuses
+  `pilots="condor"` there before any bindings call.
+- fe64ffa docs: exit-code table, `remove()` after `result()` on spooled sites, `wait(timeout=None)` under a hold.
+- Discrimination (one-edit reverts, each fails its new test): no `match`; `where=""` in the log line; exit code
+  back to `EXIT_PLAN_ERROR`; close handler narrowed to `ZeroDivisionError` (both params fail); driverless importing
+  `driver` again (stderr carries the runpy RuntimeWarning); refusal disabled; lpc datum dropped.
+- Gates: `pytest tests/frozen tests/extra` 765 passed, 11 skipped, 0 failed. test-htcondor replica (m66+m67 frozen +
+  extra, 118 passed, subprocesses combined): driver.py 100%, driverless.py 100%, sites.py 100%, launch.py 95%,
+  backend.py 94%, every file >= 90%; diff-cover vs origin/main on htcondor_backend 100% (234 lines, 0 missing).
+  Sphinx -W clean; mypy --strict clean; precommit gate ok.
