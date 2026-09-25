@@ -24,6 +24,7 @@ Install
    pip install graphed-executors                  # laptop: thread and process pools
    pip install "graphed-executors[dask]"          # + a dask.distributed cluster
    pip install "graphed-executors[parsl]"         # + a parsl pool
+   pip install "graphed-executors[htcondor]"      # + pilot jobs on an HTCondor pool (Linux)
 
 ``graphed`` comes along as a dependency. It ships wheels, so a plain install needs nothing extra;
 installing it from source builds its Rust core, which needs a Rust toolchain.
@@ -129,6 +130,10 @@ Which runner do I want?
    * - A parsl pool (HTEX on SLURM, HTCondor, LSF, …)
      - ``parsl_runner(executor)`` — see :doc:`parsl`
      - Your task functions must live in an installed module, not in ``__main__``.
+   * - An HTCondor pool: the LPC, lxplus, or your own
+     - ``htcondor_runner(site=..., n_pilots=N)`` — see :doc:`htcondor`
+     - Submits its own pilot jobs; no scheduler to start. Task functions go in a module you pass
+       in ``user_modules``.
 
 Going to a cluster is one substitution. Everything above the ``plan = ...`` line stays as it
 is; only the runner changes.
@@ -198,14 +203,15 @@ Where to go next
    design
    dask
    parsl
+   htcondor
    api
    improvements
    changelog
 
 * :doc:`design` — why your result is reproducible, where your merges run, and what happens
   when a worker dies.
-* :doc:`dask` and :doc:`parsl` — install, a worked run, the knobs, and the failures you will
-  actually hit.
+* :doc:`dask`, :doc:`parsl` and :doc:`htcondor` — install, a worked run, the knobs, and the
+  failures you will actually hit.
 * :doc:`api` — the reference, grouped by what you are doing.
 * :doc:`changelog` — what each release gives you that the last one did not.
 

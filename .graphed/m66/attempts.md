@@ -67,3 +67,13 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
   failed. Its regex runs from the parsl pytest line over every indented line to EOF, and the new job's comment
   quoted a path-valued `--cov=`. Fix: the comment no longer spells it. Not a dispute: the frozen test reads ci.yml
   as intended; the comment was the defect.
+
+## Iteration 6 — commit 4, docs
+- `docs/htcondor.rst` (how-to: laptop run with LocalPilots, four warnings, install, LPC walk-through with the
+  bootstrap.sh bind set and the non-editable venv, lxplus marked not yet run, generic pool, SiteProfile, argument
+  table, failure modes, who can talk to the task server), design.rst "On an HTCondor pool", README/index install
+  line + runner row, api.rst autosummary, changelog "Unreleased", improvements.rst + design.rst "Not supported yet"
+  keep SLURM/TaskVine only.
+- Executed: the laptop example (prints `[700] 7 6` after the two pilot lines), the `__main__` refusal (the quoted
+  ValueError), the SiteProfile example (templates render). The LPC recipe ran as the site check. `sphinx-build -W`
+  clean.

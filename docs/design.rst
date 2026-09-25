@@ -824,6 +824,40 @@ choice would also tell the scheduler-graph engine that peer movement exists, and
 route every block through your submit node believing otherwise.
 
 
+On an HTCondor pool
+~~~~~~~~~~~~~~~~~~~
+
+``graphed_executors.htcondor_backend`` (the ``[htcondor]`` extra) needs no cluster software between
+you and the batch system: it submits its own worker jobs through the HTCondor bindings. :doc:`htcondor`
+is the how-to; the design points that matter are these.
+
+**Pilots pull; nothing is pushed to them.** A batch slot can start minutes after you submit and
+sit behind a firewall that refuses inbound connections, so the workers dial out. Each pilot job
+calls a small HTTP task server in your session, asks for the next task, runs it, and posts the
+result back (a pilot job). An idle pilot waits on its request for up to ten seconds and asks again,
+so a new task starts as soon as one is queued, and closing the runner answers every waiting pilot
+at once.
+
+**Your session hands each merge its inputs.** A merge is queued only when both partial results it
+needs have come back, and it is sent out with those two values in it. Pilots never address each
+other, so this is the all-false capability floor again, as on parsl: the grouping and the answer
+are the fixed tree, and every partial crosses your session.
+
+**A lost pilot costs one retry, not the run.** Each pilot sends a heartbeat every five seconds. One
+silent for 30 seconds is lost — six missed beats, which rides out a task that holds the interpreter
+and a short network drop. The task it held goes back to the front of the queue for another pilot;
+a second loss of the same task fails it with the partition and the pilot's ``host:pid``, and so
+fails the run through the same path a dying dask worker takes. A task is never run a third time,
+so a partition that kills every process it touches cannot eat the pool. When no pilot is connected
+and HTCondor reports none queued or running, the waiting tasks fail at once rather than wait for a
+pilot that will never come.
+
+**Only your pilots get tasks.** The task server's port is reachable from the whole pool, and a task
+is a pickle, which runs code when it is read. So every run makes its own secret, ships it to the
+pilots as a file only you can read — never in the job's arguments or environment, which anyone can
+see with ``condor_q -long`` — and every request is signed with it. The server checks the signature
+before it reads the request's contents; a request without it is refused unread.
+
 Not supported yet
 -----------------
 
@@ -836,8 +870,8 @@ Not supported yet
 * **TaskVine and Work Queue.** ``ParslBackend`` refuses executor types it has not verified
   rather than guessing a capability vector, so those raise a ``TypeError`` naming the two
   supported classes. Use HTEX.
-* **Direct HTCondor and SLURM submission.** There is no batch-system executor here; go through
-  dask-jobqueue, as in the recipes above, or a provider in your own parsl config.
+* **Direct SLURM submission.** There is no SLURM executor here; go through dask-jobqueue, as in
+  the recipes above, or a provider in your own parsl config.
 * **TLS on graphed's own HTTP exchange plane.** parsl's ``encrypted=True`` covers parsl's
   channels, not this one. Keep an exchange inside a trusted network.
 * **Live monitoring during a parsl run, by default.** Worker events are buffered and delivered
