@@ -1,6 +1,6 @@
 # m69a — the H→γγ inclusive processor on graphed (attempts log)
 
-Frozen suite `tests/frozen/m69a` at `freeze-m69a` (9c17a64). Design: `lanes/htcondor/plan-services.md` §4.
+Frozen suite `tests/frozen/m69a` at `freeze-m69a` (8ee8cd4). Design: `lanes/htcondor/plan-services.md` §4.
 
 ## Iteration 1 — baseline
 - `GRAPHED_HGG_REQUIRED=1 pytest tests/frozen/m69a`: 18 pass, 9 fail, every failure `ModuleNotFoundError: analysis`.
@@ -23,3 +23,11 @@ Frozen suite `tests/frozen/m69a` at `freeze-m69a` (9c17a64). Design: `lanes/htco
 - `validate_real.py --parts 3 --mc/--data <fixtures>`: 6/6 parts IDENTICAL, `DIFFERENCES 0`.
 - ruff/mypy: `examples` added to mypy `files`, `examples/hgg` to `mypy_path` and ruff `src`; coffea/higgs_dna/
   pyarrow/fsspec/hgg_harness `ignore_missing_imports` (only test-hgg installs coffea). mypy strict clean.
+
+## Iteration 4 — gates and real-data validation
+- Gates: m69a 27 passed; the same 27 in a clean venv installed with test-hgg's exact lines; rest of frozen 604 passed /
+  78 skipped; precommit `--fast` ok; prek (ruff, ruff format, mypy strict) passed; sphinx -W ok.
+- LPC login node, coffea image + graphed 0.0.6 + fork b2612ab + uproot ca3a8a2 + higgs_dna d179305, `validate_real.py
+  --parts 8` on the whole first GluGluHto2G_M-125_amcatnlo_2024 file (4180 entries) and DataC_2024 file (704556):
+  16/16 parts IDENTICAL, `DIFFERENCES 0` (transcript `lanes/htcondor/probes/site-lpc/m69a-validate-real.txt`).
+  First attempt failed importing `hgg_harness`: it imports pytest, which the recipe's venv lacked.
