@@ -91,7 +91,7 @@ def test_fat_slot_run_and_its_retry_policy(tmp_path: Path) -> None:
     row = driver_row(schedd, handle.cluster)
     assert row["ExitCode"] == 0
     assert row["JobMaxRetries"] == 2
-    assert re.search(r"ExitCode\s*(==|=\?=)\s*3\b", str(row["OnExitRemove"])), row["OnExitRemove"]
+    assert re.search(r"ExitCode\s*(==|=\?=|is)\s*3\b", str(row["OnExitRemove"])), row["OnExitRemove"]
 
 
 def test_driver_job_submits_its_own_pilots(tmp_path: Path) -> None:
