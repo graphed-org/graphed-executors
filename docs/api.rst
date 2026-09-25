@@ -14,7 +14,9 @@ Run a plan
 (``plan_tree``, ``tree_reduce``, ``running_fold``) underneath them. The two cluster modules
 give you a one-line runner each — ``dask_runner(client)`` and ``parsl_runner(executor)`` —
 and are importable only with their extra installed (``[dask]``, ``[parsl]``). Importing
-either module does *not* import dask or parsl; that happens when you construct a runner. Every
+either module does *not* import dask or parsl; that happens when you construct a runner.
+``htcondor_runner(site=..., n_pilots=...)`` submits its own pilot jobs; the HTCondor bindings are
+imported only when it submits. Every
 executor and runner has ``run(plan)`` and ``submit(plan)``, which returns a future so you can
 record the next plan while this one runs, and honours a ``graphed.core.RunControl`` for pausing
 and cancelling — ``control=`` on the local executors and ``SubmitRunner``, the ``control``
@@ -27,6 +29,7 @@ attribute on what ``dask_runner`` and ``parsl_runner`` return.
    graphed_executors.local
    graphed_executors.dask_backend
    graphed_executors.parsl_backend
+   graphed_executors.htcondor_backend
 
 Reshape data between steps
 --------------------------

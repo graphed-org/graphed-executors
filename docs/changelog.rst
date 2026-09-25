@@ -1,6 +1,19 @@
 What changed
 ============
 
+Unreleased
+----------
+
+Run on an HTCondor pool
+~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``htcondor_runner(site=..., n_pilots=N)`` in ``graphed_executors.htcondor_backend`` (the
+  ``[htcondor]`` extra) submits pilot jobs through the HTCondor bindings and runs your plan on them:
+  no dask scheduler or parsl interchange to start. Sites ``lpc``, ``lxplus`` and ``generic`` come
+  built in; ``SiteProfile`` describes your own. ``LocalPilots`` runs the same pilots as local
+  processes. A lost pilot's task is re-run once on another pilot, and a plan whose functions a pilot
+  cannot import is refused before anything is submitted. See :doc:`htcondor`.
+
 0.0.4
 -----
 

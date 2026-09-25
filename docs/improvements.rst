@@ -3,11 +3,11 @@ Current limitations
 
 What does not work yet, and what to do instead.
 
-- **No TaskVine or WorkQueue support, and no direct HTCondor/Slurm submission.**
+- **No TaskVine or WorkQueue support, and no direct Slurm submission.**
   ``ParslBackend`` accepts parsl's ``HighThroughputExecutor`` and ``ThreadPoolExecutor`` and
-  refuses any other executor type with a ``TypeError``. To run on a batch system, keep the
-  graphed side unchanged and let the pool layer do the submission: parsl's providers
-  (``SlurmProvider``, ``CondorProvider``) under an HTEX pool, or
+  refuses any other executor type with a ``TypeError``. HTCondor has its own runner
+  (:doc:`htcondor`). To run on another batch system, keep the graphed side unchanged and let the
+  pool layer do the submission: parsl's providers (``SlurmProvider``) under an HTEX pool, or
   `dask-jobqueue <https://jobqueue.dask.org/>`__ in front of the dask backend. :doc:`dask`
   carries worked recipes for the dask side; on parsl the provider goes in your own parsl
   config and you hand the started executor to ``parsl_runner`` exactly as in :doc:`parsl`.

@@ -67,10 +67,10 @@ jobs:
           # rollout PR runs diff-cover informationally instead of failing on its own delta.
           if git cat-file -e origin/main:scripts/coverage_gate.py 2>/dev/null; then
             diff-cover coverage.xml --compare-branch=origin/main --fail-under=98 \
-              --exclude "*/dask_backend/*" "*/common/*" "*/parsl_backend/*"
+              --exclude "*/dask_backend/*" "*/common/*" "*/parsl_backend/*" "*/htcondor_backend/*"
           else
             diff-cover coverage.xml --compare-branch=origin/main \
-              --exclude "*/dask_backend/*" "*/common/*" "*/parsl_backend/*"
+              --exclude "*/dask_backend/*" "*/common/*" "*/parsl_backend/*" "*/htcondor_backend/*"
           fi
 
   # Free-threaded / bleeding-edge Pythons (plan A.5): genuinely exercises concurrency under no-GIL.
@@ -247,6 +247,66 @@ jobs:
               "src/graphed_executors/common/relay_engine.py" "src/graphed_executors/common/http_plane.py"
           fi
 
+  # The direct HTCondor backend (graphed_executors.htcondor_backend) needs the htcondor bindings, which
+  # ship Linux wheels only, and a pool: this job installs a personal HTCondor and runs the m66 suite
+  # against it. Local pilots inherit COVERAGE_PROCESS_START and self-measure as in test-parsl.
+  test-htcondor:
+    name: test-htcondor py3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Start a personal HTCondor pool
+        shell: bash
+        run: |
+          curl -fsSL https://get.htcondor.org | sudo /bin/bash -s -- --no-dry-run
+          sudo systemctl enable --now condor || sudo condor_master
+          for i in $(seq 90); do
+            condor_status -schedd -af Name 2>/dev/null | grep -q . && condor_status -af Name 2>/dev/null | grep -q . && break
+            sleep 2
+          done
+          condor_version
+          condor_status -schedd -af Name | grep .
+          condor_status -af Name State Cpus Memory
+      - name: Install deps + this package with the htcondor extra
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" "${{ env.HISTOGRAM }}"
+          python -m pip install -e ".[dev,htcondor]"
+      - name: Pytest frozen m66 on the pool + scoped coverage gate (>=90%)
+        # a bare `--cov` keeps the rcfile's source; a path-valued one overrides it (see test-parsl)
+        env:
+          COVERAGE_PROCESS_START: ${{ github.workspace }}/.coveragerc-htcondor
+          COVERAGE_RCFILE: ${{ github.workspace }}/.coveragerc-htcondor
+        run: |
+          python -c "import sysconfig, pathlib; pathlib.Path(sysconfig.get_path('purelib'), 'graphed_subcov.pth').write_text('import coverage; coverage.process_startup()\n')"
+          pytest tests/frozen/m66 tests/extra/m66 \
+            --cov --cov-config=.coveragerc-htcondor \
+            --cov-branch --cov-fail-under=0
+          mv .coverage .coverage.driver
+          coverage combine
+          coverage report --show-missing --fail-under=90
+      - name: Per-file coverage gate (>=90% each)
+        shell: bash
+        run: |
+          coverage json --rcfile=.coveragerc-htcondor -o coverage.json
+          python scripts/coverage_gate.py coverage.json 90
+      - name: Diff coverage gate (>=98% of changed lines vs main)
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        shell: bash
+        run: |
+          git fetch origin main
+          coverage xml --rcfile=.coveragerc-htcondor -o coverage.xml
+          diff-cover coverage.xml --compare-branch=origin/main --fail-under=98 \
+            --include "src/graphed_executors/htcondor_backend/**/*.py"
+
   docs:
     name: docs (sphinx -W)
     runs-on: ubuntu-latest
@@ -269,7 +329,7 @@ jobs:
   ci-required:
     name: ci required
     if: always()
-    needs: [test, test-dask, test-parsl, docs]
+    needs: [test, test-dask, test-parsl, test-htcondor, docs]
     runs-on: ubuntu-latest
     steps:
       - name: every needed job succeeded

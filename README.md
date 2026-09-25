@@ -17,6 +17,7 @@ a dask cluster, or on a parsl HTEX pool — you change the runner, not the analy
 pip install graphed-executors            # laptop runners; pulls graphed
 pip install "graphed-executors[dask]"    # + the dask.distributed backend
 pip install "graphed-executors[parsl]"   # + the parsl backend
+pip install "graphed-executors[htcondor]" # + direct HTCondor pilot jobs (Linux)
 ```
 
 Installing from source builds `graphed`'s Rust core, so you need a Rust toolchain; a plain
@@ -98,12 +99,13 @@ be module-level functions the workers can import — a lambda or a notebook-cell
 | A many-core machine where the worker count strains the open-file limit | `PinnedPoolExecutor` | `graphed_executors.local` |
 | A dask cluster (local, dask-jobqueue, Kubernetes, …) | `dask_runner(client)` | `graphed_executors.dask_backend` |
 | A parsl HTEX pool | `parsl_runner(executor)` | `graphed_executors.parsl_backend` |
+| An HTCondor pool (LPC, lxplus, your own) | `htcondor_runner(site=..., n_pilots=N)` | `graphed_executors.htcondor_backend` |
 
 (`import graphed_exec_local` still works as a deprecated alias for `graphed_executors.local`;
 use the namespaced form in new code.)
 
-TaskVine and direct HTCondor/Slurm submission aren't supported; use dask-jobqueue or parsl's
-providers to reach those batch systems.
+TaskVine and direct Slurm submission aren't supported; use dask-jobqueue or parsl's providers to
+reach those batch systems.
 
 ### On a dask cluster
 

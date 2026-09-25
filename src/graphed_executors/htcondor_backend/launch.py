@@ -1,0 +1,275 @@
+"""Pilot launchers: :class:`CondorPilots` submits pilot jobs through the ``htcondor2`` bindings, and
+:class:`LocalPilots` runs the same pilot program as local subprocesses (a laptop dry run of the wire path).
+
+A pilot is ``python -m graphed_executors.htcondor_backend.pilot <url> <secret file>``. The secret travels
+as a transferred file, never in ``arguments`` or ``environment``: both are readable by anyone who can
+query the job ad. ``htcondor2`` is imported only by :func:`_htcondor`, at ``CondorPilots.start``.
+"""
+
+from __future__ import annotations
+
+import getpass
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import sysconfig
+import tarfile
+import tempfile
+import time
+import uuid
+from collections.abc import Mapping, Sequence
+from contextlib import suppress
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+
+from .server import POLL_S
+from .sites import SITES, WEIGHT_ATTRS, SiteProfile, choose_schedd, counts_as_alive
+
+CLOSE_WAIT_S = 2 * POLL_S  # every pilot has polled /next, and seen the server's 410, by then
+
+SECRET_FILE = "graphed-secret"
+ENV_FILE = "env.tgz"
+PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
+
+
+def _htcondor() -> Any:
+    """The ``htcondor2`` module, imported on first use."""
+    try:
+        import htcondor2  # noqa: PLC0415  (lazy: the bindings are the optional extra)
+    except ImportError as exc:  # pragma: no cover - the htcondor CI job has the bindings installed
+        raise ImportError(
+            "CondorPilots needs the htcondor bindings (Linux wheels only): "
+            "pip install 'graphed-executors[htcondor]'"
+        ) from exc
+    return htcondor2
+
+
+def write_secret(path: Path, secret: bytes) -> None:
+    path.touch(mode=0o600)
+    path.chmod(0o600)  # touch keeps an existing file's mode
+    path.write_text(secret.hex())
+
+
+@runtime_checkable
+class PilotLauncher(Protocol):
+    """Starts ``n`` pilots that call back to ``url`` with ``secret``, counts the live ones, and removes them."""
+
+    def start(self, url: str, secret: bytes, n: int) -> None: ...
+
+    def alive(self) -> int: ...
+
+    def stop(self) -> None: ...
+
+
+class LocalPilots:
+    """Pilots as local subprocesses of ``python``, with ``pythonpath`` prepended to their ``PYTHONPATH``."""
+
+    def __init__(self, *, python: str = sys.executable, pythonpath: Sequence[str | Path] = ()) -> None:
+        self.python = python
+        self.pythonpath = [str(p) for p in pythonpath]
+        self.log_dir = Path(tempfile.mkdtemp(prefix="graphed-local-pilots-"))
+        self._procs: list[subprocess.Popen[bytes]] = []
+
+    def start(self, url: str, secret: bytes, n: int) -> None:
+        secret_path = self.log_dir / SECRET_FILE
+        write_secret(secret_path, secret)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join([*self.pythonpath, env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+        cmd = [self.python, "-m", PILOT_MODULE, url, str(secret_path)]
+        self._procs = [subprocess.Popen(cmd, env=env) for _ in range(n)]
+
+    def alive(self) -> int:
+        return sum(p.poll() is None for p in self._procs)
+
+    def stop(self) -> None:
+        deadline = time.monotonic() + CLOSE_WAIT_S
+        for proc in self._procs:
+            with suppress(subprocess.TimeoutExpired):
+                proc.wait(max(0.0, deadline - time.monotonic()))
+            proc.terminate()  # a no-op once it exited
+            proc.wait()
+        shutil.rmtree(self.log_dir, ignore_errors=True)
+
+
+class CondorPilots:
+    """Pilot jobs on an HTCondor pool, one cluster of ``n`` jobs per :meth:`start`.
+
+    ``log_dir`` holds the submit-side files (the secret, ``pilot.sh``, ``env.tgz``) and receives the
+    pilots' ``pilot.<n>.out``/``.err`` and ``pilots.log``; ``None`` makes a fresh directory under the
+    site's sandbox root, else a temporary one. ``user_modules`` are files or packages transferred into
+    each pilot's scratch dir, which is on ``sys.path`` because the pilot runs with ``python -m``.
+    """
+
+    def __init__(
+        self,
+        site: str | SiteProfile = "generic",
+        *,
+        image: str | None = None,
+        request_cpus: int = 1,
+        request_memory_mb: int = 2048,
+        log_dir: str | Path | None = None,
+        user_modules: Sequence[str | Path] = (),
+        env: str | Path | None = None,
+        extra_submit: Mapping[str, str] | None = None,
+    ) -> None:
+        self.profile = SITES[site] if isinstance(site, str) else site
+        self.image = image
+        self.request_cpus = request_cpus
+        self.request_memory_mb = request_memory_mb
+        self.log_dir = Path(log_dir) if log_dir is not None else None
+        self.user_modules = [os.path.abspath(m) for m in user_modules]
+        self.env = Path(env) if env is not None else Path(sys.prefix)
+        self.extra_submit = dict(extra_submit or {})
+        self.cluster: tuple[str, int] | None = None  # (schedd name, ClusterId): the choice varies per run
+        self._schedd: Any = None
+        self._constraint = ""
+        self._secret = Path(SECRET_FILE)
+        self._batch = f"graphed-pilots-{uuid.uuid4().hex[:8]}"
+
+    def _template_vars(self) -> dict[str, str]:
+        return {
+            "image": self.image or "",
+            "uid": str(os.getuid()) if hasattr(os, "getuid") else "",
+            "user": getpass.getuser(),
+            "home": os.path.expanduser("~"),
+        }
+
+    def submit_description(self, url: str, n: int) -> dict[str, str]:
+        """The submit keys for ``n`` pilots calling back to ``url``: the base keys, then the site's, then
+        ``extra_submit``. Pure: it reads no file and needs no bindings."""
+        inputs = [SECRET_FILE, *([ENV_FILE] if self.profile.ship_env else []), *self.user_modules]
+        desc = {
+            "universe": "vanilla",
+            "executable": "pilot.sh",
+            "arguments": f"{url} {SECRET_FILE}",
+            "output": "pilot.$(ProcId).out",
+            "error": "pilot.$(ProcId).err",
+            "log": "pilots.log",
+            "should_transfer_files": "YES",
+            "when_to_transfer_output": "ON_EXIT_OR_EVICT",
+            "transfer_input_files": ",".join(inputs),
+            # nothing comes back but the logs: the unpacked venv must not, and lxplus refuses a spooled
+            # job that sets neither this nor output_destination
+            "transfer_output_files": '""',
+            "request_cpus": str(self.request_cpus),
+            "request_memory": str(self.request_memory_mb),
+            "JobBatchName": self._batch,
+        }
+        if self.log_dir is not None:
+            desc["initialdir"] = str(self.log_dir)
+        subs = self._template_vars()
+        desc.update({k: v.format(**subs) for k, v in self.profile.submit.items()})
+        desc.update(self.extra_submit)
+        return desc
+
+    def _sandbox(self) -> str | None:
+        root = self.profile.sandbox_root
+        return root.format(user=getpass.getuser()) if root is not None else None
+
+    def _refuse(self) -> None:
+        profile = self.profile
+        if self.image is None and any("{image}" in v for v in profile.submit.values()):
+            raise ValueError(f"site {profile.name!r} runs pilots in a container: pass image=<path or URL>")
+        root = self._sandbox()
+        log_dir = self.log_dir
+        if (
+            root is not None
+            and log_dir is not None
+            and not Path(os.path.abspath(log_dir)).is_relative_to(root)
+        ):
+            raise ValueError(
+                f"site {profile.name!r} can only read submit files under {root}: log_dir={log_dir} lies outside it"
+            )
+        if profile.ship_env:
+            _check_shippable(self.env)
+
+    def start(self, url: str, secret: bytes, n: int) -> None:
+        self._refuse()
+        if self.log_dir is None:
+            self.log_dir = Path(tempfile.mkdtemp(prefix="graphed-pilots-", dir=self._sandbox()))
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._secret = self.log_dir / SECRET_FILE
+        write_secret(self._secret, secret)
+        python = "./env/bin/python" if self.profile.ship_env else sys.executable
+        script = self.log_dir / "pilot.sh"
+        script.write_text(
+            f'#!/bin/sh\n[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\nexec {python} -m {PILOT_MODULE} "$@"\n'
+        )
+        script.chmod(0o755)
+        if self.profile.ship_env:
+            with tarfile.open(self.log_dir / ENV_FILE, "w:gz") as tar:
+                tar.add(self.env, arcname="env")
+        htc = _htcondor()
+        name, schedd = self._choose(htc)
+        desc = self.submit_description(url, n)
+        desc["executable"] = str(script)  # a relative executable resolves against our cwd, not initialdir
+        result = schedd.submit(htc.Submit(desc), count=n, spool=self.profile.spool)
+        if self.profile.spool:
+            schedd.spool(result)
+        self.cluster = (name, int(result.cluster()))
+        self._constraint = f"ClusterId == {self.cluster[1]}"
+        self._schedd = schedd
+
+    def _choose(self, htc: Any) -> tuple[str, Any]:
+        """The site's schedd: lowest :func:`schedd_weight` among the query's ads, asking each collector
+        in the param's list in turn, else the user's own schedd."""
+        if self.profile.schedd_query is None:
+            return str(htc.param.get("SCHEDD_HOST") or socket.getfqdn()), htc.Schedd()
+        param, constraint = self.profile.schedd_query
+        errors = []
+        for node in re.findall(r"[\w/:\-.]+", str(htc.param[param])):
+            try:
+                collector = htc.Collector(node)
+                ads = collector.query(htc.AdType.Schedd, constraint, list(WEIGHT_ATTRS))
+            except Exception as exc:  # the next collector in the list may answer
+                errors.append(f"{node}: {exc}")
+                continue
+            if ads:
+                name = choose_schedd(ads)
+                # Schedd(<collector ad>) needs CondorVersion in the ad; locate returns a complete one
+                return name, htc.Schedd(collector.locate(htc.DaemonType.Schedd, name))
+            errors.append(f"{node}: no schedd matches {constraint}")
+        raise RuntimeError(f"no schedd found through {param}: {'; '.join(errors)}")
+
+    def alive(self) -> int:
+        ads = self._schedd.query(constraint=self._constraint, projection=["JobStatus", "HoldReasonCode"])
+        return sum(counts_as_alive(ad) for ad in ads)
+
+    def stop(self) -> None:
+        """Wait for the pilots to exit, fetch the spooled logs into ``log_dir``, and remove the jobs."""
+        deadline = time.monotonic() + CLOSE_WAIT_S
+        while self.alive() and time.monotonic() < deadline:
+            time.sleep(1.0)
+        htc = _htcondor()
+        constraint = self._constraint
+        left = self._schedd.query(constraint=constraint, projection=["JobStatus"])
+        if left:
+            if self.profile.spool and any(ad.get("JobStatus") == 4 for ad in left):
+                self._schedd.retrieve(f"{constraint} && JobStatus == 4")
+            # a spooled job stays in the queue after it completes until it is removed
+            self._schedd.act(htc.JobAction.Remove, constraint, reason="graphed: run closed")
+        self._secret.unlink(missing_ok=True)
+
+
+def _check_shippable(env: Path) -> None:
+    """Refuse an ``env`` pilots cannot run from an unpacked copy: not a venv, or with editable installs."""
+    recipe = "build it with `python -m venv --system-site-packages` and `pip install <path>` (not -e)"
+    if not (env / "pyvenv.cfg").is_file():
+        raise ValueError(f"env={env} is not a venv (no pyvenv.cfg); {recipe}")
+    purelib = Path(
+        sysconfig.get_path("purelib", scheme="venv", vars={"base": str(env), "platbase": str(env)})
+    )
+    editable = sorted(
+        p.parent.name.removesuffix(".dist-info")
+        for p in purelib.glob("*.dist-info/direct_url.json")
+        if json.loads(p.read_text()).get("dir_info", {}).get("editable")
+    )
+    if editable:
+        raise ValueError(
+            f"env={env} has editable installs, which point outside the shipped copy: "
+            f"{', '.join(editable)}; {recipe}"
+        )
