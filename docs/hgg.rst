@@ -5,7 +5,8 @@ Example: an H→γγ analysis, translated
 a standalone distillation of HiggsDNA's H→γγ inclusive base processor. It covers the lumi mask, MET
 filters and triggers, photon preselection, diphoton building, the detector-level fiducial cut, the
 cleaned jet variables, and the particle-level truth and fiducial flags. For each chunk it writes one
-flat parquet file of diphoton candidates and returns the chunk's event and weight counters.
+flat parquet file of diphoton candidates and counts the chunk's events and weights. One plan runs
+it over a whole fileset, MC and data together, and returns each dataset's summed counters.
 
 The translation keeps the original's methods, names and cut values. Events are coffea NanoEvents in
 graphed mode:
@@ -13,16 +14,27 @@ graphed mode:
 .. code-block:: python
 
    events = NanoEventsFactory.from_root(
-       {uri: "Events"},
+       files,  # {file: {"object_path": "Events", "steps": [[start, stop], ...]}}
        schemaclass=NanoAODSchema,
        mode="graphed",
-       metadata={"dataset": dataset, "filename": uri.split("/")[-1]},
+       metadata={"dataset": dataset},
    ).events()
 
 The analysis reads the same files the original reads: HiggsDNA's ``infer_nano_version``, plus the
 metaconditions, golden JSON and jet-ID JSONs, found through ``importlib.resources`` inside the
-installed ``higgs_dna``. ``plan(uri, ranges=..., dataset=..., year=..., out=...)`` builds one task
-per ``(start, stop)`` range. Any runner in this package runs it.
+installed ``higgs_dna``. ``plan(fileset, year=..., out=...)`` takes coffea's
+``{dataset: {file: {"object_path": "Events", "steps": [[start, stop], ...]}}}`` and builds one task
+per step of every file. Any runner in this package runs it.
+
+Data and MC take different branches in Python while the processor records (the lumi mask, the
+weights, the truth columns), so each dataset records its own graph. ``dataset_plan`` makes one
+``graphed.aggregate_plan`` per dataset: its outputs are the counters, and its one write is
+``graphed.awkward.parquet_write`` of the flat record, whose part metadata holds that chunk's own
+weight sums. ``graphed.collate`` joins the datasets' plans into the one plan ``plan`` returns. Each
+task reads its chunk once, writes its part, and returns its counters, and the runner tree-reduces
+the counters with ``coffea.processor.accumulate``, as coffea's ``Runner`` does. The value is
+``{dataset: counters}``. Each dataset's plan also runs on its own, so datasets can be submitted
+separately and their values joined into the same result.
 
 
 What changed, and why
@@ -39,8 +51,9 @@ translation has to spell that step another way. These are all eleven such places
      - Translation
    * - ``int(ak.num(...))``, ``len(events)``
      - The counters (``nTot``, ``nPos``, ``nNeg``, ``genWeightSum``, and the two weight sums in the
-       metadata) are plan outputs, computed per chunk. ``HggProcess`` converts each one to the
-       original's Python type (``int``, ``float``, or ``str`` of the float32 sum).
+       metadata) are plan outputs, computed per chunk. ``Counters`` converts each counter to the
+       original's Python type (``int`` or ``float``); the part's metadata is the ``str`` of each
+       float32 sum.
    * - ``.to_numpy()``
      - The same counters. The old-NanoAOD supercluster-η projection uses the deferred PV columns
        directly.
@@ -49,13 +62,14 @@ translation has to spell that step another way. These are all eleven such places
    * - ``ak.Array({...})`` for the flat output record
      - ``gak.zip`` of the flat columns.
    * - ``ak.to_arrow_table`` and ``pq.write_table`` inside ``process``
-     - ``HggProcess`` wraps the plan's per-chunk ``process``. It takes the materialized record and
-       runs the original's ``dump_to_parquet`` steps: ``extensionarray=False``, sorted columns,
-       and the key-value metadata merged in.
+     - A ``parquet_write`` beside the counters, in the same pass: ``extensionarray=False``, the
+       record's fields zipped in sorted order, and the part's key-value metadata replacing the
+       schema's (the original's ``pa.table`` rebuild drops the schema's own).
    * - ``events.attrs["@events_factory"]._partition_key`` for the part name
-     - ``HggProcess`` builds the name from the task's partition:
+     - ``part_name`` builds the name from the task's partition:
        ``<file stem>_Events_<start>-<stop>.parquet``. The original has the file's UUID where this
-       has the file's stem.
+       has the file's stem. A file without explicit ``steps`` is refused, since a blind partition
+       has no range to name its part by (and the counters depend on the chunking).
    * - ``LumiMask(path)(events.run, events.luminosityBlock)``
      - ``lumi_mask(run, lumi, year)``, an External recorded through
        ``graphed.preserve.externals.record_external``. Its payload is the golden JSON's bytes and
@@ -72,9 +86,6 @@ translation has to spell that step another way. These are all eleven such places
      - Unchanged. The records are zipped with ``charge`` already, and graphed NanoEvents carry
        coffea's candidate behaviors into each task.
 
-The plan's value is ``{part name: {dataset: counters}}``, and two parts combine as a dictionary
-union. ``totals(value)`` is ``coffea.processor.accumulate`` over the parts, which is how coffea's
-``Runner`` combines the original's returns.
 
 
 How the translation is checked
@@ -95,17 +106,19 @@ translation writes against the original's part for the same range. ``compare_par
 Every mutation test of the comparator asserts that its own leg fired, not just that some
 difference was found.
 
-The inputs are two 200-event NanoAOD v15 fixtures, one MC and one data. Each is built by a script
-checked in beside it. The data fixture has certified and uncertified lumi sections. The builder puts
-the diphoton signal only in events 0–59, so the (100, 200) chunk selects nothing: its part has zero
-rows and the original's schema. The suite runs both fixtures on ``SequentialRunner`` and on
-``SubmitRunner(ThreadBackend(2))``. It also records every events object coffea hands out while
+The inputs are two 200-event NanoAOD v15 fixtures, one MC and one data, each built by a script
+checked in beside it. The MC fixture is the first 200 events of a 2024 GluGluH→γγ NanoAODv15 file.
+The data fixture has certified and uncertified lumi sections, and its builder puts the diphoton
+signal only in events 0–59, so its (100, 200) chunk selects nothing: that part has zero rows and
+the original's schema. The suite runs one plan over both fixtures on ``SequentialRunner`` and on
+``SubmitRunner(ThreadBackend(2))``: its value must equal ``coffea.processor.accumulate`` of the
+original's counters, and each part must match the original's part for its range. It also records every events object coffea hands out while
 the plan is built and run, and requires each to be graphed NanoEvents.
 
 ``examples/hgg/validate_real.py --parts 2`` runs the same comparison on real 2024 NanoAOD over
 xrootd: the first file of ``GluGluHto2G_M-125_amcatnlo_2024`` and the first of ``DataC_2024``. It
-prints each file's entry count, every part's ``compare_part`` result and both sets of counters. It
-exits 1 if any part differs.
+prints each file's entry count, every part's ``compare_part`` result, and each dataset's
+accumulated counters beside the plan's. It exits 1 on any difference.
 
 The CI job ``test-hgg`` (ubuntu, Python 3.12) installs the coffea fork, ``uproot`` from the commit
 the fork needs, and ``higgs_dna`` with ``--no-deps``. It then runs
