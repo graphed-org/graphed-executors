@@ -20,8 +20,7 @@ from graphed.core.execution import ExecResult, Plan
 
 from . import launch
 from .backend import _require_importable
-from .driver import LOG_FILE, PLAN_FILE, RESULT_FILE, RUN_FILE
-from .launch import ENV_FILE, CondorPilots, collectors
+from .launch import ENV_FILE, LOG_FILE, PLAN_FILE, RESULT_FILE, RUN_FILE, CondorPilots, collectors
 from .sites import SITES, counts_as_alive
 
 DRIVER_MODULE = "graphed_executors.htcondor_backend.driver"

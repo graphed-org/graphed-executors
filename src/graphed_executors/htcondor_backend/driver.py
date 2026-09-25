@@ -5,7 +5,8 @@
 slot (``pilots="local"``) or over pilot jobs it submits itself (``pilots="condor"``, to the schedd named
 by ``run.json["schedd_locate"]``), and on every exit writes ``result.pkl`` = ``(ok, ExecResult |
 exception)`` and ``driver.log`` for the output transfer. Exit codes: 0 done; 3 the plan raised (a plan
-error is deterministic, so the job's ``retry_until`` stops retrying it); 1 anything before or after the run.
+error is deterministic, so the job's ``retry_until`` stops retrying it); 1 anything else, including a run
+that failed because its workers were lost, which the job's retries may get past.
 """
 
 from __future__ import annotations
@@ -20,14 +21,11 @@ import traceback
 from pathlib import Path
 from typing import Any, TextIO
 
-from .backend import HTCondorBackend, HTCondorRunner
-from .launch import CondorPilots, LocalPilots
-from .sites import SITES
+from graphed.debug import StageError
 
-PLAN_FILE = "plan.pkl"
-RUN_FILE = "run.json"
-RESULT_FILE = "result.pkl"
-LOG_FILE = "driver.log"
+from .backend import HTCondorBackend, HTCondorRunner
+from .launch import LOG_FILE, PLAN_FILE, RESULT_FILE, RUN_FILE, CondorPilots, LocalPilots
+from .sites import SITES
 
 EXIT_DONE, EXIT_FAILED, EXIT_PLAN_ERROR = 0, 1, 3
 
@@ -62,8 +60,11 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
         launcher = LocalPilots(python=sys.executable, pythonpath=[job])
         host, ports = "127.0.0.1", profile.worker_ports or (0, 0)
     backend = HTCondorBackend(launcher, n, host=host, port_range=ports)
-    pids = [p.pid for p in getattr(launcher, "_procs", ())]  # local pilots only
-    print(f"{n} {run['pilots']} pilots on {backend._server.url} pids={pids}", file=log, flush=True)
+    if run["pilots"] == "condor":
+        where = f"cluster={launcher.cluster}"
+    else:
+        where = f"pids={[p.pid for p in launcher._procs]}"
+    print(f"{n} {run['pilots']} pilots on {backend._server.url} {where}", file=log, flush=True)
     return HTCondorRunner(
         backend,
         min_pilots=int(run["min_pilots"]),
@@ -79,6 +80,12 @@ def _result_blob(ok: bool, payload: object) -> bytes:
         return pickle.dumps(
             (False, RuntimeError(f"{type(payload).__name__} did not pickle ({exc}): {payload}"))
         )
+
+
+def _exit_code(exc: Exception) -> int:
+    """A plan error exits 3 and is not retried; a run whose workers were lost (preempted) exits 1."""
+    lost = isinstance(exc, StageError) and exc.cause_type == "KilledWorker"
+    return EXIT_FAILED if lost else EXIT_PLAN_ERROR
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,9 +110,13 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     result, code = runner.run(plan), EXIT_DONE
                 except Exception as exc:
-                    error, code = exc, EXIT_PLAN_ERROR
+                    error, code = exc, _exit_code(exc)
             finally:
-                runner.close()
+                try:
+                    runner.close()
+                except Exception:  # the run's outcome stands; the close failure is only logged
+                    print("runner.close() failed:", file=log)
+                    traceback.print_exc(file=log)
         except Exception as exc:
             error, code = exc, EXIT_FAILED
         blob = _result_blob(True, result) if error is None else _result_blob(False, error)

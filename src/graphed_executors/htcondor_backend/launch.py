@@ -32,6 +32,8 @@ CLOSE_WAIT_S = 2 * POLL_S  # every pilot has polled /next, and seen the server's
 
 SECRET_FILE = "graphed-secret"
 ENV_FILE = "env.tgz"
+# a driverless job's files; here, not in driver.py, so importing the package never imports the -m entry
+PLAN_FILE, RUN_FILE, RESULT_FILE, LOG_FILE = "plan.pkl", "run.json", "result.pkl", "driver.log"
 PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
 
 
