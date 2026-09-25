@@ -46,3 +46,11 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
   range exhausted, pilot exit 1 after its driver vanishes. Discrimination: with the cancelled-task drop removed,
   the cancel witness fails; with collector failover replaced by a raise, both failover witnesses fail.
 - Local (macOS, py3.12): `pytest tests/frozen/m66 tests/extra/m66` → 56 passed, 1 skipped (live pool: no bindings).
+
+## Iteration 4 — LPC site check, first attempt → fix
+- Site check (driver in coffea-almalinux9-noml:2026.9.0-py3.12 with bootstrap.sh's binds, non-editable venv of
+  88d3972, htcondor 25.13.2): `schedd.spool` failed — "reading from file <cwd>/pilot.sh: No such file or directory".
+  HTCondor resolves a relative `executable` against the submitter's cwd, not `initialdir` (condor_submit manual,
+  `executable`), so the generic (non-spooled) live-pool test would hold its pilots the same way. The schedd removed
+  the half-staged cluster 30427220 itself (history: JobStatus 3, "Staging of job files failed"); 0 jobs left.
+- Fix: `start` submits `executable=<log_dir>/pilot.sh`; `submit_description` keeps `pilot.sh`, as frozen.

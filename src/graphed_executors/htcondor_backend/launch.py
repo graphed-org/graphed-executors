@@ -205,7 +205,9 @@ class CondorPilots:
                 tar.add(self.env, arcname="env")
         htc = _htcondor()
         name, schedd = self._choose(htc)
-        result = schedd.submit(htc.Submit(self.submit_description(url, n)), count=n, spool=self.profile.spool)
+        desc = self.submit_description(url, n)
+        desc["executable"] = str(script)  # a relative executable resolves against our cwd, not initialdir
+        result = schedd.submit(htc.Submit(desc), count=n, spool=self.profile.spool)
         if self.profile.spool:
             schedd.spool(result)
         self.cluster = (name, int(result.cluster()))
