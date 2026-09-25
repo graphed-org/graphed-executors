@@ -846,7 +846,7 @@ are the fixed tree, and every partial crosses your session.
 **A lost pilot costs one retry, not the run.** Each pilot sends a heartbeat every five seconds. One
 silent for 30 seconds is lost — six missed beats, which rides out a task that holds the interpreter
 and a short network drop. The task it held goes back to the front of the queue for another pilot;
-a second loss of the same task fails it with the partition and the pilot's ``host:pid``, and so
+a second loss of the same task fails it with the partition and the pilot's ``host:pid:token``, and so
 fails the run through the same path a dying dask worker takes. A task is never run a third time,
 so a partition that kills every process it touches cannot eat the pool. When no pilot is connected
 and HTCondor reports none queued or running, the waiting tasks fail at once rather than wait for a

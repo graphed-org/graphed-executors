@@ -49,8 +49,8 @@ and run the plan through two local pilots:
 
 Each pilot announces itself, then the result prints::
 
-    pilot myhost:47041 serving http://127.0.0.1:10000
-    pilot myhost:47040 serving http://127.0.0.1:10000
+    pilot myhost:47041:5c0e9a1f serving http://127.0.0.1:10000
+    pilot myhost:47040:b82d4e07 serving http://127.0.0.1:10000
     [700] 7 6
 
 On a pool, only the runner line changes: ``htcondor_runner(site=..., n_pilots=...)`` below.
@@ -89,7 +89,7 @@ Read these four before your first pool run
 
    **A pilot that dies is noticed after 30 seconds** of silence. Its task runs again on another
    pilot; if that pilot dies too, the run fails with a ``StageError`` naming the partition and the
-   last pilot (``host:pid``). If every pilot is gone and none is queued, the run fails with
+   last pilot (``host:pid:token``). If every pilot is gone and none is queued, the run fails with
    "no pilots left" instead of waiting.
 
 
@@ -253,6 +253,8 @@ The arguments you will change
        server listens on the first free port from 10000 to 10100.
    * - ``min_pilots``
      - How many pilots must be connected before the first run starts; 1 by default.
+   * - ``retries``
+     - Has no effect here. The only retry is the one re-run of a task whose pilot was lost.
 
 
 When something goes wrong
@@ -263,11 +265,11 @@ When something goes wrong
   holds, and at ``pilot.0.err`` for a pilot that started and could not reach you — the port range
   has to be open from the execute nodes to your submit host.
 * **A pilot dies mid-task.** It is re-run once elsewhere; the second death fails the run with a
-  ``StageError`` whose ``partition`` is the chunk and whose message names ``host:pid``.
+  ``StageError`` whose ``partition`` is the chunk and whose message names ``host:pid:token``.
 * **A pilot exits with code 2** and prints "wrong secret file": it was pointed at another run's
   task server. Each run has its own secret.
 * **A pilot outlives your session.** Once your session has been unreachable for 30 seconds, the
-  pilot exits when its current task ends, so a crashed driver does not hold batch slots.
+  pilot stops at once, even in the middle of a task, so a crashed driver does not hold batch slots.
 
 
 Who can talk to the task server

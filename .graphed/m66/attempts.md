@@ -88,3 +88,19 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
 - windows-latest py3.13: frozen m37 `test_errored_task_emits_errored_and_propagates[process-ProcessExecutor]`
   (0 ERRORED events seen). ProcessExecutor in `graphed_executors.local`, untouched here; the other 15 matrix legs pass.
   Treated as a flake; the next run is the check.
+
+## Iteration 8 — implementation review r1 (H1, M1, L1)
+- Coverage correction for iterations 5–7: the figures there are frozen+extra. On frozen hits alone the diff is
+  94.9% (542/571) and pilot.py 83–87% (review-measured); the CI gate is unchanged pending the owner's decision.
+- H1: the heartbeat or main thread that finds the driver gone for a lease sends its own process SIGTERM, so a
+  pilot mid-task stops at once and coverage (`sigterm = true`) still saves. Witness
+  `test_a_pilot_whose_driver_is_gone_exits_at_once[idle|mid-task]`: a 1 s lease, a 10 s task, exit asserted by
+  SIGTERM within 9 s of the server going away.
+- M1: the pilot id is `hostname:pid:token` (8 hex of uuid4). Witness
+  `test_pilots_sharing_a_hostname_and_pid_stay_distinct`: two pilots patched to `pilot-box`/pid 14 count as 2,
+  and a task that kills its first pilot is re-run on the survivor.
+- L1: the signature header is compared as latin-1 bytes, so a malformed one is a plain 403. Witness
+  `test_a_malformed_signature_header_is_refused` (`\xe9` → 403, no traceback).
+- Discrimination: with 89a2eac's pilot.py + server.py swapped in, all four witnesses fail; with this change they pass.
+- Docs: htcondor.rst says the pilot stops at once, even mid-task; the id is `host:pid:token`; `retries` has no effect
+  (the engine forwards it to `HTCondorBackend.submit`, which ignores it). The N_WORKERS_WAIT_S comment drops its figure.

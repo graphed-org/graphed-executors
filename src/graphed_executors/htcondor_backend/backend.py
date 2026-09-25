@@ -27,7 +27,7 @@ from .sites import SiteProfile
 
 R = TypeVar("R")
 
-# An idle LPC pool took 45 s from submit to a running pilot; a busy one queues for minutes.
+# Pilots queue like any other job, so a busy pool can take minutes to start the first one.
 N_WORKERS_WAIT_S = 600.0
 
 _FLOOR = SubmitCapabilities(

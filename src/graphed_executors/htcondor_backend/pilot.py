@@ -1,14 +1,16 @@
 """A pilot: ``python -m graphed_executors.htcondor_backend.pilot <url> <secret file>``.
 
 It registers with the driver's task server, beats from a daemon thread, and runs leased tasks one at a
-time until the server answers 410. Exit codes: 0 when the driver is done with it, 1 when the driver has
-been unreachable for a lease (so an orphan frees its batch slot), 2 when the driver refuses its signature.
+time until the server answers 410. It exits 0 when the driver is done with it and 2 when the driver
+refuses its signature. When the driver has been unreachable for a lease it sends itself SIGTERM, even in
+the middle of a task, so an orphan frees its batch slot.
 """
 
 from __future__ import annotations
 
 import os
 import pickle
+import signal
 import socket
 import sys
 import threading
@@ -16,7 +18,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
-from contextlib import suppress
+import uuid
 from pathlib import Path
 
 from . import server
@@ -46,9 +48,9 @@ class _Driver:
                 status, data, tid = exc.code, b"", None
             except OSError as exc:
                 if time.monotonic() - self.last_ok > self.lease_s:
-                    raise ConnectionError(
-                        f"driver {self.url} unreachable for {self.lease_s}s: {exc}"
-                    ) from exc
+                    print(f"driver {self.url} unreachable for {self.lease_s}s: {exc}", flush=True)
+                    # from either thread, mid-task too; a signal (not os._exit) lets coverage save its data
+                    os.kill(os.getpid(), signal.SIGTERM)
                 time.sleep(1.0)
                 continue
             self.last_ok = time.monotonic()
@@ -72,31 +74,27 @@ def _run(data: bytes) -> tuple[bool, bytes]:
 
 def _beat(driver: _Driver, me: str, beat_s: float) -> None:
     status = 200
-    with suppress(ConnectionError):  # the main thread reports a lost driver, after its current task
-        while status != 410:
-            time.sleep(beat_s)
-            status, _, _ = driver.post("/beat", me)
+    while status != 410:
+        time.sleep(beat_s)
+        status, _, _ = driver.post("/beat", me)
 
 
 def main(argv: list[str]) -> int:
     url, secret_path = argv
     driver = _Driver(url, bytes.fromhex(Path(secret_path).read_text().strip()))
-    me = f"{socket.gethostname()}:{os.getpid()}"
+    # hostname:pid alone collides when containers number their own pids
+    me = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     _, data, _ = driver.post("/hello", me)
     conf = pickle.loads(data)
     driver.lease_s = conf["lease_s"]
     print(f"pilot {me} serving {driver.url}", flush=True)
     threading.Thread(target=_beat, args=(driver, me, conf["beat_s"]), daemon=True).start()
-    try:
-        while True:
-            status, data, tid = driver.post("/next", me)
-            if status == 410:
-                return 0
-            if status == 200:
-                driver.post("/result", (me, int(tid or -1), *_run(data)))
-    except ConnectionError as lost:
-        print(lost, flush=True)
-        return 1
+    while True:
+        status, data, tid = driver.post("/next", me)
+        if status == 410:
+            return 0
+        if status == 200:
+            driver.post("/result", (me, int(tid or -1), *_run(data)))
 
 
 if __name__ == "__main__":

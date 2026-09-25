@@ -274,7 +274,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         tasks = self.server.tasks
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        if not hmac.compare_digest(self.headers.get(SIG_HEADER, ""), sign(tasks.secret, body)):
+        # headers arrive latin-1 decoded; comparing bytes keeps a malformed one a plain mismatch
+        sig = self.headers.get(SIG_HEADER, "").encode("latin-1")
+        if not hmac.compare_digest(sig, sign(tasks.secret, body).encode()):
             self._reply(HTTPStatus.FORBIDDEN)
             return
         try:
