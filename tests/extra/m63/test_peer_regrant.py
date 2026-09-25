@@ -43,10 +43,16 @@ def test_a_thief_denies_a_steal_while_holding_only_stolen_leaves() -> None:
 
     items = {a: [_part(k) for k in range(bounds[i], bounds[i + 1])] for i, a in enumerate(addrs)}
     stolen, items["w0"] = items["w0"][-2:], items["w0"][:-2]
+    own, items["w1"] = items["w1"], []
     inbox: dict[str, queue.Queue[Any]] = {a: queue.Queue() for a in (DRIVER, *addrs)}
-    # w1 starts holding two of w0's leaves, and w3's steal request is already in w1's inbox.
+    # w1 has settled its own leaves, then two grants from w0 land in one batch ahead of w3's steal.
     inbox["w1"].put(("w3", ("steal_req", "w3")))
-    prebuffered = {"w1": [("w0", ("steal_resp", stolen, (-1, 1)))]}
+    prebuffered = {
+        "w1": [
+            *(("w1", ("leaf", k, float(p.entry_start + 1))) for k, p in own),
+            *(("w0", ("steal_resp", [leaf], (-1, g))) for g, leaf in enumerate(stolen, 1)),
+        ]
+    }
     log: list[Any] = []
 
     def run(i: int, a: str) -> None:
