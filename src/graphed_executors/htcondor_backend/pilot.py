@@ -16,6 +16,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+from contextlib import suppress
 from pathlib import Path
 
 from . import server
@@ -45,8 +46,9 @@ class _Driver:
                 status, data, tid = exc.code, b"", None
             except OSError as exc:
                 if time.monotonic() - self.last_ok > self.lease_s:
-                    print(f"driver {self.url} unreachable for {self.lease_s}s: {exc}", flush=True)
-                    os._exit(1)  # from any thread: the main one may be inside a task that never returns
+                    raise ConnectionError(
+                        f"driver {self.url} unreachable for {self.lease_s}s: {exc}"
+                    ) from exc
                 time.sleep(1.0)
                 continue
             self.last_ok = time.monotonic()
@@ -70,9 +72,10 @@ def _run(data: bytes) -> tuple[bool, bytes]:
 
 def _beat(driver: _Driver, me: str, beat_s: float) -> None:
     status = 200
-    while status != 410:
-        time.sleep(beat_s)
-        status, _, _ = driver.post("/beat", me)
+    with suppress(ConnectionError):  # the main thread reports a lost driver, after its current task
+        while status != 410:
+            time.sleep(beat_s)
+            status, _, _ = driver.post("/beat", me)
 
 
 def main(argv: list[str]) -> int:
@@ -84,12 +87,16 @@ def main(argv: list[str]) -> int:
     driver.lease_s = conf["lease_s"]
     print(f"pilot {me} serving {driver.url}", flush=True)
     threading.Thread(target=_beat, args=(driver, me, conf["beat_s"]), daemon=True).start()
-    while True:
-        status, data, tid = driver.post("/next", me)
-        if status == 410:
-            return 0
-        if status == 200:
-            driver.post("/result", (me, int(tid or -1), *_run(data)))
+    try:
+        while True:
+            status, data, tid = driver.post("/next", me)
+            if status == 410:
+                return 0
+            if status == 200:
+                driver.post("/result", (me, int(tid or -1), *_run(data)))
+    except ConnectionError as lost:
+        print(lost, flush=True)
+        return 1
 
 
 if __name__ == "__main__":

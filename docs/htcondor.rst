@@ -266,8 +266,8 @@ When something goes wrong
   ``StageError`` whose ``partition`` is the chunk and whose message names ``host:pid``.
 * **A pilot exits with code 2** and prints "wrong secret file": it was pointed at another run's
   task server. Each run has its own secret.
-* **A pilot outlives your session.** It exits by itself once your session has been unreachable
-  for 30 seconds, so a crashed driver does not hold batch slots.
+* **A pilot outlives your session.** Once your session has been unreachable for 30 seconds, the
+  pilot exits when its current task ends, so a crashed driver does not hold batch slots.
 
 
 Who can talk to the task server

@@ -77,3 +77,14 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
 - Executed: the laptop example (prints `[700] 7 6` after the two pilot lines), the `__main__` refusal (the quoted
   ValueError), the SiteProfile example (templates render). The LPC recipe ran as the site check. `sphinx-build -W`
   clean.
+
+## Iteration 7 — CI on 4a8b295 (run 36105612341)
+- test-htcondor: 58 passed (both live-pool tests green on the personal pool); total 97%, but the per-file gate failed
+  pilot.py at 84.15%: its lost-driver exit ended in `os._exit`, which never saves subprocess coverage, and no test
+  drove an unpicklable task error.
+- Fix: `post` raises ConnectionError after a lease without the driver; the beat thread stops on it and the main
+  thread prints it and returns 1 (a pilot mid-task now exits once that task ends, documented). New witness: a task
+  raising an unpicklable exception settles its future with a RuntimeError carrying the traceback. Local pilot.py 98%.
+- windows-latest py3.13: frozen m37 `test_errored_task_emits_errored_and_propagates[process-ProcessExecutor]`
+  (0 ERRORED events seen). ProcessExecutor in `graphed_executors.local`, untouched here; the other 15 matrix legs pass.
+  Treated as a flake; the next run is the check.

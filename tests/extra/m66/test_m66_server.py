@@ -6,6 +6,7 @@ from __future__ import annotations
 import pickle
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import CancelledError, Future
 from pathlib import Path
@@ -14,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from graphed_executors.htcondor_backend import server
+from graphed_executors.htcondor_backend import HTCondorBackend, LocalPilots, server
 from graphed_executors.htcondor_backend.launch import write_secret
 from graphed_executors.parsl_backend.backend import _ParslFuture
 
@@ -23,6 +24,10 @@ PORTS = (10000, 10100)
 
 def double(x: int) -> int:
     return 2 * x
+
+
+def raise_unpicklable() -> None:
+    raise ValueError(threading.Lock())
 
 
 def task_server() -> server.TaskServer:
@@ -98,3 +103,16 @@ def test_a_pilot_exits_1_once_its_driver_is_gone(tmp_path: Path, monkeypatch: py
     ts.close()
     assert pilot.returncode == 1, out
     assert "unreachable" in out, out
+
+
+def test_an_unpicklable_task_error_still_settles_the_future(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "POLL_S", 0.2)  # the idle pilot also sees 204s
+    backend = HTCondorBackend(LocalPilots(pythonpath=[Path(__file__).parent]), 1, host="127.0.0.1")
+    try:
+        backend.wait_for_pilots(1, timeout=60)
+        time.sleep(0.5)
+        err = backend.submit(raise_unpicklable, key="graphed-m66-unpicklable").exception(timeout=60)
+    finally:
+        backend.close()
+    assert isinstance(err, RuntimeError), err
+    assert "ValueError" in str(err) and "Traceback" in str(err), err
