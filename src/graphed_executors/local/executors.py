@@ -139,6 +139,7 @@ _proc_drain_thread: threading.Thread | None = None
 _proc_last_flush = 0.0
 _PROC_DRAIN_INTERVAL = 0.05  # seconds between worker->driver batch flushes
 _PROC_BUFFER_CAP = 50000  # bounded local buffer (drop-oldest on overflow)
+_PROC_EXIT_JOIN_S = 2.0  # how long a stopping drain thread may finish its send; a hung one is abandoned
 _PROFILE_FLUSH_INTERVAL = 1.0  # serialize the profiler at most ~1/s, never per task
 # Monitored peer runs drain trailing worker events while waiting for the futures to finish; a coarse
 # poll cadence here is a fixed per-run tail (the no-monitor path blocks on f.result() to avoid exactly
@@ -208,7 +209,7 @@ def _proc_init(
     if _proc_drain_stop is not None:  # a re-init must not leave the old drain thread shipping
         _proc_drain_stop.set()
     if _proc_drain_thread is not None:
-        _proc_drain_thread.join(timeout=2)
+        _proc_drain_thread.join(timeout=_PROC_EXIT_JOIN_S)
     _proc_resources = LocalResources()
     _proc_event_q = event_q
     _proc_profiler = _proc_buffer = _proc_drain_stop = _proc_drain_thread = _proc_monitor = None
@@ -272,6 +273,8 @@ def _proc_drain_final() -> None:
     flush whatever remains so the last events/profile are not lost."""
     if _proc_drain_stop is not None:
         _proc_drain_stop.set()
+    if _proc_drain_thread is not None:  # a daemon: exit would kill it mid-send of a batch it holds
+        _proc_drain_thread.join(timeout=_PROC_EXIT_JOIN_S)
     if _proc_profiler is not None:
         with contextlib.suppress(Exception):
             payload = _proc_profiler.stop()
