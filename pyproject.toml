@@ -88,6 +88,8 @@ show_missing = true
 line-length = 110
 src = ["src", "tests"]
 target-version = "py311"
+# the owner's original H->gg processor, kept byte-identical as the m69a oracle
+extend-exclude = ["tests/frozen/m69a/data/inclusive_processor.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PLC0415"]
@@ -127,6 +129,8 @@ exclude = ["tests/frozen/**", "*.md"]
 python_version = "3.12"
 strict = true
 files = ["src", "tests"]
+# the owner's original H->gg processor, kept byte-identical as the m69a oracle
+exclude = ['^tests/frozen/m69a/data/inclusive_processor\.py$']
 # The test tree has no __init__.py, so without explicit_package_bases every test file would be a
 # bare basename and `module = ["tests.frozen.*"]` below could not match it. The repo root as a
 # package base gives them dotted names instead (tests.frozen.m40.foo). The two tests/extra dirs with
