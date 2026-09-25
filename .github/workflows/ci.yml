@@ -14,8 +14,10 @@ concurrency:
 env:
   # the former core/debug/frontend/numpy/awkward siblings are now one consolidated package
   # Pinned, not @main: graphed is an unpinned upstream whose merges can redden this frozen suite with
-  # no local change. At graphed PR-C's head (the run report) until that merges; then its merge commit.
-  GRAPHED: "graphed[awkward,numpy]==0.0.6"
+  # no local change. At the multi-output-plans PR's head (m72: writes=, collate, parquet_write) until
+  # it merges, then its merge commit, then the first release carrying it. A git install builds the
+  # Rust core, so every job installing it needs a Rust toolchain.
+  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@4a3ae76b7b4f45e6bc5d111976551efadb6bce99"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
   # The frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
@@ -325,6 +327,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
       - name: Install deps + this package + the coffea fork and higgs_dna
         shell: bash
         run: |
