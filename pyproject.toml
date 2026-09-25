@@ -180,6 +180,12 @@ module = [
 ignore_missing_imports = true
 follow_imports = "skip"
 
+# the htcondor bindings ship Linux wheels only and are imported lazily by the htcondor backend's launcher.
+[[tool.mypy.overrides]]
+module = ["htcondor2", "htcondor2.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 # tests/frozen/** is read-only under the §A.7 integrity rule, so the strict-mode diagnostics the
 # acceptance suites trip are disabled here rather than annotated away in place. This is NOT
 # ignore_errors: any code outside this list still fails the frozen tree. src/** and tests/extra/**
