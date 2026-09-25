@@ -14,6 +14,13 @@ Run on an HTCondor pool
   processes. A lost pilot's task is re-run once on another pilot, and a plan whose functions a pilot
   cannot import is refused before anything is submitted. See :doc:`htcondor`.
 
+An H→γγ analysis on graphed
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``examples/hgg``: a HiggsDNA-derived H→γγ inclusive processor translated to graphed, on coffea
+  NanoEvents in graphed mode. It writes the original's parquet parts and counters, chunk for chunk,
+  and a new CI job checks it against the original script (:doc:`hgg`).
+
 0.0.4
 -----
 
