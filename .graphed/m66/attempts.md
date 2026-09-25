@@ -107,3 +107,19 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
 - CI on 9efabb5 (run 36117544357): test-htcondor 62 passed, per-file pilot 98.8 / server 98.6 / launch 99.0 / backend
   95.9, diff 99%. Three matrix legs failed the malformed-header witness: it closed after `recv(64)` while the server
   was still writing the 403, so the server logged a reset. The test now reads to EOF; it still fails on 89a2eac.
+
+## Iteration 9 — lxplus site check: the driver port range is site data
+- Measured on lxplus (probes/site-check-lxplus/pilot-logs-run2.txt): batch nodes get `Connection refused` on the
+  driver's 10000–10100 range on the login node; with the driver on 8786 (transcript-8786.txt) the site check passes,
+  first pilot live after 105.5 s. 8786 is the port CERN opens from workers to a submit host (dask scheduler), one per node.
+- `SiteProfile.driver_ports` (default 10000–10100, set explicitly in every SITES entry; lxplus = 8786–8786).
+  `HTCondorBackend(port_range=None)` and `htcondor_runner(port_range=None)` take the launcher's profile range
+  (`generic` for a launcher without a profile). A range with no free port raises
+  `OSError: no free port for the task server: site=<name> ports=<lo>-<hi>` from the server's OSError.
+- Witnesses (tests/extra/m66/test_m66_ports.py): the lxplus profile binds 8786; `htcondor_runner(site="lxplus")` binds
+  8786 unless `port_range=` is given; a second lxplus backend fails naming `site=lxplus ports=8786-8786`.
+  Discrimination: with the source change stashed, three fail `AttributeError: 'SiteProfile' object has no attribute
+  'driver_ports'` and the fourth `DID NOT RAISE OSError`.
+- Local: frozen+extra m66 64 passed / 1 skipped (live pool); per-file backend 94%, sites 100% (launch 81% locally —
+  the bindings-only paths, 99% on the CI pool job); precommit gate ok; sphinx -W clean.
+- Docs: the lxplus note now states the measured facts and the transcript paths; `port_range` documented.

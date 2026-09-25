@@ -177,13 +177,18 @@ retrieves the pilots' logs into ``log_dir`` and removes the jobs, which took 15 
 On lxplus
 ---------
 
-.. note::
-
-   This walk-through has not been run end to end yet. The lxplus schedd refuses a spooled job
-   that brings nothing back, which the ``lxplus`` site handles with ``transfer_output_files=""``.
-
 Enter the same image with ``/etc/condor`` and your Kerberos credentials bound, build the venv as
-on the LPC, and pass ``site="lxplus"``. Pilots run in the ``longlunch`` queue (two hours); pass
+on the LPC, and pass ``site="lxplus"``. The ``lxplus`` site binds the task server to port 8786 on
+the login node: batch nodes get ``Connection refused`` on the default range 10000–10100, and 8786 is
+the one port CERN opens from workers to a submit host (for a dask scheduler), so **one driver per
+login node**. A second ``htcondor_runner`` on the same node fails at once with ``OSError: no free
+port for the task server: site=lxplus ports=8786-8786``; log in to another node. The first pilot was
+live 105 s after submission on the run this is measured from
+(``graphed-workdir/lanes/htcondor/probes/site-check-lxplus/transcript-8786.txt``; the refused
+10000 run is ``pilot-logs-run2.txt`` next to it). The lxplus schedd refuses a spooled job that
+brings nothing back, which the site handles with ``transfer_output_files=""``.
+
+Pilots run in the ``longlunch`` queue (two hours); pass
 ``extra_submit={"+JobFlavour": '"workday"'}`` for a longer run, or
 ``extra_submit={"output_destination": "root://eosuser.cern.ch//eos/user/..."}`` to have the logs
 written to EOS instead of retrieved.
@@ -217,6 +222,7 @@ For a site of your own, describe it once as a ``SiteProfile`` and pass that as `
         ship_env=True,          # send the driver's venv along as env.tgz
         sandbox_root=None,      # or a directory the schedd can read, which log_dir must sit under
         schedd_query=None,      # or (param naming the collectors, constraint) to pick a schedd
+        driver_ports=(10000, 10100),  # what the execute nodes can reach on the submit host
     )
 
 Submit values may use ``{image}``, ``{uid}``, ``{user}`` and ``{home}``.
@@ -249,8 +255,11 @@ The arguments you will change
    * - ``extra_submit``
      - Submit keys added last, so they override the site's.
    * - ``host``
-     - The name pilots call back to; this machine's fully qualified name by default. The task
-       server listens on the first free port from 10000 to 10100.
+     - The name pilots call back to; this machine's fully qualified name by default.
+   * - ``port_range``
+     - The driver-side ports the task server may bind, inclusive; the first free one is used. By
+       default the site's ``driver_ports``: 10000–10100 on ``lpc`` and ``generic``, 8786 on
+       ``lxplus``. A range with no free port is an ``OSError`` naming the site and the range.
    * - ``min_pilots``
      - How many pilots must be connected before the first run starts; 1 by default.
    * - ``retries``

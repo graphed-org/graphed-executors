@@ -23,7 +23,7 @@ from graphed_executors.submit.protocol import SubmitFuture
 
 from .launch import CondorPilots, PilotLauncher
 from .server import TaskServer, WorkerLost
-from .sites import SiteProfile
+from .sites import SITES, SiteProfile
 
 R = TypeVar("R")
 
@@ -45,7 +45,8 @@ class HTCondorBackend:
     """Starts a task server and ``n_pilots`` pilots through ``launcher``; :meth:`close` removes them.
 
     ``host`` is the name pilots dial back to (default: this machine's FQDN); the server binds the
-    first free port of ``port_range`` on all interfaces.
+    first free port of ``port_range`` on all interfaces, by default the ``driver_ports`` of the
+    launcher's site profile (``generic`` for a launcher without one).
     """
 
     def __init__(
@@ -54,12 +55,19 @@ class HTCondorBackend:
         n_pilots: int,
         *,
         host: str | None = None,
-        port_range: tuple[int, int] = (10000, 10100),
+        port_range: tuple[int, int] | None = None,
     ) -> None:
         self.capabilities = _FLOOR
         self.launcher = launcher
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
-        self._server = TaskServer(host or socket.getfqdn(), port_range, launcher)
+        profile: SiteProfile = getattr(launcher, "profile", SITES["generic"])
+        low, high = port_range if port_range is not None else profile.driver_ports
+        try:
+            self._server = TaskServer(host or socket.getfqdn(), (low, high), launcher)
+        except OSError as exc:
+            raise OSError(
+                f"no free port for the task server: site={profile.name} ports={low}-{high}"
+            ) from exc
         with ExitStack() as on_error:  # a refused start must not leave the server holding its port
             on_error.callback(self._server.shutdown)
             on_error.callback(self._server.close)
@@ -183,13 +191,15 @@ def htcondor_runner(
     env: str | Path | None = None,
     extra_submit: Mapping[str, str] | None = None,
     host: str | None = None,
+    port_range: tuple[int, int] | None = None,
     min_pilots: int = 1,
     monitor: Any = None,
     retries: int = 3,
     max_in_flight: int = 2,
 ) -> HTCondorRunner:
     """``n_pilots`` pilot jobs on the ``site`` pool behind an :class:`HTCondorRunner`;
-    ``runner.close()`` removes them."""
+    ``runner.close()`` removes them. ``port_range`` is the driver-side port range; default from the
+    site profile."""
     pilots = CondorPilots(
         site,
         image=image,
@@ -200,7 +210,7 @@ def htcondor_runner(
         env=env,
         extra_submit=extra_submit,
     )
-    backend = HTCondorBackend(pilots, n_pilots, host=host)
+    backend = HTCondorBackend(pilots, n_pilots, host=host, port_range=port_range)
     return HTCondorRunner(
         backend, min_pilots=min_pilots, monitor=monitor, retries=retries, max_in_flight=max_in_flight
     )

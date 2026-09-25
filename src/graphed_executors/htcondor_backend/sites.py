@@ -2,7 +2,8 @@
 
 A :class:`SiteProfile` holds the submit keys a site needs (templates over ``{image}``, ``{uid}``,
 ``{user}`` and ``{home}``), whether its schedd needs spooled sandboxes, whether pilots get the driver's
-venv shipped as ``env.tgz``, the directory tree its schedd can read, and how to find a schedd.
+venv shipped as ``env.tgz``, the directory tree its schedd can read, how to find a schedd, and the
+driver-side ports its execute nodes can reach.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ _SPOOLING_INPUT = 16  # HoldReasonCode of a spooled job while its input sandbox 
 class SiteProfile:
     """``schedd_query`` is ``(param naming the collectors, constraint)``; ``None`` means the user's own
     ``SCHEDD_HOST``. ``sandbox_root`` (a template over ``{user}``) is the only tree the site's schedd
-    reads, so ``log_dir`` must lie under it."""
+    reads, so ``log_dir`` must lie under it. ``driver_ports`` is the inclusive range the task server
+    binds on the submit host."""
 
     name: str
     submit: Mapping[str, str]
@@ -29,6 +31,7 @@ class SiteProfile:
     ship_env: bool
     sandbox_root: str | None
     schedd_query: tuple[str, str] | None
+    driver_ports: tuple[int, int] = (10000, 10100)
 
 
 SITES: Mapping[str, SiteProfile] = {
@@ -48,6 +51,7 @@ SITES: Mapping[str, SiteProfile] = {
             "FERMIHTC_REMOTE_POOL",
             'FERMIHTC_DRAIN_LPCSCHEDD=?=FALSE && FERMIHTC_SCHEDD_TYPE=?="CMSLPC" && MaxJobsRunning!=0',
         ),
+        driver_ports=(10000, 10100),
     ),
     "lxplus": SiteProfile(
         name="lxplus",
@@ -60,9 +64,17 @@ SITES: Mapping[str, SiteProfile] = {
         ship_env=True,
         sandbox_root=None,
         schedd_query=None,
+        # batch nodes are refused on 10000 at a login node; CERN opens 8786 there for a dask scheduler
+        driver_ports=(8786, 8786),
     ),
     "generic": SiteProfile(
-        name="generic", submit={}, spool=False, ship_env=False, sandbox_root=None, schedd_query=None
+        name="generic",
+        submit={},
+        spool=False,
+        ship_env=False,
+        sandbox_root=None,
+        schedd_query=None,
+        driver_ports=(10000, 10100),
     ),
 }
 
