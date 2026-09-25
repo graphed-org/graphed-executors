@@ -267,6 +267,9 @@ jobs:
         shell: bash
         run: |
           curl -fsSL https://get.htcondor.org | sudo /bin/bash -s -- --no-dry-run
+          # jobs share the host /tmp (default: a private one), so a driver job's FS-auth file and its
+          # pilots' initialdir under pytest's tmp_path are visible to the schedd, as on a shared-FS site
+          echo "MOUNT_UNDER_SCRATCH =" | sudo tee /etc/condor/config.d/99-jobs-share-tmp
           sudo systemctl enable --now condor || sudo condor_master
           for i in $(seq 90); do
             condor_status -schedd -af Name 2>/dev/null | grep -q . && condor_status -af Name 2>/dev/null | grep -q . && break
