@@ -10,3 +10,14 @@ Multiout lane (plans in `graphed-workdir/lanes/multiout/`: `plan.md`, `plan-C.md
 `GRAPHED` and `docs/requirements.txt` pin `graphed[awkward,numpy] @ git+…@4a3ae76b…`; `test-hgg`
 gains `dtolnay/rust-toolchain@stable` (the other six jobs installing `GRAPHED` already had it).
 Re-pin when the graphed PR's head moves or it merges.
+
+## C2 — one plan over a fileset (refrozen `test_hgg_conversion.py` 7/7; m69a 26/26)
+
+`process` returns `{"record", "counters", "metadata"}`; the record's fields are zipped in sorted
+order (the original's writer sorts). `dataset_plan` = `aggregate_plan(*distinct counter nodes,
+writes=[parquet_write(record, out/<ds>/nominal, name=part_name, metadata=…,
+arrow_options={"extensionarray": False})], reduce=Counters(slots), combine=accumulate, empty=dict)`;
+`plan(fileset)` = `collate` over datasets. `part_name` refuses a blind partition ("steps") and strips
+`/…;cycle`. `run_local.py` builds a stepped fileset; `validate_real.py` runs ONE plan over both
+files and judges each part by `compare_part` and each dataset's totals against the accumulated
+oracle counters — on the committed fixtures: every part IDENTICAL, DIFFERENCES 0.

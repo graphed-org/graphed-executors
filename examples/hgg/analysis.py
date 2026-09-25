@@ -3,40 +3,39 @@
 The processor is the original's, method for method, in the spelling a deferred array needs: events are
 coffea NanoEvents in ``mode="graphed"``, ``gak`` stands in for ``ak``, ``gak.with_field`` for
 assignment, and every place the original forces a value (``int()``, ``len()``, ``.to_numpy()``,
-``bool()`` guards) becomes a plan output or disappears. :class:`HggProcess` finishes each chunk the way
-the original's ``dump_to_parquet`` does: one flat parquet part per chunk plus the original's return
-value for that chunk.
+``bool()`` guards) becomes a plan output or disappears.
 
-    plan = analysis.plan(uri, ranges=[(0, 100), (100, 200)], dataset="MC", year="2024", out="out")
-    value = SequentialRunner().run(plan).value      # {part name: {dataset: counters}}
-    analysis.totals(value)                          # what coffea's Runner would accumulate
+One plan covers a whole fileset. Each dataset records its own graph (data and MC differ), and
+``graphed.collate`` joins them. Each task writes the original's parquet part for its chunk, with
+that chunk's sums in the part's metadata, beside the counters that the runner tree-reduces:
+
+    fileset = {"MC": {"mc.root": {"object_path": "Events", "steps": [[0, 100], [100, 200]]}}}
+    plan = analysis.plan(fileset, year="2024", out="out")
+    SequentialRunner().run(plan).value              # {dataset: counters}, as coffea's Runner accumulates
 """
 
 from __future__ import annotations
 
-import dataclasses
 import functools
 import gzip
 import json
 import logging
 import operator
-from collections.abc import Iterable, Mapping, Sequence
+import os
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Any, ClassVar
 
-import awkward as ak
 import numpy
-import pyarrow as pa
-import pyarrow.parquet as pq
 from coffea import processor
 from coffea.lumi_tools import LumiMask
 from coffea.nanoevents import NanoAODSchema, NanoEventsFactory
-from graphed import Array, aggregate_plan
-from graphed.awkward import gak
+from graphed import Array, aggregate_plan, collate
+from graphed.awkward import gak, parquet_write
 from graphed.core import Partition
-from graphed.core.execution import Plan, WorkerResources
+from graphed.core.execution import Plan
 from graphed.preserve.externals import ExternalPlugin, record_external, sha256_bytes
 from higgs_dna.utils.misc_utils import infer_nano_version
 
@@ -231,7 +230,7 @@ def get_higgs_truth_attributes(events: Any) -> tuple[Any, Any]:
 
 
 class HggInclusiveProcessor:
-    """The original's processor; ``process`` returns the plan outputs instead of writing and counting."""
+    """The original's processor; ``process`` returns what a plan writes and counts instead of doing it."""
 
     # photon preselection cuts
     min_pt_photon = 25.0
@@ -728,7 +727,7 @@ class HggInclusiveProcessor:
 
     def diphoton_to_ak_array(self, diphotons: Any) -> Any:
         """The flat output columns: photon legs prefixed ``lead_``/``sublead_``, the rest as-is,
-        without the per-photon copy of the event-level rho."""
+        without the per-photon copy of the event-level rho, in the sorted order the original writes."""
         output = {}
         for field in gak.fields(diphotons):
             prefix = self.prefixes.get(field, "")
@@ -738,16 +737,17 @@ class HggInclusiveProcessor:
                         output[f"{prefix}_{subfield}"] = diphotons[field][subfield]
             else:
                 output[field] = diphotons[field]
-        return gak.zip({k: v for k, v in output.items() if "lead_fixedGridRhoAll" not in k})
+        return gak.zip({k: output[k] for k in sorted(output) if "lead_fixedGridRhoAll" not in k})
 
     def process(self, events: Any) -> dict[str, Any]:
-        """The flat diphoton record and the chunk counters, as named plan outputs."""
+        """The flat diphoton record, the counters, and the part's key-value metadata (its arrays
+        are this chunk's sums)."""
         self.resolve_nano_version(events)
         dataset_name = events.metadata["dataset"]
         self.data_kind = "mc" if "GenPart" in events.fields else "data"
         year = self.get_year(dataset_name)
 
-        # bookkeeping before any selection; HggProcess gives each the original's Python type
+        # bookkeeping before any selection; Counters gives each the original's Python type
         if self.data_kind == "mc":
             counters = {
                 "nTot": gak.num(events.genWeight, axis=0),
@@ -761,8 +761,9 @@ class HggInclusiveProcessor:
         if self.data_kind == "data" and year is not None:
             events = events[lumi_mask(events.run, events.luminosityBlock, year)]
 
+        metadata: dict[str, Any] = {"sum_genw_presel": "Data"}
         if self.data_kind == "mc":
-            counters["sum_genw_presel"] = gak.sum(events.genWeight)
+            metadata["sum_genw_presel"] = gak.sum(events.genWeight)
 
         events = self.apply_filters_and_triggers(events)
 
@@ -803,7 +804,7 @@ class HggInclusiveProcessor:
                 "TruthPTH": TruthPTH,
                 "TruthYH": TruthYH,
             }
-            counters["sum_weight_central"] = gak.sum(sel_events.genWeight)
+            metadata["sum_weight_central"] = gak.sum(sel_events.genWeight)
         else:
             columns |= {
                 "dZ": gak.zeros_like(sel_events.PV.z),
@@ -814,112 +815,90 @@ class HggInclusiveProcessor:
             diphotons = gak.with_field(diphotons, column, name)
 
         diphotons = self.compute_sigma_m_over_m(diphotons)
-        return {"record": self.diphoton_to_ak_array(diphotons), **counters}
+        return {"record": self.diphoton_to_ak_array(diphotons), "counters": counters, "metadata": metadata}
 
 
 # ---------------------------------------------------------------------- #
-# The plan: one task per chunk, each writing its part and returning its counters.
+# The plan: every dataset's graph in one plan; each task writes its part and returns its counters.
 # ---------------------------------------------------------------------- #
 
 
-def _values(values: list[Any]) -> list[Any]:
-    return values
+@dataclass(frozen=True)
+class Counters:
+    """A chunk's counters as the original returns them, from the plan's values (paths follow them)."""
+
+    #: each counter's name and its slot among the values (one node can carry two names)
+    slots: tuple[tuple[str, int], ...]
+
+    def __call__(self, values: list[Any]) -> dict[str, Any]:
+        v = {name: values[i] for name, i in self.slots}
+        if "genWeightSum" not in v:
+            n = int(v["nTot"])
+            return {"nTot": n, "nPos": n, "nNeg": 0, "nEff": n, "genWeightSum": float(n)}
+        nPos, nNeg = int(v["nPos"]), int(v["nNeg"])
+        return {
+            "nTot": int(v["nTot"]),
+            "nPos": nPos,
+            "nNeg": nNeg,
+            "nEff": nPos - nNeg,
+            "genWeightSum": float(v["genWeightSum"]),
+        }
 
 
-def _union(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
-    return {**a, **b}
+def accumulate(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Two chunks' counters summed, as coffea's Runner accumulates the original's returns."""
+    return processor.accumulate([a, b])  # type: ignore[no-any-return]
 
 
 def part_name(partition: Partition) -> str:
     """The original's part name (``<file>_<tree>_<start>-<stop>``), with the file's stem for its UUID."""
-    return (
-        f"{Path(partition.uri).stem}_{partition.tree}_{partition.entry_start}-{partition.entry_stop}.parquet"
+    if partition.is_blind:
+        raise ValueError(
+            f"{partition.uri} has no entry range to name its part from: give every file explicit "
+            '"steps" in the fileset (the counters depend on the chunking too)'
+        )
+    tree = partition.tree.strip("/").split(";")[0]
+    return f"{Path(partition.uri).stem}_{tree}_{partition.entry_start}-{partition.entry_stop}.parquet"
+
+
+def dataset_plan(dataset: str, files: Mapping[str, Any], *, year: str, out: str) -> Plan[dict[str, Any]]:
+    """One dataset's plan over coffea's ``files`` mapping, whose files each give explicit "steps"."""
+    events = NanoEventsFactory.from_root(
+        dict(files), schemaclass=NanoAODSchema, mode="graphed", metadata={"dataset": dataset}
+    ).events()
+    outputs = HggInclusiveProcessor(metaconditions(), year={dataset: [year]}).process(events)
+    counters: dict[str, Array] = outputs["counters"]
+    # the plan returns one value per distinct node: MC's genWeightSum node is also a metadata sum
+    nodes = list({array.node_id: array for array in counters.values()}.values())
+    slot = {array.node_id: i for i, array in enumerate(nodes)}
+    part = parquet_write(
+        outputs["record"],
+        os.path.join(out, dataset, "nominal"),
+        name=part_name,
+        metadata=outputs["metadata"],
+        arrow_options={"extensionarray": False},
+    )
+    return aggregate_plan(
+        *nodes,
+        reduce=Counters(tuple((k, slot[a.node_id]) for k, a in counters.items())),
+        combine=accumulate,
+        empty=dict,
+        writes=[part],
     )
 
 
-def dump_to_parquet(akarr: ak.Array, metadata: dict[str, str], destination: Path) -> None:
-    """The original's ``dump_to_parquet`` on a materialized chunk: sorted columns, KV metadata merged."""
-    pa_table = ak.to_arrow_table(akarr, extensionarray=False)
-    col_names = sorted(pa_table.schema.names)
-    pa_table = pa.table([pa_table.column(n) for n in col_names], names=col_names)
-    if metadata:
-        merged = {**metadata, **(pa_table.schema.metadata or {})}
-        pa_table = pa_table.replace_schema_metadata(merged)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa_table, destination)
-
-
-@dataclass(frozen=True)
-class HggProcess:
-    """The plan's ``process``: the chunk's outputs from the inner reduce, then the original's parquet
-    part and return value for that chunk, keyed by the part's name."""
-
-    inner: Any
-    #: each output's name and its slot among the inner values (one output node can carry two names)
-    slots: tuple[tuple[str, int], ...]
-    dataset: str
-    out: str
-
-    def __call__(self, partition: Partition, resources: WorkerResources) -> dict[str, Any]:
-        values = self.inner(partition, resources)
-        v = {name: values[i] for name, i in self.slots}
-        if "genWeightSum" in v:
-            nPos, nNeg = int(v["nPos"]), int(v["nNeg"])
-            counters = {
-                "nTot": int(v["nTot"]),
-                "nPos": nPos,
-                "nNeg": nNeg,
-                "nEff": nPos - nNeg,
-                "genWeightSum": float(v["genWeightSum"]),
-            }
-            metadata = {
-                "sum_genw_presel": str(v["sum_genw_presel"]),
-                "sum_weight_central": str(v["sum_weight_central"]),
-            }
-        else:
-            n = int(v["nTot"])
-            counters = {"nTot": n, "nPos": n, "nNeg": 0, "nEff": n, "genWeightSum": float(n)}
-            metadata = {"sum_genw_presel": "Data"}
-        name = part_name(partition)
-        dump_to_parquet(v["record"], metadata, Path(self.out) / self.dataset / "nominal" / name)
-        return {name: {self.dataset: counters}}
-
-
-def events(uri: str, dataset: str) -> Any:
-    """Deferred coffea NanoEvents over one file, with the metadata the original's ``__main__`` gives."""
-    return NanoEventsFactory.from_root(
-        {uri: "Events"},
-        schemaclass=NanoAODSchema,
-        mode="graphed",
-        metadata={"dataset": dataset, "filename": uri.split("/")[-1]},
-    ).events()
-
-
-def plan(uri: str, *, ranges: Iterable[tuple[int, int]], dataset: str, year: str, out: str) -> Plan[Any]:
-    """One task per ``(start, stop)`` range of ``uri``'s Events; ``run(plan).value`` is
-    ``{part name: {dataset: counters}}`` and each part lands under ``out/<dataset>/nominal/``."""
-    outputs = HggInclusiveProcessor(metaconditions(), year={dataset: [year]}).process(events(uri, dataset))
-    # aggregate_plan returns one value per distinct node: MC's genWeightSum is sum_genw_presel's node
-    nodes = list({array.node_id: array for array in outputs.values()}.values())
-    slot = {array.node_id: i for i, array in enumerate(nodes)}
-    partitions = [Partition(uri, "Events", start, stop) for start, stop in ranges]
-    inner = aggregate_plan(*nodes, reduce=_values, combine=operator.add, empty=list, partitions=partitions)
-    process = HggProcess(inner.process, tuple((k, slot[a.node_id]) for k, a in outputs.items()), dataset, out)
-    return dataclasses.replace(inner, process=process, combine=_union, empty=dict)
-
-
-def totals(value: Mapping[str, Any]) -> Any:
-    """The counters summed over parts, as coffea's Runner accumulates the original's returns."""
-    return processor.accumulate(value.values())
+def plan(fileset: Mapping[str, Mapping[str, Any]], *, year: str, out: str) -> Plan[dict[str, Any]]:
+    """One plan over coffea's ``{dataset: files}``: ``run(plan).value`` is ``{dataset: counters}``,
+    and each chunk's part lands at ``out/<dataset>/nominal/<file stem>_Events_<start>-<stop>.parquet``."""
+    return collate({ds: dataset_plan(ds, files, year=year, out=out) for ds, files in fileset.items()})
 
 
 __all__: Sequence[str] = [
     "LUMIMASK_PLUGIN",
+    "Counters",
     "HggInclusiveProcessor",
-    "HggProcess",
-    "events",
+    "dataset_plan",
     "lumi_mask",
     "part_name",
     "plan",
-    "totals",
 ]
