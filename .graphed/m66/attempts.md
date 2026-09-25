@@ -104,3 +104,6 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
 - Discrimination: with 89a2eac's pilot.py + server.py swapped in, all four witnesses fail; with this change they pass.
 - Docs: htcondor.rst says the pilot stops at once, even mid-task; the id is `host:pid:token`; `retries` has no effect
   (the engine forwards it to `HTCondorBackend.submit`, which ignores it). The N_WORKERS_WAIT_S comment drops its figure.
+- CI on 9efabb5 (run 36117544357): test-htcondor 62 passed, per-file pilot 98.8 / server 98.6 / launch 99.0 / backend
+  95.9, diff 99%. Three matrix legs failed the malformed-header witness: it closed after `recv(64)` while the server
+  was still writing the 403, so the server logged a reset. The test now reads to EOF; it still fails on 89a2eac.
