@@ -49,6 +49,9 @@ dask = ["dask[distributed]>=2026.6"]
 # was verified against. Deliberately NO python_version marker — the CI axis (gate 3.12, observe 3.13,
 # exclude 3.14/3.14t), not the metadata, is the tested-support fence (plan §4).
 parsl = ["parsl>=2026.7.20"]
+# the direct HTCondor backend (graphed_executors.htcondor_backend); the floor is the version the LPC
+# image resolves. No marker: the bindings ship Linux wheels only, so elsewhere the install fails loudly.
+htcondor = ["htcondor>=25.13"]
 
 [project.urls]
 Homepage = "https://github.com/graphed-org/graphed-executors"
@@ -75,7 +78,7 @@ source = ["graphed_executors"]
 # gate; each `common/` module gated by exactly ONE job). `submit/` carries no omit: the ThreadBackend
 # conformance half exercises it in the main matrix. This is the omit-because-gated-elsewhere pattern
 # (m46 IT4) — NOT a fail_under change.
-omit = ["*/dask_backend/*", "*/common/*", "*/parsl_backend/*"]
+omit = ["*/dask_backend/*", "*/common/*", "*/parsl_backend/*", "*/htcondor_backend/*"]
 
 [tool.coverage.report]
 fail_under = 90
