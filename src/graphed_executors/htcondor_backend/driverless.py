@@ -147,6 +147,10 @@ def submit_driverless(
     if pilots not in ("local", "condor"):
         raise ValueError(f"pilots={pilots!r}: 'local' (in the driver's slot) or 'condor' (jobs it submits)")
     profile = SITES[site]
+    if pilots == "condor" and not profile.jobs_can_submit:
+        raise ValueError(
+            f"site {site!r} does not let a job submit jobs, so its driver cannot: use pilots='local'"
+        )
     for role in ("process", "combine", "empty", "next_tasks", "stop"):
         if (part := getattr(plan, role)) is not None:
             _require_importable(part, role)

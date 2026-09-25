@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from graphed_executors.htcondor_backend import RunHandle, launch, submit_driverless
+from graphed_executors.htcondor_backend import SITES, RunHandle, SiteProfile, launch, submit_driverless
 
 
 class Schedd:
@@ -113,3 +113,14 @@ def test_logs_are_the_driver_files_that_came_back(tmp_path: Path) -> None:
 def test_an_unknown_pilots_mode_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="pilots='slurm'"):
         submit_driverless(cast(Any, None), pilots="slurm", request_memory_mb=1, log_dir=tmp_path)
+
+
+def test_condor_pilots_are_refused_where_jobs_cannot_submit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(launch, "_htcondor", lambda: pytest.fail("a bindings call"))
+    with pytest.raises(ValueError, match="site 'lpc' does not let a job submit jobs"):
+        submit_driverless(cast(Any, None), site="lpc", pilots="condor", request_memory_mb=1, log_dir=tmp_path)
+    assert [name for name, row in SITES.items() if not row.jobs_can_submit] == ["lpc"]
+    six = SiteProfile(name="s", submit={}, spool=False, ship_env=False, sandbox_root=None, schedd_query=None)
+    assert six.jobs_can_submit is True

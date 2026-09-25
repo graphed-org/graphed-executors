@@ -25,7 +25,7 @@ class SiteProfile:
     reads, so ``log_dir`` must lie under it. ``driver_ports`` is the inclusive range the task server
     binds on the submit host. ``service_ports`` is the range of login-node ports execute nodes reach for
     a service beside the driver, ``worker_ports`` the range one execute node reaches on another; ``None``
-    means no such port was measured open."""
+    means no such port was measured open. ``jobs_can_submit`` is whether a job there may submit jobs."""
 
     name: str
     submit: Mapping[str, str]
@@ -36,6 +36,7 @@ class SiteProfile:
     driver_ports: tuple[int, int] = (10000, 10100)
     service_ports: tuple[int, int] | None = None
     worker_ports: tuple[int, int] | None = None
+    jobs_can_submit: bool = True
 
     @property
     def service_hosts(self) -> tuple[str, ...]:
@@ -64,6 +65,7 @@ SITES: Mapping[str, SiteProfile] = {
         # the task server binds driver_ports first, so a service scanning from 10001 cannot take its port
         service_ports=(10001, 10100),
         worker_ports=(10000, 10100),
+        jobs_can_submit=False,
     ),
     "lxplus": SiteProfile(
         name="lxplus",
