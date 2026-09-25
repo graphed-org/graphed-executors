@@ -27,3 +27,8 @@ oracle counters — on the committed fixtures: every part IDENTICAL, DIFFERENCES
 `examples/hgg/README.md` (fileset example, executed on the fixtures: 4 parts, both datasets'
 counters), `docs/hgg.rst` (the one-plan shape; the table's counters, writer and part-name rows;
 the MC fixture is now the 2024 GluGluH slice), `docs/changelog.rst`. `sphinx-build -W` clean.
+
+## R1 repair — per-dataset union wording (review impl-r1 F3)
+
+`examples/hgg/README.md` and `docs/hgg.rst` now say the union is over `plan({dataset: files})`
+values; `dataset_plan`'s value is flat counters, whose union overwrites.

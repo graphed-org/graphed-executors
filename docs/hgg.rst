@@ -33,8 +33,8 @@ weights, the truth columns), so each dataset records its own graph. ``dataset_pl
 weight sums. ``graphed.collate`` joins the datasets' plans into the one plan ``plan`` returns. Each
 task reads its chunk once, writes its part, and returns its counters, and the runner tree-reduces
 the counters with ``coffea.processor.accumulate``, as coffea's ``Runner`` does. The value is
-``{dataset: counters}``. Each dataset's plan also runs on its own, so datasets can be submitted
-separately and their values joined into the same result.
+``{dataset: counters}``. ``plan({dataset: files})`` runs one dataset on its own, so datasets can
+be submitted separately, and a dict union of their values is the same result.
 
 
 What changed, and why
