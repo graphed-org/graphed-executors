@@ -54,3 +54,16 @@ frozen suite `freeze-m66` @ 8dd983b (50 tests in `tests/frozen/m66/`). Plan: `la
   `executable`), so the generic (non-spooled) live-pool test would hold its pilots the same way. The schedd removed
   the half-staged cluster 30427220 itself (history: JobStatus 3, "Staging of job files failed"); 0 jobs left.
 - Fix: `start` submits `executable=<log_dir>/pilot.sh`; `submit_description` keeps `pilot.sh`, as frozen.
+- Site check, second attempt on f245a83 (transcript `lanes/htcondor/probes/site-check-lpc/transcript.txt`): schedd
+  lpcschedd5.fnal.gov (≈12.7k idle jobs), ClusterId 30427221, submit 3.7 s, first pilot live 33.3 s, second 116.3 s;
+  `concat_plan(16)` bit-for-bit vs SequentialRunner (357 B); tasks ran on cmswn2276 and cmswn2179 with
+  `sys.prefix=/srv/env` (the shipped venv relocated into the job scratch); close 14.7 s; 0 jobs left (history: both
+  ExitCode 0); `pilot.{0,1}.{out,err}` + `pilots.log` retrieved; scratch dir deleted.
+
+## Iteration 5 — CI on 88d3972 (run 36104880243)
+- test-htcondor: 56 passed, 2 failed — both live-pool tests, on the relative-executable bug fixed in f245a83
+  (generic: pilots never started → 240 s bound; spooled: `spoolJobFiles` could not read `<cwd>/pilot.sh`).
+- test-parsl py3.12 + 3.14t: frozen m47 `test_ci_parsl_step_runs_m47_with_a_bare_cov_and_no_path_valued_cov`
+  failed. Its regex runs from the parsl pytest line over every indented line to EOF, and the new job's comment
+  quoted a path-valued `--cov=`. Fix: the comment no longer spells it. Not a dispute: the frozen test reads ci.yml
+  as intended; the comment was the defect.

@@ -281,7 +281,7 @@ jobs:
           python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" "${{ env.HISTOGRAM }}"
           python -m pip install -e ".[dev,htcondor]"
       - name: Pytest frozen m66 on the pool + scoped coverage gate (>=90%)
-        # bare `--cov` with the rcfile's source; a path-valued `--cov=` would override it (see test-parsl)
+        # a bare `--cov` keeps the rcfile's source; a path-valued one overrides it (see test-parsl)
         env:
           COVERAGE_PROCESS_START: ${{ github.workspace }}/.coveragerc-htcondor
           COVERAGE_RCFILE: ${{ github.workspace }}/.coveragerc-htcondor
