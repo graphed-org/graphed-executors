@@ -304,7 +304,8 @@ somewhere else. Stealing one at a time from a randomly chosen victim is the sche
 bounds on the time wasted stealing (Blumofe–Leiserson, as in Cilk).
 
 Stealing moves only the ``process`` work. The leaf's original owner still merges it — the thief
-ships the partial back — so the tree, and the answer, are untouched. An idle delay plus
+ships the partial back, and never hands a stolen leaf on — so the tree, and the answer, are
+untouched. An idle delay plus
 exponential backoff makes it cost nothing on balanced work while still rebalancing a genuine
 straggler. Pass ``steal=False`` to turn it off.
 

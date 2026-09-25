@@ -610,8 +610,10 @@ def process_and_reduce(
             # steal attempts cost ~nothing. (`len > 1`: never give away the leaf I'm about to run.)
             # Each grant carries its own id (a negative level, never a node's), so the thief keeps a
             # response retried by an at-least-once transport once, and a leaf granted twice twice.
+            # Only an owned leaf is granted: the thief returns it to its owner, and the victim is the
+            # only owner guaranteed to be in the thief's bounded overlay.
             thief = payload[1]
-            if steal and len(mine) > 1:
+            if steal and len(mine) > 1 and owner(mine[-1][0]) == address:
                 stats["given"] += 1
                 outbox.send(thief, ("steal_resp", [mine.pop()], (-1 - me, stats["given"])))
             else:
