@@ -827,21 +827,18 @@ class HggInclusiveProcessor:
 class Counters:
     """A chunk's counters as the original returns them, from the plan's values (paths follow them)."""
 
-    #: each counter's name and its slot among the values (one node can carry two names)
-    slots: tuple[tuple[str, int], ...]
+    names: tuple[str, ...]
 
     def __call__(self, values: list[Any]) -> dict[str, Any]:
-        v = {name: values[i] for name, i in self.slots}
-        if "genWeightSum" not in v:
-            n = int(v["nTot"])
-            return {"nTot": n, "nPos": n, "nNeg": 0, "nEff": n, "genWeightSum": float(n)}
-        nPos, nNeg = int(v["nPos"]), int(v["nNeg"])
+        v = dict(zip(self.names, values, strict=False))  # the part's path follows the counters
+        n = int(v["nTot"])
+        nPos, nNeg = int(v.get("nPos", n)), int(v.get("nNeg", 0))
         return {
-            "nTot": int(v["nTot"]),
+            "nTot": n,
             "nPos": nPos,
             "nNeg": nNeg,
             "nEff": nPos - nNeg,
-            "genWeightSum": float(v["genWeightSum"]),
+            "genWeightSum": float(v.get("genWeightSum", n)),
         }
 
 
@@ -868,9 +865,6 @@ def dataset_plan(dataset: str, files: Mapping[str, Any], *, year: str, out: str)
     ).events()
     outputs = HggInclusiveProcessor(metaconditions(), year={dataset: [year]}).process(events)
     counters: dict[str, Array] = outputs["counters"]
-    # the plan returns one value per distinct node: MC's genWeightSum node is also a metadata sum
-    nodes = list({array.node_id: array for array in counters.values()}.values())
-    slot = {array.node_id: i for i, array in enumerate(nodes)}
     part = parquet_write(
         outputs["record"],
         os.path.join(out, dataset, "nominal"),
@@ -879,8 +873,8 @@ def dataset_plan(dataset: str, files: Mapping[str, Any], *, year: str, out: str)
         arrow_options={"extensionarray": False},
     )
     return aggregate_plan(
-        *nodes,
-        reduce=Counters(tuple((k, slot[a.node_id]) for k, a in counters.items())),
+        *counters.values(),
+        reduce=Counters(tuple(counters)),
         combine=accumulate,
         empty=dict,
         writes=[part],
