@@ -319,7 +319,6 @@ class HggInclusiveProcessor:
         self.year = year if year is not None else {}
         self.fiducialCuts = fiducialCuts
         self.nano_version = nano_version
-        self.data_kind = "mc"
 
     def get_year(self, dataset_name: str) -> str | None:
         """Return the data-taking year string for this dataset (e.g. '2024')."""
