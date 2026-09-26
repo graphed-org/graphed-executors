@@ -170,12 +170,17 @@ class HTCondorRunner(SubmitRunner):
         self._min_pilots = min_pilots
         self._waited = False
 
+    def wait_for_pilots(self) -> int:
+        """Wait for ``min_pilots`` once; pilots lost afterwards fail the run's tasks as lost workers."""
+        live = self.backend.wait_for_pilots(self._min_pilots)
+        self._waited = True
+        return live
+
     def run(self, plan: Plan[R]) -> ExecResult[R]:
         _require_importable(plan.process, "process")
         _require_importable(plan.combine, "combine")
         if not self._waited:
-            self.backend.wait_for_pilots(self._min_pilots)
-            self._waited = True
+            self.wait_for_pilots()
         return super().run(plan)
 
 

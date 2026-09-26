@@ -23,7 +23,9 @@ class SiteProfile:
     """``schedd_query`` is ``(param naming the collectors, constraint)``; ``None`` means the user's own
     ``SCHEDD_HOST``. ``sandbox_root`` (a template over ``{user}``) is the only tree the site's schedd
     reads, so ``log_dir`` must lie under it. ``driver_ports`` is the inclusive range the task server
-    binds on the submit host."""
+    binds on the submit host. ``service_ports`` is the range of login-node ports execute nodes reach for
+    a service beside the driver, ``worker_ports`` the range one execute node reaches on another; ``None``
+    means no such port was measured open. ``jobs_can_submit`` is whether a job there may submit jobs."""
 
     name: str
     submit: Mapping[str, str]
@@ -32,6 +34,14 @@ class SiteProfile:
     sandbox_root: str | None
     schedd_query: tuple[str, str] | None
     driver_ports: tuple[int, int] = (10000, 10100)
+    service_ports: tuple[int, int] | None = None
+    worker_ports: tuple[int, int] | None = None
+    jobs_can_submit: bool = True
+
+    @property
+    def service_hosts(self) -> tuple[str, ...]:
+        """Where a managed service may run: beside the driver, on a cluster node, in that order."""
+        return (*(("driver",) if self.service_ports else ()), *(("cluster",) if self.worker_ports else ()))
 
 
 SITES: Mapping[str, SiteProfile] = {
@@ -52,6 +62,10 @@ SITES: Mapping[str, SiteProfile] = {
             'FERMIHTC_DRAIN_LPCSCHEDD=?=FALSE && FERMIHTC_SCHEDD_TYPE=?="CMSLPC" && MaxJobsRunning!=0',
         ),
         driver_ports=(10000, 10100),
+        # the task server binds driver_ports first, so a service scanning from 10001 cannot take its port
+        service_ports=(10001, 10100),
+        worker_ports=(10000, 10100),
+        jobs_can_submit=False,
     ),
     "lxplus": SiteProfile(
         name="lxplus",
@@ -66,6 +80,9 @@ SITES: Mapping[str, SiteProfile] = {
         schedd_query=None,
         # batch nodes are refused on 10000 at a login node; CERN opens 8786 there for a dask scheduler
         driver_ports=(8786, 8786),
+        # 8786 is the only login port open to batch nodes, and the task server holds it
+        service_ports=None,
+        worker_ports=(10000, 10100),
     ),
     "generic": SiteProfile(
         name="generic",
@@ -75,6 +92,8 @@ SITES: Mapping[str, SiteProfile] = {
         sandbox_root=None,
         schedd_query=None,
         driver_ports=(10000, 10100),
+        service_ports=(10000, 10100),
+        worker_ports=(10000, 10100),
     ),
 }
 

@@ -228,6 +228,82 @@ For a site of your own, describe it once as a ``SiteProfile`` and pass that as `
 Submit values may use ``{image}``, ``{uid}``, ``{user}`` and ``{home}``.
 
 
+Running without a login session
+-------------------------------
+
+``htcondor_runner`` needs your session alive for the whole run: the pilots call back to it. For a
+run that should outlive your login, ``submit_driverless`` puts the driver itself in a job. It
+pickles the plan, writes ``plan.pkl`` and ``run.json`` into ``log_dir``, and submits **one** job
+that runs ``python -m graphed_executors.htcondor_backend.driver``; you get a ``RunHandle`` back and
+can log out.
+
+.. code-block:: python
+
+    # A recipe: this needs the LPC pool, from the image and venv of the steps above.
+    import os
+    from graphed_executors.htcondor_backend import submit_driverless
+
+    work = os.getcwd()                          # under your 3-day scratch area
+    handle = submit_driverless(plan, site="lpc", image=IMAGE, n_pilots=8,
+                               request_memory_mb=16000, log_dir=work,
+                               user_modules=[my_tasks.__file__])
+    handle.save("run-handle.json")
+
+Later, from any session on the same pool:
+
+.. code-block:: python
+
+    from graphed_executors.htcondor_backend import RunHandle
+
+    handle = RunHandle.load("run-handle.json")
+    print(handle.status())                      # queued, running, held, done, failed or removed
+    handle.wait(timeout=3600)                   # returns on done, failed or removed
+    result = handle.result()                    # the ExecResult; a failed run re-raises its error
+    handle.remove()                             # the LPC and lxplus keep a completed job queued
+
+Where the pilots run depends on ``pilots=``:
+
+* ``pilots="local"`` (the default) asks for one slot with ``n_pilots`` CPUs and runs the pilots
+  inside it as subprocesses of the driver. This is the only choice on the **LPC**, whose jobs
+  cannot submit jobs (``SiteProfile.jobs_can_submit``); size ``request_memory_mb`` for all of
+  them together.
+* ``pilots="condor"`` has the driver job submit ``n_pilots`` pilot jobs of its own, to the schedd
+  your session chose, and host its task server on one of the site's ``worker_ports`` (10000–10100
+  on every built-in site). On **lxplus** the pilots need a submit directory the schedd reads, so
+  ``log_dir`` must lie under ``/afs``; anything else is refused. A site without ``worker_ports`` refuses
+  ``pilots="condor"``.
+
+The job brings back ``result.pkl`` and ``driver.log`` (the pilots' pids or the pilot cluster,
+timings, and any traceback); on the LPC and lxplus they are spooled and ``result()`` retrieves
+them into ``log_dir``. ``logs()`` returns the driver's log files that have come back. The job's
+exit code decides whether HTCondor runs it again:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 72 20
+
+   * - Exit
+     - Meaning
+     - Retried
+   * - 0
+     - The plan ran.
+     - No
+   * - 1
+     - Anything another attempt may get past: the run's workers were lost (every pilot preempted,
+       say), pilots could not start, or the driver failed before or after the run.
+     - Twice
+   * - 3
+     - The plan's own code raised; it would raise again.
+     - No
+
+On a spooled site (the LPC, lxplus) the completed job stays in the queue after ``result()``, so
+call ``handle.remove()``; it also stops a job that is still running. ``wait()`` returns only on
+done, failed or removed, so ``wait(timeout=None)`` does not return while the job is held: pass a
+``timeout``, or check ``status()`` for ``held``. Everything a pilot cannot import (a lambda, a
+function defined in ``__main__``) is refused before anything is written or submitted, as for
+``htcondor_runner``.
+
+
 The arguments you will change
 -----------------------------
 

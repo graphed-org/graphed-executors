@@ -13,7 +13,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import sysconfig
@@ -33,6 +32,8 @@ CLOSE_WAIT_S = 2 * POLL_S  # every pilot has polled /next, and seen the server's
 
 SECRET_FILE = "graphed-secret"
 ENV_FILE = "env.tgz"
+# a driverless job's files; here, not in driver.py, so importing the package never imports the -m entry
+PLAN_FILE, RUN_FILE, RESULT_FILE, LOG_FILE = "plan.pkl", "run.json", "result.pkl", "driver.log"
 PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
 
 
@@ -102,6 +103,8 @@ class CondorPilots:
     pilots' ``pilot.<n>.out``/``.err`` and ``pilots.log``; ``None`` makes a fresh directory under the
     site's sandbox root, else a temporary one. ``user_modules`` are files or packages transferred into
     each pilot's scratch dir, which is on ``sys.path`` because the pilot runs with ``python -m``.
+    ``schedd_locate=(pool, name)`` submits to that schedd, found through that collector: inside a job
+    there is no local schedd for the site's default choice to find.
     """
 
     def __init__(
@@ -115,6 +118,7 @@ class CondorPilots:
         user_modules: Sequence[str | Path] = (),
         env: str | Path | None = None,
         extra_submit: Mapping[str, str] | None = None,
+        schedd_locate: tuple[str, str] | None = None,
     ) -> None:
         self.profile = SITES[site] if isinstance(site, str) else site
         self.image = image
@@ -124,6 +128,7 @@ class CondorPilots:
         self.user_modules = [os.path.abspath(m) for m in user_modules]
         self.env = Path(env) if env is not None else Path(sys.prefix)
         self.extra_submit = dict(extra_submit or {})
+        self.schedd_locate = schedd_locate
         self.cluster: tuple[str, int] | None = None  # (schedd name, ClusterId): the choice varies per run
         self._schedd: Any = None
         self._constraint = ""
@@ -138,9 +143,9 @@ class CondorPilots:
             "home": os.path.expanduser("~"),
         }
 
-    def submit_description(self, url: str, n: int) -> dict[str, str]:
-        """The submit keys for ``n`` pilots calling back to ``url``: the base keys, then the site's, then
-        ``extra_submit``. Pure: it reads no file and needs no bindings."""
+    def submit_description(self, url: str, n: int, base: Mapping[str, str] | None = None) -> dict[str, str]:
+        """The submit keys for ``n`` pilots calling back to ``url``: the base keys updated by ``base``,
+        then the site's, then ``extra_submit``. Pure: it reads no file and needs no bindings."""
         inputs = [SECRET_FILE, *([ENV_FILE] if self.profile.ship_env else []), *self.user_modules]
         desc = {
             "universe": "vanilla",
@@ -159,6 +164,7 @@ class CondorPilots:
             "request_memory": str(self.request_memory_mb),
             "JobBatchName": self._batch,
         }
+        desc.update(base or {})
         if self.log_dir is not None:
             desc["initialdir"] = str(self.log_dir)
         subs = self._template_vars()
@@ -194,34 +200,49 @@ class CondorPilots:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._secret = self.log_dir / SECRET_FILE
         write_secret(self._secret, secret)
-        python = "./env/bin/python" if self.profile.ship_env else sys.executable
-        script = self.log_dir / "pilot.sh"
-        script.write_text(
-            f'#!/bin/sh\n[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\nexec {python} -m {PILOT_MODULE} "$@"\n'
-        )
-        script.chmod(0o755)
-        if self.profile.ship_env:
-            with tarfile.open(self.log_dir / ENV_FILE, "w:gz") as tar:
-                tar.add(self.env, arcname="env")
+        script = self._stage(self.log_dir, "pilot.sh", PILOT_MODULE)
+        # a relative executable resolves against our cwd, not initialdir
+        desc = self.submit_description(url, n, {"executable": str(script)})
         htc = _htcondor()
         name, schedd = self._choose(htc)
-        desc = self.submit_description(url, n)
-        desc["executable"] = str(script)  # a relative executable resolves against our cwd, not initialdir
-        result = schedd.submit(htc.Submit(desc), count=n, spool=self.profile.spool)
-        if self.profile.spool:
-            schedd.spool(result)
+        result = self._submit(htc, schedd, desc, n)
         self.cluster = (name, int(result.cluster()))
         self._constraint = f"ClusterId == {self.cluster[1]}"
         self._schedd = schedd
 
+    def _stage(self, log_dir: Path, script_name: str, module: str) -> Path:
+        """Write the job script running ``python -m <module> "$@"`` and, when the site ships it, ``env.tgz``."""
+        python = "./env/bin/python" if self.profile.ship_env else sys.executable
+        script = log_dir / script_name
+        script.write_text(
+            f'#!/bin/sh\n[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\nexec {python} -m {module} "$@"\n'
+        )
+        script.chmod(0o755)
+        if self.profile.ship_env:
+            with tarfile.open(log_dir / ENV_FILE, "w:gz") as tar:
+                tar.add(self.env, arcname="env")
+        return script
+
+    def _submit(self, htc: Any, schedd: Any, desc: Mapping[str, str], n: int) -> Any:
+        """Submit ``n`` jobs of ``desc``, spooling their sandbox where the site needs it."""
+        result = schedd.submit(htc.Submit(dict(desc)), count=n, spool=self.profile.spool)
+        if self.profile.spool:
+            schedd.spool(result)
+        return result
+
     def _choose(self, htc: Any) -> tuple[str, Any]:
         """The site's schedd: lowest :func:`schedd_weight` among the query's ads, asking each collector
-        in the param's list in turn, else the user's own schedd."""
+        in the param's list in turn, else the user's own schedd; ``schedd_locate`` overrides both."""
+        if self.schedd_locate is not None:
+            pool, name = self.schedd_locate
+            return name, htc.Schedd(htc.Collector(pool).locate(htc.DaemonType.Schedd, name))
         if self.profile.schedd_query is None:
-            return str(htc.param.get("SCHEDD_HOST") or socket.getfqdn()), htc.Schedd()
+            # the name a later session locates this schedd by: its own ad's, not this host's
+            name = htc.param.get("SCHEDD_HOST") or htc.Collector().locate(htc.DaemonType.Schedd)["Name"]
+            return str(name), htc.Schedd()
         param, constraint = self.profile.schedd_query
         errors = []
-        for node in re.findall(r"[\w/:\-.]+", str(htc.param[param])):
+        for node in collectors(htc, param):
             try:
                 collector = htc.Collector(node)
                 ads = collector.query(htc.AdType.Schedd, constraint, list(WEIGHT_ATTRS))
@@ -253,6 +274,11 @@ class CondorPilots:
             # a spooled job stays in the queue after it completes until it is removed
             self._schedd.act(htc.JobAction.Remove, constraint, reason="graphed: run closed")
         self._secret.unlink(missing_ok=True)
+
+
+def collectors(htc: Any, param: str) -> list[str]:
+    """The collectors listed in the config ``param``, in order."""
+    return re.findall(r"[\w/:\-.]+", str(htc.param[param]))
 
 
 def _check_shippable(env: Path) -> None:

@@ -13,6 +13,12 @@ Run on an HTCondor pool
   built in; ``SiteProfile`` describes your own. ``LocalPilots`` runs the same pilots as local
   processes. A lost pilot's task is re-run once on another pilot, and a plan whose functions a pilot
   cannot import is refused before anything is submitted. See :doc:`htcondor`.
+* ``submit_driverless(plan, site=..., n_pilots=N)`` runs the driver itself as one HTCondor job, so
+  the run needs no login session: its pilots run in the job's own slot (``pilots="local"``, the
+  LPC's way) or as jobs it submits (``pilots="condor"``, e.g. lxplus). The ``RunHandle`` it returns
+  reports the job's status, waits, and fetches the result, and saves to JSON for a later session.
+  ``SiteProfile`` gains ``worker_ports``, ``service_ports`` and ``jobs_can_submit``. See
+  :doc:`htcondor`.
 
 0.0.4
 -----
