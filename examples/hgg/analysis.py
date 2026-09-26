@@ -22,7 +22,7 @@ import json
 import logging
 import operator
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -829,7 +829,7 @@ class Counters:
     names: tuple[str, ...]
 
     def __call__(self, values: list[Any]) -> dict[str, Any]:
-        v = dict(zip(self.names, values, strict=False))  # the part's path follows the counters
+        v = dict(zip(self.names, values, strict=False))
         n = int(v["nTot"])
         nPos, nNeg = int(v.get("nPos", n)), int(v.get("nNeg", 0))
         return {
@@ -886,7 +886,7 @@ def plan(fileset: Mapping[str, Mapping[str, Any]], *, year: str, out: str) -> Pl
     return collate({ds: dataset_plan(ds, files, year=year, out=out) for ds, files in fileset.items()})
 
 
-__all__: Sequence[str] = [
+__all__ = [
     "LUMIMASK_PLUGIN",
     "Counters",
     "HggInclusiveProcessor",
