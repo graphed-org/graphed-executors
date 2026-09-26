@@ -167,9 +167,9 @@ ignore_missing_imports = true
 follow_imports = "skip"
 
 # examples/hgg: coffea, higgs_dna, pyarrow and fsspec ship no type information, and only the test-hgg
-# job installs coffea/higgs_dna; hgg_harness is the frozen m69a harness validate_real.py imports.
+# job installs coffea/higgs_dna/correctionlib; hgg_harness is the frozen m69a harness validate_real.py imports.
 [[tool.mypy.overrides]]
-module = ["coffea.*", "higgs_dna.*", "pyarrow.*", "fsspec", "hgg_harness"]
+module = ["coffea.*", "higgs_dna.*", "correctionlib.*", "pyarrow.*", "fsspec", "hgg_harness"]
 ignore_missing_imports = true
 
 # dask/distributed ship no type information; the dask backend is optional and only imported lazily.
