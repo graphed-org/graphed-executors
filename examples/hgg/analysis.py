@@ -28,6 +28,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, ClassVar
 
+import correctionlib
 import numpy
 from coffea import processor
 from coffea.lumi_tools import LumiMask
@@ -158,7 +159,7 @@ def add_jetId(jets: Any, nano_version: int, year: str, flattenUnflatten: bool = 
     }
     # the correctionlib plugin parses JSON bytes, so the gzip is opened here
     payload = gzip.decompress(Path(jerc_json[year]).read_bytes())
-    corrections = {c["name"]: [i["name"] for i in c["inputs"]] for c in json.loads(payload)["corrections"]}
+    cset = correctionlib.CorrectionSet.from_string(payload.decode())
 
     if flattenUnflatten:
         counts = gak.num(jets)
@@ -177,9 +178,8 @@ def add_jetId(jets: Any, nano_version: int, year: str, flattenUnflatten: bool = 
     }
 
     def evaluate(name: str) -> Any:
-        names = corrections[name]
-        slots = [f"${i}" for i in range(len(names))]
-        return gak.apply_correction(payload, name, [eval_dict[n] for n in names], None, args=slots)
+        inputs = [eval_dict[i.name] for i in cset[name].inputs]
+        return gak.apply_correction(payload, name, inputs, None, args=[f"${i}" for i in range(len(inputs))])
 
     idTight_value = evaluate("AK4PUPPI_Tight") * 2
     idTightLepVeto_value = evaluate("AK4PUPPI_TightLeptonVeto") * 4
