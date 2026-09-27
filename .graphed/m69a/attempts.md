@@ -1,6 +1,6 @@
 # m69a — the H→γγ inclusive processor on graphed (attempts log)
 
-Frozen suite `tests/frozen/m69a` at `freeze-m69a` (8ee8cd4). Design: `lanes/htcondor/plan-services.md` §4.
+Frozen suite `tests/frozen/m69a` at `freeze-m69a` (3dc678b). Design: `lanes/htcondor/plan-services.md` §4.
 
 ## Iteration 1 — baseline
 - `GRAPHED_HGG_REQUIRED=1 pytest tests/frozen/m69a`: 18 pass, 9 fail, every failure `ModuleNotFoundError: analysis`.
