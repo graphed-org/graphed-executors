@@ -27,7 +27,7 @@ History (as recorded before #63):
 ## Release gate: the graphed floor
 - `pyproject.toml` floors `graphed>=0.0.6`, and released 0.0.6 has no `graphed.services`; m68a hard-imports it from
   `local/executors.py`, `submit/engine.py`, `submit/services.py`, `submit/recipes.py`, `htcondor_backend/` and the dask
-  and parsl `transport_peer.py`. CI installs graphed by ref (`env.GRAPHED`, now graphed#63's head f69dec1), so the suite runs.
+  and parsl `transport_peer.py`. CI installs graphed by ref (`env.GRAPHED`, now graphed#63's merge commit d0ad16b on main), so the suite runs.
 - Gate: **no graphed-executors release before the floor moves to the graphed release that carries `graphed.services`
   and the resolve walk** (plan §7: "floored at the release that holds both"). The floor is deliberately unchanged
   until that release exists.
