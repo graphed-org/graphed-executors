@@ -13,3 +13,8 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
 - Local gates run on CPython 3.12 (the `test-htcondor`/`docs` interpreter); the all-OS/all-version matrix is CI's.
 - Live legs (minicondor + Triton container): `get.htcondor.org` and `nvcr.io` are refused by this session's egress policy (403). A `htcondor/mini` container pool was tried: the condor CLI submits, but the pip `htcondor2` bindings fail FS authentication against it. The `test-htcondor` leg is therefore gated by the PR's CI, as the brief allows.
 - Pre-existing, not m68a: under `pytest -n 8`, `tests/extra/m66/test_m66_ports.py::test_a_bind_failure_names_the_site_and_the_range` and `test_m66_server.py::...exits_at_once[mid-task]` fail on port contention; both pass serially (CI runs serially). Local gates run serially.
+
+## Freeze
+- Test author wrote `tests/frozen/m68a/` (144 tests). Sanity r1 was NOT SANE, with three required fixes: README contract readings, bounding every planned-API call, and a probe fault that discriminates a connect-only probe. Optional A/B/C/E were also applied. Sanity r2 was SANE: 130 failed, 12 passed and 2 skipped on the unimplemented tree, identical across two runs, with 0 collection errors; ruff, format and mypy clean.
+- Deliberately not applied (sanity r2 optional nits, non-blocking): three `ServiceSet(...)` constructors sit outside `run_bounded`, but the plan's constructor only runs `split_endpoint`; and the README has no line saying the bare-endpoint refusal is graphed's `split_endpoint` text.
+- The test author validated attainability against a throwaway prototype outside `src/`. It was deleted before the implementer started, and the implementer never saw it.
