@@ -290,16 +290,6 @@ class _RunTasks:
             self._backend.cancel(pending)
 
 
-def _resolved_value(plan: Plan[R], value: R) -> R:
-    """graphed's ``resolve_services(plan, value)`` where graphed has it, else the same call on a
-    process that has the hook (the whole walk for a non-composite process), else ``value``."""
-    walk = getattr(graphed_services, "resolve_services", None)
-    if callable(walk):
-        return cast(R, walk(plan, value))
-    hook = getattr(plan.process, "resolve_services", None)
-    return cast(R, hook(value)) if callable(hook) else value
-
-
 class SubmitRunner:
     """A :class:`graphed.core.Executor` over any :class:`SubmitBackend`. ``run`` dispatches to the
     adaptive path when the plan carries ``next_tasks``, else the fixed ``plan_tree`` future graph.
@@ -397,7 +387,8 @@ class SubmitRunner:
                 result = self._run_fixed(bound, monitor, ctx, events_seen, submits)
             if not plan.services:
                 return result
-            return replace(result, value=_resolved_value(bound, result.value))  # the services are still up
+            # graphed's walk, through collate and aggregate_plan, while the services are still up
+            return replace(result, value=graphed_services.resolve_services(bound, result.value))
         finally:
             if unsub is not None:
                 unsub()

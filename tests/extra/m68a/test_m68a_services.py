@@ -26,7 +26,7 @@ import pytest
 from graphed.core.execution import Partition, Plan, Task
 from graphed.services import Launch, ServiceSpec
 
-from graphed_executors.submit import SubmitRunner, ThreadBackend, engine
+from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit import services as svc
 from graphed_executors.submit.recipes import http_server
 
@@ -364,17 +364,24 @@ def test_statuses_are_stamped_when_the_set_closes() -> None:
 # ---- the engine ----------------------------------------------------------------------------------------
 
 
-def test_graphed_s_resolve_walk_is_preferred_once_it_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_graphed_s_resolve_walk_is_what_a_run_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The engine hands the run's value to ``graphed.services.resolve_services`` with the bound plan
+    and returns what it gives back; a process without the hook comes back unchanged."""
     seen: list[Any] = []
+    real = graphed_services.resolve_services
 
     def walk(plan: Plan[Any], value: Any) -> Any:
-        seen.append(value)
-        return ("walked", value)
+        seen.append((plan.process, value))
+        return ("walked", real(plan, value))
 
     plain = plan_of(leaf_uri, [])
-    assert engine._resolved_value(plain, ("v",)) == ("v",)  # no hook, no walk: the value itself
-    monkeypatch.setattr(graphed_services, "resolve_services", walk, raising=False)
-    assert engine._resolved_value(plain, ("v",)) == ("walked", ("v",)) and seen == [("v",)]
+    assert graphed_services.resolve_services(plain, ("v",)) == ("v",)  # no hook: the value itself
+    monkeypatch.setattr(graphed_services, "resolve_services", walk)
+    with serving() as endpoint, SubmitRunner(ThreadBackend(2), services={"web": endpoint}) as runner:
+        result = runner.run(plan_of(GetProcess(), [bare()]))
+    assert result.value == ("walked", ("resolved", "body", "body"))
+    ((process, value),) = seen
+    assert process == GetProcess(endpoint) and value == ("body", "body")
 
 
 def test_a_run_without_services_cancels_nothing() -> None:
