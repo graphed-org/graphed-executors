@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import getpass
 import json
-import logging
 import os
 import re
 import shutil
@@ -43,8 +42,6 @@ ENV_FILE = "env.tgz"
 # a driverless job's files; here, not in driver.py, so importing the package never imports the -m entry
 PLAN_FILE, RUN_FILE, RESULT_FILE, LOG_FILE = "plan.pkl", "run.json", "result.pkl", "driver.log"
 PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
-
-logger = logging.getLogger("graphed_executors.htcondor")
 
 
 def _htcondor() -> Any:
@@ -295,14 +292,16 @@ class CondorPilots:
         ads = self._schedd.query(constraint=self._constraint, projection=["JobStatus", "HoldReasonCode"])
         return sum(counts_as_alive(ad) for ad in ads)
 
+    def _drain(self) -> None:
+        deadline = time.monotonic() + CLOSE_WAIT_S
+        while self.alive() and time.monotonic() < deadline:
+            time.sleep(1.0)
+
     def stop(self) -> None:
         """Wait for the pilots to exit, fetch the spooled logs into ``log_dir``, and remove the jobs."""
-        deadline = time.monotonic() + CLOSE_WAIT_S
-        try:
-            while self.alive() and time.monotonic() < deadline:
-                time.sleep(1.0)
-        except Exception:  # the removal below still runs
-            logger.warning("waiting for the pilots of %s to exit failed", self.cluster, exc_info=True)
+        release_quietly(
+            f"the wait for the pilots of {self.cluster} to exit", self._drain
+        )  # removal still runs
         self._stack.close()
         self._secret.unlink(missing_ok=True)
 

@@ -6,10 +6,12 @@ logged, not raised. No bindings: every schedd here is a recorder."""
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import logging
+import pickle
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -20,11 +22,12 @@ from graphed_executors.htcondor_backend import (
     CondorPilots,
     HTCondorBackend,
     RunHandle,
+    SiteProfile,
     driver,
     launch,
     submit_driverless,
 )
-from graphed_executors.submit.services import release_quietly
+from graphed_executors.submit.services import ServiceStatus, ServiceUnavailable, release_quietly
 
 
 class Schedd:
@@ -143,3 +146,33 @@ def test_the_driver_restores_the_package_logger(tmp_path: Path) -> None:
     assert driver.main([str(tmp_path)]) == 1  # no run.json: a setup failure
     assert (package.level, list(package.handlers)) == before
     assert "exit 1" in (tmp_path / "driver.log").read_text()
+
+
+@pytest.mark.parametrize("name", [*sorted(SITES), "synthetic"])
+def test_site_rows_pickle_copy_and_replace(name: str) -> None:
+    """``services`` is a mappingproxy (the frozen-mapping defaults rule); the row still pickles,
+    deep-copies and replaces, as graphed's ``Launch`` does, and comes back read-only."""
+    row = SITES.get(name) or SiteProfile(
+        name="m68a-synthetic",
+        submit={"k": "v"},
+        spool=False,
+        ship_env=False,
+        sandbox_root=None,
+        schedd_query=None,
+        service_ports=(20001, 20010),
+        worker_ports=(20000, 20010),
+        services={"triton": "grpcs://triton.m68a.example:443", "http": "http://web.m68a.example:80"},
+    )
+    for copied in (pickle.loads(pickle.dumps(row)), copy.deepcopy(row), dataclasses.replace(row)):
+        assert copied == row and dict(copied.services) == dict(row.services)
+        assert isinstance(copied.services, MappingProxyType)
+    moved = dataclasses.replace(row, services={"http": "http://other.m68a.example:81"})
+    assert dict(pickle.loads(pickle.dumps(moved)).services) == {"http": "http://other.m68a.example:81"}
+
+
+def test_a_refusal_with_read_only_legs_still_reaches_the_result_blob() -> None:
+    legs = MappingProxyType({"user": "no endpoint given", "managed": "no launch recipe"})
+    ok, exc = pickle.loads(driver._result_blob(False, ServiceUnavailable("web", legs)))
+    assert ok is False and type(exc) is ServiceUnavailable and exc.legs == dict(legs)
+    status = ServiceStatus("web", "user", None, "http://h:1", None, None, 1.0)
+    assert pickle.loads(pickle.dumps(status)) == status and copy.deepcopy(status) == status

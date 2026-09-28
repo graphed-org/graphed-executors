@@ -10,7 +10,7 @@ second leg of a run's service set.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from types import MappingProxyType
 from typing import Any
 
@@ -52,6 +52,12 @@ class SiteProfile:
             except ValueError as exc:
                 raise ValueError(f"site {self.name!r}: services[{kind!r}]: {exc}") from None
         object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        # a mappingproxy neither pickles nor deep-copies; the constructor re-wraps the plain dict (as
+        # graphed's Launch does)
+        values = [getattr(self, f.name) for f in fields(self)]
+        return (type(self), tuple(dict(v) if isinstance(v, MappingProxyType) else v for v in values))
 
     @property
     def service_hosts(self) -> tuple[str, ...]:
