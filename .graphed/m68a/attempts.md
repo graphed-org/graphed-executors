@@ -92,3 +92,12 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
 - venv graphed reinstalled at f69dec1 (graphed#63 head). `ci.yml` GRAPHED pinned there; the engine calls
   `graphed.services.resolve_services(bound, value)` directly; `_resolved_value` and its monkeypatch extra test deleted;
   blockers.md marks the resolve-walk blocker resolved (release-gate section kept). Changelog had no fallback mention.
+
+## Final review (fresh reviewer, HEAD 0ae0c4e): APPROVE
+- Local gates: 1228 passed, and the 6 failures are only the live-pool tests (m66 ×2, m67 ×3, m68a ×1; no pool here). The per-file coverage gate passes (minimum 97.03%, `local/executors.py`), diff-cover against upstream/main is 100% of 407 lines, precommit is ok, `sphinx -W` passes, and the frozen tree differs from 83ca76f only by the sanctioned m66 amendment.
+- Nits left as follow-ups:
+  - On Windows, the port scan's 1 s connect check costs about 1 s on each free port. Shorten the timeout, or use `SO_EXCLUSIVEADDRUSE` and skip the connect.
+  - Probe-cancel callbacks keep completed probe futures on a warm set's stack until it closes. Use a pending set in the `_RunTasks` idiom.
+  - `_check_grpc` honours proxy environment variables while `_check_http` bypasses them. Set `grpc.enable_http_proxy=0`, or document why they differ.
+- Pending CI (graphed-org/graphed-executors#39): test-htcondor (pool + Triton), test-dask, test-parsl, and the all-OS matrix.
+- Graphed side: graphed-org/graphed#63 (resolve walk). Reviewer APPROVE on f69dec1, with doc wording fixed in 1ff3479. CI was 36/36 green on f69dec1.
