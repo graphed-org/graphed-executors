@@ -38,6 +38,9 @@ Services a plan calls
   load error and ``driver.log``.
 * The runners that resolve no services (the local executors, the peer reductions) refuse a plan
   whose services are unbound before running any task.
+* This needs ``graphed.services``, which no graphed release has yet (0.0.6 does not): CI installs
+  graphed from git, and graphed-executors will not be released until its ``graphed`` floor moves to
+  the release carrying the service surface and its resolve walk.
 
 An H→γγ analysis on graphed
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

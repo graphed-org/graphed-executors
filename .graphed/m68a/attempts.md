@@ -50,3 +50,20 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
   - precommit `PRECOMMIT-GATE: ok` before each commit; sphinx -W ok; `git diff 83ca76f -- tests/frozen` empty.
 - Dispute filed: m66 `.coveragerc-htcondor` exact-source pin vs plan §6 / the m68a packaging pin.
 - Not verifiable here: the live pool and Triton legs (egress), the parsl job (parsl not installed), non-Linux legs of the all-OS job.
+
+## Implementer iteration 2 (review r1 REJECT: findings 3-11)
+- 3/4: blockers.md records the release gate (no release before the graphed floor carries services + the resolve walk;
+  floor unchanged) and the follow-up (delete `_resolved_value`, call `graphed.services.resolve_services` directly);
+  the changelog says graphed.services is unreleased.
+- 5: `recipes.http_server(root=)`: the default argv is the plan's exactly; `root != "."` appends `--directory root`
+  (and stays the staged input). Ambiguity: the plan's argv has no directory and the frozen suite does not pin `root`;
+  the previous reading (inputs only) served the driver's cwd, so a driver-hosted `root` had no effect. Extra test
+  serves a file from `root`.
+- 6: `_probe` docstring, the module docstring and htcondor.rst say one probe task per set, answers awaited up to the
+  largest `timeout_s` among the set's services, at most max(2, n_workers()) tasks.
+- 7: leg-1/leg-2 checks use the spec's own `timeout_s` (the 30 s cap is gone; no frozen test needs one).
+- 8: driver.main's log handler setup is in try/finally: the handler is removed and closed and the package level
+  restored (extra test).
+- 9: one log-never-raise helper, `submit.services.release_quietly`; `launch.quietly` removed, htcondor imports it.
+- 10: the managed readiness loop has its own `_READY_CHECK_S`.
+- 11: `RunHandle.result()` reads `result.pkl` outside the load `try`: a missing file raises as itself (extra test).
