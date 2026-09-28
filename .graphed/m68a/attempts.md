@@ -80,3 +80,8 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
   6-port range, and a scan without REUSEADDR runs out of ports by trial 3). Kept it on POSIX and added a connect
   check to the scan, which rejects a port anything listens on: the macOS/BSD wildcard-listener case the reviewer
   raised, and Windows' non-exclusive wildcard listener. Extra test simulates the passing bind.
+- Round-3 gates: main 1225 passed / 9 failed (the expected set) / 37 skipped, per-file min 97.03%, diff 100%;
+  htcondor 297 / 9 (same set) / 2, min 96.0%, diff 100%; dask 358 passed, 1 failed, min 91.7%, diff 100%; sphinx ok.
+  The dask failure, `tests/frozen/m43/test_dask_join_relational.py::test_salted_join_stays_co_partitioned_and_matches_local[numpy]`
+  (an empty join result), passed 5/5 isolated reruns and in the round-2 full run. Its path (common/tasks_engine.py
+  through `runner.backend.submit`) touches no m68a code, so it is recorded as an intermittent, not an m68a change.
