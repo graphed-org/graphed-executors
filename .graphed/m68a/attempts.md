@@ -87,3 +87,8 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
   through `runner.backend.submit`) touches no m68a code, so it is recorded as an intermittent, not an m68a change.
 - Coordinator check on the round-3 dask-scoped failure (`tests/frozen/m43/test_dask_join_relational.py::test_salted_join_stays_co_partitioned_and_matches_local[numpy]`, an empty join once): it passed 24/24 (12 reruns × 2 params) at b2f1a94. Its path calls `runner.backend.submit` directly (`common/tasks_engine.py:288,382,490`), and m68a's only dask-side change is the `services=` passthrough in `dask_runner` and `require_bound` in `transport_run_plan`. Not caused by m68a; CI's test-dask is the confirming run.
 - m66 freeze amendment (owner ruling on the dispute): `freeze-m66-2` → `e2a2e4de750f51932d49453288eb9a43791a9474`.
+
+## Implementer iteration 4 (graphed#63 resolve walk)
+- venv graphed reinstalled at f69dec1 (graphed#63 head). `ci.yml` GRAPHED pinned there; the engine calls
+  `graphed.services.resolve_services(bound, value)` directly; `_resolved_value` and its monkeypatch extra test deleted;
+  blockers.md marks the resolve-walk blocker resolved (release-gate section kept). Changelog had no fallback mention.

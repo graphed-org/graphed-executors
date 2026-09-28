@@ -1,6 +1,13 @@
 # m68a blockers (upstream, not disputes)
 
-## graphed's resolve walk is not merged
+## graphed's resolve walk is not merged — RESOLVED
+- **Resolved (2026-09-28):** graphed-org/graphed PR #63 (branch `resolve-walk`, head `f69dec1`) adds
+  `graphed.services.resolve_services`/`Resolvable` and the composites' forwarding. `ci.yml`'s `GRAPHED` pin is at
+  that head (to move to its merge commit, then the release). The engine calls `graphed.services.resolve_services(bound,
+  value)` directly; the fallback `_resolved_value` and its extra test are deleted. The two frozen legs
+  (`test_resolve_reaches_a_collated_part`, `test_resolve_reaches_an_aggregate_plan_reduce`) pass.
+
+History (as recorded before #63):
 - Plan: `plan-services.md` §3.2 "The resolve walk" (a graphed PR "stacked on main before the release executors floor
   at") and §7 ("graphed m68 PR and the resolve walk before executors m68a").
 - Observed (2026-09-28): `graphed-org/graphed` main `6e9e55e` has `services.py` with `ServiceSpec`, `Launch`,
@@ -20,7 +27,7 @@
 ## Release gate: the graphed floor
 - `pyproject.toml` floors `graphed>=0.0.6`, and released 0.0.6 has no `graphed.services`; m68a hard-imports it from
   `local/executors.py`, `submit/engine.py`, `submit/services.py`, `submit/recipes.py`, `htcondor_backend/` and the dask
-  and parsl `transport_peer.py`. CI installs graphed cf4520d by ref (`env.GRAPHED`), so the suite runs.
+  and parsl `transport_peer.py`. CI installs graphed by ref (`env.GRAPHED`, now graphed#63's head f69dec1), so the suite runs.
 - Gate: **no graphed-executors release before the floor moves to the graphed release that carries `graphed.services`
   and the resolve walk** (plan §7: "floored at the release that holds both"). The floor is deliberately unchanged
   until that release exists.
