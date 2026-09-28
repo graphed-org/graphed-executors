@@ -19,3 +19,34 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
 - Deliberately not applied (sanity r2 optional nits, non-blocking): three `ServiceSet(...)` constructors sit outside `run_bounded`, but the plan's constructor only runs `split_endpoint`; and the README has no line saying the bare-endpoint refusal is graphed's `split_endpoint` text.
 - The test author validated attainability against a throwaway prototype outside `src/`. It was deleted before the implementer started, and the implementer never saw it.
 - **Freeze sha: `83ca76fbd0b39ecedbd651584f9573d059de71bd`** (`test(m68a): frozen m68a acceptance suite`). The annotated tag `freeze-m68a` exists locally at that commit. The session's git proxy drops every push that carries the tag (`send-pack: unexpected disconnect`, 5 tries with backoff), while the same commit pushed as a branch. Per the brief, the sha is recorded here. Integrity check for reviewers: `git diff 83ca76f -- tests/frozen` must be empty.
+
+## Implementer iteration 1
+- Changed: `submit/services.py` (ServiceSet, three legs, check_ready, probe, host_identity, releases), `submit/recipes.py`,
+  engine (`run` opens one ExitStack per submission: ServiceSet then plan-task cancel; bind before the first submit,
+  resolve while up; `_RunTasks` holds only not-done futures), `ThreadBackend.advertise_host`, `services=` on
+  `dask_runner`/`parsl_runner`/`htcondor_runner`/`HTCondorRunner`, `require_bound` in `_BaseExecutor.run`,
+  `transport_run_plan`, `parsl_run_plan`; htcondor sites/backend/launch/driverless/driver; ci.yml, `.coveragerc-htcondor`,
+  docs; `tests/extra/m68a/`; `tests/extra/m67/test_m67_driver.py` updated for E1 (`machine_host` -> `services.host_identity`),
+  E12 (the "did not round-trip through pickle" wording) and the driver's service phase (a real `Plan` in the failing-close fake).
+- Ambiguities resolved (one line each):
+  - r23 `_RunLeaves` does not fit as-is: its `_done` calls `fut.cancelled()`, which `SubmitFuture`/`_ParslFuture` lack; the engine has `_RunTasks` in the same idiom (add under the lock, callback outside, cancel snapshot a list under the lock; done futures filtered, since a done future may not have called back yet).
+  - One probe task per set covers every spec's check; its answer wait is the largest `timeout_s` of the set; a leg-1/leg-2 check is one attempt bounded by min(timeout_s, 30 s).
+  - Statuses are logged at resolution (once per spec per start), before the probe; `closed_at` is stamped on `statuses()` at close.
+  - `ServiceUnreachable.worker` is "" when no worker answered.
+  - `recipes.http_server(root=)`: `root`, unless ".", is the recipe's staged `inputs`; argv unchanged (the suite pins argv).
+  - In-job `HTCondorBackend`: `service_ports` = row's `worker_ports` for self-submitted pilots (CondorPilots), else None (E8); `host_identity()` = the module function (E9: exposed, not absent).
+  - `HTCondorBackend.close` = its kept stack: server.close, launcher.stop, (server.close again, a no-op), shutdown; each step logged, never raised.
+  - `test-dask` gates `submit/` (per-file 90%, diff 98% over `submit/**`), so it now also runs `tests/extra/m68a` and installs `grpcio-health-checking`; `test-htcondor` timeout 30 -> 45 min for the Triton image pull (not a quality gate).
+  - driver.main adds a `graphed_executors` log handler to `driver.log` (service statuses and failed releases land there).
+- Commits: 4e572a4 feat(services) (+1305/-21), b16842d feat(htcondor) (+371/-93), 60a3ead ci+docs(m68a) (+162/-14).
+- Gates (CPython 3.12, serial):
+  - main `pytest tests/frozen tests/extra --cov`: 1216 passed, 9 failed, 37 skipped (parsl/coffea/perspective absent; the two
+    Triton legs without GRAPHED_TRITON_GRPC). Failed = expected-red: the two resolve-walk legs; the pool legs of m66/m67/m68a
+    live files (no pool here); and `tests/frozen/m66/test_htcondor_packaging_pins.py::test_coveragerc_htcondor_gates_exactly_the_backend`
+    (disputed, see disputes/). Per-file min 96.86% (local/executors.py); diff-cover vs upstream/main 100% (404 lines).
+  - htcondor-scoped (.coveragerc-htcondor, subprocess coverage, no pool): 288 passed, 9 failed (same set), 2 skipped;
+    per-file min 96%; diff-cover (htcondor_backend + submit/services.py) 100% (473 lines).
+  - dask-scoped (.coveragerc-dask, ci.yml's list + m68a): all passed; submit/ per-file >= 98.3%; diff-cover 100%.
+  - precommit `PRECOMMIT-GATE: ok` before each commit; sphinx -W ok; `git diff 83ca76f -- tests/frozen` empty.
+- Dispute filed: m66 `.coveragerc-htcondor` exact-source pin vs plan §6 / the m68a packaging pin.
+- Not verifiable here: the live pool and Triton legs (egress), the parsl job (parsl not installed), non-Linux legs of the all-OS job.
