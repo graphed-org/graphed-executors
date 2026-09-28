@@ -101,8 +101,9 @@ class RunHandle:
         if in_queue and SITES[self.site].spool:
             schedd.retrieve(f"ClusterId == {self.cluster}")
         # result.pkl crossed from the job's environment to this one, whose load is the authority
+        blob = (Path(self.log_dir) / RESULT_FILE).read_bytes()  # a missing file raises as itself
         try:
-            ok, payload = pickle.loads((Path(self.log_dir) / RESULT_FILE).read_bytes())
+            ok, payload = pickle.loads(blob)
         except Exception as exc:
             raise RuntimeError(
                 f"cluster {self.cluster}'s {RESULT_FILE} does not load here ({type(exc).__name__}: {exc}); "

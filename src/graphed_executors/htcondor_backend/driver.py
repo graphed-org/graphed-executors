@@ -45,10 +45,11 @@ from graphed_executors.submit.services import (
     ServiceUnavailable,
     ServiceUnreachable,
     host_identity,
+    release_quietly,
 )
 
 from .backend import HTCondorBackend, HTCondorRunner
-from .launch import LOG_FILE, PLAN_FILE, RESULT_FILE, RUN_FILE, CondorPilots, LocalPilots, quietly
+from .launch import LOG_FILE, PLAN_FILE, RESULT_FILE, RUN_FILE, CondorPilots, LocalPilots
 from .server import WorkerLost
 from .sites import SITES
 
@@ -75,7 +76,7 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
         host, ports = "127.0.0.1", profile.worker_ports or (0, 0)
     with ExitStack() as on_error:  # held until the runner exists: a failure after the pilots stops them
         backend = HTCondorBackend(launcher, n, host=host, port_range=ports, in_job=profile)
-        on_error.callback(quietly, "the driver job's backend", backend.close)
+        on_error.callback(release_quietly, "the driver job's backend", backend.close)
         if run["pilots"] == "condor":
             where = f"cluster={launcher.cluster}"
         else:
@@ -126,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         handler = logging.StreamHandler(log)
         handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
         package = logging.getLogger("graphed_executors")
+        level = package.level
         package.addHandler(handler)  # service statuses and failed releases, in driver.log
         package.setLevel(logging.INFO)
         try:
@@ -152,11 +154,14 @@ def main(argv: list[str] | None = None) -> int:
                     traceback.print_exc(file=log)
         except Exception as exc:
             error, code = exc, EXIT_FAILED
+        finally:
+            package.removeHandler(handler)
+            handler.close()
+            package.setLevel(level)
         blob = _result_blob(True, result) if error is None else _result_blob(False, error)
         if error is not None:
             traceback.print_exception(error, file=log)
         print(f"exit {code} after {time.monotonic() - start:.1f}s", file=log, flush=True)
-        package.removeHandler(handler)
     (job / RESULT_FILE).write_bytes(blob)
     return code
 

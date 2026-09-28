@@ -27,10 +27,10 @@ from graphed.core.execution import ExecResult, Plan
 from graphed_executors.parsl_backend.backend import _ParslFuture
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
-from graphed_executors.submit.services import host_identity
+from graphed_executors.submit.services import host_identity, release_quietly
 
 from . import launch as _launch
-from .launch import CondorPilots, PilotLauncher, quietly
+from .launch import CondorPilots, PilotLauncher
 from .server import TaskServer, WorkerLost
 from .sites import SITES, SiteProfile
 
@@ -91,12 +91,12 @@ class HTCondorBackend:
                 f"no free port for the task server: site={profile.name} ports={low}-{high}"
             ) from exc
         with ExitStack() as stack:  # a refused start must not leave the server holding its port
-            stack.callback(quietly, "the task server's port", self._server.shutdown)
-            stack.callback(quietly, "the task server", self._server.close)
+            stack.callback(release_quietly, "the task server's port", self._server.shutdown)
+            stack.callback(release_quietly, "the task server", self._server.close)
             launcher.start(self._server.url, self._server.secret, n_pilots)
-            stack.callback(quietly, "the pilots", launcher.stop)
+            stack.callback(release_quietly, "the pilots", launcher.stop)
             # closed first: pilots see 410 and exit before they are stopped (a second close is a no-op)
-            stack.callback(quietly, "the task server", self._server.close)
+            stack.callback(release_quietly, "the task server", self._server.close)
             self._stack = stack.pop_all()
 
     def n_workers(self) -> int:

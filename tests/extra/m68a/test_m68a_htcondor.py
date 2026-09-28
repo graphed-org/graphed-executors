@@ -15,7 +15,16 @@ from typing import Any
 import pytest
 from graphed.core.execution import Partition, Plan
 
-from graphed_executors.htcondor_backend import SITES, CondorPilots, HTCondorBackend, launch, submit_driverless
+from graphed_executors.htcondor_backend import (
+    SITES,
+    CondorPilots,
+    HTCondorBackend,
+    RunHandle,
+    driver,
+    launch,
+    submit_driverless,
+)
+from graphed_executors.submit.services import release_quietly
 
 
 class Schedd:
@@ -101,7 +110,7 @@ def test_a_failed_release_is_logged_not_raised(caplog: pytest.LogCaptureFixture)
         raise RuntimeError("release fault (extra)")
 
     with caplog.at_level(logging.WARNING):
-        launch.quietly("a thing", fails)
+        release_quietly("a thing", fails)
     (record,) = [r for r in caplog.records if r.exc_info]
     assert "releasing a thing failed" in record.getMessage()
 
@@ -118,3 +127,19 @@ def test_a_driverless_submit_whose_spool_fails_leaves_no_job(
     with pytest.raises(RuntimeError, match="spool reset"):
         submit_driverless(plan, site="m68a-spooled", log_dir=tmp_path, request_memory_mb=1)
     assert ("act", "Remove", "ClusterId == 77") in schedd.log
+
+
+def test_a_missing_result_is_not_a_load_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    schedd = Schedd([{"JobStatus": 4, "ExitCode": 0}])
+    monkeypatch.setattr(launch, "_htcondor", lambda: bindings(schedd))
+    handle = RunHandle(site="generic", schedd="s1", cluster=77, log_dir=tmp_path, submitted_at=0.0)
+    with pytest.raises(FileNotFoundError):
+        handle.result()
+
+
+def test_the_driver_restores_the_package_logger(tmp_path: Path) -> None:
+    package = logging.getLogger("graphed_executors")
+    before = (package.level, list(package.handlers))
+    assert driver.main([str(tmp_path)]) == 1  # no run.json: a setup failure
+    assert (package.level, list(package.handlers)) == before
+    assert "exit 1" in (tmp_path / "driver.log").read_text()

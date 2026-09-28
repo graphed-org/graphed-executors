@@ -26,10 +26,12 @@ import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import ExitStack, suppress
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+from graphed_executors.submit.services import release_quietly
 
 from .server import POLL_S
 from .sites import SITES, WEIGHT_ATTRS, SiteProfile, choose_schedd, counts_as_alive
@@ -43,15 +45,6 @@ PLAN_FILE, RUN_FILE, RESULT_FILE, LOG_FILE = "plan.pkl", "run.json", "result.pkl
 PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
 
 logger = logging.getLogger("graphed_executors.htcondor")
-
-
-def quietly(what: str, fn: Callable[..., object], *args: object) -> None:
-    """One release step: its failure is logged, never raised (the first exception is the one that
-    surfaces, and a later release still runs)."""
-    try:
-        fn(*args)
-    except Exception:
-        logger.warning("releasing %s failed", what, exc_info=True)
 
 
 def _htcondor() -> Any:
@@ -104,7 +97,7 @@ class LocalPilots:
         with ExitStack() as stack:
             for _ in range(n):
                 proc = subprocess.Popen(cmd, env=env)
-                stack.callback(quietly, f"pilot pid {proc.pid}", self._stop_pilot, proc)
+                stack.callback(release_quietly, f"pilot pid {proc.pid}", self._stop_pilot, proc)
                 self._procs.append(proc)
             self._stack = stack.pop_all()
 
@@ -258,7 +251,7 @@ class CondorPilots:
         removal goes on ``stack`` as soon as ``schedd.submit`` returns, so a failed spool leaves none."""
         result = schedd.submit(htc.Submit(dict(desc)), count=n, spool=self.profile.spool)
         constraint = f"ClusterId == {int(result.cluster())}"
-        stack.callback(quietly, f"cluster {constraint}", self._remove, htc, schedd, constraint)
+        stack.callback(release_quietly, f"cluster {constraint}", self._remove, htc, schedd, constraint)
         if self.profile.spool:
             schedd.spool(result)
         return result
