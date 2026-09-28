@@ -33,9 +33,13 @@ def triton(name: str, image: str, model_repository: str, *, gpus: int = 1) -> Se
 
 def http_server(name: str, *, root: str = ".") -> ServiceSpec:
     """The generic recipe: stdlib ``http.server`` (kind ``"http"``, checked by a GET of ``/``) serving
-    the directory it starts in. ``root``, unless ``"."``, is the recipe's staged input, for a host that
-    ships inputs to where the service starts. Every hosting path runs it without a service client."""
-    launch = Launch(argv=("{python}", "-m", "http.server", "{port}"), inputs=(root,) if root != "." else ())
+    ``root``, the directory it starts in by default. Any other ``root`` is appended as
+    ``--directory <root>`` and is the recipe's staged input, for a host that ships inputs to where the
+    service starts. Every hosting path runs it without a service client."""
+    argv = ("{python}", "-m", "http.server", "{port}")
+    if root == ".":
+        return ServiceSpec(name, "http", check="http:/", launch=Launch(argv=argv))
+    launch = Launch(argv=(*argv, "--directory", root), inputs=(root,))
     return ServiceSpec(name, "http", check="http:/", launch=launch)
 
 

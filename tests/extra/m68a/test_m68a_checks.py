@@ -183,6 +183,9 @@ def test_the_recipes_are_data() -> None:
     spec = recipes.triton("t", "img", "models/", gpus=0)
     assert spec.launch is not None and (spec.kind, spec.check) == ("triton", "grpc:")
     assert spec.launch.inputs == ("models/",) and spec.launch.resources["gpus"] == 0
-    for root, inputs in (("site/", ("site/",)), (".", ())):
-        web = recipes.http_server("web", root=root)
-        assert web.launch is not None and web.launch.inputs == inputs
+    default = ("{python}", "-m", "http.server", "{port}")
+    web = recipes.http_server("web")
+    assert web.launch is not None and (web.launch.argv, web.launch.inputs) == (default, ())
+    web = recipes.http_server("web", root="site/")
+    assert web.launch is not None and web.launch.inputs == ("site/",)
+    assert web.launch.argv == (*default, "--directory", "site/")

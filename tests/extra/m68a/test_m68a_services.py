@@ -399,3 +399,15 @@ def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(caplog: pytest
         assert ran == ["raising", "first"]
     assert any("on_close fault (extra)" in str(r.exc_info[1]) for r in caplog.records if r.exc_info)
     backend.close()
+
+
+def test_the_http_server_recipe_serves_its_root(tmp_path: Any) -> None:
+    """``root`` is the served directory beside the driver too, not the driver's cwd."""
+    (tmp_path / "marker.txt").write_text("from root")
+    spec = replace(http_server("web", root=str(tmp_path)), ports=free_ports(), timeout_s=30.0)
+    backend = ThreadBackend(1)
+    try:
+        with svc.ServiceSet([spec], backend) as eps, urllib.request.urlopen(eps["web"] + "/marker.txt") as r:
+            assert r.read() == b"from root"
+    finally:
+        backend.close()

@@ -340,10 +340,11 @@ because a gRPC gateway answers HTTP 200 to every path.
 
 **Checked from a worker.** Passing the check on the driver's host proves little about the execute
 nodes, so before the plan's first task the runner submits a small probe task that runs the same
-checks from a pilot. A service the runner started must also answer a pilot on another host than its
-own, unless that host is the driver's (a run on one machine). A service no pilot can reach fails the
-run with ``ServiceUnreachable`` naming the endpoint, the worker and the reason; ``"no worker
-answered"`` means no pilot ran the probe within the spec's ``timeout_s``, and ``"only same-host
+checks from a pilot: one task checks every service the run needs, and the runner waits for its
+answer up to the largest ``timeout_s`` among those services. A service the runner started must also
+answer a pilot on another host than its own, unless that host is the driver's (a run on one
+machine). A service no pilot can reach fails the run with ``ServiceUnreachable`` naming the endpoint, the worker and the reason; ``"no worker
+answered"`` means no pilot ran the probe within that wait, and ``"only same-host
 workers answered"`` that none on another host did.
 
 **Kept warm across plans.** A started service lives as long as the run that started it. To use one

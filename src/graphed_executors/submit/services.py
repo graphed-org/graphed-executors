@@ -12,9 +12,11 @@ the backend offers ``"driver"`` in ``service_hosts``, else on the cluster throug
 raises :class:`ServiceUnavailable` naming each leg and why it did not apply.
 
 Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from a
-worker. The worker probe is an ordinary ``backend.submit`` of :func:`_probe_services`, which answers
-with :func:`host_identity` and each check's reason; it is resubmitted under a fresh key until a host
-other than a managed service's own answers, and a service only its own host can reach passes only
+worker. The worker probe is an ordinary ``backend.submit`` of :func:`_probe_services`, one task that
+runs every service's check and answers with :func:`host_identity` and each check's reason; each answer
+is awaited up to the largest ``timeout_s`` among the set's services. It is resubmitted under a fresh
+key (at most ``max(2, n_workers())`` times) until a host other than a managed service's own answers,
+and a service only its own host can reach passes only
 when that host is the driver's (one machine). Every acquisition registers its release on an
 ``ExitStack`` the moment it returns, each release logs its failure and never raises, so the first
 exception is the one that surfaces and a raising release never skips a later one.
@@ -49,7 +51,7 @@ from graphed.services import ServiceSpec, split_endpoint
 logger = logging.getLogger("graphed_executors.services")
 
 PROBE_CHECK_S = 5.0  # each check a probe task runs
-_CHECK_S = 30.0  # the bound on one check of a given or site endpoint
+_READY_CHECK_S = 5.0  # each check of a starting managed service, polled until its timeout_s
 _POLL_S = 0.1  # between readiness checks of a starting managed service
 _GRACE_S = 5.0  # a terminated managed service's time to exit before it is killed
 _HEALTH_METHOD = "/grpc.health.v1.Health/Check"
@@ -262,8 +264,9 @@ def _probe_services(checks: Sequence[tuple[str, str]]) -> tuple[str, tuple[str |
 # ---- releases --------------------------------------------------------------------------------------
 
 
-def _release(what: str, fn: Callable[..., object], *args: object) -> None:
-    """Run one release step; its failure is logged, never raised (the first exception stands)."""
+def release_quietly(what: str, fn: Callable[..., object], *args: object) -> None:
+    """Run one release step; its failure is logged, never raised, so the first exception is the one
+    that surfaces and a later release still runs. Every release in this package goes through it."""
     try:
         fn(*args)
     except Exception:
@@ -380,7 +383,7 @@ class ServiceSet:
         legs: dict[str, str] = {}
         given = self._given.get(spec.name)
         if given is not None:
-            reason = check_ready(given, spec.check, min(spec.timeout_s, _CHECK_S))
+            reason = check_ready(given, spec.check, spec.timeout_s)
             if reason is not None:
                 raise ServiceUnavailable(spec.name, {"user": f"the given endpoint {given} failed: {reason}"})
             return self._record(spec, "user", None, given, None, None)
@@ -390,7 +393,7 @@ class ServiceSet:
         if endpoint is None:
             legs["site"] = f"the site has no endpoint for kind {spec.kind!r}"
         else:
-            reason = check_ready(endpoint, spec.check, min(spec.timeout_s, _CHECK_S))
+            reason = check_ready(endpoint, spec.check, spec.timeout_s)
             if reason is None:
                 return self._record(spec, "site", None, endpoint, None, None)
             legs["site"] = f"the site endpoint {endpoint} failed: {reason}"
@@ -417,7 +420,7 @@ class ServiceSet:
             )
         started = time.time()
         endpoint, identity, key = host_service(spec, self.scope)
-        stack.callback(_release, f"service {spec.name!r} ({key})", self.backend.release_service, key)
+        stack.callback(release_quietly, f"service {spec.name!r} ({key})", self.backend.release_service, key)
         return self._record(spec, "managed", "cluster", endpoint, identity, started, detail)
 
     def _on_driver(
@@ -432,7 +435,9 @@ class ServiceSet:
             port = _free_port(host, ports)
             env = {**os.environ, **spec.launch.env}
             proc = subprocess.Popen(_render(spec.launch.argv, host, port), env=env)
-            stack.callback(_release, f"service {spec.name!r} (pid {proc.pid})", _stop_child, proc, spec.name)
+            stack.callback(
+                release_quietly, f"service {spec.name!r} (pid {proc.pid})", _stop_child, proc, spec.name
+            )
             endpoint = minted_endpoint(spec.check, host, port)
             deadline = time.monotonic() + spec.timeout_s
             while True:
@@ -441,7 +446,7 @@ class ServiceSet:
                     reason = f"{proc.args!r} exited with returncode {code} before {spec.check!r} passed"
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
                 left = deadline - time.monotonic()
-                reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, PROBE_CHECK_S)))
+                reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
                 if reason_now is None:
                     code = proc.poll()
                     if code is None:
@@ -484,7 +489,9 @@ class ServiceSet:
 
     def _probe(self, resolved: Sequence[_Resolved], stack: contextlib.ExitStack) -> None:
         """Probe every endpoint from a worker until each passes: a managed service needs an answer
-        from a host other than its own, or its own host must be the driver's."""
+        from a host other than its own, or its own host must be the driver's. One task checks every
+        service; each answer is awaited up to the largest ``timeout_s`` among the set's services (the
+        set's one bound, not a per-service one), and at most ``max(2, n_workers())`` tasks are sent."""
         if not resolved:
             return
         checks = [(r.status.endpoint, r.spec.check) for r in resolved]
@@ -493,7 +500,7 @@ class ServiceSet:
         worker = ""
         for i in range(max(2, int(self.backend.n_workers()))):
             fut = self.backend.submit(_probe_services, checks, key=f"svc-{self.scope}-probe-{i}")
-            stack.callback(_release, f"probe task {i}", self._cancel_pending, fut)
+            stack.callback(release_quietly, f"probe task {i}", self._cancel_pending, fut)
             try:
                 worker, answers = fut.result(timeout)
             except TimeoutError:
@@ -525,7 +532,7 @@ class ServiceSet:
     def _on_close(self, callback: Callable[[], object]) -> None:
         if self._stack is None:
             raise RuntimeError("this service set is not open")
-        self._stack.callback(_release, f"on_close callback {callback!r}", callback)
+        self._stack.callback(release_quietly, f"on_close callback {callback!r}", callback)
 
     def _stamp_closed(self) -> None:
         now = time.time()
@@ -541,4 +548,5 @@ __all__ = [
     "check_ready",
     "host_identity",
     "minted_endpoint",
+    "release_quietly",
 ]
