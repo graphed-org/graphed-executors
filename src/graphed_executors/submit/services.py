@@ -29,6 +29,7 @@ and passing its :class:`Endpoints` as the runner's ``services`` (leg 1 for every
 from __future__ import annotations
 
 import contextlib
+import errno
 import importlib
 import logging
 import os
@@ -286,19 +287,31 @@ def _stop_child(proc: subprocess.Popen[bytes], name: str) -> None:
 
 
 def _free_port(host: str, ports: tuple[int, int]) -> int:
-    """The first port of the inclusive range that binds on ``host`` now; the last bind error when none
-    does."""
+    """The first port of the inclusive range that binds on ``host`` now and that nothing answers a
+    connect on; the last error when none does.
+
+    On POSIX the scan sets ``SO_REUSEADDR`` so a port whose earlier connections sit in TIME_WAIT is
+    not skipped (the managed child binds with it too, as ``http.server`` does; without it back-to-back
+    runs walk off a small range). On Linux a listener still refuses that bind, but on macOS/BSD
+    ``SO_REUSEADDR`` lets a specific-address bind pass a port another process holds on the wildcard
+    address, and on Windows a non-exclusive wildcard listener does not refuse a specific bind either;
+    the connect catches both: a port something listens on is never handed out."""
     low, high = ports
     error: OSError = OSError(f"no port in {low}-{high}")
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
     for port in range(low, high + 1):
-        family = socket.AF_INET6 if ":" in host else socket.AF_INET
         with socket.socket(family, socket.SOCK_STREAM) as sock:
-            if sys.platform != "win32":  # skip TIME_WAIT only; a listening socket still refuses the bind
+            if sys.platform != "win32":
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 sock.bind((host, port))
             except OSError as exc:
                 error = exc
+                continue
+        with socket.socket(family, socket.SOCK_STREAM) as probe:
+            probe.settimeout(1.0)
+            if probe.connect_ex((host, port)) == 0:
+                error = OSError(errno.EADDRINUSE, f"port {port} on {host} answers a connect")
                 continue
         return port
     raise error

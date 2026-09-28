@@ -67,3 +67,16 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
 - 9: one log-never-raise helper, `submit.services.release_quietly`; `launch.quietly` removed, htcondor imports it.
 - 10: the managed readiness loop has its own `_READY_CHECK_S`.
 - 11: `RunHandle.result()` reads `result.pkl` outside the load `try`: a missing file raises as itself (extra test).
+
+## Implementer iteration 3 (review r2: APPROVE-conditional, three items)
+- 1: `SiteProfile.__reduce__` rebuilds through the constructor with plain dicts (graphed `Launch`'s idiom), so every
+  row pickles, deep-copies and replaces with `services` still a mappingproxy (extra test over every SITES row + a
+  synthetic one). `dataclasses.asdict` still fails on the mappingproxy, exactly as it does for graphed's `Launch`;
+  nothing calls it on a `SiteProfile`. `ServiceUnavailable` stores `dict(legs)`, so a mappingproxy `legs` pickles
+  through `_result_blob` (extra test); `ServiceStatus` has no mapping field.
+- 2: `CondorPilots.stop` waits through `release_quietly` (`_drain`); launch.py's own logger is gone.
+- 3: dropping `SO_REUSEADDR` was tried and measured: the frozen
+  `test_two_sets_entered_together_get_distinct_ports` fails (the children's closed connections leave TIME_WAIT on the
+  6-port range, and a scan without REUSEADDR runs out of ports by trial 3). Kept it on POSIX and added a connect
+  check to the scan, which rejects a port anything listens on: the macOS/BSD wildcard-listener case the reviewer
+  raised, and Windows' non-exclusive wildcard listener. Extra test simulates the passing bind.

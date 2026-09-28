@@ -411,3 +411,21 @@ def test_the_http_server_recipe_serves_its_root(tmp_path: Any) -> None:
             assert r.read() == b"from root"
     finally:
         backend.close()
+
+
+def test_the_scan_skips_a_port_something_answers_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A port whose bind passes (as on macOS/BSD beside a wildcard listener) is still skipped when a
+    connect is answered; the next one is handed out."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        taken = int(listener.getsockname()[1])
+
+        class Binds(socket.socket):
+            def bind(self, address: Any) -> None:  # the BSD outcome: the bind itself passes
+                if address[1] != taken:
+                    super().bind(address)
+
+        monkeypatch.setattr(socket, "socket", Binds)
+        with pytest.raises(OSError, match="answers a connect"):
+            svc._free_port("127.0.0.1", (taken, taken))
