@@ -85,3 +85,4 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
   The dask failure, `tests/frozen/m43/test_dask_join_relational.py::test_salted_join_stays_co_partitioned_and_matches_local[numpy]`
   (an empty join result), passed 5/5 isolated reruns and in the round-2 full run. Its path (common/tasks_engine.py
   through `runner.backend.submit`) touches no m68a code, so it is recorded as an intermittent, not an m68a change.
+- Coordinator check on the round-3 dask-scoped failure (`tests/frozen/m43/test_dask_join_relational.py::test_salted_join_stays_co_partitioned_and_matches_local[numpy]`, an empty join once): it passed 24/24 (12 reruns × 2 params) at b2f1a94. Its path calls `runner.backend.submit` directly (`common/tasks_engine.py:288,382,490`), and m68a's only dask-side change is the `services=` passthrough in `dask_runner` and `require_bound` in `transport_run_plan`. Not caused by m68a; CI's test-dask is the confirming run.
