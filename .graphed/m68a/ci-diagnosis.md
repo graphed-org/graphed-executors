@@ -52,27 +52,38 @@ Not verified locally: there is no pool or Triton here. The live test needs the C
 
 ## macOS: `getfqdn` reverse lookup
 
-Evidence: all 44 failures are m68a service tests, and every one is a timeout:
-- a managed child's readiness check (`GET http://127.0.0.1:<port>/ failed: <urlopen error timed out>`,
-  `tcp connect ... timed out`);
-- or the worker probe (`no worker answered within 5.0s/10.0s/30.0s`).
+Evidence: all 44 failures are m68a service tests, and every one is a timeout on a readiness check or a worker probe.
+- **The 3c53335 `/etc/hosts` step changed nothing.** Its own timing lines, on run 36608363724: `getfqdn()` took 70.05 s
+  before the step and 70.03 s after.
+- **Cold timings on a macos-latest runner, one process per call, caches flushed first** (branch
+  `diag/macos-fqdn` on the fork, run 36614709844):
+  - setup-python's 3.12: `getfqdn()` >45 s; `getfqdn('127.0.0.1')`, `getfqdn('localhost')` and
+    `http.server` bound on `127.0.0.1` 35 s each; `http.server` bound on `""` >45 s.
+  - The same Python after `scutil --set HostName gha-runner` and a `127.0.0.1 gha-runner` hosts line (quarto-cli#14941's
+    fix): 35 s for every one of those calls.
+  - uv's python-build-standalone 3.12: every one of those calls took ≤ 0.20 s.
+  - This matches actions/setup-python#1223: on macOS 15+ runners, loopback reverse lookups stall at the OS resolver
+    for setup-python's builds.
+- **Where the stall sits, from dumps on this Mac** with `socket.getfqdn` slowed to 70 s in every process (a
+  sitecustomize) and a faulthandler dump per process: `test_the_driver_job_hosts_the_service_and_resolves_the_value`
+  stalls in two places, both `HTTPServer.server_bind` → `getfqdn`:
+  1. The driver job's task server (`htcondor_backend/server.py` `_Http`). The pilot then hangs in its POST. This is
+     product code.
+  2. The frozen `service_child.py` (`ThreadingHTTPServer(("", port))`). This is frozen code; so is the recipe's argv
+     `python -m http.server`, which `test_services_sites.py` pins.
 
-Both paths call `socket.getfqdn()`:
-- the probe task runs `host_identity()`, which is `socket.getfqdn()` (and a frozen test requires exactly that value);
-- the frozen `service_child.py` and the `http_server` recipe serve with `http.server`, whose `HTTPServer.server_bind`
-  calls `socket.getfqdn(host)` between `bind()` and `listen()`.
+  After the product fix, only (2) remains in the dumps.
+- On this Mac with a normal resolver the frozen suite passes: 140 passed, 4 skipped, 56 s.
 
-On macOS runners that reverse lookup blocks for tens of seconds. `local/_transport.py`'s `_InboxServer.server_bind`
-comment (m41) records the same finding for the transport. A child stuck there is bound but not listening. BSD drops
-SYNs to such a socket, where Linux resets them, so connects time out instead of being refused. Each failing test
-waited out its full timeout, hence the 1h36m legs. Linux and Windows are green.
-
-Fix (3c53335): a macOS-only CI step maps the runner's hostname (`$(hostname)`, `$(hostname -s)`) and `localhost`
-to 127.0.0.1 in `/etc/hosts`. It prints `getfqdn()` and its duration before and after, so the next run records
-the evidence. The product keeps calling `getfqdn()`, because the frozen suite pins `host_identity() ==
-socket.getfqdn()`. A user whose resolver stalls the same way pays that cost on the driver.
-
-Not verified locally: no macOS here. The next CI run's timing lines confirm or refute this.
+Fixes:
+- **Product:** `local/_transport.py`'s m41 `_InboxServer.server_bind` override becomes the base class
+  `LookupFreeHTTPServer`. Every product HTTP server uses it: the transport inbox, `common/http_plane.py`'s
+  `_DualRouteServer`, the htcondor task server, and both shuffle servers. `tests/extra/m68a/test_m68a_lookup_free_bind.py`
+  covers them with `socket.getfqdn` patched to raise, a positive control, and a source check that no module builds a
+  plain `ThreadingHTTPServer`.
+- **CI:** frozen code and the tests themselves call `getfqdn` (`host_identity() == socket.getfqdn()` is pinned), so the
+  macOS legs take Python from uv (`uv venv --seed --python-preference only-managed`) instead of setup-python. The
+  3c53335 hosts step is removed.
 
 ## test-dask py3.12: `test_window_is_the_dask_task_slots[adaptive]`
 

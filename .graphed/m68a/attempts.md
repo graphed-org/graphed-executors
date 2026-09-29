@@ -101,3 +101,11 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
   - `_check_grpc` honours proxy environment variables while `_check_http` bypasses them. Set `grpc.enable_http_proxy=0`, or document why they differ.
 - Pending CI (graphed-org/graphed-executors#39): test-htcondor (pool + Triton), test-dask, test-parsl, and the all-OS matrix.
 - Graphed side: graphed-org/graphed#63 (resolve walk). Reviewer APPROVE on f69dec1, with doc wording fixed in 1ff3479. CI was 36/36 green on f69dec1.
+
+## Laptop iteration 5: the macOS stall (see ci-diagnosis.md, macOS)
+- Root cause: on macOS 15+ runners, setup-python's builds stall 35-70 s in loopback reverse lookups
+  (actions/setup-python#1223). `HTTPServer.server_bind` runs that lookup between bind and listen, so servers sat bound
+  but not listening.
+- Product: `LookupFreeHTTPServer`, the m41 override lifted into a base, now behind every product HTTP server.
+- CI: macOS takes Python from uv, which measured ≤ 0.2 s on the same runner; the ineffective hosts step is removed.
+- Gates on this Mac: see the entry that follows.
