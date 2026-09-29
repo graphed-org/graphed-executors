@@ -96,10 +96,18 @@ def test_each_product_server_binds_without_a_lookup(name: str, no_fqdn: None, tm
 
 
 def test_no_product_module_builds_a_plain_http_server() -> None:
-    plain = {"HTTPServer", "ThreadingHTTPServer"}
     found = []
     for path in sorted(SRC.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text(), str(path))):
+        tree = ast.parse(path.read_text(), str(path))
+        plain = {"HTTPServer", "ThreadingHTTPServer"}
+        plain |= {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "http.server"
+            for alias in node.names
+            if alias.name in plain and alias.asname
+        }
+        for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name != "LookupFreeHTTPServer":
                 refs = node.bases
             elif isinstance(node, ast.Call):
