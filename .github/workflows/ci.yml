@@ -50,6 +50,18 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve the runner's own hostname locally (macOS)
+        # socket.getfqdn() (m68a's host_identity, and http.server's server_bind in every managed HTTP
+        # child) reverse-resolves the hostname, which blocks for tens of seconds on macOS runners (the
+        # m41 transport comment). A child stuck there is bound but not listening, and BSD drops SYNs to
+        # such a socket, so every readiness check and probe timed out. The timings are the evidence.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          fqdn_timing() { python -c "import socket, time; t = time.monotonic(); n = socket.getfqdn(); print(f'getfqdn() = {n!r} in {time.monotonic() - t:.2f}s')"; }
+          fqdn_timing
+          echo "127.0.0.1 localhost $(hostname) $(hostname -s)" | sudo tee -a /etc/hosts
+          fqdn_timing
       - name: Install deps + this package
         shell: bash
         run: |
