@@ -108,4 +108,4 @@ constraints `plan/reviews/m68a-exit-items-r8-r10.md` (and r7 E1–E7).
   but not listening.
 - Product: `LookupFreeHTTPServer`, the m41 override lifted into a base, now behind every product HTTP server.
 - CI: macOS takes Python from uv, which measured ≤ 0.2 s on the same runner; the ineffective hosts step is removed.
-- Gates on this Mac: see the entry that follows.
+- Gates on this Mac: frozen+extra 959 passed, 96 skipped; every file ≥ 90%; diff coverage 100% vs upstream/main; precommit ok.
