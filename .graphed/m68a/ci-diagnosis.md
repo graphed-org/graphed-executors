@@ -8,7 +8,7 @@ not matter. `main` (c2298d7) is green in every job, so each failure below is thi
 | test-parsl py3.12 / py3.13 | cancelled at the 30-min timeout, after 72 tests passed (55%) | hang: the run scope cancels HTEX futures | 46f5802 |
 | test-htcondor py3.12 | 1 failed (`test_services_live::test_a_driver_hosted_service_over_pool_pilots`) | `_ParslFuture` has no `cancelled()` | 46f5802 |
 | test macos-latest py3.11–3.14 | 44 failed each, 1h36m | `socket.getfqdn()` blocks on macOS runners | 3c53335 (CI) |
-| test-dask py3.12 | 1 failed (`m65/test_m65a3_control_dask.py::test_window_is_the_dask_task_slots[adaptive]`, `2 == 4`) | not yet root-caused, see below | none yet |
+| test-dask py3.12 | 1 failed (`m65/test_m65a3_control_dask.py::test_window_is_the_dask_task_slots[adaptive]`, `2 == 4`) | not reproduced; no m68a cause found, see below | none (the mirror push's run confirms) |
 | ci required | failure | aggregates the above | — |
 
 ## test-parsl: hang (cancelling HTEX futures)
@@ -76,10 +76,25 @@ Not verified locally: no macOS here. The next CI run's timing lines confirm or r
 
 ## test-dask py3.12: `test_window_is_the_dask_task_slots[adaptive]`
 
-`started_before_first_finished == 2`, expected 4: only 2 of the 4 window slots had started a 0.3 s probe before the
-first one finished. py3.14 passed the same suite, and the test passed 3/3 in isolation here. m68a's only change on
-this path is `_RunTasks` (one extra done-callback per dask future, and a cancel of not-yet-done futures at run exit).
-Investigation status: see below.
+CI measured `started_before_first_finished == 2`, expected 4: only 2 of the 4 window slots had started a 0.3 s probe
+before the first finished. In the same run, the `[fixed]` case and the whole py3.14 leg passed.
+
+Not reproduced locally (CPython 3.12, distributed 2026.8.0, 4 CPUs):
+- the exact test-dask pytest command, twice: 359 passed each time, in about 3m10s (CI: 3m02s);
+- the module's window tests in isolation, 3/3;
+- 10 runs under a 4-process CPU burn: 0/10 failures on this branch and 0/10 on `origin/main`.
+
+m68a's only change on this path is `_RunTasks`:
+- one extra `add_done_callback` per dask future, which only schedules onto distributed's callback thread and does
+  not delay submission;
+- a cancel, at run exit, of futures not yet done. That runs after the plan's result, so it cannot delay the first
+  four starts.
+
+The window is `DaskBackend.task_slots()` (4), and all four leaves are submitted back to back. A count of 2 means
+dask started two of them more than 0.3 s late, for example one worker busy or not yet ready. I found nothing in
+this PR that causes that, and I am not calling it a flake without a reproduction. The run triggered by mirroring
+m68a-ci is the confirming run. If it fails again, the next step is to record per-task worker and start times
+from the recorder in an extra test.
 
 ## Verification
 
