@@ -47,21 +47,20 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
+        if: runner.os != 'macOS'
         with:
           python-version: ${{ matrix.python }}
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Resolve the runner's own hostname locally (macOS)
-        # socket.getfqdn() (m68a's host_identity, and http.server's server_bind in every managed HTTP
-        # child) reverse-resolves the hostname, which blocks for tens of seconds on macOS runners (the
-        # m41 transport comment). A child stuck there is bound but not listening, and BSD drops SYNs to
-        # such a socket, so every readiness check and probe timed out. The timings are the evidence.
+      - uses: astral-sh/setup-uv@v5
+      - name: Python from uv (macOS)
+        # setup-python's macOS builds stall 35-70 s in each loopback reverse lookup (socket.getfqdn) on
+        # macOS 15+ runners (actions/setup-python#1223); uv's python-build-standalone does not.
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          fqdn_timing() { python -c "import socket, time; t = time.monotonic(); n = socket.getfqdn(); print(f'getfqdn() = {n!r} in {time.monotonic() - t:.2f}s')"; }
-          fqdn_timing
-          echo "127.0.0.1 localhost $(hostname) $(hostname -s)" | sudo tee -a /etc/hosts
-          fqdn_timing
+          uv venv --seed --python-preference only-managed --python ${{ matrix.python }} "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -c "import socket, time; t = time.monotonic(); socket.getfqdn(); print(f'getfqdn() in {time.monotonic() - t:.2f}s')"
+      - uses: dtolnay/rust-toolchain@stable
       - name: Install deps + this package
         shell: bash
         run: |
@@ -70,7 +69,6 @@ jobs:
           python -m pip install -e ".[dev]"
           # the reference gRPC health servicer the m68a readiness checks are tested against (with grpcio)
           python -m pip install grpcio-health-checking
-      - uses: astral-sh/setup-uv@v5
       - name: Lint + types (pre-commit hooks via prek)
         run: uvx prek@0.4.5 run --all-files --show-diff-on-failure
       - name: Pytest (frozen + extra) + whole-package coverage (>=90%)
