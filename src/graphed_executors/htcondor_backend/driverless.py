@@ -333,6 +333,7 @@ def submit_driverless(
         "endpoints": endpoints,
         "announce_only": announce_only,
         "dag_dir": str(run_dir) if nodes else None,
+        "extra_submit": launcher.extra_submit,
     }
     (run_dir / RUN_FILE).write_text(json.dumps(run, indent=1))
     if not nodes:

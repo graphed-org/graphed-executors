@@ -163,3 +163,22 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
 - The example runs through `CondorPilots.submit_description` on `SITES["lpc"]`: both keys absent without it, present
   with it, and an `extra_submit` key replaces a site key; `condor_submit -dry-run` parses them to
   `Environment="MYTOOL_TMP=/srv"`, `RequestDisk=20971520`. sphinx -W and precommit `--fast --no-coverage`: ok.
+
+## Implementer iteration 8 (driverless extra_submit; review r4 doc fixes)
+- Owner decision 2026-09-30: every job of a driverless run takes its `extra_submit`. `run.json` carries it
+  (`launcher.extra_submit`) and `driver._runner` passes it to the in-job `CondorPilots`, which applies it last.
+  The reader takes `run.get("extra_submit")`, as it reads `announce_only` and `endpoints`: frozen m68a
+  (`driver_run`) and m68b (`in_job_run`) hand-build run dicts without the key for `_runner`, and a `generic`
+  driver job runs the submitter's interpreter as it is when the job starts, not as it was at submit.
+- Leg `test_driverless_pilots_take_the_run_s_extra_submit_last`: `submit_driverless` (writer) → `run.json` →
+  `_runner` (reader) → the pilots' recorded submit. A user key overrides the site's `+DesiredOS` and adds
+  `request_disk` on the driver job and on the pilots; control: the same run.json without the field gives the
+  pilots the site's key alone. On c60dae8 it fails on the pilots' description (`KeyError: 'request_disk'`), after
+  the fix it passes.
+- Docs: the temp-space section says every job of a driverless run takes the keys; `/tmp` and `/var/tmp` share one
+  64 MiB tmpfs (the probe's `stat`: one `st_dev`); "a job cannot enlarge them" dropped (unmeasured). Changelog line.
+  ci.yml's `test` timeout comment carries no figure.
+- Mac `tests/extra/m68b tests/extra/m67 tests/frozen/m67 tests/frozen/m68b`: 172 passed, 0 failed (skips: the
+  bindings/`condor_dagman` legs). Container (m67 + m68b frozen and extras, simulated GPU, bytecode cleared):
+  180 passed, 0 failed; `driver.py` 100%, `driverless.py` 99% on that scope; diff-cover 100% of 519 lines. ruff,
+  format, mypy (+win32), sphinx -W, precommit `--fast --no-coverage`: ok.

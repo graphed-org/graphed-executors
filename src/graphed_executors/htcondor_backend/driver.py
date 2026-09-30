@@ -74,6 +74,7 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
             log_dir=run["log_dir"],
             user_modules=[job / name for name in run["user_modules"]],
             schedd_locate=tuple(run["schedd_locate"]),
+            extra_submit=run.get("extra_submit"),
         )
     else:
         launcher = LocalPilots(python=sys.executable, pythonpath=[job])

@@ -3,10 +3,12 @@ does not reach."""
 
 from __future__ import annotations
 
+import json
 import tempfile
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,6 +20,7 @@ from graphed_executors.htcondor_backend import (
     HTCondorBackend,
     LocalPilots,
     RunHandle,
+    driver,
     launch,
     submit_driverless,
 )
@@ -122,3 +125,49 @@ def test_a_refused_run_leaves_no_temporary_log_dir(
             request_memory_mb=1024,
         )
     assert len(list(temp.iterdir())) == 1, "control: a run past its refusals keeps its temporary log_dir"
+
+
+class _Submits:
+    """A schedd that records each submit description."""
+
+    def __init__(self, submitted: list[dict[str, str]]) -> None:
+        self.submitted = submitted
+
+    def submit(self, desc: dict[str, str], count: int = 0, spool: bool = False) -> Any:
+        self.submitted.append(desc)
+        return SimpleNamespace(cluster=lambda: 7)
+
+    def query(self, constraint: str = "", projection: Any = None) -> list[Any]:
+        return []
+
+
+def test_driverless_pilots_take_the_run_s_extra_submit_last(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    submitted: list[dict[str, str]] = []
+    fake = SimpleNamespace(
+        param={"SCHEDD_HOST": "s1", "COLLECTOR_HOST": "pool"},
+        Submit=dict,
+        Schedd=lambda ad=None: _Submits(submitted),
+        Collector=lambda pool=None: SimpleNamespace(locate=lambda kind, name: {"Name": name}),
+        DaemonType=SimpleNamespace(Schedd="schedd"),
+    )
+    monkeypatch.setattr(launch, "_htcondor", lambda: fake)
+    monkeypatch.setattr(driver, "host_identity", lambda: "127.0.0.1")
+    site = replace(SITES["generic"], name="m68b-x", submit={"+DesiredOS": '"EL9"'})
+    monkeypatch.setitem(SITES, "m68b-x", site)
+    extra = {"+DesiredOS": '"EL8"', "request_disk": "20G"}
+    plan = Plan(process=_leaf, combine=_concat, empty=_empty, tasks=())
+    job = tmp_path / "run"
+    submit_driverless(
+        plan, site="m68b-x", pilots="condor", request_memory_mb=1024, log_dir=job, extra_submit=extra
+    )
+    run = json.loads((job / "run.json").read_text())
+    with open(tmp_path / "driver.log", "a") as log:
+        driver._runner(run, job, log).close()
+        run.pop("extra_submit", None)  # a run.json written before the field: the site's keys alone
+        driver._runner(run, job, log).close()
+    driver_job, pilots, plain = submitted
+    assert {key: driver_job[key] for key in extra} == extra, driver_job
+    assert {key: pilots[key] for key in extra} == extra, pilots
+    assert plain["+DesiredOS"] == '"EL9"' and "request_disk" not in plain, "control: " + str(plain)

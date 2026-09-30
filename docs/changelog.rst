@@ -49,6 +49,9 @@ Services a plan calls
   ``pilots="condor"`` now reads it too, so a site row without one refuses self-submission.
   ``RunHandle`` gains ``dag``; a handle saved before loads as before. A ``user_modules`` path holding
   ``,`` is refused, since it would split the job's input list.
+* A driverless run's ``extra_submit`` reaches the pilot jobs its driver job submits
+  (``pilots="condor"``) as well as the driver job and its service nodes, as ``htcondor_runner``'s
+  reaches its pilots.
 * A driverless driver killed before it writes a result (out of memory, a signal, no interpreter) is
   retried like exit 1 instead of being held; after the last try ``result()`` raises ``RuntimeError:
   the driver exited before writing a result; see driver.log``.

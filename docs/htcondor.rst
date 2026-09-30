@@ -502,9 +502,8 @@ made with Python's ``tempfile`` goes to ``TMPDIR``.
 
 **On the LPC** the scratch directory is ``/srv`` inside the container, on the node's local disk, and
 ``TMPDIR``, ``TMP`` and ``TEMP`` point at it; a submit ``environment`` does not move ``TMPDIR``. ``/tmp``
-and ``/var/tmp`` are separate 64 MiB ``tmpfs`` mounts made by the site's container wrapper, and a job
-cannot enlarge them, so a tool that writes to ``/tmp`` itself runs out of space at 64 MiB
-(September 2026, ``graphed-workdir/lanes/htcondor/probes/site-lpc/m68b-tmpenv.txt`` and
+and ``/var/tmp`` share one 64 MiB ``tmpfs`` made by the site's container wrapper, so a tool that
+writes to either itself runs out of space at 64 MiB between them (September 2026, ``graphed-workdir/lanes/htcondor/probes/site-lpc/m68b-tmpenv.txt`` and
 ``m68b-proxy-scratch.txt``). Point such a tool at the scratch directory with its own variable, and
 ask for the space with `request_disk
 <https://htcondor.readthedocs.io/en/latest/man-pages/htcondor-jdl.html#request_disk>`__:
@@ -515,8 +514,8 @@ ask for the space with `request_disk
 
 Pass it to ``htcondor_runner`` or ``submit_driverless``. The submit ``environment`` reaches the job
 and ``extra_submit`` is applied after graphed-executors' own keys, none of which is
-``environment``. On ``submit_driverless`` the keys go to the driver job, whose ``pilots="local"``
-inherit its environment.
+``environment``. ``submit_driverless`` gives them to every job of the run: the driver job, the
+pilot jobs it submits and any service nodes.
 
 
 When something goes wrong
