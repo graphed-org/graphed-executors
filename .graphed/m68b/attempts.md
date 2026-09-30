@@ -153,3 +153,13 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
   versions 6/6 wedged at every site. py3.12 `pytest tests/frozen`: 903 passed, 95 skipped, 0 failed.
 - CI: `test` legs bounded at 45 min (slowest leg since 0e48380 is ~21 min) and `test-experimental` at 30 min, both
   with `faulthandler_timeout=300`.
+
+## Implementer iteration 7 (docs: temporary space on the worker)
+- `htcondor.rst` gains "Temporary space on the worker": job-side files go to the working (scratch) directory and
+  `TMPDIR`; on the LPC `/srv`, a submit `environment` that does not move `TMPDIR`, 64 MiB `tmpfs` `/tmp` and
+  `/var/tmp`; redirect a tool through `extra_submit["environment"]` and size scratch with `request_disk`. Stated
+  "on the LPC": HTCondor's manual does not document the starter setting `TMPDIR` (its only `TMPDIR` text is
+  `condor_ssh_to_job`'s).
+- The example runs through `CondorPilots.submit_description` on `SITES["lpc"]`: both keys absent without it, present
+  with it, and an `extra_submit` key replaces a site key; `condor_submit -dry-run` parses them to
+  `Environment="MYTOOL_TMP=/srv"`, `RequestDisk=20971520`. sphinx -W and precommit `--fast --no-coverage`: ok.

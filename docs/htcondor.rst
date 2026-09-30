@@ -493,6 +493,32 @@ The arguments you will change
      - Has no effect here. The only retry is the one re-run of a task whose pilot was lost.
 
 
+Temporary space on the worker
+-----------------------------
+
+No code in graphed-executors names ``/tmp`` or ``/var/tmp``. A pilot or driver job unpacks its venv
+and writes its logs in its working directory, which is the job's scratch directory, and anything
+made with Python's ``tempfile`` goes to ``TMPDIR``.
+
+**On the LPC** the scratch directory is ``/srv`` inside the container, on the node's local disk, and
+``TMPDIR``, ``TMP`` and ``TEMP`` point at it; a submit ``environment`` does not move ``TMPDIR``. ``/tmp``
+and ``/var/tmp`` are separate 64 MiB ``tmpfs`` mounts made by the site's container wrapper, and a job
+cannot enlarge them, so a tool that writes to ``/tmp`` itself runs out of space at 64 MiB
+(September 2026, ``graphed-workdir/lanes/htcondor/probes/site-lpc/m68b-tmpenv.txt`` and
+``m68b-proxy-scratch.txt``). Point such a tool at the scratch directory with its own variable, and
+ask for the space with `request_disk
+<https://htcondor.readthedocs.io/en/latest/man-pages/htcondor-jdl.html#request_disk>`__:
+
+.. code-block:: python
+
+    extra_submit = {"environment": '"MYTOOL_TMP=/srv"', "request_disk": "20G"}
+
+Pass it to ``htcondor_runner`` or ``submit_driverless``. The submit ``environment`` reaches the job
+and ``extra_submit`` is applied after graphed-executors' own keys, none of which is
+``environment``. On ``submit_driverless`` the keys go to the driver job, whose ``pilots="local"``
+inherit its environment.
+
+
 When something goes wrong
 -------------------------
 
