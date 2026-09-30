@@ -37,6 +37,8 @@ jobs:
   test:
     name: test ${{ matrix.os }} py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    # The slowest leg takes ~21 min; a wedged interpreter must fail here, not at GitHub's 6 h limit.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -72,7 +74,7 @@ jobs:
       - name: Lint + types (pre-commit hooks via prek)
         run: uvx prek@0.4.5 run --all-files --show-diff-on-failure
       - name: Pytest (frozen + extra) + whole-package coverage (>=90%)
-        run: pytest tests/frozen tests/extra --cov=graphed_executors --cov-branch --cov-report=term-missing
+        run: pytest tests/frozen tests/extra -o faulthandler_timeout=300 --cov=graphed_executors --cov-branch --cov-report=term-missing
       - name: Per-file coverage gate (>=90% each)
         shell: bash
         run: |
