@@ -36,3 +36,14 @@ FAILS; no CANCELLED check in the barrier → frozen mid-run cancel FAILS; ignori
 frozen stage-boundary FAILS; stage tasks via `backend.submit` → frozen cancel-before-release FAILS;
 ignoring `peer_data_movement` → frozen peer edge FAILS; key without the stage index → thread peer edge
 passes, frozen dask join FAILS (as the README states).
+
+## Iteration 2 — gates measured at c7d3c9f (graphed 95b1b7b), no code change
+- Full `pytest tests/frozen tests/extra` green once `grpcio-health-checking` (CI installs it) is in the
+  venv; m68c: all pass, the live HTCondor test skips (no bindings on macOS).
+- Main scope: per-file gate 15/15 >= 90% (engine 98.9%), diff-cover vs db8fb0a 100% (65 lines).
+- test-dask scope: per-file 22/22, diff-cover 100% (69 lines incl. common/__init__, dask transport_peer).
+- test-parsl scope (HTEX + subprocess coverage): report >= 90, per-file ok, diff-cover 100% (2 lines).
+- htcondor scope (non-live only): diff-cover 100% on backend.py/driverless.py (15 lines); per-file
+  needs the pool (CI test-htcondor job).
+- precommit `--fast --no-coverage` ok; sphinx -W clean; design.rst example executed, output matches.
+- Open: `GRAPHED` pin bump in ci.yml waits on graphed's m68c merge SHA.
