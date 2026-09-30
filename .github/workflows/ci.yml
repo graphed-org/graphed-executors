@@ -312,9 +312,16 @@ jobs:
             condor_status -schedd -af Name 2>/dev/null | grep -q . && condor_status -af Name 2>/dev/null | grep -q . && break
             sleep 2
           done
+          # the installer already started the pool, so the startd sees the simulated GPU only once restarted
+          sudo condor_restart -daemon startd
+          for i in $(seq 90); do
+            condor_status -af TotalGPUs 2>/dev/null | grep '^[1-9]' >/dev/null && break
+            sleep 2
+          done
           condor_version
           condor_status -schedd -af Name | grep .
           condor_status -af Name State Cpus Memory TotalGPUs
+          condor_status -af TotalGPUs | grep '^[1-9]'  # the live DAG legs need that GPU
       - name: Install deps + this package with the htcondor extra
         shell: bash
         run: |
