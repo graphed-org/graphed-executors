@@ -84,3 +84,15 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
 - ruff, ruff format, mypy strict (also `--platform win32`), prek, sphinx -W, precommit `--fast --no-coverage`: ok.
   E2: no `triton|histserv` in `htcondor_backend/**` outside `sites.py` (control: 2 hits in `sites.py`).
 - Extras and the frozen legs discriminate: 16 mutants of the B2 code (one per decision), each killed.
+
+## Implementer iteration 3 (docs)
+- `htcondor.rst`: leg 3 names cluster hosting (E3: the "does not have yet … refused naming `host_service`" text
+  and the closing driverless paragraph rewritten); new "Cluster-hosted services" under "Services" (announce,
+  timeouts and removal, `service-<key>/`, the `service/` rule with bare-name `model_repository`, `SO_REUSEADDR`,
+  argv tokens, the driverless DAG, `job_root` with its lexical check and the held-node consequences, three ×
+  `timeout_s`, the lxplus GPU walk-through, marked site-specific); the driverless section reads `job_root` for
+  `pilots="condor"`, says a DAG is not spooled, and the exit table gains a "killed" row. `design.rst`: E3's
+  "a later release fills" rewritten, the DAG and the placeholder added, "five fields" of `RunHandle` corrected.
+  `api.rst`: `SiteProfile.job_root`. `changelog.rst`: cluster hosting, the DAG and `job_root`, the killed driver.
+- The walk-through is not executable (lxplus); it parses and every call in it binds to the current signatures
+  (`inspect.signature(...).bind`). sphinx -W ok; the two new `Cluster-hosted services`_ links resolve.
