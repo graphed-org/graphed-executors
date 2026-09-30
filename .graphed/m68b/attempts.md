@@ -55,3 +55,32 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
 - ruff, ruff format, mypy strict (also `--platform win32`, with a control: unguarded `hard_reap` gives 2
   `attr-defined`), prek, sphinx -W, precommit `--fast --no-coverage`: ok (advisory `ci_config_modified`).
 - Extras discriminate: 13 mutants of `announce.py`/`services.py` (one per guarded branch), each killed by its leg.
+
+## Implementer iteration 2 (B2)
+- **Changed** (+309/−70): `sites.py` (`SiteProfile.job_root` after `jobs_can_submit`: lxplus `/afs`, generic `/`,
+  lpc default `None`), `driverless.py` (`_SELF_SUBMIT_ROOT` gone; `_require_under` = `root == "/"` or a lexical
+  `abspath` check, applied to the `log_dir` actually used (the `mkdtemp` one when `None`), then to every
+  `user_modules` path and SERVICE-node input; `_service_nodes` = launched, not given, kind not served, image or GPUs,
+  ids `svc<i>` in name order; the DAG: new `<log_dir>/graphed-<nonce>/`, `driver.sub` without the retry keys,
+  `service-svc<i>/` from B1's watch-mode `ServiceJob.files` after `_stage`, `svc<i>.sub` with `periodic_remove`
+  before `extra_submit`, `run.dag`, `from_dag(abs run.dag, DAG_OPTIONS)` submitted unspooled; `RunHandle.dag` and
+  `_dag_status`; `result()` never retrieves for a DAG and names `run.dag.dagman.out` without a `result.pkl`),
+  `driver.py` (announced runs bind the task server on the slot's `Machine` and `worker_ports`, then publish the
+  announce secret and `driver.url` into `dag_dir` via `mkstemp` (0600) + `os.replace`), `backend.py` (`announced=`
+  binds `host_service` = `wait_announce(node id, timeout_s)` and `release_service` = drop a pending announce; E3
+  docstrings), `launch.py` (`_stage(..., placeholder)`: `printf` of the octal bytes to `result.pkl` and
+  `: >> driver.log` before the tar/exec lines; `pilot.sh` unchanged), `announce.py` (`URL_FILE` shared with the
+  driver), `tests/extra/m68b/test_m68b_dag.py` (2 legs: an unannounced node times out and a release drops a pending
+  announce; a driver node held only while spooling reads `queued`).
+- **Mac** (py3.12, full `tests/frozen tests/extra`): 1068 passed, 101 skipped, 0 failed (no expected failures left;
+  the B2 skips are the `condor_dagman` fixture leg and the two live legs). Per-file min 93.02% (`local/shuffle.py`,
+  unchanged), total 97.15%; diff-cover: no measured lines (all changed src is under the excluded `htcondor_backend/`).
+- **Container** (`test-htcondor` replay, simulated GPU, all of `tests/frozen/m68b` + extras): 426 passed, 3 skipped
+  (dask absent; the two Triton legs without `GRAPHED_TRITON_GRPC`); scoped 99%; per-file min 97.92% (`backend.py`:
+  lines 129/168, m66/m68a code); `driverless.py`, `driver.py`, `sites.py` 100%; diff-cover 100% of 512 changed lines.
+- **Trap met:** a host-side mutation sweep left the container importing a restored file's mutant (shared
+  `__pycache__` of the same CPython minor over the bind mount); the container legs failed until
+  `find src tests -name __pycache__ -exec rm -rf {} +`. Clear bytecode after any host-side source mutation.
+- ruff, ruff format, mypy strict (also `--platform win32`), prek, sphinx -W, precommit `--fast --no-coverage`: ok.
+  E2: no `triton|histserv` in `htcondor_backend/**` outside `sites.py` (control: 2 hits in `sites.py`).
+- Extras and the frozen legs discriminate: 16 mutants of the B2 code (one per decision), each killed.

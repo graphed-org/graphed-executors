@@ -35,6 +35,7 @@ from typing import Any, NoReturn
 SIG_HEADER = "X-Graphed-Sig"
 RUN_DIR = "service"
 SECRET_FILE = "graphed-secret"
+URL_FILE = "driver.url"
 REAP_S = 5.0
 CHECK_S = 5.0
 
@@ -201,7 +202,7 @@ def start(cfg: dict[str, Any], ident: str) -> tuple[subprocess.Popen[bytes], int
 def _watched(watch: str) -> tuple[str, bytes] | None:
     """``(url, secret)`` from the watch dir, or ``None`` while either is missing or unreadable."""
     try:
-        with open(os.path.join(watch, "driver.url")) as f:
+        with open(os.path.join(watch, URL_FILE)) as f:
             url = f.read().strip()
         with open(os.path.join(watch, SECRET_FILE)) as f:
             secret = bytes.fromhex(f.read().strip())

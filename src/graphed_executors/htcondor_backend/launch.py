@@ -237,11 +237,18 @@ class CondorPilots:
         """The interpreter this launcher's jobs run: the shipped venv's, else this process's."""
         return "./env/bin/python" if self.profile.ship_env else sys.executable
 
-    def _stage(self, log_dir: Path, script_name: str, module: str) -> Path:
-        """Write the job script running ``python -m <module> "$@"`` and, when the site ships it, ``env.tgz``."""
+    def _stage(self, log_dir: Path, script_name: str, module: str, placeholder: bytes | None = None) -> Path:
+        """Write the job script running ``python -m <module> "$@"`` and, when the site ships it, ``env.tgz``.
+        ``placeholder`` (the driver's) is written as ``result.pkl``, and ``driver.log`` created, before the
+        interpreter starts: a job whose declared outputs are missing at exit is held, whatever killed it."""
+        pre = ""
+        if placeholder is not None:
+            octal = "".join(f"\\{byte:03o}" for byte in placeholder)
+            pre = f"printf '{octal}' > {RESULT_FILE}\n: >> {LOG_FILE}\n"
         script = log_dir / script_name
         script.write_text(
-            f'#!/bin/sh\n[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\nexec {self.job_python} -m {module} "$@"\n'
+            f"#!/bin/sh\n{pre}[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\n"
+            f'exec {self.job_python} -m {module} "$@"\n'
         )
         script.chmod(0o755)
         if self.profile.ship_env:

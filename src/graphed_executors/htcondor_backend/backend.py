@@ -6,10 +6,12 @@ The backend's service surface is duck-typed, read by the engine's service set (`
 ``site_services``, ``service_hosts`` and ``service_ports`` come from the site row, ``advertise_host``
 is the task server's host, and ``host_identity()`` names the driver's host as condor writes it for that
 host's slots. Attached, the row is the launcher's profile; in a driver job (``in_job=``) it is the job's
-own site row, and a managed service may start only beside the driver. Attached over ``CondorPilots`` on a
-row with ``"cluster"`` hosts, ``host_service``/``release_service`` run a service as its own job
+own site row. Attached over ``CondorPilots`` on a row with ``"cluster"`` hosts,
+``host_service``/``release_service`` run a service as its own job
 (:class:`~graphed_executors.htcondor_backend.services.ServiceJob`) that announces its endpoint to the task
-server's ``/announce``.
+server's ``/announce``. In a driver job a managed service starts beside the driver, or, when it is one of
+the run's DAG SERVICE nodes (``announced=``), is resolved by that node's announce: the driver job submits
+no service job.
 """
 
 from __future__ import annotations
@@ -62,7 +64,8 @@ class HTCondorBackend:
     ``host`` is the name pilots dial back to (default: this machine's FQDN); the server binds the
     first free port of ``port_range`` on all interfaces, by default the ``driver_ports`` of the
     launcher's site profile (``generic`` for a launcher without one). ``in_job`` is the site row of the
-    driver job this backend runs in (``driver.py`` passes it), else ``None`` (attached).
+    driver job this backend runs in (``driver.py`` passes it), else ``None`` (attached). ``announced`` maps
+    each service a SERVICE node of the driver job's DAG hosts to the node id it announces under.
     """
 
     def __init__(
@@ -73,6 +76,7 @@ class HTCondorBackend:
         host: str | None = None,
         port_range: tuple[int, int] | None = None,
         in_job: SiteProfile | None = None,
+        announced: Mapping[str, str] | None = None,
     ) -> None:
         self.capabilities = _FLOOR
         self.launcher = launcher
@@ -105,8 +109,12 @@ class HTCondorBackend:
             stack.callback(release_quietly, "the task server", self._server.close)
             self._stack = stack.pop_all()
         self._services: dict[str, ServiceJob] = {}
-        if in_job is None and isinstance(launcher, CondorPilots) and "cluster" in self.service_hosts:
-            # the capability IS this pair of attributes (D10): absent, the engine refuses naming it
+        self._announced = dict(announced or {})
+        # the capability IS this pair of attributes (D10): absent, the engine refuses naming it
+        if self._announced:
+            self.host_service = self._host_announced
+            self.release_service = self._release_announced
+        elif in_job is None and isinstance(launcher, CondorPilots) and "cluster" in self.service_hosts:
             self.host_service = self._host_service
             self.release_service = self._release_service
 
@@ -211,6 +219,27 @@ class HTCondorBackend:
         """Stop the service ``host_service`` started under ``key``; its announces are refused first."""
         self._server.forget_announce([key])
         self._services.pop(key).stop()
+
+    def _host_announced(self, spec: ServiceSpec, scope: str) -> tuple[str, str, str]:
+        """``spec``'s SERVICE node's announce: ``(endpoint, identity, node id)``."""
+        node = self._announced.get(spec.name)
+        if node is None:
+            raise ValueError(
+                f"service {spec.name!r} has no SERVICE node in this run's DAG "
+                f"(announce_only={self._announced!r}), and a driver job submits no service job"
+            )
+        got = self._server.wait_announce(node, spec.timeout_s)
+        if got is None:
+            raise TimeoutError(
+                f"SERVICE node {node} (service {spec.name!r}) did not announce within "
+                f"timeout_s={spec.timeout_s}"
+            )
+        host, _, port = got[0].rpartition(":")
+        return minted_endpoint(spec.check, host, int(port)), got[1], node
+
+    def _release_announced(self, key: str) -> None:
+        """Drop a pending announce of node ``key``; DAGMan removes the node when the DAG ends."""
+        self._server.wait_announce(key, 0.0)
 
     def close(self) -> None:
         """Stop serving (pilots see 410 and exit), stop the pilots, free the port; each step runs even
