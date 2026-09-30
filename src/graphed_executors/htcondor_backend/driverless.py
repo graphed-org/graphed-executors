@@ -277,7 +277,7 @@ def submit_driverless(
         os.path.abspath(log_dir or tempfile.mkdtemp(prefix="graphed-driverless-", dir=launcher._sandbox()))
     )
     with ExitStack() as refused:  # a refusal leaves no temporary log_dir behind
-        if log_dir is None:
+        if not log_dir:
             refused.callback(out.rmdir)
         if pilots == "condor" or announce_only:
             _require_under(profile, "log_dir", out)

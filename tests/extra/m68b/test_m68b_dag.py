@@ -82,9 +82,10 @@ def _empty() -> tuple[str, ...]:
 REFUSED_AFTER_MKDTEMP = ["log_dir", "service-input", "user_modules"]
 
 
+@pytest.mark.parametrize("log_dir", [None, ""])
 @pytest.mark.parametrize("case", REFUSED_AFTER_MKDTEMP)
 def test_a_refused_run_leaves_no_temporary_log_dir(
-    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    case: str, log_dir: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     temp = tmp_path / "tmp"
     temp.mkdir()
@@ -101,6 +102,7 @@ def test_a_refused_run_leaves_no_temporary_log_dir(
         "site": "m68b-x",
         "request_memory_mb": 1024,
         "user_modules": [tmp_path / "mod.py"],
+        "log_dir": log_dir,
     }
     if case == "log_dir":
         kwargs["pilots"] = "condor"

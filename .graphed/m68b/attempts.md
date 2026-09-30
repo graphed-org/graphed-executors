@@ -124,3 +124,20 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
 - Mac full: 1072 passed, 101 skipped, 0 failed; per-file min 93.02% (`local/shuffle.py`). Container (CI order,
   bytecode cleared): 430 passed, 3 skipped; per-file min 97.92% (`backend.py`), `driverless.py` 100%; diff-cover
   100% of 515 lines. ruff, format, mypy (+win32), sphinx -W, precommit `--fast --no-coverage`: ok.
+
+## Implementer iteration 6 (review r3 F1)
+- F1: the temporary `log_dir` is made when `log_dir` is falsy, but its removal on refusal was registered only for
+  `None`, so `log_dir=""` refused on `job_root` kept it. The removal now keys on `not log_dir`, as the creation does.
+  `test_a_refused_run_leaves_no_temporary_log_dir` runs each refusal with `log_dir` None and `""`: the three `""`
+  legs failed on ece74be (a `graphed-driverless-*` dir left) and pass after; the `None` legs pass on both.
+- Mac `tests/extra/m68b`: 19 passed. Container (`tests/frozen/m68b tests/extra/m68b`, simulated GPU, bytecode
+  cleared): 121 passed, 0 failed; `driverless.py` 92% on that scope alone (100% on the full test-htcondor scope of
+  iteration 5); diff-cover 100% of 517 lines. ruff, format, mypy (+win32), precommit `--fast --no-coverage`: ok.
+
+## Reviews
+- r1 REJECT: R1-1 (the exhausted-range leg flaked on a port in TIME_WAIT) and 3 nits, fixed in ebf6828.
+- r2 REJECT: R2-1 (CI's pool advertised no GPU) fixed in 87b9950; N3 (a refusal left the temporary `log_dir`)
+  taken in ece74be. Not taken: N2, as the GPU test is consistent with the engine's rule and negative gpus is invalid
+  input no caller produces; N4, as turning the assert into a raise trips the integrity scan's `assertion_removed`;
+  N1, as it is freeze history.
+- r3 APPROVE on ece74be (CI run 36677944004 green); F1 taken in iteration 6.
