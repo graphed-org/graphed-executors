@@ -358,6 +358,7 @@ def submit_driverless(
         # from_dag names the condor_dagman on this host's PATH; the scheduler universe runs the schedd's
         bindir = htc.RemoteParam(htc.Collector().locate(htc.DaemonType.Schedd, name))["BIN"]
         options = {**DAG_OPTIONS, "dagman": f"{bindir}/condor_dagman"}
+        launch.ensure_credential(htc, desc)  # the DAG's own description sends none; its nodes do
         result = schedd.submit(htc.Submit.from_dag(str(run_dir / DAG_FILE), options))
     return RunHandle(
         site=site,

@@ -184,10 +184,13 @@ def _gpu_plan() -> Plan[tuple[str, ...]]:
 
 
 class _SubmitType:
-    """``htcondor2.Submit``: each ``from_dag``'s options are recorded."""
+    """``htcondor2.Submit``: a call's ``issue_credentials`` and each ``from_dag``'s options are recorded."""
 
     def __init__(self, bindings: _DagBindings) -> None:
         self.bindings = bindings
+
+    def __call__(self, desc: dict[str, str]) -> Any:
+        return SimpleNamespace(issue_credentials=lambda: self.bindings.log.append("issue"))
 
     def from_dag(self, dag: str, options: dict[str, Any]) -> dict[str, str]:
         self.bindings.options.append(options)
@@ -195,13 +198,15 @@ class _SubmitType:
 
 
 class _DagBindings:
-    """Bindings whose schedd's ``BIN`` is ``/schedd/bin``; ``log`` records the ``RemoteParam`` lookups and
-    submits in order."""
+    """Bindings whose schedd's ``BIN`` is ``/schedd/bin`` and whose credd holds ``stored``; ``log`` records
+    the ``RemoteParam`` lookups, credential calls and submits in order."""
 
     param = {"SCHEDD_HOST": "s1", "COLLECTOR_HOST": "pool"}  # noqa: RUF012  (read only)
     DaemonType = SimpleNamespace(Schedd="schedd")
+    CredType = SimpleNamespace(Kerberos="krb")
 
-    def __init__(self) -> None:
+    def __init__(self, stored: str | None = "1790802437") -> None:
+        self.stored = stored
         self.log: list[str] = []
         self.options: list[dict[str, Any]] = []
         self.Submit = _SubmitType(self)
@@ -212,6 +217,13 @@ class _DagBindings:
     def RemoteParam(self, ad: dict[str, str]) -> dict[str, str]:
         self.log.append(f"RemoteParam {ad['Name']}")
         return {"BIN": "/schedd/bin"}
+
+    def Credd(self) -> Any:
+        return SimpleNamespace(query_user_cred=self._query)
+
+    def _query(self, kind: str) -> str | None:
+        self.log.append(f"query {kind}")
+        return self.stored
 
     def Schedd(self, ad: Any = None) -> Any:
         return SimpleNamespace(submit=self._submit)
@@ -228,6 +240,18 @@ def test_the_dag_names_the_schedd_s_condor_dagman(tmp_path: Path, monkeypatch: p
     assert handle.dag
     assert fake.options == [{**DAG_OPTIONS, "dagman": "/schedd/bin/condor_dagman"}]
     assert fake.log == ["RemoteParam s1", "submit ['dag_file']"]
+
+
+@pytest.mark.parametrize(("stored", "issued"), [(None, ["issue"]), ("1790802437", [])])
+def test_a_dag_whose_nodes_send_a_credential_stores_one_first(
+    stored: str | None, issued: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _DagBindings(stored)
+    monkeypatch.setattr(launch, "_htcondor", lambda: fake)
+    site = replace(SITES["generic"], name="m68b-x", submit={"MY.SendCredential": "True"})
+    monkeypatch.setitem(SITES, "m68b-x", site)
+    submit_driverless(_gpu_plan(), site="m68b-x", request_memory_mb=1024, log_dir=tmp_path / "logs")
+    assert fake.log == ["RemoteParam s1", "query krb", *issued, "submit ['dag_file']"]
 
 
 def test_the_dagman_job_runs_the_schedd_s_condor_dagman_not_the_one_on_path(
