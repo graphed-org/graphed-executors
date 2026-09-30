@@ -141,3 +141,15 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
   input no caller produces; N4, as turning the assert into a raise trips the integrity scan's `assertion_removed`;
   N1, as it is freeze history.
 - r3 APPROVE on ece74be (CI run 36677944004 green); F1 taken in iteration 6.
+
+## Owner-sanctioned fixup (2026-09-30)
+- Ruling: `.graphed/ft314/disputes/services_harness.run_bounded.md` (dispute + CI bound cherry-picked from `fix/ft314-hang`).
+  Every frozen per-call `ThreadPool(1)` bound deadlocks free-threaded 3.14t; the five sites (m67, m68a
+  `run_bounded`; m68b `run_bounded`, `in_background`, `m68b_dag_harness.run_bounded`) take m66's daemon-thread +
+  `join(timeout)` form. `in_background`'s handle keeps `ready()`/`get(t)`, which a frozen m68b test calls directly.
+- Tags `freeze-m67-fixup`, `freeze-m68a-fixup`, `freeze-m68b-fixup` = `5befa12cf7476f05dc66c3630dca13587920eb10`.
+  Integrity check from here: `git diff 5befa12 -- tests/frozen` must be empty.
+- Closing check (3.14.6t, 6 × 50k calls per site, 5 s watchdog): fixed 0/6 wedged at every site; the 8bb61b2
+  versions 6/6 wedged at every site. py3.12 `pytest tests/frozen`: 903 passed, 95 skipped, 0 failed.
+- CI: `test` legs bounded at 45 min (slowest leg since 0e48380 is ~21 min) and `test-experimental` at 30 min, both
+  with `faulthandler_timeout=300`.
