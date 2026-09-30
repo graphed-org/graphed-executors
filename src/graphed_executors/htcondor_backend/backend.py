@@ -6,14 +6,17 @@ The backend's service surface is duck-typed, read by the engine's service set (`
 ``site_services``, ``service_hosts`` and ``service_ports`` come from the site row, ``advertise_host``
 is the task server's host, and ``host_identity()`` names the driver's host as condor writes it for that
 host's slots. Attached, the row is the launcher's profile; in a driver job (``in_job=``) it is the job's
-own site row, and a managed service may start only beside the driver. ``host_service`` is not here:
-cluster hosting is a later seam.
+own site row, and a managed service may start only beside the driver. Attached over ``CondorPilots`` on a
+row with ``"cluster"`` hosts, ``host_service``/``release_service`` run a service as its own job
+(:class:`~graphed_executors.htcondor_backend.services.ServiceJob`) that announces its endpoint to the task
+server's ``/announce``.
 """
 
 from __future__ import annotations
 
 import io
 import pickle
+import secrets
 import socket
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -23,16 +26,19 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from graphed.core.execution import ExecResult, Plan
+from graphed.services import ServiceSpec
 
 from graphed_executors.parsl_backend.backend import _ParslFuture
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
-from graphed_executors.submit.services import host_identity, release_quietly
+from graphed_executors.submit.services import host_identity, minted_endpoint, release_quietly
 
 from . import launch as _launch
+from . import server as _server
 from .launch import CondorPilots, PilotLauncher
 from .server import TaskServer, WorkerLost
-from .sites import SITES, SiteProfile
+from .services import AD_ATTRS, ServiceJob
+from .sites import SITES, SiteProfile, counts_as_alive
 
 R = TypeVar("R")
 
@@ -98,6 +104,11 @@ class HTCondorBackend:
             # closed first: pilots see 410 and exit before they are stopped (a second close is a no-op)
             stack.callback(release_quietly, "the task server", self._server.close)
             self._stack = stack.pop_all()
+        self._services: dict[str, ServiceJob] = {}
+        if in_job is None and isinstance(launcher, CondorPilots) and "cluster" in self.service_hosts:
+            # the capability IS this pair of attributes (D10): absent, the engine refuses naming it
+            self.host_service = self._host_service
+            self.release_service = self._release_service
 
     def n_workers(self) -> int:
         """Pilots registered and live right now; never waits."""
@@ -157,6 +168,49 @@ class HTCondorBackend:
         if self._in_job is not None:
             return host_identity()
         return str(_launch._htcondor().param["FULL_HOSTNAME"])
+
+    def _host_service(self, spec: ServiceSpec, scope: str) -> tuple[str, str, str]:
+        """Run ``spec`` as a :class:`ServiceJob` and wait for its announce: ``(endpoint, identity, key)``
+        once it is ready where it runs. A job that ends, is held, or has not announced within
+        ``spec.timeout_s`` is removed and raises; every failure forgets the call's announce secret."""
+        assert isinstance(self.launcher, CondorPilots)
+        key = f"{scope}-{secrets.token_hex(8)}"
+        secret = self._server.announce_secret([key])
+        with ExitStack() as stack:
+            stack.callback(self._server.forget_announce, [key])
+            job = ServiceJob(spec, self.launcher, key=key, url=self._server.url, secret=secret)
+            job.submit()
+            stack.callback(release_quietly, f"service job {key}", job.stop)
+            hostport, identity = self._await_announce(job, spec)
+            stack.pop_all()
+        self._services[key] = job
+        host, _, port = hostport.rpartition(":")
+        return minted_endpoint(spec.check, host, int(port)), identity, key
+
+    def _await_announce(self, job: ServiceJob, spec: ServiceSpec) -> tuple[str, str]:
+        deadline = time.monotonic() + spec.timeout_s
+        while True:
+            left = max(0.0, min(_server.POLL_S, deadline - time.monotonic()))
+            got = self._server.wait_announce(job.key, left)
+            if got is not None:
+                return got
+            ad = job.ad()
+            state = ", ".join(f"{name}={ad[name]!r}" for name in AD_ATTRS if name in ad)
+            if not counts_as_alive(ad):
+                raise RuntimeError(
+                    f"service {spec.name!r} ({job.key}) ended before it announced: {state or 'no job ad'}; "
+                    f"its service.out/.err, if it wrote them, are in {job.dir}"
+                )
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"service {spec.name!r} ({job.key}) did not announce within timeout_s={spec.timeout_s}: "
+                    f"{state}"
+                )
+
+    def _release_service(self, key: str) -> None:
+        """Stop the service ``host_service`` started under ``key``; its announces are refused first."""
+        self._server.forget_announce([key])
+        self._services.pop(key).stop()
 
     def close(self) -> None:
         """Stop serving (pilots see 410 and exit), stop the pilots, free the port; each step runs even

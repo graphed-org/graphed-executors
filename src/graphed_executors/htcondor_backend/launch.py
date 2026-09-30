@@ -213,8 +213,10 @@ class CondorPilots:
 
     def start(self, url: str, secret: bytes, n: int) -> None:
         self._refuse()
-        if self.log_dir is None:
-            self.log_dir = Path(tempfile.mkdtemp(prefix="graphed-pilots-", dir=self._sandbox()))
+        # absolute in the cwd the files are written from: stop() and a service job may read it from another
+        self.log_dir = Path(
+            os.path.abspath(self.log_dir or tempfile.mkdtemp(prefix="graphed-pilots-", dir=self._sandbox()))
+        )
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._secret = self.log_dir / SECRET_FILE
         write_secret(self._secret, secret)
@@ -230,12 +232,16 @@ class CondorPilots:
             self._schedd = schedd
             self._stack = stack.pop_all()
 
+    @property
+    def job_python(self) -> str:
+        """The interpreter this launcher's jobs run: the shipped venv's, else this process's."""
+        return "./env/bin/python" if self.profile.ship_env else sys.executable
+
     def _stage(self, log_dir: Path, script_name: str, module: str) -> Path:
         """Write the job script running ``python -m <module> "$@"`` and, when the site ships it, ``env.tgz``."""
-        python = "./env/bin/python" if self.profile.ship_env else sys.executable
         script = log_dir / script_name
         script.write_text(
-            f'#!/bin/sh\n[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\nexec {python} -m {module} "$@"\n'
+            f'#!/bin/sh\n[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\nexec {self.job_python} -m {module} "$@"\n'
         )
         script.chmod(0o755)
         if self.profile.ship_env:

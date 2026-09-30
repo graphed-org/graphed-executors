@@ -28,5 +28,30 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
   Sanity r1 NOT SANE (unbounded `submit_driverless`/`result()` in the live file; skip shapes); r2 SANE. On the
   unimplemented tree: Mac 33 failed + 3 skipped, container 36 failed.
 - The precommit integrity scan hard-fails `pytest.skip(`/`@pytest.mark.skip…` in new frozen files too; environmental
-  skips are name-assigned `pytest.mark.skipif` markers (m68a\x27s `needs_triton` form) with unchanged conditions.
+  skips are name-assigned `pytest.mark.skipif` markers (m68a's `needs_triton` form) with unchanged conditions.
 - Integrity check for reviewers: `git diff b1a4d07 -- tests/frozen` must be empty.
+
+## Implementer iteration 1 (B1)
+- **Changed** (+847/−12): `htcondor_backend/announce.py` (the prototype typed; `start` returns the ready
+  `(child, port)` or the reason; argv tokens rendered by `str.replace` as the engine's `_render`, not `str.format`;
+  the self-check bypasses environment proxies, as `check_ready` does; the self-check timeout is capped by the start's
+  remaining budget; `reap` has no early return, since `Popen.terminate`/`kill` never signal a reaped child),
+  `htcondor_backend/services.py` (`ServiceJob`: keys through `CondorPilots.submit_description`, then `initialdir`,
+  the attached-only `MY.SendCredential` drop and the recipe image, then `extra_submit` again so the user's keys stay
+  last; `ad()` = queue ad, else history `match=1`), `server.py` (announce registry on its own `Condition`;
+  `forget_announce` also drops a pending record), `backend.py` (`host_service`/`release_service` iff attached over
+  `CondorPilots` with `"cluster"`; module docstring's "later seam" sentence rewritten, E3), `launch.py` (absolute
+  `log_dir` at `start`; `job_python` shared by `_stage` and `ServiceJob`), `ci.yml` `test-htcondor` (+ m68b dirs,
+  one simulated GPU before the pool starts), `.coveragerc-htcondor` comment, `tests/extra/m68b` (10 legs).
+- **Mac** (py3.12, full `tests/frozen tests/extra`, serial): 1033 passed, 101 skipped, 33 failed; every failure is
+  in `tests/frozen/m68b/test_driverless_dag.py` (B2, unimplemented; the same 33 ids as B2 sanity). Per-file min
+  93.02% (`local/shuffle.py`, unchanged), total 97.15%; diff-cover: no measured lines (all changed src is under
+  the excluded `htcondor_backend/`).
+- **Container** (`m68b-minicondor:local` + simulated GPU, `ci.yml`'s test-htcondor replay over m66/m67/m68a + B1
+  frozen m68b + extras, B2 files `--ignore`d and run separately): 388 passed, 3 skipped (dask absent; two Triton legs
+  without `GRAPHED_TRITON_GRPC`); scoped report 99%; per-file min 97.66% (`backend.py`, lines unchanged since
+  0e48380), `announce.py` 99.21% (90.31% from the frozen legs alone), `services.py` 100%; diff-cover 100% of 391
+  changed lines. B2 files there: 36 failed (all 36 B2 items).
+- ruff, ruff format, mypy strict (also `--platform win32`, with a control: unguarded `hard_reap` gives 2
+  `attr-defined`), prek, sphinx -W, precommit `--fast --no-coverage`: ok (advisory `ci_config_modified`).
+- Extras discriminate: 13 mutants of `announce.py`/`services.py` (one per guarded branch), each killed by its leg.
