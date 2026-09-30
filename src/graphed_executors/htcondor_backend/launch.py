@@ -233,7 +233,7 @@ class CondorPilots:
             self._stack = stack.pop_all()
 
     @property
-    def job_python(self) -> str:
+    def _job_python(self) -> str:
         """The interpreter this launcher's jobs run: the shipped venv's, else this process's."""
         return "./env/bin/python" if self.profile.ship_env else sys.executable
 
@@ -248,7 +248,7 @@ class CondorPilots:
         script = log_dir / script_name
         script.write_text(
             f"#!/bin/sh\n{pre}[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\n"
-            f'exec {self.job_python} -m {module} "$@"\n'
+            f'exec {self._job_python} -m {module} "$@"\n'
         )
         script.chmod(0o755)
         if self.profile.ship_env:

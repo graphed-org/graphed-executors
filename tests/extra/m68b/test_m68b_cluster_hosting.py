@@ -43,8 +43,8 @@ LISTENER = (
 
 
 def free_ports(n: int) -> list[int]:
-    """``n`` consecutive ports nothing listens on."""
-    for low in range(31000, 60000, 97):
+    """``n`` consecutive ports ``free()`` accepts, scanned from a per-process base so concurrent runs differ."""
+    for low in range(31000 + os.getpid() % 1000 * 20, 60000, 97):
         ports = list(range(low, low + n))
         if all(ann.free(p) for p in ports):
             return ports
@@ -56,6 +56,8 @@ def listeners(ports: list[int]) -> Iterator[None]:
     with ExitStack() as stack:
         for port in ports:
             sock = stack.enter_context(socket.socket())
+            # bound as free() binds: a TIME_WAIT left on the port does not refuse it
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("", port))
             sock.listen(1)
         yield
@@ -234,6 +236,13 @@ def test_a_service_job_it_cannot_build_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no worker_ports"):
         ServiceJob(web(), no_workers, key="k", url="http://h:1", secret=b"s")
     assert ServiceJob(web(), pilots, key="k", watch=str(tmp_path)).watch == str(tmp_path)
+
+
+def test_a_submit_through_an_unstarted_launcher_is_refused_before_any_file(tmp_path: Path) -> None:
+    job = ServiceJob(web(), CondorPilots("generic", log_dir=tmp_path), key="k", url="http://h:1", secret=b"s")
+    with pytest.raises(AssertionError, match="start the launcher"):
+        job.submit()
+    assert job.dir is None and list(tmp_path.iterdir()) == []
 
 
 def test_stop_before_any_submit_touches_nothing(tmp_path: Path) -> None:

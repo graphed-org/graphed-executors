@@ -110,7 +110,7 @@ class HTCondorBackend:
             self._stack = stack.pop_all()
         self._services: dict[str, ServiceJob] = {}
         self._announced = dict(announced or {})
-        # the capability IS this pair of attributes (D10): absent, the engine refuses naming it
+        # the capability IS this pair of attributes: absent, the engine refuses naming it
         if self._announced:
             self.host_service = self._host_announced
             self.release_service = self._release_announced

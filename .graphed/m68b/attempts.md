@@ -96,3 +96,18 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
   `api.rst`: `SiteProfile.job_root`. `changelog.rst`: cluster hosting, the DAG and `job_root`, the killed driver.
 - The walk-through is not executable (lxplus); it parses and every call in it binds to the current signatures
   (`inspect.signature(...).bind`). sphinx -W ok; the two new `Cluster-hosted services`_ links resolve.
+
+## Implementer iteration 4 (review r1)
+- R1-1: `tests/extra/m68b`'s `listeners()` sets `SO_REUSEADDR`, binding as `free()` binds, and `free_ports()` scans
+  from a per-process base. Closing check (`timewait_probe`: a server-side TIME_WAIT left on both ports the leg picks
+  in the same process, a plain bind then refused with errno 48 on macOS / 98 on Linux): `-k exhausted` failed before
+  the fix (errno 48 in `listeners`) and passes after, on both; a `start()` mutant that skips the `free()` scan still
+  fails it.
+- Nits: "(D10)" dropped from `backend.py`'s comment; `CondorPilots.job_python` → `_job_python` (the rendered
+  `launch` API page listed it 3 times before, 0 after); `ServiceJob.submit()`'s assert now checks the launcher's
+  schedd (what `_submit` needs) as well as `log_dir`, before any file, with a leg (a mutant checking only `log_dir`
+  is killed). It stays an assert, the nit's first option: turning it into a `raise` trips the integrity scan's
+  `assertion_removed` on a line of a pushed commit.
+- Mac full: 1069 passed, 101 skipped, 0 failed; per-file min 93.02% (`local/shuffle.py`). Container: 427 passed,
+  3 skipped; per-file min 97.92% (`backend.py`); diff-cover 100% of 513 lines. ruff, mypy (+win32), prek, sphinx -W,
+  precommit: ok.

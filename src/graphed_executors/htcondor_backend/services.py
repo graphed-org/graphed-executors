@@ -71,7 +71,7 @@ class ServiceJob:
     def files(self, dir: Path) -> dict[str, str]:
         """Write the job's files into ``dir`` and return its submit keys; submits nothing."""
         launcher, profile, image = self.launcher, self.launcher.profile, self.launch.image
-        python = "python3" if image is not None else launcher.job_python
+        python = "python3" if image is not None else launcher._job_python
         quoted = shlex.quote(python)
         (dir / "service.sh").write_text(
             f"#!/bin/sh\n[ -f {ENV_FILE} ] && tar xzf {ENV_FILE}\n"
@@ -134,7 +134,9 @@ class ServiceJob:
         job; its removal is registered the moment ``schedd.submit`` returns, so a failed spool leaves
         none."""
         launcher = self.launcher
-        assert launcher.log_dir is not None, "start the launcher before a service job"
+        assert launcher._schedd is not None and launcher.log_dir is not None, (
+            "start the launcher before a service job: it submits to the pilots' schedd"
+        )
         self.dir = launcher.log_dir / f"service-{self.key}"
         self.dir.mkdir()  # the key is per call: no call reuses another's directory
         desc = self.files(self.dir)
