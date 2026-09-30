@@ -41,8 +41,8 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
-from multiprocessing.pool import ThreadPool
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from graphed.core.execution import Partition, Plan, Task
@@ -116,21 +116,34 @@ def recipes_api() -> Any:
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
     """Run ``fn`` on a worker thread and fail if it does not finish in ``timeout_s``: a hang is a failure,
     never a wedged CI job. Returns the value or re-raises the call's exception."""
-    pool = ThreadPool(1)
     try:
-        return pool.apply_async(fn).get(timeout_s)
+        return in_background(fn).get(timeout_s)
     except multiprocessing.TimeoutError:
         raise AssertionError(f"HARD TIMEOUT: call did not finish within {timeout_s}s") from None
-    finally:
-        pool.close()
 
 
 def in_background(fn: Callable[[], Any]) -> Any:
-    """``fn`` started on a daemon worker; the returned ``AsyncResult``'s ``get(t)`` bounds the wait."""
-    pool = ThreadPool(1)
-    result = pool.apply_async(fn)
-    pool.close()
-    return result
+    """``fn`` started on a daemon thread; the handle's ``ready()``/``get(t)`` behave as ``AsyncResult``'s."""
+    out: dict[str, Any] = {}
+
+    def _drive() -> None:
+        try:
+            out["result"] = fn()
+        except BaseException as exc:
+            out["error"] = exc
+
+    thread = threading.Thread(target=_drive, daemon=True)
+    thread.start()
+
+    def get(timeout_s: float | None = None) -> Any:
+        thread.join(timeout_s)
+        if thread.is_alive():
+            raise multiprocessing.TimeoutError
+        if "error" in out:
+            raise out["error"]
+        return out["result"]
+
+    return SimpleNamespace(ready=lambda: not thread.is_alive(), get=get)
 
 
 def get_within(result: Any, timeout_s: float, what: str) -> Any:
