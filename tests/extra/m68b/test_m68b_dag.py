@@ -4,7 +4,10 @@ does not reach."""
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import tempfile
+import time
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
@@ -24,6 +27,7 @@ from graphed_executors.htcondor_backend import (
     launch,
     submit_driverless,
 )
+from graphed_executors.htcondor_backend.driverless import DAG_OPTIONS
 from graphed_executors.htcondor_backend.server import sign
 
 
@@ -171,3 +175,81 @@ def test_driverless_pilots_take_the_run_s_extra_submit_last(
     assert {key: driver_job[key] for key in extra} == extra, driver_job
     assert {key: pilots[key] for key in extra} == extra, pilots
     assert plain["+DesiredOS"] == '"EL9"' and "request_disk" not in plain, "control: " + str(plain)
+
+
+def _gpu_plan() -> Plan[tuple[str, ...]]:
+    gpu = Launch(argv=("{python}",), resources={"gpus": 1})
+    web = ServiceSpec("web", "http", check="http:/", launch=gpu)
+    return Plan(process=_leaf, combine=_concat, empty=_empty, tasks=(), services=(web,))
+
+
+class _SubmitType:
+    """``htcondor2.Submit``: each ``from_dag``'s options are recorded."""
+
+    def __init__(self, bindings: _DagBindings) -> None:
+        self.bindings = bindings
+
+    def from_dag(self, dag: str, options: dict[str, Any]) -> dict[str, str]:
+        self.bindings.options.append(options)
+        return {"dag_file": dag}
+
+
+class _DagBindings:
+    """Bindings whose schedd's ``BIN`` is ``/schedd/bin``; ``log`` records the ``RemoteParam`` lookups and
+    submits in order."""
+
+    param = {"SCHEDD_HOST": "s1", "COLLECTOR_HOST": "pool"}  # noqa: RUF012  (read only)
+    DaemonType = SimpleNamespace(Schedd="schedd")
+
+    def __init__(self) -> None:
+        self.log: list[str] = []
+        self.options: list[dict[str, Any]] = []
+        self.Submit = _SubmitType(self)
+
+    def Collector(self, pool: str | None = None) -> Any:
+        return SimpleNamespace(locate=lambda kind, name: {"Name": name})
+
+    def RemoteParam(self, ad: dict[str, str]) -> dict[str, str]:
+        self.log.append(f"RemoteParam {ad['Name']}")
+        return {"BIN": "/schedd/bin"}
+
+    def Schedd(self, ad: Any = None) -> Any:
+        return SimpleNamespace(submit=self._submit)
+
+    def _submit(self, desc: dict[str, str], count: int = 0, spool: bool = False) -> Any:
+        self.log.append(f"submit {sorted(desc)}")
+        return SimpleNamespace(cluster=lambda: 7)
+
+
+def test_the_dag_names_the_schedd_s_condor_dagman(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _DagBindings()
+    monkeypatch.setattr(launch, "_htcondor", lambda: fake)
+    handle = submit_driverless(_gpu_plan(), site="generic", request_memory_mb=1024, log_dir=tmp_path / "logs")
+    assert handle.dag
+    assert fake.options == [{**DAG_OPTIONS, "dagman": "/schedd/bin/condor_dagman"}]
+    assert fake.log == ["RemoteParam s1", "submit ['dag_file']"]
+
+
+def test_the_dagman_job_runs_the_schedd_s_condor_dagman_not_the_one_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    htcondor2: Any = pytest.importorskip("htcondor2", reason="the live pool leg runs in test-htcondor")
+    decoy = tmp_path / "decoy" / "condor_dagman"
+    decoy.parent.mkdir()
+    decoy.write_text("#!/bin/sh\nexit 1\n")
+    decoy.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{decoy.parent}{os.pathsep}{os.environ['PATH']}")
+    assert shutil.which("condor_dagman") == str(decoy), "control: from_dag alone would name the decoy"
+    handle = submit_driverless(_gpu_plan(), site="generic", request_memory_mb=1024, log_dir=tmp_path / "logs")
+    schedd = htcondor2.Schedd()
+    run = f"ClusterId == {handle.cluster} || DAGManJobId == {handle.cluster}"
+    try:
+        (ad,) = schedd.query(f"ClusterId == {handle.cluster}", ["Cmd"])
+        located = htcondor2.Collector().locate(htcondor2.DaemonType.Schedd, handle.schedd)
+        assert ad["Cmd"] == f"{htcondor2.RemoteParam(located)['BIN']}/condor_dagman"
+    finally:
+        handle.remove()
+        deadline = time.monotonic() + 120
+        while schedd.query(run, ["ClusterId"]) and time.monotonic() < deadline:
+            time.sleep(1)
+    assert schedd.query(run, ["ClusterId"]) == [], "the run's jobs outlived its removal"
