@@ -10,7 +10,8 @@ Failing with the fix, each `AttributeError` on the fake:
 `test_service_nodes_are_named_by_derived_ids_in_name_order`,
 `test_an_lxplus_service_node_keeps_its_credential_and_env_and_the_dag_is_not_spooled`,
 `test_a_user_module_path_holding_a_comma_is_refused[dag]`, `test_each_dag_submission_gets_a_new_run_directory`,
-`test_paths_under_job_root_submit`, `test_the_job_root_check_is_lexical` (`RemoteParam`);
+`test_paths_under_job_root_submit`, `test_the_job_root_check_is_lexical`, and in the test-htcondor job
+`test_the_dag_description_is_the_probe_s` (`RemoteParam`);
 `test_self_submission_reads_job_root_from_the_row` (`Credd`).
 
 ## The clause it contradicts
@@ -29,6 +30,3 @@ lanes/htcondor/probes/site-lxplus/submit-fixes/proposed-frozen-fixup.diff:
   `condor_dagman`), plus `CredType.Kerberos` and a `Credd()` whose `query_user_cred` returns a timestamp
   (a stored credential);
 - the two pins become `{**DAG_OPTIONS, "dagman": "/usr/bin/condor_dagman"}`.
-
-With it applied, every m66/m67/m68a/m68b frozen and extra test passes. The only failures are the grpc
-legs, which fail on upstream/main too (no grpc here).
