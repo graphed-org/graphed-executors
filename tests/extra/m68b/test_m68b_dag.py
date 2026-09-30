@@ -3,14 +3,24 @@ does not reach."""
 
 from __future__ import annotations
 
+import tempfile
+from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
 import pytest
+from graphed.core.execution import Partition, Plan
 from graphed.services import Launch, ServiceSpec
 
-from graphed_executors.htcondor_backend import SITES, HTCondorBackend, LocalPilots, RunHandle
+from graphed_executors.htcondor_backend import (
+    SITES,
+    HTCondorBackend,
+    LocalPilots,
+    RunHandle,
+    launch,
+    submit_driverless,
+)
 from graphed_executors.htcondor_backend.server import sign
 
 
@@ -55,3 +65,58 @@ def test_a_driver_node_held_only_while_its_input_spools_is_queued(tmp_path: Path
     handle = RunHandle(site="generic", schedd="s", cluster=7, log_dir=tmp_path, submitted_at=0.0, dag=True)
     assert handle._poll(_Schedd({"JobStatus": 5, "HoldReasonCode": 16}))[0] == "queued"
     assert handle._poll(_Schedd({"JobStatus": 5, "HoldReasonCode": 12}))[0] == "held", "control: a real hold"
+
+
+def _leaf(partition: Partition, resources: object) -> tuple[str, ...]:
+    return (partition.uri,)
+
+
+def _concat(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
+    return a + b
+
+
+def _empty() -> tuple[str, ...]:
+    return ()
+
+
+REFUSED_AFTER_MKDTEMP = ["log_dir", "service-input", "user_modules"]
+
+
+@pytest.mark.parametrize("case", REFUSED_AFTER_MKDTEMP)
+def test_a_refused_run_leaves_no_temporary_log_dir(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    temp = tmp_path / "tmp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    (tmp_path / "mod.py").write_text("X = 1\n")
+    gpu = Launch(argv=("{python}",), resources={"gpus": 1})
+    inputs = (str(tmp_path / "missing"),) if case == "service-input" else ()
+    spec = ServiceSpec("web", "http", check="http:/", launch=replace(gpu, inputs=inputs))
+    root = {"log_dir": tmp_path / "root", "service-input": "/", "user_modules": temp}[case]
+    monkeypatch.setitem(SITES, "m68b-x", replace(SITES["generic"], name="m68b-x", job_root=str(root)))
+    services = () if case == "log_dir" else (spec,)
+    plan = Plan(process=_leaf, combine=_concat, empty=_empty, tasks=(), services=services)
+    kwargs: dict[str, Any] = {
+        "site": "m68b-x",
+        "request_memory_mb": 1024,
+        "user_modules": [tmp_path / "mod.py"],
+    }
+    if case == "log_dir":
+        kwargs["pilots"] = "condor"
+    with pytest.raises(ValueError, match=case.replace("service-input", "does not exist")):
+        submit_driverless(plan, **kwargs)
+    assert list(temp.iterdir()) == []
+
+    def no_bindings() -> None:
+        raise RuntimeError("no bindings here")
+
+    monkeypatch.setitem(SITES, "m68b-x", replace(SITES["generic"], name="m68b-x"))
+    monkeypatch.setattr(launch, "_htcondor", no_bindings)
+    with pytest.raises(RuntimeError, match="no bindings here"):
+        submit_driverless(
+            Plan(process=_leaf, combine=_concat, empty=_empty, tasks=()),
+            site="m68b-x",
+            request_memory_mb=1024,
+        )
+    assert len(list(temp.iterdir())) == 1, "control: a run past its refusals keeps its temporary log_dir"

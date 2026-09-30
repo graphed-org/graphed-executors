@@ -111,3 +111,16 @@ confirmed r25; B2 converged r19/r20); implementer constraints `plan/reviews/m68b
 - Mac full: 1069 passed, 101 skipped, 0 failed; per-file min 93.02% (`local/shuffle.py`). Container: 427 passed,
   3 skipped; per-file min 97.92% (`backend.py`); diff-cover 100% of 513 lines. ruff, mypy (+win32), prek, sphinx -W,
   precommit: ok.
+
+## Implementer iteration 5 (review r2)
+- R2-1: the installer already starts the pool, so the "Start a personal HTCondor pool" step now runs
+  `sudo condor_restart -daemon startd` after writing `99-sim-gpu`, waits (bounded, 90 × 2 s) for
+  `condor_status -af TotalGPUs` ≥ 1, and fails the step if it never does. Container mirror in CI's order (pool up,
+  then the config, then a 20 s wait): `TotalGPUs` 0 before the restart, 1 after it (loop broke at i=7).
+- N3: `submit_driverless` removes the temporary `log_dir` it made when a refusal follows (`ExitStack` popped once
+  every refusal has passed). Leg `test_a_refused_run_leaves_no_temporary_log_dir` (log_dir / service input /
+  user_modules refusals): each case left a `graphed-driverless-*` dir before the fix and none after; its control, a
+  run past its refusals failing on the missing bindings, keeps exactly one.
+- Mac full: 1072 passed, 101 skipped, 0 failed; per-file min 93.02% (`local/shuffle.py`). Container (CI order,
+  bytecode cleared): 430 passed, 3 skipped; per-file min 97.92% (`backend.py`), `driverless.py` 100%; diff-cover
+  100% of 515 lines. ruff, format, mypy (+win32), sphinx -W, precommit `--fast --no-coverage`: ok.

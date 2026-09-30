@@ -276,21 +276,25 @@ def submit_driverless(
     out = Path(
         os.path.abspath(log_dir or tempfile.mkdtemp(prefix="graphed-driverless-", dir=launcher._sandbox()))
     )
-    if pilots == "condor" or announce_only:
-        _require_under(profile, "log_dir", out)
-    nonce = uuid.uuid4().hex[:8]
-    run_dir = out / f"graphed-{nonce}" if announce_only else out
-    by_name = {spec.name: spec for spec in plan.services}
-    nodes = {
-        node: ServiceJob(by_name[name], launcher, key=node, watch=str(run_dir))
-        for name, node in announce_only.items()
-    }
-    if nodes:  # unspooled: the schedd reads each of these where it lies
-        for module in launcher.user_modules:
-            _require_under(profile, "user_modules", module)
-        for job in nodes.values():
-            for path in job.inputs:
-                _require_under(profile, f"service {job.spec.name!r} input", path)
+    with ExitStack() as refused:  # a refusal leaves no temporary log_dir behind
+        if log_dir is None:
+            refused.callback(out.rmdir)
+        if pilots == "condor" or announce_only:
+            _require_under(profile, "log_dir", out)
+        nonce = uuid.uuid4().hex[:8]
+        run_dir = out / f"graphed-{nonce}" if announce_only else out
+        by_name = {spec.name: spec for spec in plan.services}
+        nodes = {
+            node: ServiceJob(by_name[name], launcher, key=node, watch=str(run_dir))
+            for name, node in announce_only.items()
+        }
+        if nodes:  # unspooled: the schedd reads each of these where it lies
+            for module in launcher.user_modules:
+                _require_under(profile, "user_modules", module)
+            for job in nodes.values():
+                for path in job.inputs:
+                    _require_under(profile, f"service {job.spec.name!r} input", path)
+        refused.pop_all()
     out.mkdir(parents=True, exist_ok=True)
     if nodes:
         run_dir.mkdir()  # new per run: no DAG reads another run's files
