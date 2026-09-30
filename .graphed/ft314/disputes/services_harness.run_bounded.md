@@ -35,3 +35,7 @@ macOS 3.14.6t: 0 of 3 runs wedge in 50k calls each (the unmodified pattern: 3 of
 ## Why not fixed outside tests/frozen
 Nothing in `src/` creates these pools, and patching the harness from a non-frozen conftest would be
 routing around a frozen file. Resolution needs an owner-sanctioned frozen fixup (as `freeze-m47-fixup`).
+
+## Owner ruling 2026-09-30
+Sanctioned fixup: every frozen `run_bounded` that pools uses the daemon-thread + `join(timeout)` form of `tests/frozen/m66/htcondor_harness.py::run_bounded`, in PR #40; tags freeze-m67-fixup, freeze-m68a-fixup, freeze-m68b-fixup.
+Sites: m67 `driverless_harness.run_bounded`, m68a `services_harness.run_bounded`, m68b `m68b_harness.run_bounded` and `m68b_harness.in_background` (the same per-call pool), and m68b `m68b_dag_harness.run_bounded`.
