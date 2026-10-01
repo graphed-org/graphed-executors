@@ -36,3 +36,20 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   `tests/extra/m68a/test_m68a_services.py::test_a_child_that_exits_after_its_check_passed` (a 1 s window for a
   child to exit; passes 3/3 alone, with and without coverage). Per-file ≥98% (submit/services.py 99.15%);
   diff-cover 100% (100 lines).
+
+## Merge — upstream/main b0dfd2e (#42 m68c, #43 atomic write_secret)
+- `git merge upstream/main` at 4759ba8: no conflicts (4ecd444). ci.yml GRAPHED arrived at 7e048bf; lane venvs and
+  the pool container upgraded to graphed 7e048bf.
+- Linux pool after the merge (+ frozen/extra m68c): see Iteration 4. macOS: frozen m68a/m68c/m69b + extra
+  m68c/m69b 191 passed, 16 skipped (pool and hgg rows).
+
+## Iteration 3 — commit 3: H→γγ diagnostics
+- `analysis.DIAGNOSTICS` (seven, Weight, weight=`weight`), `diagnostics(record, context)` (gh.boost, or
+  histserv on a context), `HggReduce`/`HggCombine`/`HggEmpty` composing `Counters`/`accumulate` with
+  `pieces.reduce`/`combine`/`empty`; `dataset_plan`/`plan(..., context=None)` → `pieces.serve(aggregate_plan(...))`.
+  `run_local.report` prints the counters and saves the diagnostics as UHI JSON.
+- test-hgg equivalent (`.venv-m69b-hgg`, graphed 7e048bf, `GRAPHED_HGG_REQUIRED=1`): frozen m69a + m69b
+  `test_hgg_*` + extra m69b: 57 passed, 0 skipped.
+- Mutants (frozen diagnostics + extra hgg): combine drops b's histograms → no-context row + empty-identity fail
+  (served rows pass: every chunk's receipt names the same server histogram); reduce without
+  `resolve_services` → all three served/no-context rows fail; empty without `"diagnostics"` → empty-identity fails.
