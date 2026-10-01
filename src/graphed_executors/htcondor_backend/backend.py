@@ -278,7 +278,7 @@ def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[st
 
 
 class HTCondorRunner(SubmitRunner):
-    """A :class:`SubmitRunner` that refuses a plan pilots cannot import, and waits for ``min_pilots``
+    """A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import, and waits for ``min_pilots``
     before its first run so pilots that never start are an error instead of a queue that never drains."""
 
     backend: HTCondorBackend
