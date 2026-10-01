@@ -103,7 +103,8 @@ class RunHandle:
                 return "held"
             return "running" if any(ad.get("JobStatus") == 2 for ad in ads) else "queued"
         if status == 4:
-            tries = list(schedd.history(node, ["ClusterId", "ExitCode"], match=3))
+            # newest first: the first driver ad is the latest try, and a bound past the tries scans all history
+            tries = list(schedd.history(node, ["ClusterId", "ExitCode"], match=1))
             latest: Mapping[str, Any] = max(tries, key=lambda ad: int(ad["ClusterId"]), default={})
             return "done" if latest.get("ExitCode") == 0 else "failed"
         return "running"
