@@ -83,3 +83,14 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   Same command: 404 passed, diff-cover 100% (44 lines). Include globs untouched.
 - test-parsl: its include (`parsl_backend/**`, `common/relay_engine.py`, `common/http_plane.py`) meets none of the
   PR's changed src files (`htcondor_backend/{backend,services}.py`, `submit/services.py`): no exposure.
+
+## Iteration 6 — PR #44 round 2: run_lpc parts from pilot scratch
+- Site run (driver, `lanes/htcondor/probes/site-lpc/m69-hgg*.txt`): the EOS `--out` failed the first pilot write
+  (`ArrowInvalid: Unrecognized filesystem type in URI: root://…`; graphed's `_ArrowParquet` hands the path to
+  `pq.write_table`); a local `--out` passed and stayed in pilot scratch. Plan §9's fallback:
+  `--out` defaults to `output_inclusive` in each pilot's scratch; pilots carry `transfer_output_files=<out>` and
+  `output_destination=<--destination>` (default `root://cmseos.fnal.gov//store/user/<user>/hgg/`) through
+  `extra_submit`; a `://` `--out` is refused via `parser.error` naming pyarrow. Driverless returns `<out>` beside
+  `result.pkl,driver.log` instead (an `output_destination` on the driver job would take `result.pkl` too).
+- Tests: the attached and driverless submit keys, the refusal before any runner. Mutants (no
+  `output_destination`; driverless takes the pilot keys; root `--out` accepted) each fail one test.

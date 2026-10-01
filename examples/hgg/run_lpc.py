@@ -8,12 +8,13 @@ graphed-histogram[histserv], the coffea fork and higgs_dna (``--env`` ships it t
         --pilots 8 --server-mb 512 2048 --env "$VIRTUAL_ENV" [--placement driver] [--driverless]
 
 Each of ``--datasets`` takes its manifest's first ``--files`` files, each split into ``--parts`` entry
-ranges. Parts go to ``--out`` (default ``root://cmseos.fnal.gov//store/user/<user>/hgg/``, which the
-pilots write over xrootd with the job's proxy). ``--placement cluster`` runs each server as a job of its
-own on the pool; ``driver`` runs them beside the driver on the login node. ``--driverless`` submits the
-run as one job whose slot holds the driver, its local pilots and the servers. Service statuses (where
-each server ran, when it was submitted and ready) are logged; the servers' sizes and predictions print
-before the run.
+ranges. A pilot writes its parts under ``--out``, a directory in its scratch, which HTCondor sends to
+``--destination`` (default ``root://cmseos.fnal.gov//store/user/<user>/hgg/``) when the pilot exits; a
+driverless job returns ``--out`` beside its result instead. ``--placement cluster`` runs each server as a
+job of its own on the pool; ``driver`` runs them beside the driver on the login node. ``--driverless``
+submits the run as one job whose slot holds the driver, its local pilots and the servers. Service statuses
+(where each server ran, when it was submitted and ready) are logged; the servers' sizes and predictions
+print before the run.
 """
 
 from __future__ import annotations
@@ -31,9 +32,11 @@ from graphed_histogram import histserv
 
 import analysis
 from graphed_executors.htcondor_backend import SITES, htcondor_runner, submit_driverless
+from graphed_executors.htcondor_backend.launch import LOG_FILE, RESULT_FILE
 from run_local import fileset, report
 
 DATASETS = ("GluGluHto2G_M-125_amcatnlo_2024", "DataC_2024")
+EOS = "root://cmseos.fnal.gov//store/user/{user}/hgg/"
 IMAGE = "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/coffea-almalinux9-noml:2026.9.0-py3.12"
 #: the driver's own share of a driverless job's slot, beside its pilots and servers
 DRIVER_MB = 2048
@@ -52,6 +55,15 @@ def manifests(paths: Sequence[str]) -> dict[str, list[str]]:
 def steps(samples: dict[str, list[str]], datasets: Sequence[str], files: int, parts: int) -> dict[str, Any]:
     """coffea's fileset over each dataset's first ``files`` files, each in ``parts`` steps."""
     return {ds: fileset(samples[ds][:files], ds, parts)[ds] for ds in datasets}
+
+
+def output_keys(out: str, destination: str, *, driverless: bool) -> dict[str, str]:
+    """The submit keys that bring ``out`` (relative to a job's scratch dir) home: a pilot's goes to
+    ``destination`` when it exits; a driverless job's comes back beside its result, since an
+    ``output_destination`` would take ``result.pkl`` there too."""
+    if driverless:
+        return {"transfer_output_files": f"{RESULT_FILE},{LOG_FILE},{out}"}
+    return {"transfer_output_files": out, "output_destination": destination}
 
 
 def driverless_memory_mb(ctx: histserv.Context, pilots: int, pilot_mb: int) -> int:
@@ -76,12 +88,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--image", default=IMAGE)
     parser.add_argument("--env", default=None, help="a venv to ship to the jobs")
     parser.add_argument("--log-dir", default=None)
-    parser.add_argument("--out", default=None, help="default: root://cmseos.fnal.gov//store/user/<user>/hgg/")
+    parser.add_argument(
+        "--out", default="output_inclusive", help="the parts' directory in each job's scratch"
+    )
+    parser.add_argument("--destination", default=None, help=f"where --out goes (default {EOS})")
     parser.add_argument("--histograms", default="hgg_diagnostics.json", help="where the UHI JSON goes")
     args = parser.parse_args(argv)
 
+    if "://" in args.out:
+        parser.error(
+            f"--out {args.out}: the pilots write parquet through pyarrow, which has no root:// filesystem; "
+            "--out is a directory in each pilot's scratch, and --destination is where HTCondor sends it"
+        )
     logging.basicConfig(level=logging.INFO)
-    out = args.out or f"root://cmseos.fnal.gov//store/user/{getpass.getuser()}/hgg/"
+    keys = output_keys(
+        args.out, args.destination or EOS.format(user=getpass.getuser()), driverless=args.driverless
+    )
     ctx = histserv.Context(
         memory_mb=args.server_mb,
         workers=args.pilots,
@@ -89,7 +111,7 @@ def main(argv: list[str] | None = None) -> None:
         ports=SITES["lpc"].service_ports,
     )
     work = steps(manifests(args.manifest), args.datasets, args.files, args.parts)
-    plan = analysis.plan(work, year=args.year, out=out, context=ctx)
+    plan = analysis.plan(work, year=args.year, out=args.out, context=ctx)
     print("servers (name, memory_mb, predicted_bytes, n_histograms):", ctx.servers(), flush=True)
     if args.driverless:
         handle = submit_driverless(
@@ -102,6 +124,7 @@ def main(argv: list[str] | None = None) -> None:
             log_dir=args.log_dir,
             user_modules=[ANALYSIS],
             env=args.env,
+            extra_submit=keys,
         )
         print(f"driverless cluster {handle.cluster}: {handle.log_dir}", flush=True)
         print("status:", handle.wait(), flush=True)
@@ -115,6 +138,7 @@ def main(argv: list[str] | None = None) -> None:
             log_dir=args.log_dir,
             user_modules=[ANALYSIS],
             env=args.env,
+            extra_submit=keys,
             service_hosts=(args.placement,),
         ) as runner:
             value = runner.run(plan).value
