@@ -393,12 +393,12 @@ standard-library script (Python 3.9 or later, so it runs in an image with no ven
 first free port of the site's ``worker_ports``, starts the recipe's command on it, runs the spec's
 check there, and then *announces* ``host:port`` to the runner's task server, signed with a secret
 made for that one service. While the job waits for a slot (idle, or spooling its inputs) the runner
-waits with it, with no deadline, and logs the job's key and state on the ``graphed_executors`` logger
-at first and every 30 seconds; the spec's ``timeout_s`` counts from the job's start (its first
-``JobStatus == 2``), and an eviction back to idle does not restart it. A job that ends or is held
-first raises ``RuntimeError`` naming its state and its directory ``service-<key>/`` under
-``log_dir``; a job that has started and not announced within ``timeout_s`` raises ``TimeoutError``;
-either way the job is removed. When the run ends the job is removed too, and leaves its slot (and its
+waits with it, with no deadline but the runner's close (`Schedulability`_), and logs the job's key and
+state on the ``graphed_executors`` logger at first and every 30 seconds; the spec's ``timeout_s``
+counts from the job's start (its first ``JobStatus == 2``), and an eviction back to idle does not
+restart it. A job that ends or is held first raises ``RuntimeError`` naming its state and its
+directory ``service-<key>/`` under ``log_dir``; a job that has started and not announced within
+``timeout_s`` raises ``TimeoutError``; either way the job is removed. When the run ends the job is removed too, and leaves its slot (and its
 GPU) within 30 seconds. On a spooled site (the LPC, lxplus) a service job that completed has its
 ``service.out`` and ``service.err`` fetched into ``service-<key>/`` when it is removed.
 
@@ -469,8 +469,12 @@ reached from CPU pilots:
 Schedulability
 ~~~~~~~~~~~~~~
 
-A service starts only where it can run, and a run that cannot place one is refused before any of
-its work starts, never left waiting on a slot that will not come.
+A service starts only where it can run: a run that cannot place one anywhere is refused before any
+of its work starts. A run whose service can run on some slot waits for one, for as long as the
+scheduler offers no room, including when the room is held by the run's own pilots (which keep their
+slots until the runner closes). While it waits, the ``graphed_executors`` logger names the job's key
+and state every 30 seconds, and ``runner.close()`` ends the wait: the job is removed and the run
+raises ``RuntimeError`` naming the key.
 
 * **Where it may go.** ``htcondor_runner(..., service_hosts=("cluster",))`` (or ``("driver",)``)
   narrows the site's ``service_hosts`` for this run. A host the site does not offer is a
@@ -484,10 +488,12 @@ its work starts, never left waiting on a slot that will not come.
   backend with no cluster host refuses it with ``ServiceUnavailable``, whose ``legs["managed"]`` names
   the sizes and the limit.
 * **On the cluster, a slot must match.** After the service job is submitted, its ad is matched
-  against every slot of the pool, busy or not, with a partitionable slot counted whole. A job no slot
-  matches (too much memory, a requirement no machine meets) is removed before it ever runs, and the
-  run raises ``ServiceUnavailable`` naming ``RequestMemory``, ``RequestCpus``, ``RequestGPUs`` and the
-  largest slot's memory. A job that matches a busy slot waits for it, as above.
+  against every slot of the pool, busy or not, with a partitionable slot counted whole (its total
+  memory, CPUs, GPUs and disk). A job no slot matches (too much memory, a requirement no machine
+  meets) is removed before it ever runs, and the run raises ``ServiceUnavailable`` naming
+  ``RequestMemory``, ``RequestCpus``, ``RequestGPUs`` and the largest slot's memory. A job that
+  matches a busy slot waits for it, as above. A collector that lists no slot at all is not asked: the
+  job is submitted and waits.
 
 Histograms on histserv servers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

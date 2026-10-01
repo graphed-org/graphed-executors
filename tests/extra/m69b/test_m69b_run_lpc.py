@@ -2,7 +2,8 @@
 ``--parts`` steps, the attached run asks for the LPC row narrowed to ``--placement`` with the analysis
 shipped and the pilots' parts sent from their scratch to EOS, the driverless run asks for a slot that holds
 the driver, its pilots and every server and returns its parts beside its result, both save the run's
-diagnostics, and a root:// ``--out`` is refused before anything runs. The runner is a stand-in that runs the
+diagnostics, each server's status line names when it was submitted and ready, and a root:// ``--out`` is
+refused before anything runs. The runner is a stand-in that runs the
 plan on threads in the test's directory. Skips without coffea or higgs_dna unless ``GRAPHED_HGG_REQUIRED=1``,
 as ``hgg_harness`` does."""
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 import getpass
 import importlib
 import json
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,6 +24,7 @@ import pytest
 import uhi.io.json
 
 from graphed_executors.submit import SubmitRunner, ThreadBackend
+from graphed_executors.submit.services import ServiceStatus
 
 
 @pytest.fixture(scope="module")
@@ -101,3 +104,34 @@ def test_a_root_out_is_refused_before_anything_runs(
     with pytest.raises(SystemExit):
         run_lpc.main(argv(tmp_path, "--out", "root://cmseos.fnal.gov//store/user/x/hgg/"))
     assert "pyarrow, which has no root:// filesystem" in capsys.readouterr().err
+
+
+def test_each_server_s_status_line_names_when_it_was_submitted_and_ready(
+    run_lpc: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    services = logging.getLogger("graphed_executors.services")
+
+    @contextmanager
+    def runner(**kwargs: Any) -> Iterator[Any]:
+        def run(plan: Any) -> Any:
+            for i, spec in enumerate(plan.services):
+                status = ServiceStatus(
+                    spec.name, "managed", "cluster", "tcp://n:1", "n", 1000.25 + i, 2000.5 + i
+                )
+                services.info("service %r: managed leg (cluster)", spec.name, extra={"status": status})
+            return SimpleNamespace(value=threads(plan, kwargs["n_pilots"]))
+
+        yield SimpleNamespace(run=run)
+
+    monkeypatch.setattr(run_lpc, "htcondor_runner", runner)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(logging.root, "handlers", [])  # main's own handler, not pytest's capture
+    level = logging.root.level
+    try:
+        run_lpc.main(argv(tmp_path, "--server-mb", "256"))
+    finally:
+        logging.root.setLevel(level)
+    lines = [line for line in capsys.readouterr().err.splitlines() if "managed leg (cluster)" in line]
+    assert len(lines) >= 1
+    for i, line in enumerate(lines):
+        assert f"started_at={1000.25 + i} ready_at={2000.5 + i}" in line, line

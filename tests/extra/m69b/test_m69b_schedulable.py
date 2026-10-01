@@ -2,7 +2,8 @@
 the driver check's fall-through to a cluster host and its refusal beside the earlier legs, the per-start sum,
 a size-less spec; a driver job's slot ``Memory``; the condor announce wait's idle log cadence and a deadline
 that outlives an eviction; the collector query, a partitionable slot's totals, and a job that left the queue
-before its match. No bindings and no pool: the condor pieces run over stand-ins."""
+before its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; a
+runner's close ending a wait for a slot. No bindings and no pool: the condor pieces run over stand-ins."""
 
 from __future__ import annotations
 
@@ -11,15 +12,18 @@ import logging
 import os
 import socket
 import sys
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from graphed.core.execution import Partition, Plan, Task
 from graphed.services import Launch, ServiceSpec
 
-from graphed_executors.htcondor_backend import SITES, CondorPilots, HTCondorBackend, launch
+from graphed_executors.htcondor_backend import SITES, CondorPilots, HTCondorBackend, HTCondorRunner, launch
 from graphed_executors.htcondor_backend import backend as backend_mod
 from graphed_executors.htcondor_backend import server as server_mod
 from graphed_executors.htcondor_backend.services import ServiceJob, _as_whole, machine_ads
@@ -297,8 +301,10 @@ def test_a_partitionable_slot_is_matched_at_its_totals() -> None:
         "TotalSlotMemory": 15973,
         "Cpus": 1,
         "TotalSlotCpus": 10,
+        "Disk": 524288,
+        "TotalSlotDisk": 2097152,
     }
-    assert _as_whole(dict(busy)) == {**busy, "Memory": 15973, "Cpus": 10}
+    assert _as_whole(dict(busy)) == {**busy, "Memory": 15973, "Cpus": 10, "Disk": 2097152}
     static = {"Memory": 2048, "TotalSlotMemory": 4096}
     assert _as_whole(dict(static)) == static
 
@@ -310,3 +316,124 @@ def test_a_job_that_left_the_queue_is_not_refused_by_the_match(tmp_path: Path) -
     job = ServiceJob(spec("gone", None), pilots, key="scope-gone", url="http://127.0.0.1:1", secret=b"s")
     job.cluster = 4242
     assert job.match_refusal([{"SlotType": "Partitionable"}]) is None
+
+
+def test_a_job_waiting_only_on_a_busy_node_s_disk_matches() -> None:
+    classad2 = pytest.importorskip("classad2")  # ships with the htcondor bindings (Linux)
+    job = classad2.ClassAd("[ RequestDisk = 1048576; Requirements = TARGET.Disk >= RequestDisk ]")
+    busy = "[ PartitionableSlot = true; Disk = 524288; TotalSlotDisk = 2097152; Requirements = true ]"
+    assert not job.symmetricMatch(classad2.ClassAd(busy))  # the collector's busy node, as it reports it
+    assert job.symmetricMatch(_as_whole(classad2.ClassAd(busy)))
+
+
+# ---- a whole backend over a stand-in pool -------------------------------------------------------------------
+
+
+class Pool:
+    """``htcondor2`` over a schedd whose every job answers ``status`` (``None``: gone) and a collector that
+    lists no slot; ``log`` records submits (by batch name) and actions."""
+
+    def __init__(self, status: int | None) -> None:
+        self.status = status
+        self.log: list[tuple[str, str]] = []
+        self.clusters = iter(range(70, 100))
+        self.JobAction = SimpleNamespace(Remove="Remove")
+        self.param = {"SCHEDD_HOST": "s1"}
+        self.Submit = dict
+
+    def Schedd(self, ad: Any = None) -> Any:
+        return self
+
+    def Collector(self, *pool: str) -> Any:
+        return SimpleNamespace(query=lambda constraint: [])
+
+    def submit(self, desc: dict[str, str], count: int = 0, spool: bool = False) -> Any:
+        cluster = next(self.clusters)
+        self.log.append(("submit", f"{desc['JobBatchName']} {cluster}"))
+        return SimpleNamespace(cluster=lambda: cluster)
+
+    def query(self, constraint: str = "", projection: Any = None) -> list[dict[str, Any]]:
+        return [] if self.status is None else [{"JobStatus": self.status}]
+
+    def history(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    def act(self, action: str, constraint: str, reason: str = "") -> None:
+        self.log.append(("act", f"{action} {constraint}"))
+
+    def service_cluster(self) -> str:
+        (submit,) = [entry for kind, entry in self.log if kind == "submit" and "graphed-service-" in entry]
+        return submit.rsplit(" ", 1)[1]
+
+
+def pooled(
+    status: int | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[HTCondorBackend, Pool]:
+    pool = Pool(status)
+    monkeypatch.setattr(launch, "_htcondor", lambda: pool)
+    monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)  # the stand-in's pilots never exit by themselves
+    pilots = CondorPilots("generic", log_dir=tmp_path)
+    return HTCondorBackend(pilots, 1, host="127.0.0.1", service_hosts=("cluster",)), pool
+
+
+def test_a_pool_whose_collector_lists_no_slot_submits_and_waits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # were the empty ad list matched, this classad2 would reach max() over no slot
+    monkeypatch.setitem(sys.modules, "classad2", SimpleNamespace(ClassAd=dict))
+    monkeypatch.setattr(server_mod, "POLL_S", 0.02)
+    backend, pool = pooled(2, tmp_path, monkeypatch)
+    try:
+        announcing_after(backend, monkeypatch, 2)
+        endpoint, identity, key = backend.host_service(spec("unlisted", 64), "scope")
+        assert (endpoint, identity) == ("tcp://127.0.0.1:10007", "node7")
+        backend.release_service(key)
+        assert ("act", f"Remove ClusterId == {pool.service_cluster()}") in pool.log
+    finally:
+        pool.status = None
+        backend.close()
+
+
+def leaf(partition: Partition, resources: object) -> int:
+    return 1
+
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+def zero() -> int:
+    return 0
+
+
+def test_close_ends_a_wait_for_a_slot_removing_the_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(server_mod, "POLL_S", 0.1)
+    backend, pool = pooled(1, tmp_path, monkeypatch)  # every job idle, the pilots and the service alike
+    runner = HTCondorRunner(backend, min_pilots=0)
+    tasks = (Task(0, Partition("mem://m69b-close/0", "", 0, 1)),)
+    waits = Plan(process=leaf, combine=add, empty=zero, tasks=tasks, services=(spec("idle", 64),))
+    closer = threading.Thread(target=runner.close, daemon=True)
+    try:
+        with caplog.at_level(logging.INFO, logger="graphed_executors"):
+            future = runner.submit(waits)
+            deadline = time.monotonic() + 10.0
+            while "waits for a slot" not in caplog.text and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert "waits for a slot" in caplog.text, caplog.text
+            closer.start()
+            closer.join(5.0)
+        assert not closer.is_alive(), "close() still waits for the slot"
+        with pytest.raises(
+            RuntimeError, match=r"still waited for a slot when the runner closed: JobStatus=1"
+        ):
+            future.result(0)
+        assert ("act", f"Remove ClusterId == {pool.service_cluster()}") in pool.log
+        assert backend._server._announce_secrets == {}
+    finally:
+        pool.status = None  # the job is gone: a wait that outlived close() ends
+        if closer.is_alive():
+            closer.join(30.0)
+        elif not closer.ident:
+            runner.close()

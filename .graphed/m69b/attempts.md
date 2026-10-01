@@ -94,3 +94,26 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   `result.pkl,driver.log` instead (an `output_destination` on the driver job would take `result.pkl` too).
 - Tests: the attached and driverless submit keys, the refusal before any runner. Mutants (no
   `output_destination`; driverless takes the pilot keys; root `--out` accepted) each fail one test.
+
+## Iteration 7 — review r1 (REJECT) round: M1, M2, m1, m2
+- Hygiene: a zsh `rm .coverage*` glob had deleted the three `.coveragerc-*` files (restored by the coordinator);
+  coverage data is cleaned with `.coverage .coverage.*` only.
+- M1: `HTCondorRunner.close()` (and `HTCondorBackend.close()`) call `backend.stop_waiting()` first; a service wait
+  still idle or spooling (no deadline yet) raises `RuntimeError` naming the key at its next poll (≤ `POLL_S`), its
+  ExitStack removes the job and forgets the key. A started job keeps its `timeout_s`; the no-deadline wait stays
+  (owner ruling). Docs: the false "never left waiting" sentence rewritten (waits while the scheduler offers no
+  room, own pilots included; key logged every 30 s; `close()` ends it).
+  Test `test_close_ends_a_wait_for_a_slot_removing_the_job` (stand-in pool, every job idle): fails on d536f04
+  ("close() still waits for the slot"), fails with the runner's `stop_waiting()` call removed. Reviewer's
+  self-starve probe in the pool: close returned (~13 s after the 90 s watch), run raised naming the key, queue 0.
+- M2: `_as_whole` also takes `TotalSlotDisk` → `Disk`. Dict row fails on d536f04 (`Disk 524288 != 2097152`);
+  classad2 row `test_a_job_waiting_only_on_a_busy_node_s_disk_matches` passes in the pool; the reviewer's disk
+  probe now prints "match as shipped: True".
+- m1: `run_lpc` logs through `ServerTimes`, which appends each status's `started_at`/`ready_at`. Row fails on
+  d536f04 (the stand-in status line carries no times).
+- m2: the empty-ads guard moves into `match_refusal`; row `test_a_pool_whose_collector_lists_no_slot_submits_and_waits`
+  (collector lists nothing; a stand-in classad2) reaches the announce; with the guard deleted it fails with
+  `ValueError: max() iterable argument is empty`.
+- Gates: macOS main job 1138 passed / 120 skipped, per-file min 98.33 %, diff-cover 100 %; test-dask job 406
+  passed, diff-cover 100 %; pool test-htcondor job 506 passed / 10 skipped, per-file min 99.79 %, diff-cover 100 %
+  (109 lines); sphinx -W, ruff, mypy src+tests clean.

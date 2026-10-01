@@ -158,7 +158,10 @@ class ServiceJob:
     def match_refusal(self, machines: list[Any]) -> str | None:
         """Why no slot of ``machines`` could ever run this queued job, else ``None``: its whole ad (the
         request, the site's and the user's submit keys) must ``symmetricMatch`` a slot's ad whose free
-        ``Memory``/``Cpus``/``GPUs`` are a partitionable slot's totals, so a busy pool still matches."""
+        ``Memory``/``Cpus``/``GPUs``/``Disk`` are a partitionable slot's totals, so a busy pool still
+        matches; ``None`` when ``machines`` is empty."""
+        if not machines:  # a collector that lists no slot says nothing about the pool: submit and wait
+            return None
         ads = list(self.launcher._schedd.query(constraint=f"ClusterId == {self.cluster}"))
         if not ads:  # it already left the queue: the announce wait reports how
             return None
@@ -199,6 +202,7 @@ def _as_whole(slot: Any) -> Any:
             ("TotalSlotMemory", "Memory"),
             ("TotalSlotCpus", "Cpus"),
             ("TotalSlotGPUs", "GPUs"),
+            ("TotalSlotDisk", "Disk"),
         ):
             if total in slot:
                 slot[free] = slot[total]

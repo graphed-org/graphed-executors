@@ -66,6 +66,18 @@ def output_keys(out: str, destination: str, *, driverless: bool) -> dict[str, st
     return {"transfer_output_files": out, "output_destination": destination}
 
 
+class ServerTimes(logging.Formatter):
+    """A record's line, and for a service status, when its server was submitted and when it was ready
+    (``time.time()`` stamps)."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        line = super().format(record)
+        status = getattr(record, "status", None)
+        if status is None:
+            return line
+        return f"{line} started_at={status.started_at} ready_at={status.ready_at}"
+
+
 def driverless_memory_mb(ctx: histserv.Context, pilots: int, pilot_mb: int) -> int:
     """A driverless job's slot: the driver, its local pilots, and every server the context opened."""
     return DRIVER_MB + pilots * pilot_mb + sum(int(mb) for _name, mb, _predicted, _n in ctx.servers())
@@ -100,7 +112,9 @@ def main(argv: list[str] | None = None) -> None:
             f"--out {args.out}: the pilots write parquet through pyarrow, which has no root:// filesystem; "
             "--out is a directory in each pilot's scratch, and --destination is where HTCondor sends it"
         )
-    logging.basicConfig(level=logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setFormatter(ServerTimes(logging.BASIC_FORMAT))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
     keys = output_keys(
         args.out, args.destination or EOS.format(user=getpass.getuser()), driverless=args.driverless
     )

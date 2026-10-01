@@ -11,9 +11,9 @@ profile; in a driver job (``in_job=``) it is the job's own site row. Attached ov
 row with ``"cluster"`` hosts, ``host_service``/``release_service`` run a service as its own job
 (:class:`~graphed_executors.htcondor_backend.services.ServiceJob`) that announces its endpoint to the task
 server's ``/announce``: a job no slot of the pool could ever run is removed and refused, and a job waiting
-for a slot is waited for, its ``timeout_s`` counted from its start. In a driver job a managed service starts beside the driver, or, when it is one of
-the run's DAG SERVICE nodes (``announced=``), is resolved by that node's announce: the driver job submits
-no service job.
+for a slot is waited for until the runner closes, its ``timeout_s`` counted from its start. In a driver job
+a managed service starts beside the driver, or, when it is one of the run's DAG SERVICE nodes
+(``announced=``), is resolved by that node's announce: the driver job submits no service job.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import logging
 import pickle
 import secrets
 import socket
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
@@ -139,6 +140,7 @@ class HTCondorBackend:
             stack.callback(release_quietly, "the task server", self._server.close)
             self._stack = stack.pop_all()
         self._services: dict[str, ServiceJob] = {}
+        self._closing = threading.Event()  # set: a service job still waiting for a slot ends its wait
         self._announced = dict(announced or {})
         # the capability IS this pair of attributes: absent, the engine refuses naming it
         if self._announced:
@@ -222,7 +224,7 @@ class HTCondorBackend:
             job = ServiceJob(spec, self.launcher, key=key, url=self._server.url, secret=secret)
             job.submit()
             stack.callback(release_quietly, f"service job {key}", job.stop)
-            refusal = job.match_refusal(machines) if machines else None
+            refusal = job.match_refusal(machines)
             if refusal is not None:
                 raise ServiceUnavailable(spec.name, {"managed": refusal})
             hostport, identity = self._await_announce(job, spec)
@@ -233,8 +235,8 @@ class HTCondorBackend:
 
     def _await_announce(self, job: ServiceJob, spec: ServiceSpec) -> tuple[str, str]:
         """The job's announce. No deadline runs while it waits for a slot (idle, or held while its input
-        spools), which is logged at the first such answer and every ``IDLE_LOG_S``; ``timeout_s``
-        counts from the first answer that it runs."""
+        spools), which is logged at the first such answer and every ``IDLE_LOG_S`` and ends when the
+        backend closes; ``timeout_s`` counts from the first answer that it runs."""
         deadline: float | None = None
         logged = -IDLE_LOG_S
         while True:
@@ -257,6 +259,11 @@ class HTCondorBackend:
             if deadline is None and ad.get("JobStatus") == _RUNNING:
                 deadline = now + spec.timeout_s
             if deadline is None:
+                if self._closing.is_set():
+                    raise RuntimeError(
+                        f"service {spec.name!r} ({job.key}) still waited for a slot when the runner closed: "
+                        f"{state}"
+                    )
                 if now - logged >= IDLE_LOG_S:
                     logger.info("service %r (%s) waits for a slot: %s", spec.name, job.key, state)
                     logged = now
@@ -292,9 +299,15 @@ class HTCondorBackend:
         """Drop a pending announce of node ``key``; DAGMan removes the node when the DAG ends."""
         self._server.wait_announce(key, 0.0)
 
+    def stop_waiting(self) -> None:
+        """End every wait for a service job that has no slot yet, within one ``POLL_S``: the job is
+        removed and its run raises. A job that has started keeps its ``timeout_s``."""
+        self._closing.set()
+
     def close(self) -> None:
         """Stop serving (pilots see 410 and exit), stop the pilots, free the port; each step runs even
         when an earlier one fails, and each failure is logged."""
+        self.stop_waiting()
         self._stack.close()
 
 
@@ -364,6 +377,12 @@ class HTCondorRunner(SubmitRunner):
         if not self._waited:
             self.wait_for_pilots()
         return super().run(plan)
+
+    def close(self) -> None:
+        """Finish every submitted plan, then close the backend; a plan whose service job still waits for
+        a slot does not finish: the job is removed and the plan raises."""
+        self.backend.stop_waiting()
+        super().close()
 
 
 def htcondor_runner(
