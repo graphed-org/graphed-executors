@@ -70,3 +70,9 @@ passes, frozen dask join FAILS (as the README states).
   m66–m68c, no Triton): pytest rc 0, both m68c lambda tests PASSED (live join over pool pilots
   included); per-file gate 11/11 >= 90% (min `backend.py` 98.04%); diff-cover vs db8fb0a 100% (14 lines).
 - precommit `--fast --no-coverage` ok; mypy src ok; sphinx -W ok.
+
+## Merge of main 8c299f7 (#41) — 2026-10-01
+- Merge-group run 36870516270 ejected #42: #41's `RemoteParam` read in `submit_driverless`'s DAG branch
+  meets the frozen m68c `_FakeHTCondor`, which lacks it (one failure across tests/frozen m66–m68c).
+- Owner-sanctioned refreeze: the fake gains `RemoteParam` (dispute
+  tests.frozen.m68c.test_m68c_htcondor._FakeHTCondor.md); tag freeze-m68c-fixup2.

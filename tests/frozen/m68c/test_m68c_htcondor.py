@@ -134,6 +134,10 @@ class _FakeHTCondor:
         self.log.append(("Schedd",))
         return _Schedd(self.log)
 
+    def RemoteParam(self, location: Any) -> dict[str, str]:
+        """The located schedd's config: the CI pool's RPM layout."""
+        return {"BIN": "/usr/bin"}
+
 
 def _record_bindings(monkeypatch: pytest.MonkeyPatch) -> _FakeHTCondor:
     fake = _FakeHTCondor()
