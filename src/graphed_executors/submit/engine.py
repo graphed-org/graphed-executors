@@ -36,6 +36,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast, overload
 
+import cloudpickle
 from graphed import services as graphed_services
 from graphed.core import (
     DurablePlanV2,
@@ -257,9 +258,9 @@ def _map_task(payload: bytes, token: str, task: Task, *inputs: bytes) -> dict[in
     return split(_stage_task(payload, token, task, *inputs))
 
 
-def _fingerprint(obj: object) -> tuple[str, bytes]:
+def _fingerprint(obj: object, dumps: Callable[[object], bytes] = pickle.dumps) -> tuple[str, bytes]:
     """(12-hex content fingerprint, pickled payload) — the M31 broadcast-token idiom."""
-    payload = pickle.dumps(obj)
+    payload = dumps(obj)
     return hashlib.sha256(payload).hexdigest()[:12], payload
 
 
@@ -737,7 +738,8 @@ class SubmitRunner:
             upstream = [f for i in stage.inputs for f in stage_futs[i]]
             if not settle(upstream) or (control is not None and control.wait() is RunState.CANCELLED):
                 return ExecResult(None, ran[0], ran[1], StopReason.CANCELLED)
-            fp, payload = _fingerprint(stage.process.resolve())
+            # by value: a resolved opaque process is a copy stdlib pickle cannot name by reference
+            fp, payload = _fingerprint(stage.process.resolve(), cloudpickle.dumps)
             token = f"{fp}-{ctx.run_nonce}"
             handle = backend.broadcast(payload, token=token)
             fn = _map_task if stage.kind == "map_write" else _stage_task

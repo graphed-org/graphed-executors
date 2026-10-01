@@ -18,7 +18,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 # graphed carries the execution contract (Plan/Task/Partition), Session, and StageError.
-dependencies = ["graphed>=0.0.6"]
+dependencies = ["graphed>=0.0.6", "cloudpickle"]
 
 [project.optional-dependencies]
 # the backends + corpus are only needed to exercise realistic HEP analyses end-to-end in the suite
@@ -171,6 +171,11 @@ follow_imports = "skip"
 # job installs coffea/higgs_dna/correctionlib; hgg_harness is the frozen m69a harness validate_real.py imports.
 [[tool.mypy.overrides]]
 module = ["coffea.*", "higgs_dna.*", "correctionlib.*", "pyarrow.*", "fsspec", "hgg_harness"]
+ignore_missing_imports = true
+
+# cloudpickle ships no type information.
+[[tool.mypy.overrides]]
+module = ["cloudpickle"]
 ignore_missing_imports = true
 
 # dask/distributed ship no type information; the dask backend is optional and only imported lazily.

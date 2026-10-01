@@ -564,9 +564,9 @@ that read your sources and evaluate everything up to the exchange, gather stages
 collect each destination and evaluate what you recorded after it, and optionally a one-task fold.
 ``SubmitRunner`` runs one on any backend (``dask_runner``, ``parsl_runner`` and ``htcondor_runner``
 included), with the plan's services resolved and bound as for any plan, so a service call can come
-before the join. A plan carries its functions as copies, so the functions it calls must live in a
-module the workers can import, never in ``__main__`` — even on ``ThreadBackend``. With the call in
-``sf_client.py``:
+before the join. Functions the plan cannot import go to the workers by value, so they may live in
+``__main__``; ``htcondor_runner`` and ``submit_driverless`` refuse them, as pilots import each stage
+by name. With the call in ``sf_client.py``:
 
 .. code-block:: python
 
