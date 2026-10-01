@@ -53,3 +53,21 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
 - Mutants (frozen diagnostics + extra hgg): combine drops b's histograms → no-context row + empty-identity fail
   (served rows pass: every chunk's receipt names the same server histogram); reduce without
   `resolve_services` → all three served/no-context rows fail; empty without `"diagnostics"` → empty-identity fails.
+
+## Iteration 4 — commit 4: LPC runner, ci, docs
+- `examples/hgg/run_lpc.py`: manifests → each dataset's first `--files` files in `--parts` steps (entry counts via
+  `run_local.fileset`); `htcondor_runner(site="lpc", service_hosts=(--placement,), user_modules=[analysis.py])`, or
+  `--driverless` via `submit_driverless(pilots="local", request_memory_mb=driver + pilots + every server)`;
+  `Context(memory_mb=--server-mb, workers=--pilots, ports=lpc service_ports)`; parts to EOS by default; UHI JSON.
+  Not run at a site. `tests/extra/m69b/test_m69b_run_lpc.py` (runner stand-ins): mutants placement ignored /
+  servers left out of the slot / one file too many each fail.
+- ci.yml (§6): HISTOGRAM = `graphed-histogram[histserv]` @ 3830aca (test-experimental strips the extra: no cp314t
+  grpcio); test-htcondor adds frozen m69b `test_histserv_*.py` + extra m69b; test-hgg runs `-rs` m69a + m69b
+  `test_hgg_*` + extra m69b. GRAPHED stays 7e048bf (from the merge).
+- Docs: htcondor.rst timeout wording, "Schedulability", "Histograms on histserv servers", "An H→γγ run",
+  `service_hosts` row; hgg.rst "Diagnostics"; README; changelog. The histserv example ran (printed output
+  matches); the hgg.rst fragment ran on the MC fixture; sphinx -W clean.
+- Gates at the head: macOS main job 1136 passed, 116 skipped (bindings/coffea/dask/parsl/Triton only), per-file
+  min 98.33% (submit/threadpool.py), diff-cover 100% (44 lines). Linux pool (merge state; src unchanged since):
+  503 passed, 5 skipped (dask/parsl absent, no Triton container), htcondor scope min 98% (backend.py), diff-cover
+  100% (98 lines); extra m69b in the container 25 passed, 2 skipped (no coffea). test-hgg equivalent 59 passed.
