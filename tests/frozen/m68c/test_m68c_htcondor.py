@@ -1,12 +1,15 @@
-"""m68c §6 on HTCondor: ``HTCondorRunner.run`` and ``submit_driverless`` pre-check a join plan's stage
-processes, the driverless DAG derives a join plan's SERVICE nodes, and a live join runs over pool pilots.
+"""m68c §6 on HTCondor: ``HTCondorRunner.run`` and ``submit_driverless`` accept a join plan whose stage
+process holds a lambda (it travels cloudpickled by value), the driverless DAG derives a join plan's SERVICE
+nodes, and live joins run over pool pilots.
 
-The refusal and derivation legs run anywhere (no bindings: a recorder stands in for ``htcondor2``); the
-live leg needs the bindings and a personal HTCondor (the test-htcondor job), skipped without bindings."""
+The driverless legs run anywhere (no bindings: a recorder stands in for ``htcondor2``); the live legs
+need the bindings and a personal HTCondor (the test-htcondor job), skipped without bindings."""
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,18 +17,16 @@ from typing import Any
 import pytest
 from graphed.services import Launch, ServiceSpec
 from m68c_harness import (
+    HARNESS_DIR,
     HARNESS_FILE,
     StandIn,
     given_spec,
     join_v2,
     run_bounded,
     sequential,
-    stage_index,
 )
 
 from graphed_executors.htcondor_backend import (
-    HTCondorBackend,
-    HTCondorRunner,
     htcondor_runner,
     submit_driverless,
 )
@@ -36,7 +37,7 @@ POOL_PROBE_S = 30.0
 
 
 def _lambda_combine_plan(tag: str) -> Any:
-    """A join plan whose fold stage holds a lambda ``combine``: pilots cannot import it."""
+    """A join plan whose fold stage holds a lambda ``combine``, which only travels by value."""
     return join_v2(tag, combine=lambda a, b: sorted(a + b))
 
 
@@ -146,56 +147,37 @@ def _record_bindings(monkeypatch: pytest.MonkeyPatch) -> _FakeHTCondor:
     return fake
 
 
-class _NoStart:
-    """A pilot launcher that starts nothing."""
+# ---- lambda stage processes ----------------------------------------------------------------------
 
-    log_dir = None
-
-    def start(self, url: str, secret: bytes, n: int) -> None:
-        return None
-
-    def alive(self) -> int:
-        return 0
-
-    def stop(self) -> None:
-        return None
+_RUN_PLAN_PKL = (
+    "import json, pickle, sys\n"
+    "from graphed.core.execution import SequentialRunner\n"
+    "with open(sys.argv[1], 'rb') as f:\n"
+    "    plan = pickle.load(f)\n"
+    "print(json.dumps(SequentialRunner().run(plan).value))\n"
+)
 
 
-# ---- the stage-process pre-check ------------------------------------------------------------------
-
-
-def test_the_htcondor_runner_refuses_a_stage_process_pilots_cannot_import() -> None:
-    plan = _lambda_combine_plan("htc-refuse")
-    index = stage_index(plan, "reduce")
-    backend = run_bounded(lambda: HTCondorBackend(_NoStart(), 1, host="127.0.0.1", port_range=(0, 0)))
-    keys: list[str] = []
-    inner = backend.submit
-
-    def counting(fn: Any, /, *args: Any, key: str, **kwargs: Any) -> Any:
-        keys.append(key)
-        return inner(fn, *args, key=key, **kwargs)
-
-    backend.submit = counting
-    runner = HTCondorRunner(backend, min_pilots=0)
-    try:
-        with pytest.raises(ValueError) as excinfo:
-            run_bounded(lambda: runner.run(plan))
-    finally:
-        run_bounded(runner.close)
-    assert f"stages[{index}].process" in str(excinfo.value), excinfo.value
-    assert keys == [], keys
-
-
-def test_submit_driverless_refuses_a_stage_process_pilots_cannot_import(
-    monkeypatch: pytest.MonkeyPatch,
+def test_submit_driverless_accepts_a_lambda_stage_process_and_its_plan_pkl_runs_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plan = _lambda_combine_plan("dl-refuse")
-    index = stage_index(plan, "reduce")
+    plan = _lambda_combine_plan("dl-lambda")
+    ref = sequential(plan).value
     fake = _record_bindings(monkeypatch)
-    with pytest.raises(ValueError) as excinfo:
-        run_bounded(lambda: submit_driverless(plan, request_memory_mb=1024))
-    assert f"stages[{index}].process" in str(excinfo.value), excinfo.value
-    assert fake.log == [], fake.log
+    handle = run_bounded(lambda: submit_driverless(plan, request_memory_mb=1024, log_dir=tmp_path / "logs"))
+    assert [e for e in fake.log if e[0] == "submit"], fake.log
+    # PYTHONPATH stands in for the user_modules ship of the module-level harness parts.
+    env = {**os.environ, "PYTHONPATH": HARNESS_DIR}
+    out = subprocess.run(
+        [sys.executable, "-c", _RUN_PLAN_PKL, str(Path(handle.log_dir) / "plan.pkl")],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        timeout=LIVE_S,
+    )
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == ref and ref, (out.stdout, ref)
 
 
 def test_submit_driverless_derives_a_join_plan_s_service_nodes(
@@ -256,4 +238,25 @@ def test_a_live_join_over_pool_pilots_calls_the_given_server(tmp_path: Path) -> 
         calls = server.calls()
         ref = sequential(plan, {"sf": server.endpoint()})
     assert calls > 0, "no pilot task called the server"
+    assert got.value == ref.value and got.value, (got.value, ref.value)
+
+
+def test_a_live_join_over_pool_pilots_runs_a_lambda_stage_process(tmp_path: Path) -> None:
+    _require_pool()
+    plan = _lambda_combine_plan("htc-lambda")
+    runner = run_bounded(
+        lambda: htcondor_runner(
+            n_pilots=2,
+            site="generic",
+            log_dir=tmp_path / "pilots",
+            user_modules=[HARNESS_FILE],
+            min_pilots=2,
+        ),
+        LIVE_S,
+    )
+    try:
+        got = run_bounded(lambda: runner.run(plan), LIVE_S)
+    finally:
+        run_bounded(runner.close, LIVE_S)
+    ref = sequential(plan)
     assert got.value == ref.value and got.value, (got.value, ref.value)

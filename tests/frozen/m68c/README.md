@@ -9,8 +9,8 @@ and CI jobs). **Frozen: read-only after the `freeze-m68c` tag.**
   step (§7), whose diff-cover gates `submit/**`.
 - `test_m68c_submit_dask.py`: the test-dask job (`importorskip("distributed")`), a process `LocalCluster`.
 - `test_m68c_submit_parsl.py`: the test-parsl job (`importorskip("parsl")`), a started HTEX.
-- `test_m68c_htcondor.py`: refusal and derivation legs run anywhere under a bindings recorder; the live
-  leg needs `htcondor2` and a personal HTCondor (skipped without the bindings), in the test-htcondor job.
+- `test_m68c_htcondor.py`: the driverless legs run anywhere under a bindings recorder; the live
+  legs need `htcondor2` and a personal HTCondor (skipped without the bindings), in the test-htcondor job.
 - `m68c_harness.py`: the fixtures (join plans whose left side calls a server through the `SCALE`
   External), the counting HTTP stand-in (`StandIn`, GETs of `/sf` counted apart from readiness GETs of
   `/`), `RecordingBackend` (submits with args, broadcast handles, cancels, task starts, gather args at
@@ -44,10 +44,10 @@ graphed's `feat(runners)` tip; on graphed main every test fails at the fixture
 | `parsl::test_parsl_htex_runs_a_service_join_moving_each_map_result_once` | §6 ParslBackend over HTEX, driver edge | `next_tasks` | pick tasks on HTEX (each map dict reshipped per dest: measure ≥ 2×) |
 | `parsl::test_parsl_htex_with_the_pick_task_edge_moves_each_map_result_per_dest` | §6 ParslBackend live control | `next_tasks` | an edge that ignores `peer_data_movement` (measure < parts/2) |
 | `parsl::test_the_parsl_peer_transport_refuses_a_join_plan_naming_submit_runner` | §6 refusals | `UnboundService` | as the local refusal |
-| `htcondor::test_the_htcondor_runner_refuses_a_stage_process_pilots_cannot_import` | §6 HTCondor pre-check; §4 one helper | `process` | V1 roles read off a V2 plan, a message not naming `stages[i].process`, a refusal after a submit |
-| `htcondor::test_submit_driverless_refuses_a_stage_process_pilots_cannot_import` | same, driverless | `process` | as above, a refusal after a bindings call |
+| `htcondor::test_submit_driverless_accepts_a_lambda_stage_process_and_its_plan_pkl_runs_elsewhere` | §6 HTCondor, lambda stage processes accepted (owner ruling 2026-10-01, `freeze-m68c-fixup`): a recorder logs a submit, and the run dir's `plan.pkl` run by `SequentialRunner` in a fresh process (harness on `PYTHONPATH`, as a `user_modules` ship) equals the in-process value | `ValueError` naming `stages[i].process` at `fc9e316` | a stage-process pre-check that refuses a lambda; a `plan.pkl` the fresh process cannot load or that runs to another value |
 | `htcondor::test_submit_driverless_derives_a_join_plan_s_service_nodes` | §6 SERVICE-node derivation (m68b) | `process` | a pre-check that refuses importable stage processes; `plan.services` not reaching `_service_nodes` |
 | `htcondor::test_a_live_join_over_pool_pilots_calls_the_given_server` | §6 live V2 run | `process` (skipped without bindings) | pilots that never call the server, a wrong value |
+| `htcondor::test_a_live_join_over_pool_pilots_runs_a_lambda_stage_process` | §6 HTCondor, lambda stage processes accepted (owner ruling 2026-10-01, `freeze-m68c-fixup`): `htcondor_runner` over pool pilots runs the lambda-`combine` join to `SequentialRunner`'s non-empty value | `ValueError` naming `stages[i].process` at `fc9e316` (skipped without bindings) | a pre-check that refuses a lambda; a broadcast pilots cannot unpickle; a wrong fold |
 
 ## Choices the plan leaves open
 
