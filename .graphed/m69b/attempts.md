@@ -71,3 +71,15 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   min 98.33% (submit/threadpool.py), diff-cover 100% (44 lines). Linux pool (merge state; src unchanged since):
   503 passed, 5 skipped (dask/parsl absent, no Triton container), htcondor scope min 98% (backend.py), diff-cover
   100% (98 lines); extra m69b in the container 25 passed, 2 skipped (no coffea). test-hgg equivalent 59 passed.
+
+## Iteration 5 — PR #44 round 2: the test-dask diff-cover
+- CI (d3f2820): test-dask py3.12/3.14 diff-cover 65.9% on `submit/services.py` (missing 176,178-179,191-195,466-469,
+  483-484,499): the job runs no m69b file. Reproduced verbatim (job's pytest list + `.coveragerc-dask` + its
+  diff-cover include) in `.venv-m69b-dask` (the job's installs): 384 passed, same 15 lines, 65%.
+- `tests/extra/m69b/test_m69b_dask_driver_check.py` (dask runner, LocalCluster 2×1): a 64 MiB service under
+  `driver_memory_mb=64` starts beside the driver and every task dials it from a dask worker; 1024 MiB is refused
+  before it starts naming 1024 and 64; with no limit, physical+1 is refused naming the physical size. The job's
+  list adds it and `test_m69b_schedulable.py` (the Windows branch, the fall to a cluster host, the merged refusal).
+  Same command: 404 passed, diff-cover 100% (44 lines). Include globs untouched.
+- test-parsl: its include (`parsl_backend/**`, `common/relay_engine.py`, `common/http_plane.py`) meets none of the
+  PR's changed src files (`htcondor_backend/{backend,services}.py`, `submit/services.py`): no exposure.
