@@ -126,13 +126,17 @@ def test_given_endpoints_start_nothing_and_are_left_empty(
         try:
             with caplog.at_level(logging.INFO, logger=SERVICES_LOGGER):
                 result = run_bounded(lambda: runner.run(spied(plan, tag)))
+            statuses = status_records(caplog.records)
+            # the same backend still holds a spec on the managed leg to its 64 MiB
+            managed, started = refused(runner, 1024)
         finally:
             runner.close()
-        statuses = status_records(caplog.records)
         assert sorted((s.name, s.leg, s.endpoint) for s in statuses) == [(n, "user", given[n]) for n in names]
         assert seen(tag) == dict.fromkeys(endpoints, (1, 1))
         assert [server_count(ep) for ep in endpoints] == [0, 0], "the resolve left server copies"
     assert same_values(result.value, twin)
+    assert named(1024, managed) and named(64, managed), managed
+    assert [p.args for p in started if "histserv" in str(p.args)] == []
 
 
 def driver_job(
@@ -205,20 +209,24 @@ def named(number: int, text: str, *cut: str) -> bool:
     return re.search(rf"(?<!\d){number}(?!\d)", text) is not None
 
 
-def refused_start(backend: Any, size_mb: int) -> tuple[str, list[Any]]:
-    """``legs["managed"]`` of the ``ServiceUnavailable`` a one-server plan of ``size_mb`` raises on
-    ``backend``, and every process ``subprocess.Popen`` started meanwhile."""
+def refused(runner: Any, size_mb: int) -> tuple[str, list[Any]]:
+    """``legs["managed"]`` of the ``ServiceUnavailable`` a one-server plan of ``size_mb``, bound to no
+    endpoint, raises on ``runner``, and every process ``subprocess.Popen`` started meanwhile."""
     require_histserv()
     ctx = histserv_api().Context(memory_mb=size_mb, workers=WORKERS, name=unique("m69b-refused"))
     plan = served_plan(SMALL, ctx)
     assert [s[1] for s in ctx.servers()] == [size_mb], ctx.servers()
+    with popen_backstop() as started, pytest.raises(ServiceUnavailable) as err:
+        run_bounded(lambda: runner.run(plan))
+    return str(err.value.legs["managed"]), list(started)
+
+
+def refused_start(backend: Any, size_mb: int) -> tuple[str, list[Any]]:
     runner = SubmitRunner(backend)
     try:
-        with popen_backstop() as started, pytest.raises(ServiceUnavailable) as err:
-            run_bounded(lambda: runner.run(plan))
+        return refused(runner, size_mb)
     finally:
         runner.close()
-    return str(err.value.legs["managed"]), list(started)
 
 
 def test_a_server_the_set_driver_memory_cannot_hold_is_refused_before_it_starts() -> None:
