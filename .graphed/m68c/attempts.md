@@ -47,3 +47,12 @@ passes, frozen dask join FAILS (as the README states).
   needs the pool (CI test-htcondor job).
 - precommit `--fast --no-coverage` ok; sphinx -W clean; design.rst example executed, output matches.
 - Open: `GRAPHED` pin bump in ci.yml waits on graphed's m68c merge SHA.
+
+## Iteration 3 — __main__/lambda V2 callables (r2, after 275c802's builder `live=` was rejected)
+- `_run_stages` broadcasts each resolved stage process with `cloudpickle.dumps` (V1 keeps stdlib
+  pickle); workers' `pickle.loads` unchanged. Covers the services-bound process too (`bind_services`
+  wraps the cloudpickled copy: stdlib pickle of the bound gather_join raised PicklingError before).
+- `tests/extra/m68c/test_m68c_main_reduce.py`: plain and bound __main__ reduce/combine equal
+  `SequentialRunner`; both fail with the stdlib broadcast. dask process workers probed: __main__ and
+  lambda reduce equal SequentialRunner after, PicklingError before.
+- HTCondor pre-check stays stdlib (frozen refusal tests rely on it); design.rst says so.
