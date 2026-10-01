@@ -29,6 +29,7 @@ from .launch import ENV_FILE, SECRET_FILE, CondorPilots, write_secret
 ANNOUNCE_SOURCE = Path(__file__).with_name("announce.py")
 RUN_DIR = "service"
 AD_ATTRS = ["JobStatus", "ExitCode", "HoldReasonCode", "HoldReason"]
+_REQUESTS = ("RequestMemory", "RequestCpus", "RequestGPUs")
 VACATE_S = 30  # a removed service frees its slot (and GPU) this soon, whatever the EP's own vacate time
 
 
@@ -154,12 +155,54 @@ class ServiceJob:
             ads = list(schedd.history(constraint, AD_ATTRS, match=1))
         return ads[0] if ads else {}
 
+    def match_refusal(self, machines: list[Any]) -> str | None:
+        """Why no slot of ``machines`` could ever run this queued job, else ``None``: its whole ad (the
+        request, the site's and the user's submit keys) must ``symmetricMatch`` a slot's ad whose free
+        ``Memory``/``Cpus``/``GPUs`` are a partitionable slot's totals, so a busy pool still matches."""
+        ads = list(self.launcher._schedd.query(constraint=f"ClusterId == {self.cluster}"))
+        if not ads:  # it already left the queue: the announce wait reports how
+            return None
+        import classad2  # noqa: PLC0415  (ships with the htcondor2 bindings)
+
+        slots = [_as_whole(classad2.ClassAd(str(machine))) for machine in machines]
+        if any(ads[0].symmetricMatch(slot) for slot in slots):
+            return None
+        asked = ", ".join(f"{a}={ads[0].eval(a) if a in ads[0] else 0}" for a in _REQUESTS)
+        largest = max(int(slot.get("Memory", 0)) for slot in slots)
+        return (
+            f"service job {self.key} matches no slot of the pool, busy or not: {asked}; "
+            f"the largest slot memory is {largest} MiB"
+        )
+
     def stop(self) -> None:
         """Remove the job at once (a service never exits by itself; a spooled job that completed is
         retrieved first, so its ``service.out``/``.err`` come back), then drop its secret file."""
         self._stack.close()
         if self.dir is not None:
             (self.dir / SECRET_FILE).unlink(missing_ok=True)
+
+
+def machine_ads(launcher: CondorPilots) -> list[Any]:
+    """The pool's slot ads, dynamic slots dropped, from the collector of ``launcher``'s schedd
+    (``schedd_locate``'s pool, else the default collector)."""
+    htc = launch._htcondor()
+    locate = launcher.schedd_locate
+    collector = htc.Collector(locate[0]) if locate is not None else htc.Collector()
+    return [ad for ad in collector.query(constraint='MyType == "Machine"') if ad.get("SlotType") != "Dynamic"]
+
+
+def _as_whole(slot: Any) -> Any:
+    """``slot`` (a copy) as it would be with nothing running: a partitionable slot's totals as its free
+    resources."""
+    if slot.get("PartitionableSlot"):
+        for total, free in (
+            ("TotalSlotMemory", "Memory"),
+            ("TotalSlotCpus", "Cpus"),
+            ("TotalSlotGPUs", "GPUs"),
+        ):
+            if total in slot:
+                slot[free] = slot[total]
+    return slot
 
 
 def _checked_inputs(inputs: tuple[str, ...]) -> list[str]:
@@ -204,4 +247,4 @@ def _mirror(inputs: list[str], dest: Path) -> None:
                 os.symlink(os.path.join(root, name), here / name)
 
 
-__all__ = ["ServiceJob"]
+__all__ = ["ServiceJob", "machine_ads"]

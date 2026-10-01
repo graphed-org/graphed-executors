@@ -4,12 +4,14 @@ back; the driver resolves future arguments before a task is queued, so pilots ne
 
 The backend's service surface is duck-typed, read by the engine's service set (``submit/services.py``):
 ``site_services``, ``service_hosts`` (which the caller may narrow) and ``service_ports`` come from the
-site row, ``advertise_host`` is the task server's host, and ``host_identity()`` names the driver's host
-as condor writes it for that host's slots. Attached, the row is the launcher's profile; in a driver job (``in_job=``) it is the job's
-own site row. Attached over ``CondorPilots`` on a row with ``"cluster"`` hosts,
-``host_service``/``release_service`` run a service as its own job
+site row, ``advertise_host`` is the task server's host, ``host_identity()`` names the driver's host as
+condor writes it for that host's slots, and ``driver_memory_mb`` bounds the services beside the driver (a
+driver job's slot ``Memory``; ``None``, the host's physical memory). Attached, the row is the launcher's
+profile; in a driver job (``in_job=``) it is the job's own site row. Attached over ``CondorPilots`` on a
+row with ``"cluster"`` hosts, ``host_service``/``release_service`` run a service as its own job
 (:class:`~graphed_executors.htcondor_backend.services.ServiceJob`) that announces its endpoint to the task
-server's ``/announce``. In a driver job a managed service starts beside the driver, or, when it is one of
+server's ``/announce``: a job no slot of the pool could ever run is removed and refused, and a job waiting
+for a slot is waited for, its ``timeout_s`` counted from its start. In a driver job a managed service starts beside the driver, or, when it is one of
 the run's DAG SERVICE nodes (``announced=``), is resolved by that node's announce: the driver job submits
 no service job.
 """
@@ -17,6 +19,7 @@ no service job.
 from __future__ import annotations
 
 import io
+import logging
 import pickle
 import secrets
 import socket
@@ -33,19 +36,29 @@ from graphed.services import ServiceSpec
 from graphed_executors.parsl_backend.backend import _ParslFuture
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
-from graphed_executors.submit.services import host_identity, minted_endpoint, release_quietly
+from graphed_executors.submit.services import (
+    ServiceUnavailable,
+    host_identity,
+    machine_ad,
+    minted_endpoint,
+    release_quietly,
+)
 
 from . import launch as _launch
 from . import server as _server
 from .launch import CondorPilots, PilotLauncher
 from .server import TaskServer, WorkerLost
-from .services import AD_ATTRS, ServiceJob
+from .services import AD_ATTRS, ServiceJob, machine_ads
 from .sites import SITES, SiteProfile, counts_as_alive
 
 R = TypeVar("R")
 
 # Pilots queue like any other job, so a busy pool can take minutes to start the first one.
 N_WORKERS_WAIT_S = 600.0
+IDLE_LOG_S = 30.0  # between log lines of a service job still waiting for a slot
+_RUNNING = 2  # JobStatus
+
+logger = logging.getLogger(__name__)
 
 _FLOOR = SubmitCapabilities(
     peer_data_movement=False,
@@ -99,12 +112,16 @@ class HTCondorBackend:
             offered if service_hosts is None else tuple(h for h in offered if h in service_hosts)
         )
         self.service_ports: tuple[int, int] | None
+        # the engine holds the services beside the driver to it; None reads the host's physical memory
+        self.driver_memory_mb: int | None = None
         if in_job is None:
             self.site_services = profile.services
             self.service_ports = profile.service_ports
         else:  # self-submitted pilots reach the driver on worker_ports
             self.site_services = in_job.services
             self.service_ports = in_job.worker_ports if isinstance(launcher, CondorPilots) else None
+            slot = machine_ad("Memory")  # the job's slot, not the node it shares
+            self.driver_memory_mb = None if slot is None else int(slot)
         low, high = port_range if port_range is not None else profile.driver_ports
         try:
             self._server = TaskServer(self.advertise_host, (low, high), launcher)
@@ -191,9 +208,12 @@ class HTCondorBackend:
 
     def _host_service(self, spec: ServiceSpec, scope: str) -> tuple[str, str, str]:
         """Run ``spec`` as a :class:`ServiceJob` and wait for its announce: ``(endpoint, identity, key)``
-        once it is ready where it runs. A job that ends, is held, or has not announced within
-        ``spec.timeout_s`` is removed and raises; every failure forgets the call's announce secret."""
+        once it is ready where it runs. A job no slot of the pool could ever run raises
+        :class:`ServiceUnavailable` (a pool whose collector lists no slot is not asked); one that ends,
+        is held, or has not announced within ``spec.timeout_s`` of its start raises. Each is removed,
+        and every failure forgets the call's announce secret."""
         assert isinstance(self.launcher, CondorPilots)
+        machines = machine_ads(self.launcher)
         key = f"{scope}-{secrets.token_hex(8)}"
         secret = self._server.announce_secret([key])
         with ExitStack() as stack:
@@ -201,6 +221,9 @@ class HTCondorBackend:
             job = ServiceJob(spec, self.launcher, key=key, url=self._server.url, secret=secret)
             job.submit()
             stack.callback(release_quietly, f"service job {key}", job.stop)
+            refusal = job.match_refusal(machines) if machines else None
+            if refusal is not None:
+                raise ServiceUnavailable(spec.name, {"managed": refusal})
             hostport, identity = self._await_announce(job, spec)
             stack.pop_all()
         self._services[key] = job
@@ -208,9 +231,17 @@ class HTCondorBackend:
         return minted_endpoint(spec.check, host, int(port)), identity, key
 
     def _await_announce(self, job: ServiceJob, spec: ServiceSpec) -> tuple[str, str]:
-        deadline = time.monotonic() + spec.timeout_s
+        """The job's announce. No deadline runs while it waits for a slot (idle, or held while its input
+        spools), which is logged at the first such answer and every ``IDLE_LOG_S``; ``timeout_s``
+        counts from the first answer that it runs."""
+        deadline: float | None = None
+        logged = -IDLE_LOG_S
         while True:
-            left = max(0.0, min(_server.POLL_S, deadline - time.monotonic()))
+            left = (
+                _server.POLL_S
+                if deadline is None
+                else max(0.0, min(_server.POLL_S, deadline - time.monotonic()))
+            )
             got = self._server.wait_announce(job.key, left)
             if got is not None:
                 return got
@@ -221,10 +252,17 @@ class HTCondorBackend:
                     f"service {spec.name!r} ({job.key}) ended before it announced: {state or 'no job ad'}; "
                     f"its service.out/.err, if it wrote them, are in {job.dir}"
                 )
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if deadline is None and ad.get("JobStatus") == _RUNNING:
+                deadline = now + spec.timeout_s
+            if deadline is None:
+                if now - logged >= IDLE_LOG_S:
+                    logger.info("service %r (%s) waits for a slot: %s", spec.name, job.key, state)
+                    logged = now
+            elif now >= deadline:
                 raise TimeoutError(
-                    f"service {spec.name!r} ({job.key}) did not announce within timeout_s={spec.timeout_s}: "
-                    f"{state}"
+                    f"service {spec.name!r} ({job.key}) did not announce within timeout_s={spec.timeout_s} "
+                    f"of its start: {state}"
                 )
 
     def _release_service(self, key: str) -> None:

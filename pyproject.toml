@@ -190,9 +190,10 @@ module = [
 ignore_missing_imports = true
 follow_imports = "skip"
 
-# the htcondor bindings ship Linux wheels only and are imported lazily by the htcondor backend's launcher.
+# the htcondor bindings (and their classad2) ship Linux wheels only and are imported lazily by the
+# htcondor backend.
 [[tool.mypy.overrides]]
-module = ["htcondor2", "htcondor2.*"]
+module = ["htcondor2", "htcondor2.*", "classad2"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
