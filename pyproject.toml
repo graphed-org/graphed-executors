@@ -65,7 +65,7 @@ exclude = ["CLAUDE.md", ".graphed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "tests/frozen/m7", "tests/frozen/m10", "tests/frozen/m31", "tests/frozen/m34", "tests/frozen/m37", "tests/frozen/m65"]
+pythonpath = ["src", "tests/frozen/m7", "tests/frozen/m10", "tests/frozen/m31", "tests/frozen/m34", "tests/frozen/m37", "tests/frozen/m65", "tests/frozen/m68a", "tests/frozen/m69a"]
 addopts = "-q"
 
 [tool.coverage.run]
