@@ -553,27 +553,15 @@ login node, with a proxy and a venv that holds this package's ``[htcondor]`` ext
         --pilots 8 --server-mb 512 --env "$VIRTUAL_ENV"
 
 It takes each dataset's first ``--files`` files (``GluGluHto2G_M-125_amcatnlo_2024`` and
-``DataC_2024`` unless ``--datasets`` names others) and splits each into ``--parts`` entry ranges. It
-prints the servers the context opened, logs each server's status (where it ran, when it was submitted
-and ready), prints the counters, and saves the diagnostics as UHI JSON (``--histograms``,
-``hgg_diagnostics.json`` by default; read them back with ``json.load(f,
-object_hook=uhi.io.json.object_hook)`` and ``boost_histogram.Histogram``). ``--placement cluster``
-(the default) runs each server as a job of its own; ``--placement driver`` runs them on the login node.
-``--driverless`` submits the whole run as one job whose slot holds the driver, the ``--pilots`` local
-pilots and the servers, and asks for memory for all of them.
-
-**Where the parts land.** Each pilot writes its parquet parts under ``--out`` (``output_inclusive`` by
-default), a directory relative to its scratch directory, which is gone when the pilot's job ends. So the
-pilots carry ``transfer_output_files = <--out>`` and ``output_destination = <--destination>`` (by
-default ``root://cmseos.fnal.gov//store/user/<you>/hgg/``): when a pilot exits, HTCondor sends its
-``--out`` there, so a part lands at ``<destination>/<--out>/<dataset>/nominal/<part>``. The pilots'
-``pilot.<n>.out`` and ``.err`` still come back to ``log_dir`` (`output_destination
-<https://htcondor.readthedocs.io/en/latest/man-pages/htcondor-jdl.html>`__). A driverless run returns
-its ``--out`` beside ``result.pkl`` in the run's ``log_dir`` instead, since an ``output_destination``
-would send ``result.pkl`` to EOS too. An ``--out`` of ``root://…`` is refused: the parquet writer
-hands its path to pyarrow, which has no ``root://`` filesystem, so the first pilot write fails
-(measured at the LPC, October 2026). Without these keys a local ``--out`` stays in each pilot's scratch and nothing
-brings it back.
+``DataC_2024`` unless ``--datasets`` names others), splits each into ``--parts`` entry ranges, and
+writes the parquet parts to ``--out``, by default ``root://cmseos.fnal.gov//store/user/<you>/hgg/``,
+which the pilots write over xrootd with the job's proxy. It prints the servers the context opened,
+logs each server's status (where it ran, when it was submitted and ready), prints the counters, and
+saves the diagnostics as UHI JSON (``--histograms``, ``hgg_diagnostics.json`` by default; read them
+back with ``json.load(f, object_hook=uhi.io.json.object_hook)`` and ``boost_histogram.Histogram``).
+``--placement cluster`` (the default) runs each server as a job of its own; ``--placement driver``
+runs them on the login node. ``--driverless`` submits the whole run as one job whose slot holds the
+driver, the ``--pilots`` local pilots and the servers, and asks for memory for all of them.
 
 
 The arguments you will change
