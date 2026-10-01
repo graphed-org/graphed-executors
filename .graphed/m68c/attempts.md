@@ -56,3 +56,17 @@ passes, frozen dask join FAILS (as the README states).
   `SequentialRunner`; both fail with the stdlib broadcast. dask process workers probed: __main__ and
   lambda reduce equal SequentialRunner after, PicklingError before.
 - HTCondor pre-check stays stdlib (frozen refusal tests rely on it); design.rst says so.
+
+## Iteration 4 — lambda stage processes accepted on HTCondor (owner ruling 2026-10-01, `freeze-m68c-fixup`)
+- `_require_plan_importable` returns at once for a `DurablePlanV2`: its stage processes ship by value
+  (cloudpickled OpSpec, cloudpickle broadcast), so pilots need not import them; V1 roles keep the
+  stdlib/`__main__` check. design.rst, htcondor.rst and the changelog say join plans accept lambdas.
+- Control: on the pre-change src the driverless acceptance test fails with
+  `AttributeError: Can't get local object '_lambda_combine_plan.<locals>.<lambda>'` from the pre-check.
+- macOS `pytest tests/frozen tests/extra -n 8`: 1490 passed, 10 skipped, 2 failed — both pass alone and
+  reproduce at fc9e316 under `-n 4` (m66 ports test: `test_m66_ports.py` and `test_services_sites.py`
+  both bind port 8786; m66 pilot-driver-gone flake).
+- minicondor container (`m68b-minicondor:local`, graphed 322bc49 installed, CI test-htcondor order
+  m66–m68c, no Triton): pytest rc 0, both m68c lambda tests PASSED (live join over pool pilots
+  included); per-file gate 11/11 >= 90% (min `backend.py` 98.04%); diff-cover vs db8fb0a 100% (14 lines).
+- precommit `--fast --no-coverage` ok; mypy src ok; sphinx -W ok.

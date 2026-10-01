@@ -268,11 +268,9 @@ def _require_importable(obj: object, role: str) -> None:
 
 
 def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[str]) -> None:
-    """Refuse ``plan`` when a pilot could not import a part it runs: the V1 ``roles`` the caller ships,
-    or each stage process of a ``DurablePlanV2``."""
+    """Refuse ``plan`` when a pilot could not import one of the V1 ``roles`` the caller ships; a
+    ``DurablePlanV2``'s stage processes travel by value, so pilots need not import them."""
     if isinstance(plan, DurablePlanV2):
-        for i, stage in enumerate(plan.stages):
-            _require_importable(stage.process.resolve(), f"stages[{i}].process")
         return
     for role in roles:
         if (part := getattr(plan, role)) is not None:

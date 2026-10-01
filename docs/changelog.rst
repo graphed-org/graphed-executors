@@ -59,7 +59,8 @@ Services a plan calls
   ``submit_driverless`` through its driver) runs a join or repartition plan (graphed's ``join_plan``
   / ``shuffle_plan``, a ``DurablePlanV2``) stage by stage, with its services, so a service call can
   come before the join. The local executors and the peer reductions refuse one with a ``TypeError``
-  naming ``SubmitRunner``. See :ref:`design-join-plan`.
+  naming ``SubmitRunner``. Its stage functions travel by value, so on HTCondor too (``htcondor_runner``,
+  ``submit_driverless``) they may be lambdas or live in ``__main__``. See :ref:`design-join-plan`.
 * This needs ``graphed.services``, which no graphed release has yet (0.0.6 does not): CI installs
   graphed from git, and graphed-executors will not be released until its ``graphed`` floor moves to
   the release carrying the service surface and its resolve walk.
