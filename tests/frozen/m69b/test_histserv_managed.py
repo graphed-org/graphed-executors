@@ -5,9 +5,10 @@ The plan is two equal Weight slots (dyadic weights, so every sum is exact) under
 fits each slot alone and not both, so it declares two servers. On ``SubmitRunner(ThreadBackend(2))`` the
 engine starts both beside the driver, the run's receipts name them, the resolve reads them while they are
 up and the run's end stops them; given endpoints are used instead and emptied; a driverless job hosts them
-in the driver job and ships back resolved histograms. A server the driver host cannot hold (a
-``driver_memory_mb`` set on the backend, else the host's physical memory) is refused before any histserv
-process starts.
+in the driver job and ships back resolved histograms. Servers the driver host cannot hold (a
+``driver_memory_mb`` set on the backend, else the host's physical memory; a driver job's slot ``Memory``)
+are refused before the one that overflows starts: the servers beside the driver count together, and a given
+endpoint is never held to it.
 """
 
 from __future__ import annotations
@@ -117,9 +118,11 @@ def test_given_endpoints_start_nothing_and_are_left_empty(
     _ctx, plan = two_server_plan(size_mb)
     names = sorted(s.name for s in plan.services)
     tag = unique("given")
+    backend = ThreadBackend(WORKERS)
+    backend.driver_memory_mb = 64  # below either server: a given endpoint is never held to it
     with user_servers(2) as endpoints:
         given = dict(zip(names, endpoints, strict=True))
-        runner = SubmitRunner(ThreadBackend(WORKERS), services=given)
+        runner = SubmitRunner(backend, services=given)
         try:
             with caplog.at_level(logging.INFO, logger=SERVICES_LOGGER):
                 result = run_bounded(lambda: runner.run(spied(plan, tag)))
@@ -132,11 +135,11 @@ def test_given_endpoints_start_nothing_and_are_left_empty(
     assert same_values(result.value, twin)
 
 
-def test_a_driverless_job_hosts_the_servers_and_returns_resolved_histograms(
-    size_mb: int, twin: dict[Any, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ports = free_range(4)
-    _ctx, plan = two_server_plan(size_mb, ports)
+def driver_job(
+    plan: Any, size_mb: int, slot_mb: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """``plan`` submitted driverless (``pilots="local"``) under recorded bindings, then its driver job run
+    here (``python -m …driver``) with a machine ad whose slot ``Memory`` is ``slot_mb``."""
     log_dir = tmp_path / "submit"
     log_dir.mkdir()
     fake = record_bindings(monkeypatch, RecordingSchedd())
@@ -154,7 +157,7 @@ def test_a_driverless_job_hosts_the_servers_and_returns_resolved_histograms(
     (entry,) = submits(fake.log)
     job = job_dir(entry[1], log_dir, tmp_path / "job")
     ad = job / ".machine.ad"
-    ad.write_text('Machine = "127.0.0.1"\nName = "slot1@127.0.0.1"\nCpus = 4\nMemory = 65536\n')
+    ad.write_text(f'Machine = "127.0.0.1"\nName = "slot1@127.0.0.1"\nCpus = 4\nMemory = {slot_mb}\n')
     proc = subprocess.run(
         [sys.executable, "-m", DRIVER_MODULE, str(job)],
         cwd=job,
@@ -164,6 +167,15 @@ def test_a_driverless_job_hosts_the_servers_and_returns_resolved_histograms(
         timeout=RUN_TIMEOUT_S,
         check=False,
     )
+    return proc, job
+
+
+def test_a_driverless_job_hosts_the_servers_and_returns_resolved_histograms(
+    size_mb: int, twin: dict[Any, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ports = free_range(4)
+    _ctx, plan = two_server_plan(size_mb, ports)
+    proc, job = driver_job(plan, size_mb, 65536, tmp_path, monkeypatch)
     log = (job / "driver.log").read_text() if (job / "driver.log").is_file() else "<no driver.log>"
     assert proc.returncode == 0, (proc.stderr, log)
     hosted = {name: int(port) for name, port in STATUS_LINE.findall(log)}
@@ -174,7 +186,22 @@ def test_a_driverless_job_hosts_the_servers_and_returns_resolved_histograms(
     assert same_values(result.value, twin)
 
 
-def named(number: int, text: str) -> bool:
+def test_a_driver_job_holds_its_servers_to_its_slot_memory(
+    size_mb: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _ctx, plan = two_server_plan(size_mb)
+    slot = size_mb + size_mb // 2  # one server fits the slot, the two do not
+    proc, job = driver_job(plan, size_mb, slot, tmp_path, monkeypatch)
+    assert (job / "result.pkl").is_file(), (proc.returncode, proc.stderr)
+    ok, result = pickle.loads((job / "result.pkl").read_bytes())
+    text = f"{result} {getattr(result, 'legs', '')}"
+    assert ok is False and named(slot, text, str(tmp_path)), result
+
+
+def named(number: int, text: str, *cut: str) -> bool:
+    """``number`` stands alone in ``text`` once ``cut`` (the run's own paths) is removed from it."""
+    for ident in cut:
+        text = text.replace(ident, "")
     return re.search(rf"(?<!\d){number}(?!\d)", text) is not None
 
 
@@ -207,3 +234,19 @@ def test_a_server_above_the_host_memory_is_refused_on_every_os() -> None:
     managed, started = refused_start(ThreadBackend(WORKERS), host + 1)
     assert named(host + 1, managed) and named(host, managed), (host, managed)
     assert [p.args for p in started if "histserv" in str(p.args)] == []
+
+
+def test_the_driver_check_sums_the_servers_beside_the_driver(size_mb: int) -> None:
+    _ctx, plan = two_server_plan(size_mb)
+    backend = ThreadBackend(WORKERS)
+    limit = size_mb + size_mb // 2  # one server fits, the two do not
+    backend.driver_memory_mb = limit
+    runner = SubmitRunner(backend)
+    try:
+        with popen_backstop() as started, pytest.raises(ServiceUnavailable) as err:
+            run_bounded(lambda: runner.run(plan))
+    finally:
+        runner.close()
+    managed = str(err.value.legs["managed"])
+    assert named(size_mb, managed) and named(2 * size_mb, managed) and named(limit, managed), managed
+    assert len([p for p in started if "histserv" in str(p.args)]) == 1, [p.args for p in started]

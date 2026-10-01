@@ -3,8 +3,8 @@
 
 ``HTCondorBackend`` over ``LocalPilots`` takes the generic profile's service placement, whose first host is
 the driver, so the context's servers start beside the driver; pilot processes fill them concurrently. The
-``test-hgg`` job runs this file with ``GRAPHED_HGG_REQUIRED=1``; elsewhere it skips without coffea,
-higgs_dna or histserv.
+bindings are the m68a recorder (no pool, no ``htcondor2``). The ``test-hgg`` job runs this file with
+``GRAPHED_HGG_REQUIRED=1``; elsewhere it skips without coffea, higgs_dna or histserv.
 """
 
 from __future__ import annotations
@@ -16,7 +16,14 @@ from typing import Any
 import pytest
 from m69b_harness import histserv_api, port_free, run_bounded, unique
 from m69b_hgg import DIAGNOSTICS, SERVER_MB, close, direct, fileset, h, oracle_totals, totals
-from services_harness import backend_api, endpoint_port, launch_api, status_records
+from services_harness import (
+    RecordingSchedd,
+    backend_api,
+    endpoint_port,
+    launch_api,
+    record_bindings,
+    status_records,
+)
 
 RUN_S = 900.0
 PILOTS = 2
@@ -28,7 +35,10 @@ def test_local_pilots_fill_servers_beside_the_driver(
     oracle: dict[str, Any],
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # the driver's identity is the bindings' FULL_HOSTNAME, and test-hgg installs no bindings
+    record_bindings(monkeypatch, RecordingSchedd())
     ctx = histserv_api().Context(memory_mb=SERVER_MB, workers=PILOTS, name=unique("m69b-hgg-pilots"))
     plan = analysis.plan(fileset(fixtures), year=h.YEAR, out=str(tmp_path), context=ctx)
     pilots = launch_api().LocalPilots(pythonpath=[str(h.EXAMPLE)])
