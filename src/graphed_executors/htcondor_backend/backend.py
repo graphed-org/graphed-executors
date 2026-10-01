@@ -3,9 +3,9 @@ launches itself. Pilots pull pickled tasks from the backend's :class:`TaskServer
 back; the driver resolves future arguments before a task is queued, so pilots never talk to each other.
 
 The backend's service surface is duck-typed, read by the engine's service set (``submit/services.py``):
-``site_services``, ``service_hosts`` and ``service_ports`` come from the site row, ``advertise_host``
-is the task server's host, and ``host_identity()`` names the driver's host as condor writes it for that
-host's slots. Attached, the row is the launcher's profile; in a driver job (``in_job=``) it is the job's
+``site_services``, ``service_hosts`` (which the caller may narrow) and ``service_ports`` come from the
+site row, ``advertise_host`` is the task server's host, and ``host_identity()`` names the driver's host
+as condor writes it for that host's slots. Attached, the row is the launcher's profile; in a driver job (``in_job=``) it is the job's
 own site row. Attached over ``CondorPilots`` on a row with ``"cluster"`` hosts,
 ``host_service``/``release_service`` run a service as its own job
 (:class:`~graphed_executors.htcondor_backend.services.ServiceJob`) that announces its endpoint to the task
@@ -66,6 +66,8 @@ class HTCondorBackend:
     launcher's site profile (``generic`` for a launcher without one). ``in_job`` is the site row of the
     driver job this backend runs in (``driver.py`` passes it), else ``None`` (attached). ``announced`` maps
     each service a SERVICE node of the driver job's DAG hosts to the node id it announces under.
+    ``service_hosts`` narrows where a managed service may run to a subset of the hosts the row offers
+    (``None``: all of them); a host it does not offer is refused before the task server starts.
     """
 
     def __init__(
@@ -77,21 +79,31 @@ class HTCondorBackend:
         port_range: tuple[int, int] | None = None,
         in_job: SiteProfile | None = None,
         announced: Mapping[str, str] | None = None,
+        service_hosts: Sequence[str] | None = None,
     ) -> None:
         self.capabilities = _FLOOR
         self.launcher = launcher
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
         profile: SiteProfile = getattr(launcher, "profile", SITES["generic"])
+        # a driver job's services stay beside it, reached like its task server
+        offered = profile.service_hosts if in_job is None else ("driver",)
+        if service_hosts is not None and not set(service_hosts) <= set(offered):
+            where = "a driver job" if in_job is not None else f"site {profile.name!r}"
+            raise ValueError(
+                f"service_hosts={tuple(service_hosts)!r} names a host {where} does not offer: "
+                f"it offers {offered!r}"
+            )
         self.advertise_host = host or socket.getfqdn()
         self._in_job = in_job
+        self.service_hosts = (
+            offered if service_hosts is None else tuple(h for h in offered if h in service_hosts)
+        )
         self.service_ports: tuple[int, int] | None
         if in_job is None:
             self.site_services = profile.services
-            self.service_hosts = profile.service_hosts
             self.service_ports = profile.service_ports
-        else:  # beside the driver only; reached like the task server (self-submitted pilots: worker_ports)
+        else:  # self-submitted pilots reach the driver on worker_ports
             self.site_services = in_job.services
-            self.service_hosts = ("driver",)
             self.service_ports = in_job.worker_ports if isinstance(launcher, CondorPilots) else None
         low, high = port_range if port_range is not None else profile.driver_ports
         try:
@@ -320,10 +332,13 @@ def htcondor_runner(
     retries: int = 3,
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
+    service_hosts: Sequence[str] | None = None,
 ) -> HTCondorRunner:
     """``n_pilots`` pilot jobs on the ``site`` pool behind an :class:`HTCondorRunner`;
     ``runner.close()`` removes them. ``port_range`` is the driver-side port range; default from the
-    site profile. ``services`` are the runner's given service endpoints."""
+    site profile. ``services`` are the runner's given service endpoints. ``service_hosts`` narrows
+    where a managed service runs to a subset of the site's, such as ``("cluster",)``; a host the site
+    does not offer is refused before any pilot is submitted."""
     pilots = CondorPilots(
         site,
         image=image,
@@ -334,7 +349,7 @@ def htcondor_runner(
         env=env,
         extra_submit=extra_submit,
     )
-    backend = HTCondorBackend(pilots, n_pilots, host=host, port_range=port_range)
+    backend = HTCondorBackend(pilots, n_pilots, host=host, port_range=port_range, service_hosts=service_hosts)
     return HTCondorRunner(
         backend,
         min_pilots=min_pilots,
