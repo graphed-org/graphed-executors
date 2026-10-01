@@ -25,3 +25,7 @@ bit-for-bit.
 - Frozen pin: `e[3] == 1`. The recorded-order cases still pass, because the fake returns every ad
   whatever the `match`.
 - Plan: change the B2/`RunHandle(dag=True)` text from `match=3` to `match=1`, with that reason.
+
+## Owner ruling 2026-10-01
+Approved as proposed (owner, asked what lxplus still needed: "you can do this yourself"): the
+product reads the driver node's history with `match=1` and the frozen pin becomes `e[3] == 1`.

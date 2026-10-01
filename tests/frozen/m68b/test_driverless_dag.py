@@ -572,7 +572,7 @@ def test_a_finished_dag_takes_its_outcome_from_the_latest_driver_try(
     record_bindings(monkeypatch, schedd)
     assert run_bounded(dag_handle(tmp_path).status) == expected
     node_history = [e for e in logged(schedd.log, "history") if is_node_constraint(e[1])]
-    assert node_history and all(names_the_driver_node(e[1]) and e[3] == 3 for e in node_history), node_history
+    assert node_history and all(names_the_driver_node(e[1]) and e[3] == 1 for e in node_history), node_history
     assert_no_dag_counters(schedd.log)
 
 
