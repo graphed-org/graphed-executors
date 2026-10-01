@@ -19,7 +19,7 @@ env:
   # split_endpoint, bind_services, require_bound) that m68a runs on. Moves to the first release carrying
   # both. A git install builds the Rust core, so every job installing it needs a Rust
   # toolchain.
-  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@d0ad16bc34c59583e967bf557af68d664dc323de"
+  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@7e048bfdf929f7182885e62c1611e1c2a3357f77"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
   # The frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
