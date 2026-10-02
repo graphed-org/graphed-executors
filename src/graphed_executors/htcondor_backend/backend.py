@@ -28,9 +28,9 @@ import secrets
 import socket
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
@@ -79,8 +79,8 @@ _FLOOR = SubmitCapabilities(
 class HTCondorBackend:
     """Starts a task server and ``n_pilots`` pilots through ``launcher``; :meth:`close` removes them.
     Pilot jobs whose services are jobs too (``CondorPilots`` with ``host_service``) are submitted at
-    the first need of a worker, put off while a server waits to announce, and that need waits once for
-    ``min_pilots``, counted from the submit.
+    the first need of a worker, put off while a plan's services start (:meth:`starting_services`) and
+    never made once the run ends, and that need waits once for ``min_pilots``, counted from the submit.
 
     ``host`` is the name pilots dial back to (default: this machine's FQDN); the server binds the
     first free port of ``port_range`` on all interfaces, by default the ``driver_ports`` of the
@@ -143,10 +143,10 @@ class HTCondorBackend:
         self._announced = dict(announced or {})
         # the capability IS this pair of attributes: absent, the engine refuses naming it
         if self._announced:
-            self.host_service = self._announcing(self._host_announced)
+            self.host_service = self._host_announced
             self.release_service = self._release_announced
         elif in_job is None and isinstance(launcher, CondorPilots) and "cluster" in self.service_hosts:
-            self.host_service = self._announcing(self._host_service)
+            self.host_service = self._host_service
             self.release_service = self._release_service
         # pilot jobs submitted with the services' jobs would hold the room those need: they wait
         deferred = isinstance(launcher, CondorPilots) and hasattr(self, "host_service")
@@ -156,8 +156,9 @@ class HTCondorBackend:
         self._submitted_at = None if deferred else time.monotonic()
         self._held = False  # the queued pilots are held while a later plan's services start
         self._waited = False
-        self._serving = 0  # host_service calls not yet returned or raised
-        self._wanted = False  # a need of a worker arrived while one ran
+        self._starting = 0  # plans whose services are starting (ServiceSet resolve phases)
+        self._wanted = False  # a need of a worker arrived during one
+        self._closed = False
         with ExitStack() as stack:  # a refused start must not leave the server holding its port
             stack.callback(release_quietly, "the task server's port", self._server.shutdown)
             stack.callback(release_quietly, "the task server", self._server.close)
@@ -173,41 +174,38 @@ class HTCondorBackend:
     def _need(self) -> None:
         """A need of a worker (:meth:`n_workers`, :meth:`submit` or :meth:`wait_for_pilots`)."""
         with self._pilots_lock:
-            # pilots move only while no server waits to announce: the last one to end moves them
-            if self._serving:
+            if self._starting:
                 self._wanted = True
             else:
                 self._move_pilots()
 
     def _move_pilots(self) -> None:
         """Release the pilots a plan's services held, or submit deferred ones; under ``_pilots_lock``."""
+        # pilots move only once no plan is starting its services, and none is submitted once the run ends
+        # (a release still runs: the plans the drain finishes may need them)
         if self._held:
             assert isinstance(self.launcher, CondorPilots)
             self.launcher.release_held()
             self._held = False
-        if self._submitted_at is None:
+        if self._submitted_at is None and not self._closing.is_set():
             self.launcher.start(self._server.url, self._server.secret, self._n_pilots)
             self._submitted_at = time.monotonic()
 
-    def _announcing(
-        self, host: Callable[[ServiceSpec, str], tuple[str, str, str]]
-    ) -> Callable[[ServiceSpec, str], tuple[str, str, str]]:
-        """``host``, counted as a server waiting to announce while it runs; the last to end moves the
-        pilots a need asked for meanwhile (a failure is logged, and the next need retries it)."""
-
-        def counted(spec: ServiceSpec, scope: str) -> tuple[str, str, str]:
+    @contextmanager
+    def starting_services(self) -> Iterator[None]:
+        """A plan's services starting (:class:`ServiceSet`'s resolve phase): a need of a worker meanwhile
+        is recorded, and the last phase to end moves the pilots (a failure is logged; the next need
+        retries it)."""
+        with self._pilots_lock:
+            self._starting += 1
+        try:
+            yield
+        finally:
             with self._pilots_lock:
-                self._serving += 1
-            try:
-                return host(spec, scope)
-            finally:
-                with self._pilots_lock:
-                    self._serving -= 1
-                    if not self._serving and self._wanted:
-                        self._wanted = False
-                        release_quietly("the pilots", self._move_pilots)
-
-        return counted
+                self._starting -= 1
+                if not self._starting and self._wanted:
+                    self._wanted = False
+                    release_quietly("the pilots", self._move_pilots)
 
     def _need_worker(self) -> None:
         if self._waited:
@@ -223,14 +221,19 @@ class HTCondorBackend:
 
     def wait_for_pilots(self, n: int, timeout: float = N_WORKERS_WAIT_S) -> int:
         """Wait for ``n`` live pilots, a need of a worker at each poll; ``timeout`` counts from the call,
-        or from the pilots' submit when a server's wait defers it. A wait for ``min_pilots`` or more is
-        the first need's wait."""
+        or from the pilots' submit when a plan's service start defers it. A wait for ``min_pilots`` or
+        more is the first need's wait; once the run ends, a wait no pilot can end raises."""
         called = time.monotonic()
         while True:
             self._need()
             if (live := self._server.live_pilots()) >= n:
                 break
             submitted = self._submitted_at
+            if self._closing.is_set() and (submitted is None or self._closed):
+                raise RuntimeError(
+                    f"{live} of {n} pilots connected when the runner closed"
+                    + ("; none was submitted" if submitted is None else "")
+                )
             if submitted is not None and time.monotonic() > max(called, submitted) + timeout:
                 raise RuntimeError(
                     f"{live} of {n} pilots connected after {timeout}s; "
@@ -291,8 +294,8 @@ class HTCondorBackend:
         :class:`ServiceUnavailable` (a pool whose collector lists no slot is not asked); one that ends,
         is held, or has not announced within ``spec.timeout_s`` of its start raises. Each is removed,
         and every failure forgets the call's announce secret. Once the pilots are submitted (a later
-        plan), the first call holds their queued jobs until a need of a worker once no server waits,
-        and the match counts each slot less what the running pilots hold, which they keep until close."""
+        plan), the first call holds their queued jobs until a need of a worker after the plan's services
+        start, and the match counts each slot less what the running pilots hold, which they keep until close."""
         assert isinstance(self.launcher, CondorPilots)
         machines = machine_ads(self.launcher)
         claims: list[Any] = []
@@ -394,11 +397,12 @@ class HTCondorBackend:
         self._closing.set()
 
     def close(self) -> None:
-        """Remove every service job this backend submitted, in the calling thread (a wait for one then
-        raises), stop serving (pilots see 410 and exit), stop the pilots, free the port; each step runs
-        even when an earlier one fails, and each failure is logged."""
+        """Remove every service job this backend submitted, in the calling thread (a wait for one, or
+        for pilots, then raises), stop serving (pilots see 410 and exit), stop the pilots, free the
+        port; each step runs even when an earlier one fails, and each failure is logged."""
         with self._lock:
             self._closing.set()
+            self._closed = True
             jobs = list(self._services.items())
         for key, job in jobs:
             release_quietly(f"service job {key}", job.stop)

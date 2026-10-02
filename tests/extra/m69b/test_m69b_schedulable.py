@@ -4,10 +4,11 @@ a size-less spec; a driver job's slot ``Memory``; the condor announce wait's idl
 that outlives an eviction; the collector query, a partitionable slot's totals, and a job that left the queue
 before its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; the
 backend's close removing a waiting job in its own thread, a serialized stop() done once, no submit after a
-stop or once the waits are stopped; a need beside a waiting server timed from the pilots' submit, and a
-wait below min_pilots that is not the first need's; a held pilot counted alive, a running pilot's claim
-taken out of its slot, and graphed's release leaving a user's hold (that one on a real schedd). The rest
-run over stand-ins."""
+stop or once the waits are stopped; no pilot submitted for a need beside a starting service once the run
+ends, while a held one is still released, and a wait for submitted pilots ended by close() alone; a wait
+timed from the pilots' submit or from its call, whichever is later, and a wait below min_pilots that is
+not the first need's; a held pilot counted alive, a running pilot's claim taken out of its slot, and
+graphed's release leaving a user's hold (that one on a real schedd). The rest run over stand-ins."""
 
 from __future__ import annotations
 
@@ -340,7 +341,7 @@ class Pool:
         self.status = status
         self.log: list[tuple[str, str]] = []
         self.clusters = iter(range(70, 100))
-        self.JobAction = SimpleNamespace(Remove="Remove")
+        self.JobAction = SimpleNamespace(Remove="Remove", Hold="Hold", Release="Release")
         self.param = {"SCHEDD_HOST": "s1"}
         self.Submit = dict
 
@@ -522,37 +523,144 @@ def test_no_service_job_is_submitted_once_the_waits_are_stopped(
 # ---- the runner's own pilots --------------------------------------------------------------------------
 
 
-def test_a_need_beside_a_waiting_server_counts_its_timeout_from_the_pilots_submit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def pilot_submits(pool: Pool) -> list[str]:
+    return [entry for kind, entry in pool.log if kind == "submit" and "graphed-pilots-" in entry]
+
+
+@pytest.mark.parametrize("end", ["stop_waiting", "close"])
+def test_a_need_beside_a_starting_service_submits_no_pilot_once_the_run_ends(
+    end: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(server_mod, "POLL_S", 0.1)
     backend, pool = pooled(1, tmp_path, monkeypatch)  # the service job stays idle
-    raised: list[BaseException] = []
+    raised: dict[str, BaseException] = {}
 
-    def call(fn: Any) -> None:
+    def call(name: str, fn: Any) -> None:
         try:
             fn()
         except Exception as exc:
-            raised.append(exc)
+            raised[name] = exc
 
-    server = threading.Thread(target=call, args=(lambda: backend.host_service(spec("idle", 64), "s"),))
-    need = threading.Thread(target=call, args=(lambda: backend.wait_for_pilots(1, timeout=0.2),))
+    def starting() -> None:
+        ServiceSet([spec("idle", 64)], backend, scope="s").start()
+
+    server = threading.Thread(target=call, args=("server", starting), daemon=True)
+    need = threading.Thread(target=call, args=("need", lambda: backend.wait_for_pilots(1)), daemon=True)
     try:
         server.start()
         assert wait_until(lambda: any(kind == "submit" for kind, _ in pool.log), 10.0)
         need.start()
-        need.join(1.0)
-        assert need.is_alive() and raised == [], raised
-        assert not [entry for kind, entry in pool.log if "graphed-pilots-" in entry], pool.log
-        backend.stop_waiting()  # the server raises, and as the last to end submits the pilots
+        need.join(0.5)
+        assert need.is_alive() and raised == {}, raised
+        getattr(backend, end)()
         server.join(10.0)
         need.join(10.0)
-        assert [entry for kind, entry in pool.log if "graphed-pilots-" in entry], pool.log
-        messages = sorted(str(exc) for exc in raised)
-        assert len(messages) == 2 and "0 of 1 pilots connected after 0.2s" in messages[0], messages
-        assert "when the runner closed" in messages[1], messages
+        assert pilot_submits(pool) == [], pool.log
+        assert "when the runner closed" in str(raised.get("server")), raised
+        assert "0 of 1 pilots connected when the runner closed" in str(raised.get("need")), raised
     finally:
         pool.status = None
+        backend.close()
+        need.join(10.0)
+
+
+def test_a_need_beside_a_later_plan_s_starting_service_releases_its_pilots_once_the_run_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server_mod, "POLL_S", 0.1)
+    backend, pool = pooled(1, tmp_path, monkeypatch)
+    backend.min_pilots = 0
+    backend.wait_for_pilots(0)  # a first plan ran
+    raised: list[BaseException] = []
+
+    def starting() -> None:
+        try:
+            ServiceSet([spec("idle", 64)], backend, scope="s").start()
+        except RuntimeError as exc:
+            raised.append(exc)
+
+    server = threading.Thread(target=starting, daemon=True)
+    try:
+        server.start()
+        assert wait_until(lambda: any("graphed-service-" in entry for _, entry in pool.log), 10.0)
+        backend.n_workers()  # a need, recorded
+        assert [entry for _, entry in pool.log if entry.startswith("Release")] == [], pool.log
+        backend.stop_waiting()  # a queued plan the drain finishes may need the held pilots
+        server.join(10.0)
+        assert len(raised) == 1 and "when the runner closed" in str(raised[0]), raised
+        assert len([entry for _, entry in pool.log if entry.startswith("Release")]) == 1, pool.log
+        assert len(pilot_submits(pool)) == 1, pool.log
+    finally:
+        pool.status = None
+        backend.close()
+
+
+def test_once_the_pilots_are_submitted_only_close_ends_a_wait_for_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, _pool = pooled(1, tmp_path, monkeypatch)
+    raised: list[BaseException] = []
+
+    def need() -> None:
+        try:
+            backend.wait_for_pilots(1)
+        except RuntimeError as exc:
+            raised.append(exc)
+
+    waiter = threading.Thread(target=need, daemon=True)
+    try:
+        backend.wait_for_pilots(0)  # submits the pilots
+        waiter.start()
+        backend.stop_waiting()
+        waiter.join(0.5)
+        assert waiter.is_alive() and raised == [], "the drain's plans wait for submitted pilots"
+        backend.close()
+        waiter.join(10.0)
+        assert [str(exc) for exc in raised] == ["0 of 1 pilots connected when the runner closed"]
+    finally:
+        backend.close()
+        waiter.join(10.0)
+
+
+def test_a_need_deferred_by_a_service_start_times_its_wait_from_the_pilots_submit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, pool = pooled(1, tmp_path, monkeypatch)
+    raised: list[tuple[float, BaseException]] = []
+
+    def need() -> None:
+        try:
+            backend.wait_for_pilots(1, timeout=1.0)
+        except RuntimeError as exc:
+            raised.append((time.monotonic(), exc))
+
+    waiter = threading.Thread(target=need, daemon=True)
+    try:
+        with backend.starting_services():
+            waiter.start()
+            time.sleep(1.5)  # deferred past its timeout
+            assert raised == [] and pilot_submits(pool) == [], (raised, pool.log)
+        ended = time.monotonic()
+        waiter.join(10.0)
+        assert len(pilot_submits(pool)) == 1, pool.log
+        ((at, exc),) = raised
+        assert "0 of 1 pilots connected after 1.0s" in str(exc) and at - ended >= 1.0, (at - ended, exc)
+    finally:
+        backend.close()
+
+
+def test_a_wait_called_after_the_pilots_submit_times_from_the_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, _pool = pooled(1, tmp_path, monkeypatch)
+    try:
+        backend.wait_for_pilots(0)  # submits the pilots
+        time.sleep(1.2)  # past the next wait's timeout
+        called = time.monotonic()
+        with pytest.raises(RuntimeError, match=r"0 of 1 pilots connected after 1\.0s"):
+            backend.wait_for_pilots(1, timeout=1.0)
+        assert time.monotonic() - called >= 1.0
+    finally:
         backend.close()
 
 

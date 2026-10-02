@@ -11,7 +11,9 @@ backend offers ``"driver"`` in ``service_hosts``, and the driver holds it (the `
 of the set's services beside the driver, this one included, sum to no more than the backend's
 ``driver_memory_mb``, else the host's physical memory), else on the cluster through the backend's
 ``host_service``/``release_service`` pair (D10: the capability IS the pair of methods). Nothing left
-raises :class:`ServiceUnavailable` naming each leg and why it did not apply.
+raises :class:`ServiceUnavailable` naming each leg and why it did not apply. The resolving runs inside
+the backend's ``starting_services()`` context when it has one, a backend that holds its workers back
+while a plan's services start.
 
 Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from a
 worker. The worker probe is an ordinary ``backend.submit`` of :func:`_probe_services`, one task that
@@ -416,8 +418,9 @@ class ServiceSet:
         self._driver_mb = 0
         with contextlib.ExitStack() as stack:
             stack.callback(self._stamp_closed)
-            resolved = [self._resolve(spec, stack) for spec in self.specs]
-            self._probe(resolved, stack)
+            with getattr(self.backend, "starting_services", contextlib.nullcontext)():
+                resolved = [self._resolve(spec, stack) for spec in self.specs]
+            self._probe(resolved, stack)  # outside the phase: it needs a worker
             self._stack = stack.pop_all()
         return Endpoints({r.spec.name: r.status.endpoint for r in resolved}, self._on_close)
 
