@@ -44,6 +44,17 @@ PLAN_FILE, RUN_FILE, RESULT_FILE, LOG_FILE = "plan.pkl", "run.json", "result.pkl
 PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
 
 
+class CondorReason(tuple[str, None]):
+    """A ``Schedd.act`` reason: htcondor2 (25.13, 25.14) applies a ``(text, code)`` tuple and drops a
+    ``str``, and the schedd appends `` (by user <name>)`` to the text. ``str()`` is the text."""
+
+    def __new__(cls, text: str) -> CondorReason:
+        return super().__new__(cls, (text, None))
+
+    def __str__(self) -> str:
+        return self[0]
+
+
 def _htcondor() -> Any:
     """The ``htcondor2`` module, imported on first use."""
     try:
@@ -309,7 +320,7 @@ class CondorPilots:
             if self.profile.spool and any(ad.get("JobStatus") == 4 for ad in left):
                 schedd.retrieve(f"{constraint} && JobStatus == 4")
             # a spooled job stays in the queue after it completes until it is removed
-            schedd.act(htc.JobAction.Remove, constraint, reason="graphed: run closed")
+            schedd.act(htc.JobAction.Remove, constraint, reason=CondorReason("graphed: run closed"))
 
     def _choose(self, htc: Any) -> tuple[str, Any]:
         """The site's schedd: lowest :func:`schedd_weight` among the query's ads, asking each collector
