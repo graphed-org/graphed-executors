@@ -248,3 +248,23 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg 80 passed / 5 skipped. ruff, ruff
   format, mypy --strict (also win32), sphinx -W clean. The 25 ordering ids: identical over two runs (macOS 20
   pass / 5 skip; pool 25 pass).
+
+## Iteration 14 — review r6 (D1, D2; D3 awaits the owner)
+- D1: the last service-start phase to end moved the pilots only when a need was recorded; a set that failed has
+  no worker probe after it, so its hold stayed until some later need. `starting_services`' end now also acts
+  when `_held` (`_held` implies submitted, so it only releases). Plan ada3a49: held pilots "are released once
+  those services have started or failed"; htcondor.rst says the same. Frozen row 1 keeps one Hold and one
+  Release, the Release after the last announce.
+- D2: `ServiceSet._managed` fell through from a driver refusal to any callable `host_service`; a driver job's
+  (`_host_announced`) hosts only its SERVICE nodes, so a too-big image-less spec raised `ValueError`. It now
+  falls through only when `"cluster"` is among the hosts, and otherwise refuses with the sizes.
+- Rows (each kills its mutant; controls pass): a later plan's set that fails (the job leaves the queue
+  unannounced) acts Hold then Release with no need made (`wanted-only-phase-end`, 245d0c6's condition); a driver
+  job with a SERVICE node refuses a 200 MiB spec beside its 100 MiB slot with `ServiceUnavailable` naming both
+  (`too-big-falls-through-to-any-host-service`, raises `ValueError`). The 22 earlier mutants still die.
+- Gates (2c77051): macOS main job 1163 passed / 126 skipped, per-file min 93.02 % (`local/shuffle.py`),
+  diff-cover 100 % (47 lines). Pool `test-htcondor` line 537 passed / 10 skipped, htcondor scope per-file min
+  98.80 % (`server.py`), diff-cover 100 % (271 lines), queue empty. test-dask 421 passed / 2 skipped, per-file min
+  91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg 82 passed / 5 skipped. ruff, ruff
+  format, mypy --strict (also win32), sphinx -W clean. The 27 ordering ids: identical over two runs (macOS 22
+  pass / 5 skip; pool 27 pass).
