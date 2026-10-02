@@ -482,9 +482,7 @@ and state every 30 seconds. The runner's queued pilots never take that room:
   ten minutes for ``min_pilots``, counted from the pilots' submit.
 * **A later plan's servers wait with the runner's queued pilots held**, across all of that plan's
   services, and the pilots are released once those services have started or failed (by the same
-  rule, once no other plan's services are starting); a hold you placed yourself is left alone. The runner's running pilots keep their slots until it closes, so a
-  server that would fit only where they sit is removed before it runs and refused with
-  ``ServiceUnavailable`` naming the pilots' cluster.
+  rule, once no other plan's services are starting); a hold you placed yourself is left alone.
 * **Closing.** ``runner.close()``, or leaving the ``with`` block normally, waits for every submitted
   plan, a server still waiting for its slot included. Ctrl-C anywhere (in the ``with`` block, or in
   ``close()`` itself) ends the wait and removes the run's jobs, its servers and its pilots. Any other
@@ -504,13 +502,15 @@ and state every 30 seconds. The runner's queued pilots never take that room:
   slot. A service that does not fit goes to the cluster, its status ``detail`` naming the sizes; a
   backend with no cluster host refuses it with ``ServiceUnavailable``, whose ``legs["managed"]`` names
   the sizes and the limit.
-* **On the cluster, a slot must match.** After the service job is submitted, its ad is matched
-  against every slot of the pool, busy or not, with a partitionable slot counted whole (its total
-  memory, CPUs, GPUs and disk). A job no slot matches (too much memory, a requirement no machine
-  meets) is removed before it ever runs, and the run raises ``ServiceUnavailable`` naming
-  ``RequestMemory``, ``RequestCpus``, ``RequestGPUs`` and the largest slot's memory. A job that
-  matches a busy slot waits for it, as above. A collector that lists no slot at all is not asked: the
-  job is submitted and waits.
+* **On the cluster, a slot must match.** After the service job is submitted, its ad is matched against
+  every slot of the pool, busy or not, with a partitionable slot counted whole (its total memory, CPUs,
+  GPUs and disk) less what the runner's running pilots and the run's earlier servers hold there: the
+  pilots keep their slots until the runner closes, the servers until the run ends. A server that would
+  fit only where they sit is removed before it runs, and the run raises ``ServiceUnavailable`` naming
+  their clusters. A job no slot matches (too much memory, a requirement no machine meets) is removed
+  before it ever runs, and the run raises ``ServiceUnavailable`` naming ``RequestMemory``,
+  ``RequestCpus``, ``RequestGPUs`` and the largest slot's memory. A job that matches a busy slot waits
+  for it, as above. A collector that lists no slot at all is not asked: the job is submitted and waits.
 
 Histograms on histserv servers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

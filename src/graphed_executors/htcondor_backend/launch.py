@@ -368,9 +368,10 @@ class CondorPilots:
         constraint = f"{self._constraint} && JobStatus == 5 && {ours}"
         self._schedd.act(_htcondor().JobAction.Release, constraint)
 
-    def running_claims(self) -> list[Any]:
-        """The running pilots' ads: the slot each runs in and what it was given there."""
-        constraint = f"{self._constraint} && JobStatus == 2"
+    def running_claims(self, jobs: str | None = None) -> list[Any]:
+        """The running ads of ``jobs`` (a constraint; the pilots by default): the slot each runs in and
+        what it was given there."""
+        constraint = f"{jobs or self._constraint} && JobStatus == 2"
         sizes = [f"{r}Provisioned" for r in SLOT_RESOURCES] + [f"Request{r}" for r in SLOT_RESOURCES]
         return list(self._schedd.query(constraint=constraint, projection=["RemoteHost", *sizes]))
 

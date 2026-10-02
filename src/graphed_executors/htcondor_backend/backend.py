@@ -294,17 +294,27 @@ class HTCondorBackend:
         :class:`ServiceUnavailable` (a pool whose collector lists no slot is not asked); one that ends,
         is held, or has not announced within ``spec.timeout_s`` of its start raises. Each is removed,
         and every failure forgets the call's announce secret. Once the pilots are submitted (a later
-        plan), the first call holds their queued jobs until the plan's services have started or failed,
-        and the match counts each slot less what the running pilots hold, which they keep until close."""
+        plan), the first call holds their queued jobs until the plan's services have started or failed.
+        The match counts each slot less what the running pilots and the set's earlier servers (keys of
+        ``scope``) hold, which they keep until the run ends."""
         assert isinstance(self.launcher, CondorPilots)
         machines = machine_ads(self.launcher)
-        claims: list[Any] = []
+        claims: dict[str, list[Any]] = {}
         with self._pilots_lock:
             if self._submitted_at is not None:
                 if not self._held:
                     self.launcher.hold_queued()
                     self._held = True
-                claims = self.launcher.running_claims() if machines else []
+                if machines and self.launcher.cluster is not None:
+                    pilots = f"the runner's running pilots (cluster {self.launcher.cluster[1]})"
+                    claims[pilots] = self.launcher.running_claims()
+        if machines:
+            with self._lock:
+                siblings = [job for key, job in self._services.items() if key.startswith(f"{scope}-")]
+            for sibling in siblings:
+                if sibling.cluster is not None:
+                    server = f"its server {sibling.spec.name!r} (cluster {sibling.cluster})"
+                    claims[server] = self.launcher.running_claims(f"ClusterId == {sibling.cluster}")
         key = f"{scope}-{secrets.token_hex(8)}"
         secret = self._server.announce_secret([key])
         with ExitStack() as stack:

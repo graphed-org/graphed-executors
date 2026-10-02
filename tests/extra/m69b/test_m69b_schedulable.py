@@ -17,6 +17,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import re
 import socket
 import sys
 import threading
@@ -801,6 +802,75 @@ def test_a_running_job_s_claim_leaves_the_slot_it_runs_in() -> None:
         {**static, "Memory": 0, "Cpus": 0},
         other,
     ]
+
+
+class SlotPool(Pool):
+    """``Pool`` whose collector lists one 1000 MiB partitionable slot; the schedd answers a job's ad (its
+    request, as ``classad2``) and, once the job is in ``running``, its claim on that slot."""
+
+    SLOT = (
+        '[ Name = "slot1@wn"; SlotType = "Partitionable"; PartitionableSlot = true; Memory = 0; '
+        "TotalSlotMemory = 1000; Cpus = 1; TotalSlotCpus = 4; Requirements = true ]"
+    )
+
+    def __init__(self, classad2: Any) -> None:
+        super().__init__(None)
+        self.classad2 = classad2
+        self.asked: dict[int, int] = {}
+        self.running: set[int] = set()
+
+    def Collector(self, *pool: str) -> Any:
+        return SimpleNamespace(query=lambda constraint: [self.classad2.ClassAd(self.SLOT)])
+
+    def submit(self, desc: dict[str, str], count: int = 0, spool: bool = False) -> Any:
+        result = super().submit(desc, count, spool)
+        self.asked[result.cluster()] = int(desc["request_memory"])
+        return result
+
+    def query(self, constraint: str = "", projection: Any = None) -> list[Any]:
+        found = re.search(r"ClusterId == (\d+)", constraint)
+        assert found is not None, constraint
+        cluster = int(found.group(1))
+        if "JobStatus == 2" in constraint:
+            claim = Ad(RemoteHost="slot1_1@wn", MemoryProvisioned=self.asked[cluster])
+            return [claim] if cluster in self.running else []
+        request = f"RequestMemory = {self.asked[cluster]}; Requirements = TARGET.Memory >= RequestMemory"
+        return [self.classad2.ClassAd(f"[ {request} ]")]
+
+
+def test_a_first_plan_s_server_is_refused_where_only_its_set_s_earlier_server_holds_room(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    classad2 = pytest.importorskip("classad2")  # ships with the htcondor bindings (Linux)
+    pool = SlotPool(classad2)
+    monkeypatch.setattr(launch, "_htcondor", lambda: pool)
+    monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)
+    pilots = CondorPilots("generic", log_dir=tmp_path)
+    backend = HTCondorBackend(pilots, 1, host="127.0.0.1", service_hosts=("cluster",))
+
+    def wait(key: str, timeout: float) -> tuple[str, str] | None:
+        job = backend._services[key]
+        if job.spec.name != "web1" or job.cluster is None:
+            return None
+        pool.running.add(job.cluster)
+        return ("127.0.0.1:10007", "node7")
+
+    monkeypatch.setattr(backend._server, "wait_announce", wait)
+    other = ServiceJob(spec("other", 300), pilots, key="t-0", url=backend._server.url, secret=b"s")
+    try:
+        other.submit()  # another plan's server, running on the same slot
+        assert other.cluster is not None
+        pool.running.add(other.cluster)
+        backend._services[other.key] = other
+        with pytest.raises(ServiceUnavailable) as refused:
+            ServiceSet([spec("web1", 600), spec("web2", 600)], backend, scope="s").start()
+        managed = refused.value.legs["managed"]
+        web1, web2 = (int(e.rsplit(" ", 1)[1]) for k, e in pool.log if k == "submit" and "-s-" in e)
+        assert f"'web1' (cluster {web1})" in managed and "'other'" not in managed, managed
+        assert "beside them is 400 MiB" in managed, managed
+        assert pilots.cluster is None and ("act", f"Remove ClusterId == {web2}") in pool.log, pool.log
+    finally:
+        backend.close()
 
 
 def test_a_real_schedd_releases_graphed_s_hold_and_not_the_user_s(

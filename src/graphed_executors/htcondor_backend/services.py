@@ -17,7 +17,7 @@ import os
 import shlex
 import shutil
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -161,32 +161,36 @@ class ServiceJob:
             ads = list(schedd.history(constraint, AD_ATTRS, match=1))
         return ads[0] if ads else {}
 
-    def match_refusal(self, machines: list[Any], claims: Sequence[Any] = ()) -> str | None:
+    def match_refusal(
+        self, machines: list[Any], claims: Mapping[str, Sequence[Any]] | None = None
+    ) -> str | None:
         """Why no slot of ``machines`` could ever run this queued job, else ``None``: its whole ad (the
         request, the site's and the user's submit keys) must ``symmetricMatch`` a slot's ad whose free
         ``Memory``/``Cpus``/``GPUs``/``Disk`` are a partitionable slot's totals, so a busy pool still
-        matches, less what ``claims`` (the ads of the runner's running pilots, which keep their slots
-        to its close) hold there; ``None`` when ``machines`` is empty."""
+        matches, less what ``claims`` hold there (by holder, the running ads of the runner's pilots and
+        of the set's earlier servers, which keep their slots to the run's end); ``None`` when
+        ``machines`` is empty."""
         if not machines:  # a collector that lists no slot says nothing about the pool: submit and wait
             return None
+        assert self.cluster is not None, "matched only once submitted"
         ads = list(self.launcher._schedd.query(constraint=f"ClusterId == {self.cluster}"))
         if not ads:  # it already left the queue: the announce wait reports how
             return None
         import classad2  # noqa: PLC0415  (ships with the htcondor2 bindings)
 
         slots = [_as_whole(classad2.ClassAd(str(machine))) for machine in machines]
-        for claim in claims:
-            _less_claim(slots, claim)
+        held = {who: running for who, running in (claims or {}).items() if running}
+        for running in held.values():
+            for claim in running:
+                _less_claim(slots, claim)
         if any(ads[0].symmetricMatch(slot) for slot in slots):
             return None
         asked = ", ".join(f"{a}={ads[0].eval(a) if a in ads[0] else 0}" for a in _REQUESTS)
         largest = max(int(slot.get("Memory", 0)) for slot in slots)
-        if claims:
-            assert self.launcher.cluster is not None, "claims are the submitted pilots'"
+        if held:
             return (
-                f"service job {self.key} matches no slot of the pool beside the runner's running pilots "
-                f"(cluster {self.launcher.cluster[1]}), which keep their slots until it closes: {asked}; "
-                f"the largest slot memory beside them is {largest} MiB"
+                f"service job {self.key} matches no slot of the pool beside {' and '.join(held)}, which keep "
+                f"their slots until the run ends: {asked}; the largest slot memory beside them is {largest} MiB"
             )
         return (
             f"service job {self.key} matches no slot of the pool, busy or not: {asked}; "
