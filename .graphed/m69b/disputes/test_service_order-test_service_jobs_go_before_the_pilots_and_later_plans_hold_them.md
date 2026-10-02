@@ -1,6 +1,6 @@
 # Dispute: tests/frozen/m69b/test_service_order.py::test_service_jobs_go_before_the_pilots_and_later_plans_hold_them
 
-Status: OPEN — awaiting owner ruling
+Status: CLOSED — owner ruling 2026-10-02: "approve the freeze-m69b-fixup2 refreeze, go" (freeze-m69b-fixup2)
 
 ## The test
 For each later plan it asserts `hold.t < services[0].t` and `release.t > of_kind(later, "announce")[-1].t`, where

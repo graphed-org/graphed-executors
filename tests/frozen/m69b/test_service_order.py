@@ -142,8 +142,10 @@ def test_service_jobs_go_before_the_pilots_and_later_plans_hold_them(
             assert holds_named(hold, pilots.cluster) and re.search(r"JobStatus\s*==\s*1\b", hold.text), hold
             assert hold.reason, f"the pilots were held without a reason: {hold}"
             assert holds_named(release, pilots.cluster) and hold.reason in release.text, (hold, release)
-            assert hold.t < services[0].t, f"plan {i} held its pilots after its service submit: {later}"
-            assert release.t > of_kind(later, "announce")[-1].t, (
+            assert later.index(hold) < later.index(services[0]), (
+                f"plan {i} held its pilots after its service submit: {later}"
+            )
+            assert later.index(release) > later.index(of_kind(later, "announce")[-1]), (
                 f"plan {i} released before its announce: {later}"
             )
         for plan, value in zip(plans, values, strict=True):
