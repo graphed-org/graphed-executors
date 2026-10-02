@@ -164,11 +164,11 @@ def main(argv: list[str] | None = None) -> int:
                 plan = pickle.load(f)
             runner = _runner(run, job, log)
             try:
-                live = runner.wait_for_pilots()
-                print(f"{live} pilots live after {time.monotonic() - start:.1f}s", file=log, flush=True)
                 # the driver job's own set: its failures are environment (exit 1) whatever their type
                 given = run.get("endpoints") or {}
                 with ServiceSet(plan.services, runner.backend, endpoints=given) as endpoints:
+                    live = runner.wait_for_pilots()  # after the SERVICE nodes' announces; a failure exits 1
+                    print(f"{live} pilots live after {time.monotonic() - start:.1f}s", file=log, flush=True)
                     runner.services = endpoints
                     try:
                         result, code = runner.run(plan), EXIT_DONE

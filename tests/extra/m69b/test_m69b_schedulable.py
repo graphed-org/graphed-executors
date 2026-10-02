@@ -3,9 +3,11 @@ the driver check's fall-through to a cluster host and its refusal beside the ear
 a size-less spec; a driver job's slot ``Memory``; the condor announce wait's idle log cadence and a deadline
 that outlives an eviction; the collector query, a partitionable slot's totals, and a job that left the queue
 before its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; the
-backend's close removing a waiting job in its own thread, a serialized stop(), no submit after a stop or
-once the waits are stopped; a held pilot counted alive, a running pilot's claim taken out of its slot, and
-graphed's release leaving a user's hold (that one on a real schedd). The rest run over stand-ins."""
+backend's close removing a waiting job in its own thread, a serialized stop() done once, no submit after a
+stop or once the waits are stopped; a need beside a waiting server timed from the pilots' submit, and a
+wait below min_pilots that is not the first need's; a held pilot counted alive, a running pilot's claim
+taken out of its slot, and graphed's release leaving a user's hold (that one on a real schedd). The rest
+run over stand-ins."""
 
 from __future__ import annotations
 
@@ -420,10 +422,11 @@ def test_backend_close_removes_a_waiting_service_job_before_it_returns(
         time.sleep(0.01)
     backend.close()
     removed = ("act", f"Remove ClusterId == {pool.service_cluster()}") in pool.log
+    pool.status = None  # the removed job leaves the queue, as on a schedd
     waiter.join(30.0)
     assert removed, pool.log
     (error,) = raised
-    assert key_of(pool) in str(error), error
+    assert key_of(pool) in str(error) and "when the runner closed" in str(error), error
 
 
 class BlockingPool(Pool):
@@ -517,6 +520,67 @@ def test_no_service_job_is_submitted_once_the_waits_are_stopped(
 
 
 # ---- the runner's own pilots --------------------------------------------------------------------------
+
+
+def test_a_need_beside_a_waiting_server_counts_its_timeout_from_the_pilots_submit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server_mod, "POLL_S", 0.1)
+    backend, pool = pooled(1, tmp_path, monkeypatch)  # the service job stays idle
+    raised: list[BaseException] = []
+
+    def call(fn: Any) -> None:
+        try:
+            fn()
+        except Exception as exc:
+            raised.append(exc)
+
+    server = threading.Thread(target=call, args=(lambda: backend.host_service(spec("idle", 64), "s"),))
+    need = threading.Thread(target=call, args=(lambda: backend.wait_for_pilots(1, timeout=0.2),))
+    try:
+        server.start()
+        assert wait_until(lambda: any(kind == "submit" for kind, _ in pool.log), 10.0)
+        need.start()
+        need.join(1.0)
+        assert need.is_alive() and raised == [], raised
+        assert not [entry for kind, entry in pool.log if "graphed-pilots-" in entry], pool.log
+        backend.stop_waiting()  # the server raises, and as the last to end submits the pilots
+        server.join(10.0)
+        need.join(10.0)
+        assert [entry for kind, entry in pool.log if "graphed-pilots-" in entry], pool.log
+        messages = sorted(str(exc) for exc in raised)
+        assert len(messages) == 2 and "0 of 1 pilots connected after 0.2s" in messages[0], messages
+        assert "when the runner closed" in messages[1], messages
+    finally:
+        pool.status = None
+        backend.close()
+
+
+def test_a_wait_below_min_pilots_leaves_the_first_need_s_wait_to_come(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, _pool = pooled(1, tmp_path, monkeypatch)
+    live = [0]
+    monkeypatch.setattr(backend._server, "live_pilots", lambda: live[0])  # pilots connect when the row says
+    got: list[int] = []
+    first = threading.Thread(target=lambda: got.append(backend.n_workers()), daemon=True)
+    later = threading.Thread(target=lambda: got.append(backend.n_workers()), daemon=True)
+    try:
+        assert backend.wait_for_pilots(0) == 0  # min_pilots is 1
+        first.start()
+        first.join(0.5)
+        assert first.is_alive() and got == [], "the first need did not wait for min_pilots"
+        live[0] = 1
+        first.join(10.0)
+        live[0] = 0  # every pilot lost after the first need's wait: a need no longer waits
+        later.start()
+        later.join(5.0)
+        assert got == [1, 0], got
+    finally:
+        live[0] = 1
+        first.join(10.0)
+        later.join(10.0)
+        backend.close()
 
 
 def test_alive_counts_a_pilot_graphed_held_and_not_one_the_user_held(tmp_path: Path) -> None:

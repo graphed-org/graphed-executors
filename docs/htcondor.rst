@@ -472,16 +472,19 @@ Schedulability
 A service starts only where it can run: a run that cannot place one anywhere is refused before any
 of its work starts. A run whose service can run on some slot waits for one, with no deadline, for as
 long as other jobs hold the room; while it waits, the ``graphed_executors`` logger names the job's key
-and state every 30 seconds. The runner's own pilots never hold that room:
+and state every 30 seconds. The runner's queued pilots never take that room:
 
 * **A run's service jobs go before its pilots.** A runner whose services are jobs submits its pilots
-  when the first plan first needs a worker, which is after that plan's servers have started and
-  announced, so the pilots queue for the room beside them. That first need waits up to ten minutes
-  for ``min_pilots``.
-* **A later plan's servers wait with the runner's queued pilots held**, and the pilots are released
-  when that plan next needs a worker; a hold you placed yourself is left alone. The runner's running
-  pilots keep their slots until it closes, so a server that would fit only where they sit is removed
-  before it runs and refused with ``ServiceUnavailable`` naming the pilots' cluster.
+  at the first need of a worker (a task, ``n_workers()`` or ``wait_for_pilots()``, from any plan);
+  a need that comes while one of its servers waits to announce is put off until the last of them has
+  announced or failed, so the pilots queue for the room beside them. A driver job's pilots likewise
+  follow its ``SERVICE`` nodes' announces. That first need waits up to ten minutes for ``min_pilots``,
+  counted from the pilots' submit.
+* **A later plan's servers wait with the runner's queued pilots held**, and the pilots are released,
+  by the same rule, at the next need of a worker; a hold you placed yourself is left alone. The
+  runner's running pilots keep their slots until it closes, so a server that would fit only where
+  they sit is removed before it runs and refused with ``ServiceUnavailable`` naming the pilots'
+  cluster.
 * **Closing.** ``runner.close()``, or leaving the ``with`` block normally, waits for every submitted
   plan, a server still waiting for its slot included. Ctrl-C anywhere (in the ``with`` block, or in
   ``close()`` itself) ends the wait and removes the run's jobs, its servers and its pilots. Any other
