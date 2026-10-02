@@ -166,3 +166,37 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   98.69 % (`backend.py`), diff-cover 100 % (239 lines), queue empty. test-dask 411 passed, diff-cover 100 % (44).
   test-hgg 67 passed / 5 skipped. ruff, ruff format, mypy --strict (also win32), sphinx -W clean. The ten
   ordering ids: identical outcomes over two runs (macOS 5 pass / 5 skip; pool 10 pass).
+
+## Iteration 11 — review r3 (O1, O2): a need moves the pilots only while no server waits to announce
+- Gate (`backend.py`): `host_service` (`_host_service`, or a driver job's `_host_announced`) is wrapped by
+  `_announcing`, which counts a server waiting to announce for the call's span. `_need()` (every
+  `n_workers()`/`submit()`/`wait_for_pilots()` poll) moves the pilots (release a hold, or the deferred submit)
+  only while none waits, else records the need; the last server to return or raise moves them (a failure
+  logged; the next need retries). `wait_for_pilots`' `timeout` counts from the later of the call and the
+  pilots' submit (none while the submit is put off). Frozen row 1 (one Hold, one Release per later plan)
+  passes with the gate.
+- `driver.main` waits for its pilots inside its `ServiceSet`, before `runner.run` (and outside its `try`), so
+  a driver job's pilots follow its SERVICE nodes' announces and pilots that never start exit 1, services or
+  none.
+- `ServiceJob.stop()` (Windows CI at 67ba8f2, `PermissionError(13)`): the secret-file unlink ran outside the
+  lock, so the second of two concurrent stops raced the first's unlink, which Windows refuses while the
+  delete is pending. The first stop now removes and unlinks under the lock; a later one returns at once.
+- Rows, each failing its mutant (controls pass): O2 `test_m69b_announce_gate.py` over the frozen
+  `OrderSchedd`: no Release while plan B's server waits beside plan A's task, one after B's announce
+  (`release-on-any-need`, `last-server-does-not-move`); O1 a DAG driver job's pilots submitted after its
+  SERVICE node's announce (`driver-waits-before-services`, 67ba8f2's order); a driver job whose pilots never
+  start exits 1 (`wait-inside-the-run-try`: exit 3; the frozen m67 bogus-python row fails at construction,
+  so it does not reach the wait). `test_m69b_schedulable.py`: a need beside a waiting server times its wait
+  from the pilots' submit (`deadline-from-the-call`); `wait_for_pilots(0)` then `n_workers()` with
+  `min_pilots=1` (`any-wait-is-the-first-need`, `no-wait-is-the-first-need`); the close row asserts
+  "when the runner closed" with the removed job gone from the queue (`closing-after-ad-check`); the stop row
+  asserts a later stop repeats nothing (`unlink-every-stop`, `unlink-outside-the-lock`).
+- Docs: htcondor.rst "Schedulability" says the runner's queued pilots never take a waiting server's room,
+  and states the need rule, the driver job's order, and the wait counted from the submit.
+- Gates (78df2e9's src and tests): macOS main job 1154 passed / 126 skipped, per-file min 98.33 %
+  (`submit/threadpool.py`), diff-cover 100 % (44 lines). Pool `test-htcondor` line 528 passed / 10 skipped,
+  htcondor scope per-file min 98.80 % (`server.py`), diff-cover 100 % (264 lines), queue empty. test-dask 413
+  passed / 2 skipped, per-file gate ok, diff-cover 100 % (44). test-hgg 73 passed / 5 skipped. ruff, ruff
+  format, mypy --strict (also win32), sphinx -W clean. The 18 ordering ids (frozen `test_service_order.py`,
+  the gate file, the four schedulable rows): identical outcomes over two runs (macOS 13 pass / 5 skip; pool
+  18 pass).
