@@ -368,7 +368,8 @@ jobs:
           pytest tests/frozen/m66 tests/extra/m66 tests/frozen/m67 tests/extra/m67 \
             tests/frozen/m68a tests/extra/m68a tests/frozen/m68b tests/extra/m68b \
             tests/frozen/m68c tests/extra/m68c \
-            tests/frozen/m69b/test_histserv_cluster.py tests/frozen/m69b/test_histserv_managed.py tests/extra/m69b \
+            tests/frozen/m69b/test_histserv_cluster.py tests/frozen/m69b/test_histserv_managed.py \
+            tests/frozen/m69b/test_service_order.py tests/extra/m69b \
             --cov --cov-config=.coveragerc-htcondor \
             --cov-branch --cov-fail-under=0
           mv .coverage .coverage.driver
