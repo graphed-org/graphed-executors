@@ -42,6 +42,8 @@ ENV_FILE = "env.tgz"
 # a driverless job's files; here, not in driver.py, so importing the package never imports the -m entry
 PLAN_FILE, RUN_FILE, RESULT_FILE, LOG_FILE = "plan.pkl", "run.json", "result.pkl", "driver.log"
 PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
+HOLD_REASON = "graphed: a service of this run waits for a slot"
+SLOT_RESOURCES = ("Memory", "Cpus", "GPUs", "Disk")  # a running job holds <r>Provisioned, else Request<r>
 
 
 class CondorReason(tuple[str, None]):
@@ -349,8 +351,28 @@ class CondorPilots:
         raise RuntimeError(f"no schedd found through {param}: {'; '.join(errors)}")
 
     def alive(self) -> int:
-        ads = self._schedd.query(constraint=self._constraint, projection=["JobStatus", "HoldReasonCode"])
-        return sum(counts_as_alive(ad) for ad in ads)
+        """Pilots idle, running, spooling, or held by :meth:`hold_queued` (a hold graphed releases)."""
+        ads = self._schedd.query(
+            constraint=self._constraint, projection=["JobStatus", "HoldReasonCode", "HoldReason"]
+        )
+        return sum(counts_as_alive(ad) or str(ad.get("HoldReason", "")).startswith(HOLD_REASON) for ad in ads)
+
+    def hold_queued(self) -> None:
+        """Hold the idle pilots, under graphed's own reason, so none takes a slot a service waits for."""
+        constraint = f"{self._constraint} && JobStatus == 1"
+        self._schedd.act(_htcondor().JobAction.Hold, constraint, reason=CondorReason(HOLD_REASON))
+
+    def release_held(self) -> None:
+        """Release the pilots :meth:`hold_queued` held; a hold anyone else placed stays."""
+        ours = f'substr(HoldReason, 0, {len(HOLD_REASON)}) == "{HOLD_REASON}"'
+        constraint = f"{self._constraint} && JobStatus == 5 && {ours}"
+        self._schedd.act(_htcondor().JobAction.Release, constraint)
+
+    def running_claims(self) -> list[Any]:
+        """The running pilots' ads: the slot each runs in and what it was given there."""
+        constraint = f"{self._constraint} && JobStatus == 2"
+        sizes = [f"{r}Provisioned" for r in SLOT_RESOURCES] + [f"Request{r}" for r in SLOT_RESOURCES]
+        return list(self._schedd.query(constraint=constraint, projection=["RemoteHost", *sizes]))
 
     def _drain(self) -> None:
         deadline = time.monotonic() + CLOSE_WAIT_S

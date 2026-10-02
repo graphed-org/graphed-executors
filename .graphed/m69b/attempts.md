@@ -137,3 +137,32 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
 - Extra: `test_m66_ports.py` intercepts `prepare` (the url is now first seen there).
 - Frozen recorder rows 2–4 pass; rows 1 and 5 wait on commit 3.
 
+## Iteration 10 — commit 3: close() finishes a waiting plan; later plans hold the pilots; act reasons
+- Probe (pool, htcondor2 25.13.2; 25.14.1's `Schedd.act` source is the same): `act(..., reason="text")` leaves
+  `HoldReason` `''` (only a `(text, code)` tuple is applied), and the schedd appends `" (by user <name>)"`. So
+  `CondorReason(text)` (a `(text, None)` tuple whose `str()` is the text) is every `act` reason (the pilots' and a
+  driverless run's removal too), the release matches `substr(HoldReason, 0, len) == "<reason>"`, and `alive()` a
+  `HoldReason` starting with it. A plain-`str` hold or an exact `HoldReason ==` release would leave a later
+  plan's pilots held for good.
+- Later plans: once the pilots are submitted, `_host_service` holds their idle jobs once (`JobStatus == 1`,
+  graphed's reason) before its submit, releases at the backend's next need of a worker, and matches each slot
+  less the running pilots' claims (`<r>Provisioned`, else `Request<r>` evaluated in the ad: the pool's pilot ads
+  carried no `*Provisioned` and `RequestDisk` is an expression), the refusal naming the pilots' cluster.
+- close(): `HTCondorRunner.close()` drains in `try`/`finally` without `stop_waiting()`; `__exit__` with an
+  exception calls `stop_waiting()` first. `HTCondorBackend` records each `ServiceJob` before its submit (under a
+  lock, refused once `_closing` is set), and `close()` removes every recorded job in its own thread before the
+  server and pilots. `ServiceJob.stop()`/`submit()` share a lock; a stopped job is never submitted. A wait with
+  no deadline checks `_closing` before the ad, so a job close() removed reports the close.
+- Extra (`test_m69b_schedulable.py`): df4d059's close row removed (the frozen close row supersedes it).
+  New rows, each failing its mutant (control passes): backend `close()` removing a waiting job before it returns
+  (`backend-close-no-remove`: the Remove comes at the waiter's poll); two threads' `stop()` on a removal held on
+  an Event (unserialized, early-return flag); a stopped job never submitted (`_stopped` check gone); no submit
+  after `stop_waiting()` (`_closing` check gone); `alive()` (held not counted / any hold counted); a claim's
+  share (parent slot not found / `Request` before `Provisioned`); a real schedd releasing graphed's hold and not
+  the user's (pool: `str` reason, exact `HoldReason ==`, a release of any hold).
+- CI: `test-htcondor`'s pytest line gains `tests/frozen/m69b/test_service_order.py` (the five pool ids ran nowhere).
+- Gates (the tip): macOS main job 1148 passed / 126 skipped, per-file min 93.02 % (`local/shuffle.py`),
+  diff-cover 100 % (44 lines). Pool `test-htcondor` line 522 passed / 10 skipped, htcondor scope per-file min
+  98.69 % (`backend.py`), diff-cover 100 % (239 lines), queue empty. test-dask 411 passed, diff-cover 100 % (44).
+  test-hgg 67 passed / 5 skipped. ruff, ruff format, mypy --strict (also win32), sphinx -W clean. The ten
+  ordering ids: identical outcomes over two runs (macOS 5 pass / 5 skip; pool 10 pass).

@@ -393,7 +393,7 @@ standard-library script (Python 3.9 or later, so it runs in an image with no ven
 first free port of the site's ``worker_ports``, starts the recipe's command on it, runs the spec's
 check there, and then *announces* ``host:port`` to the runner's task server, signed with a secret
 made for that one service. While the job waits for a slot (idle, or spooling its inputs) the runner
-waits with it, with no deadline but the runner's close (`Schedulability`_), and logs the job's key and
+waits with it, with no deadline (`Schedulability`_), and logs the job's key and
 state on the ``graphed_executors`` logger at first and every 30 seconds; the spec's ``timeout_s``
 counts from the job's start (its first ``JobStatus == 2``), and an eviction back to idle does not
 restart it. A job that ends or is held first raises ``RuntimeError`` naming its state and its
@@ -470,11 +470,23 @@ Schedulability
 ~~~~~~~~~~~~~~
 
 A service starts only where it can run: a run that cannot place one anywhere is refused before any
-of its work starts. A run whose service can run on some slot waits for one, for as long as the
-scheduler offers no room, including when the room is held by the run's own pilots (which keep their
-slots until the runner closes). While it waits, the ``graphed_executors`` logger names the job's key
-and state every 30 seconds, and ``runner.close()`` ends the wait: the job is removed and the run
-raises ``RuntimeError`` naming the key.
+of its work starts. A run whose service can run on some slot waits for one, with no deadline, for as
+long as other jobs hold the room; while it waits, the ``graphed_executors`` logger names the job's key
+and state every 30 seconds. The runner's own pilots never hold that room:
+
+* **A run's service jobs go before its pilots.** A runner whose services are jobs submits its pilots
+  when the first plan first needs a worker, which is after that plan's servers have started and
+  announced, so the pilots queue for the room beside them. That first need waits up to ten minutes
+  for ``min_pilots``.
+* **A later plan's servers wait with the runner's queued pilots held**, and the pilots are released
+  when that plan next needs a worker; a hold you placed yourself is left alone. The runner's running
+  pilots keep their slots until it closes, so a server that would fit only where they sit is removed
+  before it runs and refused with ``ServiceUnavailable`` naming the pilots' cluster.
+* **Closing.** ``runner.close()``, or leaving the ``with`` block normally, waits for every submitted
+  plan, a server still waiting for its slot included. Ctrl-C anywhere (in the ``with`` block, or in
+  ``close()`` itself) ends the wait and removes the run's jobs, its servers and its pilots. Any other
+  exception leaving the ``with`` block ends the wait too: the job is removed and the plan raises
+  ``RuntimeError`` naming its key.
 
 * **Where it may go.** ``htcondor_runner(..., service_hosts=("cluster",))`` (or ``("driver",)``)
   narrows the site's ``service_hosts`` for this run. A host the site does not offer is a
@@ -599,7 +611,8 @@ The arguments you will change
        default the site's ``driver_ports``: 10000–10100 on ``lpc`` and ``generic``, 8786 on
        ``lxplus``. A range with no free port is an ``OSError`` naming the site and the range.
    * - ``min_pilots``
-     - How many pilots must be connected before the first run starts; 1 by default.
+     - How many pilots must be connected when a run first needs a worker (its first task, or the
+       check of its services from a worker); 1 by default.
    * - ``retries``
      - Has no effect here. The only retry is the one re-run of a task whose pilot was lost.
    * - ``service_hosts``

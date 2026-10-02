@@ -2,8 +2,10 @@
 the driver check's fall-through to a cluster host and its refusal beside the earlier legs, the per-start sum,
 a size-less spec; a driver job's slot ``Memory``; the condor announce wait's idle log cadence and a deadline
 that outlives an eviction; the collector query, a partitionable slot's totals, and a job that left the queue
-before its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; a
-runner's close ending a wait for a slot. No bindings and no pool: the condor pieces run over stand-ins."""
+before its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; the
+backend's close removing a waiting job in its own thread, a serialized stop(), no submit after a stop or
+once the waits are stopped; a held pilot counted alive, a running pilot's claim taken out of its slot, and
+graphed's release leaving a user's hold (that one on a real schedd). The rest run over stand-ins."""
 
 from __future__ import annotations
 
@@ -20,13 +22,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from graphed.core.execution import Partition, Plan, Task
 from graphed.services import Launch, ServiceSpec
 
-from graphed_executors.htcondor_backend import SITES, CondorPilots, HTCondorBackend, HTCondorRunner, launch
+from graphed_executors.htcondor_backend import SITES, CondorPilots, HTCondorBackend, launch
 from graphed_executors.htcondor_backend import backend as backend_mod
 from graphed_executors.htcondor_backend import server as server_mod
-from graphed_executors.htcondor_backend.services import ServiceJob, _as_whole, machine_ads
+from graphed_executors.htcondor_backend.services import ServiceJob, _as_whole, _less_claim, machine_ads
 from graphed_executors.submit import ThreadBackend
 from graphed_executors.submit.services import (
     ServiceSet,
@@ -394,46 +395,190 @@ def test_a_pool_whose_collector_lists_no_slot_submits_and_waits(
         backend.close()
 
 
-def leaf(partition: Partition, resources: object) -> int:
-    return 1
+def key_of(pool: Pool) -> str:
+    (submit,) = [entry for kind, entry in pool.log if kind == "submit" and "graphed-service-" in entry]
+    return submit.split(" ", 1)[0].removeprefix("graphed-service-")
 
 
-def add(a: int, b: int) -> int:
-    return a + b
-
-
-def zero() -> int:
-    return 0
-
-
-def test_close_ends_a_wait_for_a_slot_removing_the_job(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+def test_backend_close_removes_a_waiting_service_job_before_it_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(server_mod, "POLL_S", 0.1)
-    backend, pool = pooled(1, tmp_path, monkeypatch)  # every job idle, the pilots and the service alike
-    runner = HTCondorRunner(backend, min_pilots=0)
-    tasks = (Task(0, Partition("mem://m69b-close/0", "", 0, 1)),)
-    waits = Plan(process=leaf, combine=add, empty=zero, tasks=tasks, services=(spec("idle", 64),))
-    closer = threading.Thread(target=runner.close, daemon=True)
+    monkeypatch.setattr(server_mod, "POLL_S", 3.0)  # the waiter's own poll comes long after close() returns
+    backend, pool = pooled(1, tmp_path, monkeypatch)  # the job stays idle
+    raised: list[BaseException] = []
+
+    def wait() -> None:
+        try:
+            backend.host_service(spec("idle", 64), "scope")
+        except Exception as exc:
+            raised.append(exc)
+
+    waiter = threading.Thread(target=wait, daemon=True)
+    waiter.start()
+    deadline = time.monotonic() + 10.0
+    while not any(kind == "submit" for kind, _ in pool.log) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    backend.close()
+    removed = ("act", f"Remove ClusterId == {pool.service_cluster()}") in pool.log
+    waiter.join(30.0)
+    assert removed, pool.log
+    (error,) = raised
+    assert key_of(pool) in str(error), error
+
+
+class BlockingPool(Pool):
+    """A ``Pool`` whose every ``act`` waits for ``gate``, having set ``acting``."""
+
+    def __init__(self) -> None:
+        super().__init__(1)
+        self.acting = threading.Event()
+        self.gate = threading.Event()
+
+    def act(self, action: str, constraint: str, reason: str = "") -> None:
+        self.acting.set()
+        self.gate.wait(30.0)
+        super().act(action, constraint, reason)
+
+
+def submitted_job(
+    pool: Pool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, submit: bool = True
+) -> ServiceJob:
+    monkeypatch.setattr(launch, "_htcondor", lambda: pool)
+    pilots = CondorPilots("generic", log_dir=tmp_path)
+    pilots.prepare("http://127.0.0.1:1", b"s")
+    job = ServiceJob(spec("web", 64), pilots, key="scope-web", url="http://127.0.0.1:1", secret=b"s")
+    if submit:
+        job.submit()
+    return job
+
+
+def test_a_second_stop_returns_only_after_the_first_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = BlockingPool()
+    job = submitted_job(pool, tmp_path, monkeypatch)
+    returned: list[str] = []
+    raised: list[BaseException] = []
+
+    def stop(name: str) -> None:
+        try:
+            job.stop()
+        except BaseException as exc:
+            raised.append(exc)
+        returned.append(name)
+
+    first = threading.Thread(target=stop, args=("first",), daemon=True)
+    second = threading.Thread(target=stop, args=("second",), daemon=True)
     try:
-        with caplog.at_level(logging.INFO, logger="graphed_executors"):
-            future = runner.submit(waits)
-            deadline = time.monotonic() + 10.0
-            while "waits for a slot" not in caplog.text and time.monotonic() < deadline:
-                time.sleep(0.05)
-            assert "waits for a slot" in caplog.text, caplog.text
-            closer.start()
-            closer.join(5.0)
-        assert not closer.is_alive(), "close() still waits for the slot"
-        with pytest.raises(
-            RuntimeError, match=r"still waited for a slot when the runner closed: JobStatus=1"
-        ):
-            future.result(0)
-        assert ("act", f"Remove ClusterId == {pool.service_cluster()}") in pool.log
+        first.start()
+        assert pool.acting.wait(10.0), "the first stop() never reached its removal"
+        second.start()
+        second.join(1.0)
+        assert second.is_alive() and returned == [], "a second stop() returned before the removal ran"
+    finally:
+        pool.gate.set()
+        first.join(10.0)
+        second.join(10.0)
+    assert sorted(returned) == ["first", "second"] and raised == []
+    assert [entry for entry in pool.log if entry[0] == "act"] == [
+        ("act", f"Remove ClusterId == {job.cluster}")
+    ]
+
+
+def test_a_job_stopped_before_its_submit_is_never_submitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = Pool(1)
+    job = submitted_job(pool, tmp_path, monkeypatch, submit=False)
+    job.stop()
+    with pytest.raises(RuntimeError, match="stopped before it was submitted"):
+        job.submit()
+    assert [kind for kind, _ in pool.log] == []
+
+
+def test_no_service_job_is_submitted_once_the_waits_are_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, pool = pooled(1, tmp_path, monkeypatch)
+    try:
+        backend.stop_waiting()
+        with pytest.raises(RuntimeError, match="not submitted: the runner is closing"):
+            backend.host_service(spec("late", 64), "scope")
+        assert pool.log == []
         assert backend._server._announce_secrets == {}
     finally:
-        pool.status = None  # the job is gone: a wait that outlived close() ends
-        if closer.is_alive():
-            closer.join(30.0)
-        elif not closer.ident:
-            runner.close()
+        backend.close()
+
+
+# ---- the runner's own pilots --------------------------------------------------------------------------
+
+
+def test_alive_counts_a_pilot_graphed_held_and_not_one_the_user_held(tmp_path: Path) -> None:
+    held = f"{launch.HOLD_REASON} (by user someone)"
+    ads = [
+        {"JobStatus": 2},
+        {"JobStatus": 5, "HoldReasonCode": 1, "HoldReason": held},
+        {"JobStatus": 5, "HoldReasonCode": 1, "HoldReason": "via condor_hold (by user someone)"},
+    ]
+    pilots = CondorPilots("generic", log_dir=tmp_path)
+    pilots._schedd = SimpleNamespace(query=lambda constraint, projection: ads)
+    assert pilots.alive() == 2
+
+
+class Ad(dict[str, Any]):
+    """A job ad as ``schedd.query`` returns it: ``eval`` reads an attribute's value."""
+
+    def eval(self, attr: str) -> Any:
+        return self[attr]
+
+
+def test_a_running_job_s_claim_leaves_the_slot_it_runs_in() -> None:
+    whole = {"Name": "slot1@wn", "Memory": 16000, "Cpus": 8, "Disk": 1000}
+    static = {"Name": "slot2@wn", "Memory": 4000, "Cpus": 1, "Disk": 1000}
+    other = {"Name": "slot1@wn2", "Memory": 16000, "Cpus": 8, "Disk": 1000}
+    slots = [dict(whole), dict(static), dict(other)]
+    dynamic = Ad(RemoteHost="slot1_3@wn", MemoryProvisioned=6144, CpusProvisioned=2, RequestMemory=6000)
+    asked_only = Ad(RemoteHost="slot2@wn", RequestMemory=4000, RequestCpus=1, RequestGPUs=1)
+    _less_claim(slots, dynamic)
+    _less_claim(slots, asked_only)
+    assert slots == [
+        {**whole, "Memory": 16000 - 6144, "Cpus": 6},
+        {**static, "Memory": 0, "Cpus": 0},
+        other,
+    ]
+
+
+def test_a_real_schedd_releases_graphed_s_hold_and_not_the_user_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    htc = pytest.importorskip("htcondor2", reason="the htcondor bindings (Linux; the test-htcondor job)")
+    monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)
+    pilots = CondorPilots("generic", log_dir=tmp_path, request_memory_mb=10**7)  # never matched: idle
+    pilots.start("http://127.0.0.1:1", b"s", 2)
+    try:
+        assert pilots.cluster is not None
+        cluster = pilots.cluster[1]
+        pilots._schedd.act(htc.JobAction.Hold, f"ClusterId == {cluster} && ProcId == 1")  # the user's
+
+        def statuses() -> list[int]:
+            ads = pilots._schedd.query(
+                constraint=f"ClusterId == {cluster}", projection=["ProcId", "JobStatus"]
+            )
+            return [int(ad["JobStatus"]) for ad in sorted(ads, key=lambda ad: int(ad["ProcId"]))]
+
+        pilots.hold_queued()
+        assert wait_until(lambda: statuses() == [5, 5]), statuses()
+        assert pilots.alive() == 1
+        pilots.release_held()
+        assert wait_until(lambda: statuses() == [1, 5]), statuses()
+    finally:
+        pilots.stop()
+
+
+def wait_until(predicate: Any, timeout_s: float = 30.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while not predicate():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.2)
+    return True

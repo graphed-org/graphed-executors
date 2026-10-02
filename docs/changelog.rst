@@ -55,7 +55,10 @@ Services a plan calls
   the host's physical memory; one that does not runs on the cluster or is refused with the sizes
   named. A cluster service job no slot of the pool can ever match is removed before it runs and
   refused naming its requests and the largest slot; one waiting for a busy slot waits without a
-  deadline, logged every 30 seconds, and its ``timeout_s`` counts from its start. See :doc:`htcondor`.
+  deadline, logged every 30 seconds, and its ``timeout_s`` counts from its start. A run's service jobs
+  are submitted before its pilots, a later plan's wait with the runner's queued pilots held, and
+  ``runner.close()`` waits for a server still waiting for its slot; Ctrl-C ends the wait and removes
+  the run's jobs. See :doc:`htcondor`.
 * Histograms on histserv servers (``graphed_histogram.histserv``) run on every runner here: their
   servers are services the runner starts beside the driver or as cluster jobs sized to them, and the
   value holds the histograms read back from them. See :doc:`htcondor`.

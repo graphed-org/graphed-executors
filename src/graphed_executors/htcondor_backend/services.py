@@ -16,6 +16,8 @@ import json
 import os
 import shlex
 import shutil
+import threading
+from collections.abc import Sequence
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -24,7 +26,7 @@ from graphed.services import ServiceSpec
 
 from . import launch
 from . import server as _server
-from .launch import ENV_FILE, SECRET_FILE, CondorPilots, write_secret
+from .launch import ENV_FILE, SECRET_FILE, SLOT_RESOURCES, CondorPilots, write_secret
 
 ANNOUNCE_SOURCE = Path(__file__).with_name("announce.py")
 RUN_DIR = "service"
@@ -68,6 +70,8 @@ class ServiceJob:
         self.dir: Path | None = None
         self.cluster: int | None = None
         self._stack = ExitStack()
+        self._lock = threading.Lock()  # one submit or stop at a time: a stop waits for a submit in flight
+        self._stopped = False
 
     def files(self, dir: Path) -> dict[str, str]:
         """Write the job's files into ``dir`` and return its submit keys; submits nothing."""
@@ -133,7 +137,7 @@ class ServiceJob:
     def submit(self) -> None:
         """Write the files into a new ``service-<key>/`` under the launcher's ``log_dir`` and submit one
         job; its removal is registered the moment ``schedd.submit`` returns, so a failed spool leaves
-        none."""
+        none. A job already stopped is not submitted."""
         launcher = self.launcher
         assert launcher._schedd is not None and launcher.log_dir is not None, (
             "start the launcher before a service job: it submits to the pilots' schedd"
@@ -142,7 +146,9 @@ class ServiceJob:
         self.dir.mkdir()  # the key is per call: no call reuses another's directory
         desc = self.files(self.dir)
         htc = launch._htcondor()
-        with ExitStack() as stack:
+        with self._lock, ExitStack() as stack:
+            if self._stopped:
+                raise RuntimeError(f"service job {self.key} was stopped before it was submitted")
             result = launcher._submit(htc, launcher._schedd, desc, 1, stack)
             self.cluster = int(result.cluster())
             self._stack = stack.pop_all()
@@ -155,11 +161,12 @@ class ServiceJob:
             ads = list(schedd.history(constraint, AD_ATTRS, match=1))
         return ads[0] if ads else {}
 
-    def match_refusal(self, machines: list[Any]) -> str | None:
+    def match_refusal(self, machines: list[Any], claims: Sequence[Any] = ()) -> str | None:
         """Why no slot of ``machines`` could ever run this queued job, else ``None``: its whole ad (the
         request, the site's and the user's submit keys) must ``symmetricMatch`` a slot's ad whose free
         ``Memory``/``Cpus``/``GPUs``/``Disk`` are a partitionable slot's totals, so a busy pool still
-        matches; ``None`` when ``machines`` is empty."""
+        matches, less what ``claims`` (the ads of the runner's running pilots, which keep their slots
+        to its close) hold there; ``None`` when ``machines`` is empty."""
         if not machines:  # a collector that lists no slot says nothing about the pool: submit and wait
             return None
         ads = list(self.launcher._schedd.query(constraint=f"ClusterId == {self.cluster}"))
@@ -168,10 +175,19 @@ class ServiceJob:
         import classad2  # noqa: PLC0415  (ships with the htcondor2 bindings)
 
         slots = [_as_whole(classad2.ClassAd(str(machine))) for machine in machines]
+        for claim in claims:
+            _less_claim(slots, claim)
         if any(ads[0].symmetricMatch(slot) for slot in slots):
             return None
         asked = ", ".join(f"{a}={ads[0].eval(a) if a in ads[0] else 0}" for a in _REQUESTS)
         largest = max(int(slot.get("Memory", 0)) for slot in slots)
+        if claims:
+            assert self.launcher.cluster is not None, "claims are the submitted pilots'"
+            return (
+                f"service job {self.key} matches no slot of the pool beside the runner's running pilots "
+                f"(cluster {self.launcher.cluster[1]}), which keep their slots until it closes: {asked}; "
+                f"the largest slot memory beside them is {largest} MiB"
+            )
         return (
             f"service job {self.key} matches no slot of the pool, busy or not: {asked}; "
             f"the largest slot memory is {largest} MiB"
@@ -179,8 +195,11 @@ class ServiceJob:
 
     def stop(self) -> None:
         """Remove the job at once (a service never exits by itself; a spooled job that completed is
-        retrieved first, so its ``service.out``/``.err`` come back), then drop its secret file."""
-        self._stack.close()
+        retrieved first, so its ``service.out``/``.err`` come back), then drop its secret file. Calls
+        from any threads are serialized: each returns once the job's removal has run."""
+        with self._lock:
+            self._stopped = True
+            self._stack.close()
         if self.dir is not None:
             (self.dir / SECRET_FILE).unlink(missing_ok=True)
 
@@ -207,6 +226,21 @@ def _as_whole(slot: Any) -> Any:
             if total in slot:
                 slot[free] = slot[total]
     return slot
+
+
+def _less_claim(slots: list[Any], claim: Any) -> None:
+    """Take a running job's share (``<r>Provisioned``, else ``Request<r>`` evaluated in its ad) out of
+    the slot it runs in: ``RemoteHost`` names its dynamic slot ``slotN_M@host``, whose parent is
+    ``slotN@host``, or a static slot itself."""
+    remote = str(claim.get("RemoteHost", ""))
+    name, at, host = remote.partition("@")
+    parent = name.rsplit("_", 1)[0] + at + host
+    for slot in slots:
+        if slot.get("Name") in (remote, parent):
+            for r in SLOT_RESOURCES:
+                held = next((a for a in (f"{r}Provisioned", f"Request{r}") if a in claim), None)
+                if r in slot and held is not None:
+                    slot[r] = int(slot[r]) - int(claim.eval(held))  # RequestDisk is an expression
 
 
 def _checked_inputs(inputs: tuple[str, ...]) -> list[str]:
