@@ -8,8 +8,9 @@ stop or once the waits are stopped; no pilot submitted for a need beside a start
 ends, while a held one is still released, a wait for submitted pilots ended by close() alone, and a
 pilot submit in flight that close() waits for and removes; a wait timed from the pilots' submit or from
 its call, whichever is later, and a wait below min_pilots that is not the first need's; a held pilot
-counted alive, a running pilot's claim taken out of its slot, and graphed's release leaving a user's hold
-(that one on a real schedd). The rest run over stand-ins."""
+counted alive, a running pilot's claim taken out of its slot, a later plan's failed service start releasing
+the pilots it held, a driver job's too-big service refused naming the sizes, and graphed's release leaving a
+user's hold (that one on a real schedd). The rest run over stand-ins."""
 
 from __future__ import annotations
 
@@ -211,6 +212,24 @@ def test_a_driver_job_holds_its_services_to_its_slot_memory(
     finally:
         attached.close()
         in_job.close()
+
+
+def test_a_driver_job_refuses_a_service_too_big_for_its_slot_naming_the_sizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ad = tmp_path / ".machine.ad"
+    ad.write_text('Machine = "127.0.0.1"\nMemory = 100\n')
+    monkeypatch.setenv("_CONDOR_MACHINE_AD", str(ad))
+    backend = HTCondorBackend(
+        NoPilots(), 1, host="127.0.0.1", in_job=SITES["generic"], announced={"gpu": "svc0"}
+    )  # its host_service answers the DAG's SERVICE nodes only
+    try:
+        with pytest.raises(ServiceUnavailable) as refused:
+            ServiceSet([spec("small", 200)], backend, scope="p").start()
+        managed = refused.value.legs["managed"]
+        assert "200 MiB" in managed and "driver_memory_mb of 100 MiB" in managed, refused.value.legs
+    finally:
+        backend.close()
 
 
 # ---- the announce wait ------------------------------------------------------------------------------------
@@ -661,6 +680,22 @@ def test_close_waits_for_a_pilot_submit_in_flight_and_removes_its_cluster(
         assert ("act", f"Remove ClusterId == {cluster}") in pool.log, pool.log
     finally:
         pool.gate.set()
+        backend.close()
+
+
+def test_a_later_plan_s_failed_service_start_releases_the_pilots_it_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server_mod, "POLL_S", 0.05)
+    backend, pool = pooled(None, tmp_path, monkeypatch)  # the service job leaves the queue unannounced
+    try:
+        backend.min_pilots = 0
+        backend.wait_for_pilots(0)  # a first plan ran
+        with pytest.raises(RuntimeError, match="ended before it announced"):
+            ServiceSet([spec("gone", 64)], backend, scope="s").start()
+        moves = [entry.split(" ", 1)[0] for kind, entry in pool.log if kind == "act"]
+        assert moves == ["Hold", "Release"], pool.log  # no need of a worker was made
+    finally:
         backend.close()
 
 

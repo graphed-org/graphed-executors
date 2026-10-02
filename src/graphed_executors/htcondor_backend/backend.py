@@ -194,8 +194,8 @@ class HTCondorBackend:
     @contextmanager
     def starting_services(self) -> Iterator[None]:
         """A plan's services starting (:class:`ServiceSet`'s resolve phase): a need of a worker meanwhile
-        is recorded, and the last phase to end moves the pilots (a failure is logged; the next need
-        retries it)."""
+        is recorded, and the last phase to end moves the pilots a need asked for or a server held, its
+        services started or failed (a failure is logged; the next need retries it)."""
         with self._pilots_lock:
             self._starting += 1
         try:
@@ -203,7 +203,7 @@ class HTCondorBackend:
         finally:
             with self._pilots_lock:
                 self._starting -= 1
-                if not self._starting and self._wanted:
+                if not self._starting and (self._wanted or self._held):
                     self._wanted = False
                     release_quietly("the pilots", self._move_pilots)
 
@@ -294,8 +294,8 @@ class HTCondorBackend:
         :class:`ServiceUnavailable` (a pool whose collector lists no slot is not asked); one that ends,
         is held, or has not announced within ``spec.timeout_s`` of its start raises. Each is removed,
         and every failure forgets the call's announce secret. Once the pilots are submitted (a later
-        plan), the first call holds their queued jobs until a need of a worker after the plan's services
-        start, and the match counts each slot less what the running pilots hold, which they keep until close."""
+        plan), the first call holds their queued jobs until the plan's services have started or failed,
+        and the match counts each slot less what the running pilots hold, which they keep until close."""
         assert isinstance(self.launcher, CondorPilots)
         machines = machine_ads(self.launcher)
         claims: list[Any] = []

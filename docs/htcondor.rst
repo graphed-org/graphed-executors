@@ -481,8 +481,8 @@ and state every 30 seconds. The runner's queued pilots never take that room:
   driver job's pilots likewise follow its ``SERVICE`` nodes' announces. That first need waits up to
   ten minutes for ``min_pilots``, counted from the pilots' submit.
 * **A later plan's servers wait with the runner's queued pilots held**, across all of that plan's
-  services, and the pilots are released, by the same rule, at the next need of a worker; a hold you
-  placed yourself is left alone. The runner's running pilots keep their slots until it closes, so a
+  services, and the pilots are released once those services have started or failed (by the same
+  rule, once no other plan's services are starting); a hold you placed yourself is left alone. The runner's running pilots keep their slots until it closes, so a
   server that would fit only where they sit is removed before it runs and refused with
   ``ServiceUnavailable`` naming the pilots' cluster.
 * **Closing.** ``runner.close()``, or leaving the ``with`` block normally, waits for every submitted

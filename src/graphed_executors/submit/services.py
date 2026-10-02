@@ -466,7 +466,8 @@ class ServiceSet:
                 resolved = self._on_driver(spec, legs, detail, stack)
                 self._driver_mb += size
                 return resolved
-            if not callable(host_service):
+            # only a cluster host takes what the driver cannot hold
+            if not callable(host_service) or "cluster" not in hosts:
                 raise ServiceUnavailable(spec.name, {**legs, "managed": too_big})
             legs["driver"] = too_big
             detail = "; ".join(f"{leg}: {why}" for leg, why in legs.items())
