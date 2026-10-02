@@ -117,3 +117,23 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
 - Gates: macOS main job 1138 passed / 120 skipped, per-file min 98.33 %, diff-cover 100 %; test-dask job 406
   passed, diff-cover 100 %; pool test-htcondor job 506 passed / 10 skipped, per-file min 99.79 %, diff-cover 100 %
   (109 lines); sphinx -W, ruff, mypy src+tests clean.
+
+## Iteration 8 — 40470e6, 84e6fb7: run_lpc writes its parts to EOS again; CI's graphed at a51bee4
+- 40470e6 reverts d536f04's output route (parts left in pilot scratch and shipped by `output_destination`, a
+  `root://` `--out` refused): no LPC slot offers the root file-transfer plugin. Each job again writes its parts to
+  the `root://` `--out` through graphed's parquet writer; df4d059's `ServerTimes` status lines stay. The
+  root-`--out` refusal row left with the revert (review r2: test-hgg 62 passed).
+- 84e6fb7 moves CI's `GRAPHED` from 7e048bf to a51bee4, whose writers open fsspec URLs, as that default `--out`
+  needs; the docs put fsspec-xrootd beside the analysis. Until this pin, 40470e6's "now opens root://" did not hold
+  at CI's graphed (review r2 exit item 5).
+
+## Iteration 9 — §5.2 "Ordering", commit 2: a run's service jobs go before its pilots
+- `CondorPilots.prepare(url, secret)` is `start` without the pilots' submit, once; `start` = `prepare` + submit;
+  `stop()` waits for no pilot when none was submitted. `HTCondorBackend` over `CondorPilots` with `host_service`
+  (the `"cluster"` hosts, or `announced`) prepares when built and submits its pilots at the first `n_workers()`,
+  `submit()` or `wait_for_pilots()`; the first `n_workers()`/`submit()` waits once for `min_pilots`
+  (`HTCondorRunner` sets it; 1 bare), an explicit `wait_for_pilots(n >= min_pilots)` counting as that wait.
+  `HTCondorRunner.run` no longer waits. `driver.py`'s start-up line says the pilots go at the first need.
+- Extra: `test_m66_ports.py` intercepts `prepare` (the url is now first seen there).
+- Frozen recorder rows 2–4 pass; rows 1 and 5 wait on commit 3.
+

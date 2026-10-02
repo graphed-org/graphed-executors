@@ -75,6 +75,9 @@ _FLOOR = SubmitCapabilities(
 
 class HTCondorBackend:
     """Starts a task server and ``n_pilots`` pilots through ``launcher``; :meth:`close` removes them.
+    Pilot jobs whose services are jobs too (``CondorPilots`` with ``host_service``) are submitted at
+    the first need of a worker, after the services that need resolved, and that need waits once for
+    ``min_pilots``.
 
     ``host`` is the name pilots dial back to (default: this machine's FQDN); the server binds the
     first free port of ``port_range`` on all interfaces, by default the ``driver_ports`` of the
@@ -131,14 +134,6 @@ class HTCondorBackend:
             raise OSError(
                 f"no free port for the task server: site={profile.name} ports={low}-{high}"
             ) from exc
-        with ExitStack() as stack:  # a refused start must not leave the server holding its port
-            stack.callback(release_quietly, "the task server's port", self._server.shutdown)
-            stack.callback(release_quietly, "the task server", self._server.close)
-            launcher.start(self._server.url, self._server.secret, n_pilots)
-            stack.callback(release_quietly, "the pilots", launcher.stop)
-            # closed first: pilots see 410 and exit before they are stopped (a second close is a no-op)
-            stack.callback(release_quietly, "the task server", self._server.close)
-            self._stack = stack.pop_all()
         self._services: dict[str, ServiceJob] = {}
         self._closing = threading.Event()  # set: a service job still waiting for a slot ends its wait
         self._announced = dict(announced or {})
@@ -149,12 +144,48 @@ class HTCondorBackend:
         elif in_job is None and isinstance(launcher, CondorPilots) and "cluster" in self.service_hosts:
             self.host_service = self._host_service
             self.release_service = self._release_service
+        # pilot jobs submitted with the services' jobs would hold the room those need: they wait
+        deferred = isinstance(launcher, CondorPilots) and hasattr(self, "host_service")
+        self.min_pilots = 1  # the first need of a worker waits for this many
+        self._n_pilots = n_pilots
+        self._pilots_lock = threading.Lock()
+        self._submitted = not deferred
+        self._waited = False
+        with ExitStack() as stack:  # a refused start must not leave the server holding its port
+            stack.callback(release_quietly, "the task server's port", self._server.shutdown)
+            stack.callback(release_quietly, "the task server", self._server.close)
+            if deferred and isinstance(launcher, CondorPilots):
+                launcher.prepare(self._server.url, self._server.secret)
+            else:
+                launcher.start(self._server.url, self._server.secret, n_pilots)
+            stack.callback(release_quietly, "the pilots", launcher.stop)
+            # closed first: pilots see 410 and exit before they are stopped (a second close is a no-op)
+            stack.callback(release_quietly, "the task server", self._server.close)
+            self._stack = stack.pop_all()
+
+    def _submit_pilots(self) -> None:
+        """Submit deferred pilots, at the first need of a worker: :meth:`n_workers`, :meth:`submit` or
+        :meth:`wait_for_pilots`."""
+        with self._pilots_lock:
+            if not self._submitted:
+                self.launcher.start(self._server.url, self._server.secret, self._n_pilots)
+                self._submitted = True
+
+    def _need_worker(self) -> None:
+        self._submit_pilots()
+        if not self._waited:
+            self.wait_for_pilots(self.min_pilots)
 
     def n_workers(self) -> int:
-        """Pilots registered and live right now; never waits."""
+        """Pilots registered and live right now. The first call, or the first :meth:`submit`, waits
+        once for ``min_pilots``, submitting deferred pilots first."""
+        self._need_worker()
         return self._server.live_pilots()
 
     def wait_for_pilots(self, n: int, timeout: float = N_WORKERS_WAIT_S) -> int:
+        """Wait for ``n`` live pilots, submitting deferred ones first; a wait for ``min_pilots`` or more
+        is the first need's wait."""
+        self._submit_pilots()
         deadline = time.monotonic() + timeout
         while (live := self._server.live_pilots()) < n:
             if time.monotonic() > deadline:
@@ -163,6 +194,7 @@ class HTCondorBackend:
                     f"see the pilot logs in {getattr(self.launcher, 'log_dir', None)}"
                 )
             time.sleep(0.05)
+        self._waited = self._waited or n >= self.min_pilots
         return live
 
     def submit(
@@ -177,7 +209,8 @@ class HTCondorBackend:
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
         """Never blocks on a future argument: the task queues once its arguments are done. The hints
-        are ignored."""
+        are ignored. The first call, or the first :meth:`n_workers`, waits once for ``min_pilots``."""
+        self._need_worker()
         raw: Future[Any] = Future()
         self._server.add(key, fn, args, raw)
         return _ParslFuture(raw, self._handlers)
@@ -341,8 +374,9 @@ def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[st
 
 
 class HTCondorRunner(SubmitRunner):
-    """A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import, and waits for ``min_pilots``
-    before its first run so pilots that never start are an error instead of a queue that never drains."""
+    """A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import, and whose backend waits for
+    ``min_pilots`` at its first need of a worker, so pilots that never start are an error instead of a
+    queue that never drains."""
 
     backend: HTCondorBackend
 
@@ -359,14 +393,11 @@ class HTCondorRunner(SubmitRunner):
         super().__init__(
             backend, monitor=monitor, retries=retries, max_in_flight=max_in_flight, services=services
         )
-        self._min_pilots = min_pilots
-        self._waited = False
+        self._min_pilots = backend.min_pilots = min_pilots
 
     def wait_for_pilots(self) -> int:
-        """Wait for ``min_pilots`` once; pilots lost afterwards fail the run's tasks as lost workers."""
-        live = self.backend.wait_for_pilots(self._min_pilots)
-        self._waited = True
-        return live
+        """Wait for ``min_pilots``; pilots lost afterwards fail the run's tasks as lost workers."""
+        return self.backend.wait_for_pilots(self._min_pilots)
 
     @overload
     def run(self, plan: Plan[R]) -> ExecResult[R]: ...
@@ -374,8 +405,6 @@ class HTCondorRunner(SubmitRunner):
     def run(self, plan: DurablePlanV2) -> ExecResult[Any]: ...
     def run(self, plan: Plan[R] | DurablePlanV2) -> ExecResult[R] | ExecResult[Any]:
         _require_plan_importable(plan, ("process", "combine"))
-        if not self._waited:
-            self.wait_for_pilots()
         return super().run(plan)
 
     def close(self) -> None:

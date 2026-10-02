@@ -3,7 +3,7 @@
 
 A pilot is ``python -m graphed_executors.htcondor_backend.pilot <url> <secret file>``. The secret travels
 as a transferred file, never in ``arguments`` or ``environment``: both are readable by anyone who can
-query the job ad. ``htcondor2`` is imported only by :func:`_htcondor`, at ``CondorPilots.start``.
+query the job ad. ``htcondor2`` is imported only by :func:`_htcondor`, at ``CondorPilots.prepare``.
 
 Each launcher registers the release of what it acquires the moment the acquisition returns (a pilot
 process once spawned, a cluster once ``schedd.submit`` returns, before its sandbox spools), so a start
@@ -174,6 +174,8 @@ class CondorPilots:
         self.schedd_locate = schedd_locate
         self.cluster: tuple[str, int] | None = None  # (schedd name, ClusterId): the choice varies per run
         self._schedd: Any = None
+        self._schedd_name = ""
+        self._script = Path("pilot.sh")
         self._constraint = ""
         self._secret = Path(SECRET_FILE)
         self._batch = f"graphed-pilots-{uuid.uuid4().hex[:8]}"
@@ -237,7 +239,11 @@ class CondorPilots:
         if profile.ship_env:
             _check_shippable(self.env)
 
-    def start(self, url: str, secret: bytes, n: int) -> None:
+    def prepare(self, url: str, secret: bytes) -> None:
+        """Everything :meth:`start` does but the pilots' submit (the refusals, ``log_dir``, the secret,
+        ``pilot.sh`` and ``env.tgz``, the schedd choice), once: a service job needs only these."""
+        if self._schedd is not None:
+            return
         self._refuse()
         # absolute in the cwd the files are written from: stop() and a service job may read it from another
         self.log_dir = Path(
@@ -246,16 +252,17 @@ class CondorPilots:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._secret = self.log_dir / SECRET_FILE
         write_secret(self._secret, secret)
-        script = self._stage(self.log_dir, "pilot.sh", PILOT_MODULE)
+        self._script = self._stage(self.log_dir, "pilot.sh", PILOT_MODULE)
+        self._schedd_name, self._schedd = self._choose(_htcondor())
+
+    def start(self, url: str, secret: bytes, n: int) -> None:
+        self.prepare(url, secret)
         # a relative executable resolves against our cwd, not initialdir
-        desc = self.submit_description(url, n, {"executable": str(script)})
-        htc = _htcondor()
-        name, schedd = self._choose(htc)
+        desc = self.submit_description(url, n, {"executable": str(self._script)})
         with ExitStack() as stack:
-            result = self._submit(htc, schedd, desc, n, stack)
-            self.cluster = (name, int(result.cluster()))
+            result = self._submit(_htcondor(), self._schedd, desc, n, stack)
+            self.cluster = (self._schedd_name, int(result.cluster()))
             self._constraint = f"ClusterId == {self.cluster[1]}"
-            self._schedd = schedd
             self._stack = stack.pop_all()
 
     @property
@@ -341,9 +348,10 @@ class CondorPilots:
 
     def stop(self) -> None:
         """Wait for the pilots to exit, fetch the spooled logs into ``log_dir``, and remove the jobs."""
-        release_quietly(
-            f"the wait for the pilots of {self.cluster} to exit", self._drain
-        )  # removal still runs
+        if self.cluster is not None:  # none submitted: nothing to wait for
+            release_quietly(
+                f"the wait for the pilots of {self.cluster} to exit", self._drain
+            )  # removal still runs
         self._stack.close()
         self._secret.unlink(missing_ok=True)
 

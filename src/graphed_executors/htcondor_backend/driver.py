@@ -102,7 +102,11 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
             publish(dag_dir / SECRET_FILE, secret.hex())
             publish(dag_dir / URL_FILE, backend._server.url)
         if run["pilots"] == "condor":
-            where = f"cluster={launcher.cluster}"
+            where = (
+                f"cluster={launcher.cluster}"
+                if launcher.cluster
+                else "submitted at the first need of a worker"
+            )
         else:
             where = f"pids={[p.pid for p in launcher._procs]}"
         print(f"{n} {run['pilots']} pilots on {backend._server.url} {where}", file=log, flush=True)
