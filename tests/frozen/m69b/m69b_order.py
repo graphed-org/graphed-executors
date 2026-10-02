@@ -112,7 +112,9 @@ class OrderSchedd(RecordingSchedd):
         self._services: dict[int, Path] = {}
         self._gone: set[int] = set()
 
-    def _stamp(self, kind: str, cluster: int | None = None, text: str = "", reason: str | None = None) -> None:
+    def _stamp(
+        self, kind: str, cluster: int | None = None, text: str = "", reason: str | None = None
+    ) -> None:
         with self._lock:
             self.events.append(Event(time.monotonic(), kind, cluster, text, reason))
 
@@ -151,7 +153,10 @@ class OrderSchedd(RecordingSchedd):
             with self._lock:
                 if cluster in self._gone:
                     return
-                with open(job_dir / f"pilot.{i}.out", "wb") as out, open(job_dir / f"pilot.{i}.err", "wb") as err:
+                with (
+                    open(job_dir / f"pilot.{i}.out", "wb") as out,
+                    open(job_dir / f"pilot.{i}.err", "wb") as err,
+                ):
                     proc = subprocess.Popen(argv, cwd=job_dir, env=env, stdout=out, stderr=err)
                 self._pilots[cluster][i] = proc
             self._stamp("pilot-start", cluster)
@@ -189,7 +194,11 @@ class OrderSchedd(RecordingSchedd):
             if proc is None:
                 ads.append({**ad, "JobStatus": 1})
             elif proc.poll() is None:
-                claim = {"RemoteHost": f"slot1_{i + 1}@{IDENTITY}", "MemoryProvisioned": 128, "CpusProvisioned": 1}
+                claim = {
+                    "RemoteHost": f"slot1_{i + 1}@{IDENTITY}",
+                    "MemoryProvisioned": 128,
+                    "CpusProvisioned": 1,
+                }
                 ads.append({**ad, "JobStatus": 2, **claim})
         return ads
 

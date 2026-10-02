@@ -490,7 +490,9 @@ def test_ctrl_c_removes_a_waiting_server_and_submits_no_pilot(form: str, tmp_pat
         pilots = since(t0, PILOT_JOBS)
         submitted = queued(schedd, pilots) + list(schedd.history(pilots, ["ClusterId"], match=10))
         assert submitted == [], "the child submitted a pilot job"
-        assert waiting.is_set(), f"the {form} child never waited for a slot ({child.poll()}): {''.join(output)}"
+        assert waiting.is_set(), (
+            f"the {form} child never waited for a slot ({child.poll()}): {''.join(output)}"
+        )
         assert child.poll() is not None, f"the {form} child still ran {3 * CHILD_POLL_S}s after SIGINT"
         assert wait_for(lambda: not queued(schedd, since(t0)), GONE_S), queued(schedd, since(t0))
         services = since(t0, SERVICE_JOBS)
