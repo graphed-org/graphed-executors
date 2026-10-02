@@ -400,7 +400,7 @@ class HTCondorBackend:
         """Remove every service job this backend submitted, in the calling thread (a wait for one, or
         for pilots, then raises), stop serving (pilots see 410 and exit), stop the pilots, free the
         port; each step runs even when an earlier one fails, and each failure is logged."""
-        with self._lock:
+        with self._pilots_lock, self._lock:  # a pilot submit in flight finishes first, so the stop removes it
             self._closing.set()
             self._closed = True
             jobs = list(self._services.items())

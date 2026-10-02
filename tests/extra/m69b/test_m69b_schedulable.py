@@ -5,10 +5,11 @@ that outlives an eviction; the collector query, a partitionable slot's totals, a
 before its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; the
 backend's close removing a waiting job in its own thread, a serialized stop() done once, no submit after a
 stop or once the waits are stopped; no pilot submitted for a need beside a starting service once the run
-ends, while a held one is still released, and a wait for submitted pilots ended by close() alone; a wait
-timed from the pilots' submit or from its call, whichever is later, and a wait below min_pilots that is
-not the first need's; a held pilot counted alive, a running pilot's claim taken out of its slot, and
-graphed's release leaving a user's hold (that one on a real schedd). The rest run over stand-ins."""
+ends, while a held one is still released, a wait for submitted pilots ended by close() alone, and a
+pilot submit in flight that close() waits for and removes; a wait timed from the pilots' submit or from
+its call, whichever is later, and a wait below min_pilots that is not the first need's; a held pilot
+counted alive, a running pilot's claim taken out of its slot, and graphed's release leaving a user's hold
+(that one on a real schedd). The rest run over stand-ins."""
 
 from __future__ import annotations
 
@@ -620,6 +621,47 @@ def test_once_the_pilots_are_submitted_only_close_ends_a_wait_for_them(
     finally:
         backend.close()
         waiter.join(10.0)
+
+
+class GatedSubmitPool(Pool):
+    """A ``Pool`` whose pilots' submit waits for ``gate``, having set ``submitting``."""
+
+    def __init__(self) -> None:
+        super().__init__(1)
+        self.submitting = threading.Event()
+        self.gate = threading.Event()
+
+    def submit(self, desc: dict[str, str], count: int = 0, spool: bool = False) -> Any:
+        if "graphed-pilots-" in desc["JobBatchName"]:
+            self.submitting.set()
+            self.gate.wait(30.0)
+        return super().submit(desc, count, spool)
+
+
+def test_close_waits_for_a_pilot_submit_in_flight_and_removes_its_cluster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = GatedSubmitPool()
+    monkeypatch.setattr(launch, "_htcondor", lambda: pool)
+    monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)
+    pilots = CondorPilots("generic", log_dir=tmp_path)
+    backend = HTCondorBackend(pilots, 1, host="127.0.0.1", service_hosts=("cluster",))
+    need = threading.Thread(target=backend.wait_for_pilots, args=(0,), daemon=True)
+    closer = threading.Thread(target=backend.close, daemon=True)
+    try:
+        need.start()
+        assert pool.submitting.wait(10.0), "the need never reached the pilots' submit"
+        closer.start()
+        closer.join(0.5)
+        assert closer.is_alive(), "close() returned with a pilot submit in flight"
+        pool.gate.set()
+        closer.join(10.0)
+        assert not closer.is_alive()
+        (cluster,) = [entry.rsplit(" ", 1)[1] for entry in pilot_submits(pool)]
+        assert ("act", f"Remove ClusterId == {cluster}") in pool.log, pool.log
+    finally:
+        pool.gate.set()
+        backend.close()
 
 
 def test_a_need_deferred_by_a_service_start_times_its_wait_from_the_pilots_submit(
