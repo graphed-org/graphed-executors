@@ -229,3 +229,22 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg 79 passed / 5 skipped. ruff, ruff
   format, mypy --strict (also win32), sphinx -W clean. The 24 ordering ids: identical over two runs (macOS 19
   pass / 5 skip; pool 24 pass).
+
+## Iteration 13 — review r5 (H1): close() waits for a pilot submit in flight
+- `_move_pilots` read `_closing` under `_pilots_lock`, but `close()` set it under `_lock` alone and stopped the
+  launcher while `cluster` was still None; a submit already running finished afterwards and left its cluster
+  queued (present since 67ba8f2's deferred submit). `close()` now takes `with self._pilots_lock, self._lock:`, the
+  rule `ServiceJob._lock` keeps. Lock order: no path holds `_lock` while taking `_pilots_lock` (`_host_service`
+  takes them in separate blocks; nothing under `_pilots_lock` reaches `_lock`). `stop_waiting()` takes no lock: a
+  submit in flight when it runs is removed by the later `close()`. htcondor.rst "Closing" is true as written.
+- Row `test_close_waits_for_a_pilot_submit_in_flight_and_removes_its_cluster`: the pilots' submit held on an
+  Event, `close()` on another thread stays blocked until it is let go, then returns with that cluster's Remove
+  acted (`close-without-the-pilots-lock`, 6877abc's `close()`, killed; control passes). The other 21 mutants
+  still die. `probe_start_close_exec_rv5`: both cases act `Remove ClusterId == 7001` before `close()` returns and
+  leave nothing queued (the 20 s before it is `CLOSE_WAIT_S`).
+- Gates (df176a2): macOS main job 1161 passed / 126 skipped, per-file min 93.02 % (`local/shuffle.py`),
+  diff-cover 100 % (47 lines). Pool `test-htcondor` line 535 passed / 10 skipped, htcondor scope per-file min
+  98.80 % (`server.py`), diff-cover 100 % (271 lines), queue empty. test-dask 419 passed / 2 skipped, per-file min
+  91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg 80 passed / 5 skipped. ruff, ruff
+  format, mypy --strict (also win32), sphinx -W clean. The 25 ordering ids: identical over two runs (macOS 20
+  pass / 5 skip; pool 25 pass).
