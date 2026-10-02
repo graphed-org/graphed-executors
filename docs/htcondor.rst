@@ -555,7 +555,9 @@ login node, with a proxy and a venv that holds this package's ``[htcondor]`` ext
 It takes each dataset's first ``--files`` files (``GluGluHto2G_M-125_amcatnlo_2024`` and
 ``DataC_2024`` unless ``--datasets`` names others), splits each into ``--parts`` entry ranges, and
 writes the parquet parts to ``--out``, by default ``root://cmseos.fnal.gov//store/user/<you>/hgg/``,
-which the pilots write over xrootd with the job's proxy. It prints the servers the context opened,
+which the pilots write over xrootd with the job's proxy: graphed opens an ``--out`` holding ``://``
+through fsspec, so a ``root://`` one needs fsspec-xrootd beside the analysis (the coffea image has it).
+It prints the servers the context opened,
 logs each server's status (where it ran, when it was submitted and ready), prints the counters, and
 saves the diagnostics as UHI JSON (``--histograms``, ``hgg_diagnostics.json`` by default; read them
 back with ``json.load(f, object_hook=uhi.io.json.object_hook)`` and ``boost_histogram.Histogram``).
