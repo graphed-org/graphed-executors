@@ -268,3 +268,26 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg 82 passed / 5 skipped. ruff, ruff
   format, mypy --strict (also win32), sphinx -W clean. The 27 ordering ids: identical over two runs (macOS 22
   pass / 5 skip; pool 27 pass).
+
+## Iteration 15 — D3 (owner-approved; plan e546dfe §5.2): a set's earlier servers hold their slots
+- A set whose servers each fit a slot but not together waited forever for the later one: the match subtracted
+  only a later plan's running pilots. `_host_service` now also passes the running ads of the set's earlier
+  service jobs (`_services` keys starting `f"{scope}-"`, via `running_claims(jobs)`), in every plan; other
+  plans' servers stay out. `match_refusal` takes claims by holder, names each one that holds something (pilots
+  and servers, by cluster), and no longer asserts the pilots' cluster. htcondor.rst's slot-match bullet carries
+  the claims sentence, with the set's servers.
+- The precommit integrity scan flags the removed assert unless the same file adds one; `match_refusal` now
+  asserts its precondition `self.cluster is not None` (its only caller submits first).
+- Rows. Recorder (Linux, `classad2`): a first plan's web2 is refused beside its running web1 on a 1000 MiB slot,
+  naming web1's cluster, at 400 MiB, not naming another plan's running server. Pool: 2 × 3/8 of
+  `TotalSlotMemory` both serve the run; 2 × 9/16 refuse web2 naming web1's cluster, with web2 unrun
+  (`NumJobStarts 0`) and the queue empty. Killed in the pool container (controls pass): `state-5ba868f`
+  (recorder: "ended before it announced"; pool over leg: 240 s timeout), `sibling-claims-only-once-submitted`,
+  `assert-in-refusal`, `every-plan-s-servers` (recorder), `slots-as-advertised` (fit leg: web1 counted twice).
+- Gates (1b3ba0f): macOS main job 1163 passed / 129 skipped, per-file min 93.02 % (`local/shuffle.py`),
+  diff-cover 100 % (47 lines). Pool `test-htcondor` line 540 passed / 10 skipped (a first run, with the
+  startd started before the GPU config, failed the two m68b GPU rows; rerun after its restart), htcondor scope
+  per-file min 98.80 % (`server.py`), diff-cover 100 % (282 lines), queue empty, container removed. test-dask 421
+  passed / 3 skipped, per-file min 91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg
+  82 passed / 8 skipped. ruff, ruff format, mypy --strict (also win32), sphinx -W clean. The 30 ordering ids:
+  identical over two runs (macOS 22 pass / 8 skip; pool 30 pass).
