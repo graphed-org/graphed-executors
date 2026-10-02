@@ -196,12 +196,14 @@ class ServiceJob:
     def stop(self) -> None:
         """Remove the job at once (a service never exits by itself; a spooled job that completed is
         retrieved first, so its ``service.out``/``.err`` come back), then drop its secret file. Calls
-        from any threads are serialized: each returns once the job's removal has run."""
+        from any threads are serialized and only the first does that: each returns once it has run."""
         with self._lock:
+            if self._stopped:  # Windows refuses an unlink racing another one: access denied
+                return
             self._stopped = True
             self._stack.close()
-        if self.dir is not None:
-            (self.dir / SECRET_FILE).unlink(missing_ok=True)
+            if self.dir is not None:
+                (self.dir / SECRET_FILE).unlink(missing_ok=True)
 
 
 def machine_ads(launcher: CondorPilots) -> list[Any]:

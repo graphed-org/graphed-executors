@@ -480,6 +480,12 @@ def test_a_second_stop_returns_only_after_the_first_removal(
         first.join(10.0)
         second.join(10.0)
     assert sorted(returned) == ["first", "second"] and raised == []
+    assert job.dir is not None
+    secret = job.dir / launch.SECRET_FILE
+    assert not secret.exists()
+    secret.write_text("")
+    job.stop()  # a later stop() repeats none of the work
+    assert secret.exists()
     assert [entry for entry in pool.log if entry[0] == "act"] == [
         ("act", f"Remove ClusterId == {job.cluster}")
     ]
