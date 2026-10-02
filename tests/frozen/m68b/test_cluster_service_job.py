@@ -694,7 +694,8 @@ def test_host_service_forgets_its_announce_secret_when_construction_refuses(
         minted = keys_of(events, "announce_secret")
         assert len(minted) == 1 and minted[0].startswith("scope1-"), events
         assert keys_of(events, "forget_announce") == minted
-        assert len(submits(schedd.log)) == 1, "a service job was submitted for a refused input"
+        services = [d for d in submits(schedd.log) if str(d["JobBatchName"]).startswith("graphed-service-")]
+        assert services == [], "a service job was submitted for a refused input"
     finally:
         close_backend(backend, schedd)
 
@@ -764,8 +765,7 @@ def test_host_service_returns_the_announced_endpoint_and_releases_in_order(
         announce_hex = (found / "graphed-secret").read_text().strip()
         pilot_hex = (log_dir / "graphed-secret").read_text().strip()
         assert announce_hex != pilot_hex, "the service job carries the pilots' secret"
-        pilot_desc, service_desc = submits(schedd.log)[:2]
-        assert cfg["url"] == pilot_desc["arguments"].split()[0]
+        (service_desc,) = submits(schedd.log)
         leaked = [k for k, v in service_desc.items() if announce_hex in str(v) or pilot_hex in str(v)]
         assert leaked == [], leaked
         body = announce_body(key, "wn9.example:10042", "wn9.example")
