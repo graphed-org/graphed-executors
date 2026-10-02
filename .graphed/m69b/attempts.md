@@ -200,3 +200,32 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   format, mypy --strict (also win32), sphinx -W clean. The 18 ordering ids (frozen `test_service_order.py`,
   the gate file, the four schedulable rows): identical outcomes over two runs (macOS 13 pass / 5 skip; pool
   18 pass).
+
+## Iteration 12 — review r4 (G1, G2, T1): the gate reads a plan's service start and the run's end
+- Cause (owner ruling, plan 3ddd3a4): 78df2e9 counted `host_service` calls in flight, a stand-in for two states.
+  A need between two services of one `ServiceSet` released the plan's hold (two Holds, two Releases in one set),
+  and a server ending because the run closed submitted the deferred pilots after `close()`.
+- `ServiceSet.start` resolves inside the backend's optional `starting_services()` context (`nullcontext`
+  otherwise), its worker `_probe` outside it. `HTCondorBackend.starting_services` counts the phases; a need during
+  one is recorded and the last phase to end moves the pilots. `_announcing`/`_serving` are gone. `_move_pilots`
+  submits no pilot once `_closing` is set (`stop_waiting()` or `close()`), and still releases. `wait_for_pilots`
+  raises naming the close when the run is closing and no pilot was submitted, or once `close()` ran.
+- Rows (each kills its mutant; controls pass): the O2 row now drives plan B's real `ServiceSet` (pilots answer its
+  probe); G2: a need between a set's two services leaves one Hold and one Release, the Release after the last
+  announce (`phase-per-resolve`, 0008028's src); G1, `stop_waiting`/`close`: a need beside a first plan's starting
+  service submits no pilot and ends naming the close (`submit-while-closing`, `wait-ignores-the-close`, 0008028's
+  src); a later plan's held pilots are still released when the run ends (`no-release-while-closing`,
+  `last-phase-does-not-move`); `close()` alone ends a wait on submitted pilots (`wait-ends-only-unsubmitted`,
+  `wait-ends-at-any-close`); T1 both sides of the `max` (`deadline-from-the-call`, `deadline-from-the-submit`);
+  `no-phase` and `release-on-any-need` (O2); `probe-inside-the-phase` hangs the O1 row. r3's rows' mutants still die.
+- r4's probes re-run: `probe_close_need_exec_rv4` submits no pilot in the four runner cases (the result form
+  leaves the block at 3.00 s, as its control); its direct case calls a bare `host_service`, not a plan's service
+  start, so the need submits at once and `close()` removes the cluster and ends the need. `probe_set_gap_exec_rv4`:
+  inside the set 1 Hold, 1 Release, the Release after service 2's announce.
+- Correction to iteration 11: its macOS per-file minimum was 93.02 % (`local/shuffle.py`), not 98.33 %.
+- Gates (3a977ac): macOS main job 1160 passed / 126 skipped, per-file min 93.02 % (`local/shuffle.py`),
+  diff-cover 100 % (47 lines). Pool `test-htcondor` line 534 passed / 10 skipped, htcondor scope per-file min
+  98.80 % (`server.py`), diff-cover 100 % (271 lines), queue empty. test-dask 418 passed / 2 skipped, per-file min
+  91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg 79 passed / 5 skipped. ruff, ruff
+  format, mypy --strict (also win32), sphinx -W clean. The 24 ordering ids: identical over two runs (macOS 19
+  pass / 5 skip; pool 24 pass).
