@@ -155,10 +155,10 @@ class Endpoints(Mapping[str, str]):
 # ---- host identity and readiness -----------------------------------------------------------------
 
 
-def machine_ad(attr: str) -> str | None:
-    """``attr`` of the ad file ``$_CONDOR_MACHINE_AD`` names (string quotes dropped), read without the
-    bindings; ``None`` outside a job or when the ad has no such line."""
-    path = os.environ.get("_CONDOR_MACHINE_AD")
+def machine_ad(attr: str, env: str = "_CONDOR_MACHINE_AD") -> str | None:
+    """``attr`` of the ad file ``$<env>`` names (string quotes dropped; ``_CONDOR_JOB_AD`` for the job's own
+    ad), read without the bindings; ``None`` outside a job or when the ad has no such line."""
+    path = os.environ.get(env)
     if path and os.path.isfile(path):
         with open(path) as ad:
             for line in ad:

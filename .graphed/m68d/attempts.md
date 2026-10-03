@@ -48,3 +48,20 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - Extra: a restart with no usable port exits 3 (kills a restart that reuses a served port: exit 5).
 - Frozen B1/B1b/B2/B3 + C pass on macOS (17) and in `m68d-impl-pool` with P1–P4 and the m68b/m68d
   announce extras (54 passed).
+
+## Iteration 5 — commit 5: the driver fails fast on an ended, held or unschedulable SERVICE node
+- `htcondor_backend/services.py`: `ServiceJob.match_refusal`'s core lifted to `queued_refusal(what, ad,
+  machines, claims)` (same text, `what` names the job); `machine_ads(locate)` takes the locate pair.
+  `launch.py`: `located_schedd(htc, locate)` (shared with `CondorPilots._choose`), `CLAIM_ATTRS`.
+- `backend.py`: `_Node` (key, dir, `ad()`) feeds m69b's `_await_announce`: its ad query is
+  `DAGManJobId == <own> && DAGNodeName == "<key>"`; on the first idle ad it matches the whole ad against
+  the collector's slots with the DAG's running jobs, plus the runner's running condor pilots, as claims.
+  `_host_announced` holds queued pilots as `_host_service` does; an import/locate/query failure logs one
+  line and falls back to `wait_announce(node, timeout_s)`. `driverless.py` writes `schedd_locate` for a
+  DAG run; `driver._runner` passes it and `dag_dir` to the backend.
+- Frozen A1–A3 + all m68d pass on macOS (31, 8 Linux/pool skips) and in `m68d-impl-pool` (39).
+- Extras: running pilots counted + queued pilots held then released (recorded bindings); nothing held
+  before the pilots are submitted; no Machine ads → plain wait; live pool: a rerun holds the queued
+  condor pilot (pilots.log 012 with graphed's reason, then 013) and the DAG completes with the twin's
+  value. The pilot hold was unmeasured before this leg: it passes, and with the hold removed from
+  `_host_announced` both the recorded-bindings and the live test fail.

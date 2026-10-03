@@ -78,6 +78,7 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
     profile = SITES[run["site"]]
     n = int(run["n_pilots"])
     announced: dict[str, str] = run.get("announce_only") or {}
+    locate = tuple(run["schedd_locate"]) if run.get("schedd_locate") else None
     if run["pilots"] == "condor":
         launcher: Any = CondorPilots(
             profile,
@@ -85,7 +86,7 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
             request_memory_mb=int(run["request_memory_mb"]),
             log_dir=run["log_dir"],
             user_modules=[job / name for name in run["user_modules"]],
-            schedd_locate=tuple(run["schedd_locate"]),
+            schedd_locate=locate,
             extra_submit=run.get("extra_submit"),
         )
     else:
@@ -96,7 +97,14 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
         host, ports = "127.0.0.1", profile.worker_ports or (0, 0)
     with ExitStack() as on_error:  # held until the runner exists: a failure after the pilots stops them
         backend = HTCondorBackend(
-            launcher, n, host=host, port_range=ports, in_job=profile, announced=announced
+            launcher,
+            n,
+            host=host,
+            port_range=ports,
+            in_job=profile,
+            announced=announced,
+            schedd_locate=locate,
+            dag_dir=run.get("dag_dir"),
         )
         on_error.callback(release_quietly, "the driver job's backend", backend.close)
         if announced:

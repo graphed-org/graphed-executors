@@ -313,7 +313,7 @@ def test_machine_ads_ask_the_schedd_s_pool_and_drop_dynamic_slots(
         return SimpleNamespace(query=query)
 
     monkeypatch.setattr(launch, "_htcondor", lambda: SimpleNamespace(Collector=collector))
-    got = machine_ads(CondorPilots("generic", schedd_locate=locate))
+    got = machine_ads(locate)
     assert [ad["Name"] for ad in got] == ["slot1"]
     pool = () if locate is None else (locate[0],)
     assert asked == [(*pool, 'MyType == "Machine"')]
