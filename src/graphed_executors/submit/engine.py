@@ -67,7 +67,7 @@ from graphed_executors.local._reduce import plan_tree, running_fold
 from graphed_executors.local.executors import _PAUSED_WAKE_S, _wait_until, _Window
 
 from .protocol import SubmitBackend, SubmitFuture
-from .services import ServiceSet
+from .services import PROBE_CHECK_S, ServiceSet, ServiceUnreachable, check_ready, host_identity
 
 if TYPE_CHECKING:
     from graphed.core import Partition
@@ -284,16 +284,38 @@ def _event_from_dict(d: dict[str, object]) -> TaskEvent:
     )
 
 
+def _service_checked(
+    checks: tuple[tuple[str, str, str], ...], fn: Callable[..., object], *args: object
+) -> object:
+    """``fn(*args)``; when it raises, each ``(name, endpoint, check)`` is re-checked here, on the worker that
+    ran it, and the first that fails raises :class:`ServiceUnreachable` from the task's exception, which
+    is otherwise re-raised unchanged: a plan's own error beside a live service stays a plan error."""
+    try:
+        return fn(*args)
+    except Exception as exc:
+        for name, endpoint, check in checks:
+            why = check_ready(endpoint, check, PROBE_CHECK_S)
+            if why is not None:
+                raise ServiceUnreachable(
+                    name, endpoint, host_identity(), f"{why}; the task raised {exc!r}"
+                ) from exc
+        raise
+
+
 class _RunTasks:
     """One run's plan-task submits (the ``_RunLeaves`` idiom): only the futures not yet done are held,
-    since a held dask future pins its result in cluster memory, and :meth:`cancel` cancels those."""
+    since a held dask future pins its result in cluster memory, and :meth:`cancel` cancels those. With
+    ``checks`` (the run's services), every task runs through :func:`_service_checked`."""
 
-    def __init__(self, backend: SubmitBackend) -> None:
+    def __init__(self, backend: SubmitBackend, checks: tuple[tuple[str, str, str], ...] = ()) -> None:
         self._backend = backend
+        self._checks = checks
         self._lock = threading.Lock()
         self._pending: set[SubmitFuture] = set()
 
     def submit(self, fn: Callable[..., object], /, *args: object, key: str, retries: int) -> SubmitFuture:
+        if self._checks:
+            args, fn = (self._checks, fn, *args), _service_checked
         fut = self._backend.submit(fn, *args, key=key, retries=retries)
         with self._lock:
             self._pending.add(fut)
@@ -391,10 +413,13 @@ class SubmitRunner:
                 empty = None if isinstance(plan, DurablePlanV2) else plan.empty()
                 return ExecResult(empty, 0, 0, StopReason.CANCELLED)
             bound = plan
+            checks: tuple[tuple[str, str, str], ...] = ()
             if plan.services:
                 services = ServiceSet(plan.services, self.backend, endpoints=given, scope=ctx.run_nonce)
-                bound = graphed_services.bind_services(plan, scope.enter_context(services))
-            submits = _RunTasks(self.backend)
+                endpoints = scope.enter_context(services)
+                bound = graphed_services.bind_services(plan, endpoints)
+                checks = tuple((spec.name, endpoints[spec.name], spec.check) for spec in plan.services)
+            submits = _RunTasks(self.backend, checks)
             scope.callback(submits.cancel)  # registered after the services, so it runs before their release
             if ctx.monitor_topic is not None and ctx.events_per_leaf:
 
