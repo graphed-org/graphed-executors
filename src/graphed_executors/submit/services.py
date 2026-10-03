@@ -573,13 +573,13 @@ class ServiceSet:
                 if code is not None:
                     reason = f"{proc.args!r} exited with returncode {code} before {spec.check!r} passed"
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
-                # a dial passes on any listener: one another process bound after the scan is refused
+                left = deadline - time.monotonic()
+                reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
+                # read after the dial, which passes on any listener, so the one it reached is judged
                 inodes = listeners(port)
                 if inodes and not held_by(proc.pid, inodes):
                     reason = f"port {port} on {host} is held by another process"
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
-                left = deadline - time.monotonic()
-                reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
                 if reason_now is None:
                     code = proc.poll()
                     if code is None:

@@ -241,13 +241,13 @@ def start(
                     return f"the child exited with returncode {child.returncode} on port {port}"
                 log(f"port {port} taken after the scan (the child exited {child.returncode}), next")
                 break
-            # a dial passes on any listener: one the child's tree does not hold took the port after the scan
+            why = self_check(cfg["check"], ident, port, max(0.1, min(CHECK_S, deadline - time.monotonic())))
+            # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
             if inodes and not held_by(child.pid, inodes):
                 log(f"port {port} is held by another process, next")
                 reap(child)
                 break
-            why = self_check(cfg["check"], ident, port, max(0.1, min(CHECK_S, deadline - time.monotonic())))
             if why is None and child.poll() is None:
                 return child, port
             if time.monotonic() >= deadline:

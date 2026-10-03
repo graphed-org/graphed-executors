@@ -77,3 +77,10 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - Gates: macOS frozen + extra 1205 passed / 140 skipped (the one failure was the rcfile try, reverted);
   per-file >= 90 % and diff-cover 100 % (engine, services) on that data; `m68d-impl-pool` test-htcondor
   set 594 passed / 10 skipped, 99 % total, per-file gate ok, diff-cover 99 %.
+
+## Iteration 7 — commit 7: the ownership scan follows the dial
+- Frozen P2 (`test_a_driver_hosted_service_refuses_a_port_held_by_another_process`) failed once in the
+  pool's coverage run: the scan ran before the foreign server bound, then the dial reached that server.
+  Both members (`announce.start`, `_on_driver`) read the listeners after each dial (addendum).
+- Extras: a listener that appears during the first dial is refused (driver) / passed over (announce);
+  both fail on the scan-first order and pass after.
