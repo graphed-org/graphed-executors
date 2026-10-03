@@ -476,13 +476,17 @@ and state every 30 seconds. The runner's queued pilots never take that room:
 
 * **A run's service jobs go before its pilots.** A runner whose services are jobs submits its pilots
   at the first need of a worker (a task, ``n_workers()`` or ``wait_for_pilots()``, from any plan);
-  a need that comes while any plan's services are starting is put off until the last of those plans
-  has all its services started (or one failed), so the pilots queue for the room beside them. A
-  driver job's pilots likewise follow its ``SERVICE`` nodes' announces. That first need waits up to
-  ten minutes for ``min_pilots``, counted from the pilots' submit.
+  a need that comes while a plan's services are starting is put off until they have all started (or
+  one failed), so the pilots queue for the room beside them. A driver job's pilots likewise follow its
+  ``SERVICE`` nodes' announces. That first need waits up to ten minutes for ``min_pilots``, counted
+  from the pilots' submit.
 * **A later plan's servers wait with the runner's queued pilots held**, across all of that plan's
-  services, and the pilots are released once those services have started or failed (by the same
-  rule, once no other plan's services are starting); a hold you placed yourself is left alone.
+  services, and the pilots are released once those services have started or failed; a hold you
+  placed yourself is left alone.
+* **One plan's services start at a time.** Plans of one runner overlap (a ``submit`` beside a
+  ``run``, or ``run`` from two threads), but their service sets start one after another, each through
+  its worker probe, so no plan's server waits for room that another plan still starting holds. A plan
+  waiting its turn raises ``RuntimeError`` naming the close once the runner closes or stops waiting.
 * **Closing.** ``runner.close()``, or leaving the ``with`` block normally, waits for every submitted
   plan, a server still waiting for its slot included. Ctrl-C anywhere (in the ``with`` block, or in
   ``close()`` itself) ends the wait and removes the run's jobs, its servers and its pilots. Any other

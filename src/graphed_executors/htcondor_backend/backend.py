@@ -157,6 +157,7 @@ class HTCondorBackend:
         self._held = False  # the queued pilots are held while a later plan's services start
         self._waited = False
         self._starting = 0  # plans whose services are starting (ServiceSet resolve phases)
+        self._set_start = threading.Lock()  # held by the one service set starting, through its probe
         self._wanted = False  # a need of a worker arrived during one
         self._closed = False
         with ExitStack() as stack:  # a refused start must not leave the server holding its port
@@ -190,6 +191,22 @@ class HTCondorBackend:
         if self._submitted_at is None and not self._closing.is_set():
             self.launcher.start(self._server.url, self._server.secret, self._n_pilots)
             self._submitted_at = time.monotonic()
+
+    @contextmanager
+    def starting_service_set(self) -> Iterator[None]:
+        """A plan's service set starting, through its probe (:meth:`ServiceSet.start`): one at a time, so no
+        set waits for room or a pilot that another starting set holds while that set waits for its own. A set
+        waiting its turn raises once the runner closes (:meth:`stop_waiting`, :meth:`close`), within one
+        ``POLL_S``, whatever the starting set is waiting for."""
+        while not self._set_start.acquire(timeout=_server.POLL_S):
+            if self._closing.is_set():
+                raise RuntimeError(
+                    "a plan's services still waited for another plan's to start when the runner closed"
+                )
+        try:
+            yield
+        finally:
+            self._set_start.release()
 
     @contextmanager
     def starting_services(self) -> Iterator[None]:

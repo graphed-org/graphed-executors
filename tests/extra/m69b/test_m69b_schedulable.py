@@ -700,6 +700,62 @@ def test_a_later_plan_s_failed_service_start_releases_the_pilots_it_held(
         backend.close()
 
 
+class GonePool(Pool):
+    """``Pool`` whose removed jobs leave the queue."""
+
+    def __init__(self, status: int | None) -> None:
+        super().__init__(status)
+        self.gone: set[str] = set()
+
+    def act(self, action: str, constraint: str, reason: str = "") -> None:
+        super().act(action, constraint, reason)
+        if action == "Remove":
+            self.gone.add(constraint)
+
+    def query(self, constraint: str = "", projection: Any = None) -> list[dict[str, Any]]:
+        return [] if constraint in self.gone else super().query(constraint, projection)
+
+
+@pytest.mark.parametrize("end", ["stop_waiting", "close"])
+def test_a_set_waiting_its_turn_to_start_ends_when_the_runner_closes(
+    end: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(server_mod, "POLL_S", 0.05)
+    pool = GonePool(2)  # a started job that never announces: its wait outlives stop_waiting
+    monkeypatch.setattr(launch, "_htcondor", lambda: pool)
+    monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)
+    pilots = CondorPilots("generic", log_dir=tmp_path)
+    backend = HTCondorBackend(pilots, 1, host="127.0.0.1", service_hosts=("cluster",))
+    ended: dict[str, BaseException] = {}
+
+    def start(name: str) -> None:
+        waits = ServiceSpec(name, kind="m69b", check="tcp", launch=Launch(("serve",)), timeout_s=600.0)
+        try:
+            ServiceSet([waits], backend, scope=name).start()
+        except Exception as exc:
+            ended[name] = exc
+
+    first = threading.Thread(target=start, args=("a",), daemon=True)
+    second = threading.Thread(target=start, args=("b",), daemon=True)
+    try:
+        first.start()
+        assert wait_until(lambda: len(pool.log) > 0), "plan a submitted no service job"
+        second.start()
+        time.sleep(0.5)
+        assert second.is_alive() and [k for k, _ in pool.log] == ["submit"], pool.log
+        getattr(backend, end)()
+        second.join(5.0)
+        assert not second.is_alive(), "plan b still waited its turn after the runner closed"
+        # its turn may come as plan a ends: then the closing backend refuses its submit
+        assert isinstance(ended["b"], RuntimeError) and re.search("runner (is )?clos", str(ended["b"])), ended
+    finally:
+        backend.close()
+        first.join(10.0)
+    assert not first.is_alive() and "a" in ended, ended
+    (submit,) = [entry for kind, entry in pool.log if kind == "submit"]
+    assert f"ClusterId == {submit.rsplit(' ', 1)[1]}" in pool.gone, pool.log
+
+
 def test_a_need_deferred_by_a_service_start_times_its_wait_from_the_pilots_submit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

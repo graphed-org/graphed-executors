@@ -1,6 +1,8 @@
 # Dispute: tests/frozen/m68b/test_cluster_services_live.py::test_a_cluster_hosted_http_server_serves_its_run_and_leaves_with_it
 
-Status: OPEN — the r7 H1 cut (plan/m68 71a5deb §5.2) cannot pass this frozen row; the plan contradicts itself.
+Status: WITHDRAWN — the contradicting plan sentence (71a5deb, an `HTCondorRunner` runs one plan at a time) was the
+driver's, not B1's; plan/m68 ba30c9c replaced it with the correction below (a backend starts one service set at a
+time, through its probe). No frozen change is needed.
 
 ## The test
 On the pool, `held = runner.submit(<gated plan>)` keeps its task waiting on a gate, then
