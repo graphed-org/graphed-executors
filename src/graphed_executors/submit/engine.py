@@ -4,8 +4,9 @@ One engine, N backends — the same factorization as the generic shuffle engine 
 ``ShuffleBackend``. The fixed path mirrors the local reduction topology EXACTLY: leaves are
 ``process`` tasks, combines follow the ``plan_tree`` shape as future dependencies, and the driver
 takes the value of the single root future (so bit-for-bit equality vs ``SequentialRunner`` is inherited,
-not re-derived), raising at the first task that fails. The adaptive path folds completions with ``running_fold`` and cancels outstanding work
-on stop. Both are reused from ``graphed_executors.local._reduce`` — no duplication.
+not re-derived), raising at the first task that fails. The adaptive path folds completions with
+``running_fold`` and cancels outstanding work on stop. Both are reused from
+``graphed_executors.local._reduce`` — no duplication.
 
 The worker seam (plan §1.1, review r1 B1): per-run state travels as a picklable :class:`RunContext`
 first argument; per-worker capability (``open_once`` resources + the event transport) arrives via a

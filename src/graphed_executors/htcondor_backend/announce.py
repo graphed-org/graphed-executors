@@ -9,15 +9,17 @@ It reads the secret, starts the recipe's child in ``service/`` (the transferred 
 the recipe's inputs) on the first free port of ``ports``, checks it where it runs, and posts ``key
 host:port identity``, signed, to ``<url>/announce``. ``timeout_s`` bounds the whole start. A child that
 exits moves on to the next port only when another process took its port; otherwise the start fails (exit
-3). Attached (``url`` set): the secret file is read and unlinked before the child starts, the announce
-repeats every ``beat_s``, and a 403 or no 200 for ``lease_s`` (counted from readiness) stops the service
-and exits 0, as an orphaned pilot does. Watch mode (``watch`` a directory): ``<watch>/driver.url`` and
+3). A port another process listens on, which the child's process tree does not hold (Linux ``/proc``),
+moves on too. Attached (``url`` set): the secret file is read and unlinked before the child starts, the
+announce repeats every ``beat_s``, and a 403 or no 200 for ``lease_s`` (counted from readiness) stops the
+service and exits 0, as an orphaned pilot does. Watch mode (``watch`` a directory): ``<watch>/driver.url`` and
 ``<watch>/graphed-secret`` are read each second and each new pair is announced until it answers 200.
 Otherwise the exit code is the child's; SIGTERM reaps the child and exits 143.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -80,6 +82,48 @@ def self_check(check: str, host: str, port: int, timeout: float) -> str | None:
         return None
     except Exception as exc:  # a refusal, a non-2xx (HTTPError), a server not yet speaking HTTP
         return repr(exc)
+
+
+def listeners(port: int, proc: str = "/proc") -> set[str]:
+    """The inodes of the sockets listening on ``port`` (the engine's rule, copied): read from
+    ``{proc}/net/tcp`` and ``{proc}/net/tcp6``; a file that cannot be read contributes none."""
+    found: set[str] = set()
+    for name in ("tcp", "tcp6"):
+        try:
+            with open(os.path.join(proc, "net", name)) as f:
+                rows = f.read().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            col = row.split()
+            if col[3] == "0A" and int(col[1].rsplit(":", 1)[1], 16) == port:  # 0A: TCP_LISTEN
+                found.add(col[9])
+    return found
+
+
+def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
+    """Whether ``pid`` and its descendants hold every one of ``inodes`` among their fds (the engine's rule,
+    copied); a process whose ``stat`` or ``fd`` cannot be read holds none."""
+    kids: dict[int, list[int]] = {}
+    for entry in os.listdir(proc):
+        if entry.isdigit():
+            try:
+                with open(os.path.join(proc, entry, "stat")) as f:
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])  # comm, in parentheses, may hold spaces
+            except (OSError, IndexError, ValueError):
+                continue
+            kids.setdefault(ppid, []).append(int(entry))
+    links: set[str] = set()
+    todo = [pid]
+    while todo:
+        p = todo.pop()
+        todo.extend(kids.get(p, ()))
+        fds = os.path.join(proc, str(p), "fd")
+        with contextlib.suppress(OSError):
+            for fd in os.listdir(fds):
+                with contextlib.suppress(OSError):  # an fd closed meanwhile, or a host without symlinks
+                    links.add(os.readlink(os.path.join(fds, fd)))
+    return {f"socket:[{inode}]" for inode in inodes} <= links
 
 
 def free(port: int) -> bool:
@@ -188,6 +232,12 @@ def start(cfg: dict[str, Any], ident: str) -> tuple[subprocess.Popen[bytes], int
                 if free(port):
                     return f"the child exited with returncode {child.returncode} on port {port}"
                 log(f"port {port} taken after the scan (the child exited {child.returncode}), next")
+                break
+            # a dial passes on any listener: one the child's tree does not hold took the port after the scan
+            inodes = listeners(port)
+            if inodes and not held_by(child.pid, inodes):
+                log(f"port {port} is held by another process, next")
+                reap(child)
                 break
             why = self_check(cfg["check"], ident, port, max(0.1, min(CHECK_S, deadline - time.monotonic())))
             if why is None and child.poll() is None:

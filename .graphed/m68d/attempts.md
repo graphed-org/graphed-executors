@@ -22,3 +22,15 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - Frozen C1–C6 (13): passed.
 - Extras: the first failing service among several is named (mutant: first check only → fails); a
   `RunControl`-windowed run classifies too (mutant: no wrapper → fails).
+
+## Iteration 3 — commit 3: a port counts only when the child's process tree holds its listener
+- `listeners(port, proc="/proc")` (LISTEN inodes on the port from `net/tcp` + `net/tcp6`) and
+  `held_by(pid, inodes, proc="/proc")` (the pid's tree, through each `stat`'s ppid, holds every inode among
+  its fd links) in `submit/services.py`, copied into the stdlib-only `announce.py`. No platform gate:
+  without `/proc` the set is empty and the path is today's dial.
+- `announce.start`: a listener the child's tree does not hold reaps the child, logs `port P is held by
+  another process, next`, and moves on. `ServiceSet._on_driver`: the same raises `ServiceUnavailable`
+  with `legs["managed"] = "port P on H is held by another process"`.
+- Frozen P4 (both modules) passes on macOS; P1–P4 (6) pass in `m68d-impl-pool` (Linux).
+- Extras (every OS, stand-in probe answers): the driver-hosted start refuses / takes its port by
+  `held_by`'s answer; announce moves past the port. Mutant (both checks removed) fails all three.
