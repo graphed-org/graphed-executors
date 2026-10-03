@@ -65,3 +65,15 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
   condor pilot (pilots.log 012 with graphed's reason, then 013) and the DAG completes with the twin's
   value. The pilot hold was unmeasured before this leg: it passes, and with the hold removed from
   `_host_announced` both the recorded-bindings and the live test fail.
+
+## Iteration 6 — commit 6: docs and the test-htcondor paths
+- `htcondor.rst` (re-check on a failed task; the port ownership rule beside the driver and in a service
+  job; restart + rerun and the queue-ad wait in a driverless run; the held-node cost), `design.rst`,
+  changelog. `ci.yml`'s `test-htcondor` pytest line gains `tests/frozen/m68d tests/extra/m68d`.
+- Not done: `engine.py` in `test-htcondor`'s diff-cover. Frozen
+  `m66::test_coveragerc_htcondor_gates_exactly_the_backend` forbids it in `.coveragerc-htcondor`'s source
+  (tried: that test fails), and without it the include gates nothing; the main matrix's diff-cover
+  gates `engine.py` (addendum).
+- Gates: macOS frozen + extra 1205 passed / 140 skipped (the one failure was the rcfile try, reverted);
+  per-file >= 90 % and diff-cover 100 % (engine, services) on that data; `m68d-impl-pool` test-htcondor
+  set 594 passed / 10 skipped, 99 % total, per-file gate ok, diff-cover 99 %.

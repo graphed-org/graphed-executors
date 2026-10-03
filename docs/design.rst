@@ -967,9 +967,15 @@ included, is retried. A driver killed before it writes its result is retried too
 writes a placeholder result before Python starts, because HTCondor holds a job whose declared outputs
 are missing. A plan with a service that needs an image or a GPU goes as a DAG instead: that job as
 its ``driver`` node beside one ``SERVICE`` node per such service, each announcing to whichever try of
-the driver is running. The run's outcome is the driver node's last try, never DAGMan's own exit,
-which depends on how strictly the site's DAGMan treats service nodes still idle or held at the end.
-A ``RunHandle`` is a few fields of JSON, so another session can pick the run up.
+the driver is running. DAGMan never retries a SERVICE node, so the node's own wrapper restarts a
+service that dies, on a port no earlier instance served, so that no worker's client cached by
+endpoint reaches the dead one; a run binds its endpoints once, so the driver answers a task's
+``ServiceUnreachable`` for such a service by running the plan again in the same job. While it waits,
+the driver reads the node's queue ad on the DAG's schedd, so a node that ended, is held, or that no
+slot could ever run fails the try at once instead of after ``timeout_s``. The run's outcome is the
+driver node's last try, never DAGMan's own exit, which depends on how strictly the site's DAGMan treats
+service nodes still idle or held at the end. A ``RunHandle`` is a few fields of JSON, so another
+session can pick the run up.
 
 **Services: an analysis names them, a run finds them.** A plan's ``services`` are requirements
 (graphed ``ServiceSpec``: a name, a kind, a readiness check, optionally a launch recipe); the endpoint
@@ -978,15 +984,18 @@ run, on any backend, by three legs in order — an endpoint the user gave, the s
 kind, a managed start — and names every leg and why it did not apply when none does. It checks each
 endpoint where it runs and then from a worker, through an ordinary task, because a service the driver
 reaches may be firewalled from the execute nodes; a managed one must answer a worker on another host
-than its own unless that host is the driver's. The endpoints are bound into the plan before its first
-task and the value is resolved while the services are still up. A run's services, its probe tasks and
-its queued tasks live exactly as long as the run: every acquisition registers its release when it
-returns, and each release logs its failure instead of raising, so the error you see is the first one.
-The engine names no service; the recipes are plain data in ``graphed_executors.submit.recipes``.
-Cluster hosting is one duck-typed seam, a backend's ``host_service``/``release_service`` pair. The
-HTCondor backend fills it with a job per service that announces its endpoint, signed with a secret
-made for that one service (never the pilots' secret, which signs pickles), from a directory that holds
-only the recipe's inputs.
+than its own unless that host is the driver's. A task that fails re-runs those checks where it ran:
+an exception's type cannot tell a dead service from a plan error, but asking the service can, and the
+run ends at that first failure either way. A started service's port counts only when the started
+process tree holds its listener, because a check passes on any listener. The endpoints are bound into
+the plan before its first task and the value is resolved while the services are still up. A run's
+services, its probe tasks and its queued tasks live exactly as long as the run: every acquisition
+registers its release when it returns, and each release logs its failure instead of raising, so the
+error you see is the first one. The engine names no service; the recipes are plain data in
+``graphed_executors.submit.recipes``. Cluster hosting is one duck-typed seam, a backend's
+``host_service``/``release_service`` pair. The HTCondor backend fills it with a job per service that
+announces its endpoint, signed with a secret made for that one service (never the pilots' secret, which
+signs pickles), from a directory that holds only the recipe's inputs.
 
 Not supported yet
 -----------------
