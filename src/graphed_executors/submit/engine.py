@@ -3,8 +3,8 @@
 One engine, N backends — the same factorization as the generic shuffle engine over
 ``ShuffleBackend``. The fixed path mirrors the local reduction topology EXACTLY: leaves are
 ``process`` tasks, combines follow the ``plan_tree`` shape as future dependencies, and the driver
-waits on the single root future (so bit-for-bit equality vs ``SequentialRunner`` is inherited, not
-re-derived). The adaptive path folds completions with ``running_fold`` and cancels outstanding work
+takes the value of the single root future (so bit-for-bit equality vs ``SequentialRunner`` is inherited,
+not re-derived), raising at the first task that fails. The adaptive path folds completions with ``running_fold`` and cancels outstanding work
 on stop. Both are reused from ``graphed_executors.local._reduce`` — no duplication.
 
 The worker seam (plan §1.1, review r1 B1): per-run state travels as a picklable :class:`RunContext`
@@ -447,6 +447,7 @@ class SubmitRunner:
         phandle = backend.broadcast(ppayload, token=ptoken)
         key_to_task: dict[str, Task] = {}
         futs: dict[int, SubmitFuture] = {}
+        leaves_seen = 0  # the drain waits for these leaves' events only: an early raise leaves the rest unrun
         try:
             for i, task in enumerate(tasks):
                 if monitor is not None:
@@ -466,11 +467,22 @@ class SubmitRunner:
                 futs[out] = submits.submit(
                     _combine_task, ctx, chandle, ctoken, futs[a], futs[b], key=key, retries=self._retries
                 )
+            # a combine settles only once all its inputs have, so the root alone learns of a failure late
+            done_q: queue.Queue[SubmitFuture] = queue.Queue()
+            leaves = {futs[i] for i in range(n)}
+            for fut in futs.values():
+                fut.add_done_callback(done_q.put)
+            while not futs[root].done():
+                fut = done_q.get()
+                leaves_seen += fut in leaves
+                if fut.exception() is not None:  # exception() transfers no result on dask
+                    self._result(fut, key_to_task)  # raises it, translated
             value = cast(R, self._result(futs[root], key_to_task))
+            leaves_seen = n
             return ExecResult(value, n, len(combines), StopReason.EXHAUSTED)
         finally:
             if ctx.monitor_topic is not None:  # drain trailing worker events before unsubscribe
-                _wait_until(lambda: events_seen[0] >= ctx.events_per_leaf * n, _DRAIN_TIMEOUT_S)
+                _wait_until(lambda: events_seen[0] >= ctx.events_per_leaf * leaves_seen, _DRAIN_TIMEOUT_S)
 
     def _run_fixed_windowed(
         self,
