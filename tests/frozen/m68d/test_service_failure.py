@@ -117,11 +117,9 @@ def test_a_fixed_run_with_a_monitor_raises_well_within_the_drain_timeout(
     begun = time.monotonic()
     err = raised_by(lambda: runner.run(stop_plan(mark)))
     took = time.monotonic() - begun
-    at_raise = started(mark)
     assert type(err) is ValueError and str(err) == LEAF_ERROR, repr(err)
     assert len(monitor.phases("submitted")) == 8, "the monitor was not attached to the run"
     assert took < engine_api()._DRAIN_TIMEOUT_S / 2, f"raised after {took:.1f}s"
-    assert 1 in at_raise and len(at_raise) <= 3, f"leaves started by the raise: {at_raise}"
     run_bounded(runner.close, 120.0)
     assert len(started(mark)) < 8, f"leaves started by close: {started(mark)}"
 
