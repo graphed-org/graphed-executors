@@ -414,8 +414,8 @@ class HTCondorBackend:
         return minted_endpoint(spec.check, host, int(port)), got[1], node
 
     def _release_announced(self, key: str) -> None:
-        """Drop a pending announce of node ``key``; DAGMan removes the node when the DAG ends."""
-        self._server.wait_announce(key, 0.0)
+        """Nothing: a pending announce of node ``key`` is its restart's, which the next set resolves, and
+        DAGMan removes the node when the DAG ends."""
 
     def stop_waiting(self) -> None:
         """End every wait for a service job that has no slot yet, within one ``POLL_S``: the job is

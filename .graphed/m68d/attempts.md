@@ -34,3 +34,17 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - Frozen P4 (both modules) passes on macOS; P1–P4 (6) pass in `m68d-impl-pool` (Linux).
 - Extras (every OS, stand-in probe answers): the driver-hosted start refuses / takes its port by
   `held_by`'s answer; announce moves past the port. Mutant (both checks removed) fails all three.
+
+## Iteration 4 — commit 4: the SERVICE node restarts its service; the driver reruns on its re-announce
+- `announce.py`: `RESTARTS = 3`; in watch mode a child that dies after it was ready is started again by
+  `start(cfg, ident, skip=<ports an earlier child served>)` and announced to the current pair (`last`
+  reset); past `RESTARTS` the job exits with the child's code, a failed restart with 3. Attached mode
+  unchanged.
+- `driver.main`: `_attempt` = the driver's `ServiceSet` (opened before `wait_for_pilots`) around one
+  `runner.run`; a `ServiceUnreachable` whose `.name` is in `announce_only` logs `rerun: <error>`, closes
+  the set and runs again. `_release_announced` does nothing.
+- m68b extras that pinned the old behaviour: the release now keeps a pending announce (the next
+  `host_service` resolves it); the refused-pair watch test sets `RESTARTS = 0`.
+- Extra: a restart with no usable port exits 3 (kills a restart that reuses a served port: exit 5).
+- Frozen B1/B1b/B2/B3 + C pass on macOS (17) and in `m68d-impl-pool` with P1–P4 and the m68b/m68d
+  announce extras (54 passed).

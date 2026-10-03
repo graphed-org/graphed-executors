@@ -13,8 +13,10 @@ exits moves on to the next port only when another process took its port; otherwi
 moves on too. Attached (``url`` set): the secret file is read and unlinked before the child starts, the
 announce repeats every ``beat_s``, and a 403 or no 200 for ``lease_s`` (counted from readiness) stops the
 service and exits 0, as an orphaned pilot does. Watch mode (``watch`` a directory): ``<watch>/driver.url`` and
-``<watch>/graphed-secret`` are read each second and each new pair is announced until it answers 200.
-Otherwise the exit code is the child's; SIGTERM reaps the child and exits 143.
+``<watch>/graphed-secret`` are read each second and each new pair is announced until it answers 200, and a
+child that dies after it was ready is started again, at most ``RESTARTS`` times, on a port no earlier
+child of this job served, then announced to the current pair. Otherwise the exit code is the child's
+(3 when a restart never became ready); SIGTERM reaps the child and exits 143.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ SECRET_FILE = "graphed-secret"
 URL_FILE = "driver.url"
 REAP_S = 5.0
 CHECK_S = 5.0
+RESTARTS = 3  # starts of a watch-mode child after its first one dies
 
 # the self-check dials this job's own port: an environment proxy must not sit in between
 _DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -201,12 +204,17 @@ def interpreter(name: str) -> str:
     return shutil.which(name, path=os.environ.get("PATH", os.defpath)) or name
 
 
-def start(cfg: dict[str, Any], ident: str) -> tuple[subprocess.Popen[bytes], int] | str:
-    """The ready child and its port, or why none is."""
+def start(
+    cfg: dict[str, Any], ident: str, skip: frozenset[int] = frozenset()
+) -> tuple[subprocess.Popen[bytes], int] | str:
+    """The ready child and its port, never one of ``skip``, or why none is."""
     low, high = cfg["ports"]
     deadline = time.monotonic() + float(cfg["timeout_s"])
     subs = {"{python}": interpreter(cfg["python"]), "{host}": ident}
     for port in range(low, high + 1):
+        if port in skip:
+            log(f"port {port} served an earlier child, next")
+            continue
         if not free(port):
             log(f"port {port} taken, next")
             continue
@@ -283,7 +291,23 @@ def serve() -> int:
     log(f"ready pid={child.pid} body={body.decode()!r}")
     last: tuple[str, bytes] | None = None
     last_ok, announced = time.monotonic(), False
-    while child.poll() is None:
+    # graphed keys a worker's client by endpoint and pilots outlive a rerun: no port serves two children
+    served, restarts = {port}, 0
+    while True:
+        if child.poll() is not None:
+            log(f"the child exited {child.returncode}")
+            if not cfg["watch"] or restarts >= RESTARTS:
+                return int(child.returncode)
+            restarts += 1
+            started = start(cfg, ident, frozenset(served))
+            if isinstance(started, str):
+                log(f"not ready: {started}")
+                return 3
+            child, port = started
+            served.add(port)
+            body = f"{cfg['key']} {ident}:{port} {ident}".encode()
+            log(f"restart {restarts} of {RESTARTS}: ready pid={child.pid} body={body.decode()!r}")
+            last = None  # announced again to the pair already answered
         if cfg["watch"]:
             pair = _watched(cfg["watch"])
             if pair is not None and pair != last:
@@ -303,8 +327,6 @@ def serve() -> int:
             reap(child)
             return 0
         time.sleep(cfg["beat_s"] if announced else 1.0)
-    log(f"the child exited {child.returncode}")
-    return int(child.returncode)
 
 
 def main() -> int:

@@ -11,7 +11,10 @@ The plan's services are resolved here, in the driver job, by the engine's three 
 start (leg 3), beside the driver or, for a name in ``run.json["announce_only"]``, by the announce of
 the run's DAG SERVICE node, to which the driver publishes its url and an announce secret in
 ``run.json["dag_dir"]``; the run then re-checks and probes them as leg-1 endpoints inside
-``runner.run`` and resolves its value while they are still up.
+``runner.run`` and resolves its value while they are still up. A run that raises ``ServiceUnreachable``
+for a SERVICE node's service is run again (``rerun: <error>`` in ``driver.log``) under a new set, which
+waits for that node's next announce; every rerun needs a fresh announce, so the loop is bounded by the
+node's restarts.
 
 ``main`` classifies an exit by phase, and only inside ``runner.run(plan)`` by type:
 
@@ -142,6 +145,21 @@ def _exit_code(exc: Exception) -> int:
     return EXIT_FAILED if lost or service else EXIT_PLAN_ERROR
 
 
+def _attempt(
+    plan: Any, runner: HTCondorRunner, given: dict[str, str], log: TextIO, start: float
+) -> tuple[object, Exception | None, int]:
+    """One ``runner.run(plan)`` under the driver job's own service set: ``(result, error, exit code)``."""
+    # the driver job's own set: its failures are environment (exit 1) whatever their type
+    with ServiceSet(plan.services, runner.backend, endpoints=given) as endpoints:
+        live = runner.wait_for_pilots()  # after the SERVICE nodes' announces; a failure exits 1
+        print(f"{live} pilots live after {time.monotonic() - start:.1f}s", file=log, flush=True)
+        runner.services = endpoints
+        try:
+            return runner.run(plan), None, EXIT_DONE
+        except Exception as exc:
+            return None, exc, _exit_code(exc)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     job = Path(args[0] if args else ".").resolve()
@@ -165,16 +183,13 @@ def main(argv: list[str] | None = None) -> int:
                 plan = pickle.load(f)
             runner = _runner(run, job, log)
             try:
-                # the driver job's own set: its failures are environment (exit 1) whatever their type
-                given = run.get("endpoints") or {}
-                with ServiceSet(plan.services, runner.backend, endpoints=given) as endpoints:
-                    live = runner.wait_for_pilots()  # after the SERVICE nodes' announces; a failure exits 1
-                    print(f"{live} pilots live after {time.monotonic() - start:.1f}s", file=log, flush=True)
-                    runner.services = endpoints
-                    try:
-                        result, code = runner.run(plan), EXIT_DONE
-                    except Exception as exc:
-                        error, code = exc, _exit_code(exc)
+                announced = run.get("announce_only") or {}
+                while True:
+                    result, error, code = _attempt(plan, runner, run.get("endpoints") or {}, log, start)
+                    # a run binds its endpoints once: a SERVICE node's new one takes a new run
+                    if not (isinstance(error, ServiceUnreachable) and error.name in announced):
+                        break
+                    print(f"rerun: {error}", file=log, flush=True)
             finally:
                 try:
                     runner.close()
