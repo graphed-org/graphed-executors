@@ -323,14 +323,14 @@ class HTCondorBackend:
                     self.launcher.hold_queued()
                     self._held = True
                 if machines and self.launcher.cluster is not None:
-                    pilots = f"the runner's running pilots (cluster {self.launcher.cluster[1]}, held until it closes)"
+                    pilots = f"the runner's running pilots (cluster {self.launcher.cluster[1]}, whose slots stay taken until it closes)"
                     claims[pilots] = self.launcher.running_claims()
         if machines:
             with self._lock:
                 siblings = [job for key, job in self._services.items() if key.startswith(f"{scope}-")]
             for sibling in siblings:
                 if sibling.cluster is not None:
-                    server = f"its server {sibling.spec.name!r} (cluster {sibling.cluster}, held until the run ends)"
+                    server = f"its server {sibling.spec.name!r} (cluster {sibling.cluster}, whose slot stays taken until the run ends)"
                     claims[server] = self.launcher.running_claims(f"ClusterId == {sibling.cluster}")
         key = f"{scope}-{secrets.token_hex(8)}"
         secret = self._server.announce_secret([key])
