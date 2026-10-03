@@ -291,3 +291,27 @@ histserv 0.2.1), `.venv-m69b-hgg` (+ coffea fork b2612ab, uproot ca3a8a2, higgs_
   passed / 3 skipped, per-file min 91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (47). test-hgg
   82 passed / 8 skipped. ruff, ruff format, mypy --strict (also win32), sphinx -W clean. The 30 ordering ids:
   identical over two runs (macOS 22 pass / 8 skip; pool 30 pass).
+
+## Iteration 16 — review r7 (H1): a backend starts one service set at a time, through its probe
+- H1: two plans of one runner starting their sets together each admitted a second server beside the other's first
+  and waited for room the other kept. r7's cut (an `HTCondorRunner` runs one plan at a time, plan 71a5deb) fails
+  frozen m68b `test_a_cluster_hosted_http_server_serves_its_run_and_leaves_with_it` on the pool (B1's overlap leg,
+  350.5 s, "the direct run's end removed the submitted run's service"): dispute 776b171, withdrawn here once plan
+  ba30c9c replaced the sentence.
+- `HTCondorBackend.starting_service_set()` holds a lock across `ServiceSet.start`'s resolve phase and probe (duck-typed
+  as `starting_services`); a set waiting its turn polls the lock every `POLL_S` and raises once `_closing` is set
+  (`stop_waiting`, `close`), whatever the holder waits for. htcondor.rst: the "once no other plan's services are
+  starting" clause is gone, a bullet says sets start one at a time.
+- Rows. Recorder (all OS), `[stop_waiting]`/`[close]`: plan a's started server never announces (600 s timeout), plan
+  b waits its turn; after the end b raises naming the close within 5 s, a ends at close, only a's job was submitted
+  and it was removed. Pool: plans x and y from two threads, two servers of 3/8 of `TotalSlotMemory` each, both
+  return their values (56 s) and the queue is empty. Killed (controls pass): `bare-set-lock` and
+  `set-wait-ends-only-on-close` ([stop_waiting]), `no-set-lock` (both legs: b submits beside a), on the pool
+  `state-7e6e9c5` and `probe-outside-the-set-lock` (r7's narrower cut): both hang to the 240 s bound. The 24 earlier
+  mutants still die (PHASE re-anchored to the new indentation).
+- Gates (3cdff78): macOS main job 1165 passed / 130 skipped, per-file min 93.02 % (`local/shuffle.py`), diff-cover
+  100 % (48 lines). Pool `test-htcondor` line 543 passed / 10 skipped (B1's row passes), htcondor scope per-file min
+  98.80 % (`server.py`), diff-cover 100 % (292 lines), queue empty, container removed. test-dask 423 passed / 3
+  skipped, per-file min 91.70 % (`dask_backend/transport_shuffle.py`), diff-cover 100 % (48). test-hgg 84 passed / 9
+  skipped. ruff, ruff format, mypy --strict (also win32), sphinx -W clean. The 33 ordering ids: identical over two
+  runs (macOS 24 pass / 9 skip; pool 33 pass).
