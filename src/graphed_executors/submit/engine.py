@@ -473,7 +473,7 @@ class SubmitRunner:
         phandle = backend.broadcast(ppayload, token=ptoken)
         key_to_task: dict[str, Task] = {}
         futs: dict[int, SubmitFuture] = {}
-        leaves_seen = 0  # the drain waits for these leaves' events only: an early raise leaves the rest unrun
+        drained = 0  # a raise drains nothing: a piggyback backend ships a leaf's events only in its result()
         try:
             for i, task in enumerate(tasks):
                 if monitor is not None:
@@ -495,20 +495,18 @@ class SubmitRunner:
                 )
             # a combine settles only once all its inputs have, so the root alone learns of a failure late
             done_q: queue.Queue[SubmitFuture] = queue.Queue()
-            leaves = {futs[i] for i in range(n)}
             for fut in futs.values():
                 fut.add_done_callback(done_q.put)
             while not futs[root].done():
                 fut = done_q.get()
-                leaves_seen += fut in leaves
                 if fut.exception() is not None:  # exception() transfers no result on dask
                     self._result(fut, key_to_task)  # raises it, translated
             value = cast(R, self._result(futs[root], key_to_task))
-            leaves_seen = n
+            drained = n
             return ExecResult(value, n, len(combines), StopReason.EXHAUSTED)
         finally:
             if ctx.monitor_topic is not None:  # drain trailing worker events before unsubscribe
-                _wait_until(lambda: events_seen[0] >= ctx.events_per_leaf * leaves_seen, _DRAIN_TIMEOUT_S)
+                _wait_until(lambda: events_seen[0] >= ctx.events_per_leaf * drained, _DRAIN_TIMEOUT_S)
 
     def _run_fixed_windowed(
         self,
