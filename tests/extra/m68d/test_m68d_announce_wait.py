@@ -5,6 +5,7 @@ pool whose collector lists no slot waits for its announce unmatched."""
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sys
@@ -213,3 +214,36 @@ def test_on_a_pool_a_rerun_holds_the_queued_condor_pilot_and_releases_it(
         assert wait_for(lambda: not schedd.query(run, ["ClusterId"]), 180.0, 2.0), (
             "the run outlived its removal"
         )
+
+
+@pytest.mark.parametrize("missing", ["schedd_locate", "job_ad"])
+def test_a_wait_without_a_locator_or_a_job_ad_reads_no_queue_and_logs_nothing(
+    missing: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    schedd = PilotSchedd([(0.0, node_ad(IDLE, memory_mb=6000))])
+    with Web() as web, condor_dag_backend(tmp_path, monkeypatch, schedd) as (backend, fake):
+        if missing == "schedd_locate":
+            backend._schedd_locate = None
+        else:
+            monkeypatch.delenv("_CONDOR_JOB_AD")
+        publish_pair(backend, tmp_path / "dag")
+        announce_later(tmp_path / "dag", web.port, 0.6)
+        with caplog.at_level(logging.WARNING, logger="graphed_executors"):
+            got = run_bounded(lambda: backend.host_service(node_spec(600.0), "m-dee-scope"), 20.0)
+    assert tuple(got) == (web.endpoint, SERVICE_ID, NODE), got
+    assert schedd.node_queries() == [], fake.log
+    assert caplog.records == [], [r.getMessage() for r in caplog.records]
+
+
+def test_an_idle_node_is_matched_once_across_its_idle_polls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    schedd = PilotSchedd([(0.0, node_ad(IDLE, memory_mb=6000))])
+    with Web() as web, condor_dag_backend(tmp_path, monkeypatch, schedd) as (backend, fake):
+        publish_pair(backend, tmp_path / "dag")
+        announce_later(tmp_path / "dag", web.port, 1.0)
+        got = run_bounded(lambda: backend.host_service(node_spec(600.0), "m-dee-scope"), 20.0)
+    assert tuple(got) == (web.endpoint, SERVICE_ID, NODE), got
+    idle_answers = [e for e in schedd.node_queries() if e[3] == IDLE]
+    machine_queries = [e for e in fake.log if e[0] == "collector-query" and "Machine" in e[3]]
+    assert len(idle_answers) >= 3 and len(machine_queries) == 1, (len(idle_answers), machine_queries)
