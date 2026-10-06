@@ -19,6 +19,7 @@ from graphed.core.execution import SequentialRunner
 
 from graphed_executors.htcondor_backend import CondorPilots, HTCondorBackend, submit_driverless
 from graphed_executors.htcondor_backend import server as server_mod
+from graphed_executors.htcondor_backend.launch import CondorReason
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68d"))
 from m68d_harness import (
@@ -40,6 +41,7 @@ from m68d_harness import (
     free_range,
     gated_plan,
     matches,
+    names_the_node,
     node_ad,
     node_spec,
     raised_by,
@@ -165,6 +167,107 @@ def publish_pair(backend: HTCondorBackend, dag: Path) -> None:
     dag.mkdir(parents=True, exist_ok=True)
     (dag / "graphed-secret").write_text(backend._server.announce_secret([NODE]).hex())
     (dag / "driver.url").write_text(backend._server.url)
+
+
+class HistorySchedd(PilotSchedd):
+    """A :class:`PilotSchedd` whose history answers ``rows``, or raises ``refuse``; asks are logged."""
+
+    def __init__(self, phases: list[tuple[float, Any]], rows: list[Any], refuse: str | None = None) -> None:
+        super().__init__(phases)
+        self.rows, self.refuse = rows, refuse
+
+    def history(
+        self, constraint: Any = None, projection: Any = None, match: int = -1, **kwargs: Any
+    ) -> list[Any]:
+        self.log.append(("history", str(constraint), tuple(projection or ()), match))
+        if self.refuse is not None:
+            raise RuntimeError(self.refuse)
+        return self.rows
+
+
+DEPARTED: dict[str, tuple[list[Any], str | None, str]] = {
+    "held-then-removed": (
+        [FakeAd(JobStatus=3, LastHoldReason="m-held-before-it-announced", RemoveReason="m-periodic-remove")],
+        None,
+        "JobStatus=3, LastHoldReason='m-held-before-it-announced';",
+    ),
+    "removed": (
+        [FakeAd(JobStatus=3, RemoveReason="m-removed-by-hand")],
+        None,
+        "JobStatus=3, RemoveReason='m-removed-by-hand';",
+    ),
+    "no-history-row": ([], None, "no job ad;"),
+    "unreadable-history": ([], "m-history-refused", "no job ad;"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(DEPARTED))
+def test_a_departed_node_is_named_by_its_history_row(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    rows, refuse, state = DEPARTED[case]
+    schedd = HistorySchedd([(0.0, None)], rows, refuse)
+    with (
+        caplog.at_level(logging.WARNING, logger="graphed_executors"),
+        condor_dag_backend(tmp_path, monkeypatch, schedd) as (backend, _fake),
+    ):
+        err = raised_by(lambda: backend.host_service(node_spec(600.0), "m-dee-scope"), 20.0)
+    assert isinstance(err, RuntimeError) and f"({NODE}) ended before it announced: {state}" in str(err), repr(
+        err
+    )
+    asks = [e for e in schedd.log if e[0] == "history"]
+    assert asks and {e[3] for e in asks} == {1} and all(names_the_node(e[1]) for e in asks), asks
+    warned = [r.getMessage() for r in caplog.records if NODE in r.getMessage()]
+    if rows:
+        assert warned == [], warned
+    else:
+        assert len(warned) == 1 and (refuse or "no history row") in warned[0], warned
+
+
+HOLD_REASON = "m68d test: svc0 held before it announces"
+
+
+def test_on_a_pool_a_node_held_and_removed_before_the_driver_looks_is_named_by_its_hold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    htcondor2: Any = pytest.importorskip("htcondor2", reason="the live pool leg runs in test-htcondor")
+    argv = ("{python}", Path(CHILD_FILE).name, "serve", "{port}", str(tmp_path / "child"))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "logs").mkdir()
+    handle = submit_driverless(
+        gated_plan(tmp_path / "mark", node_spec(600.0, argv, inputs=(CHILD_FILE,))),
+        site="generic",
+        n_pilots=1,
+        pilots="local",
+        request_memory_mb=1024,
+        log_dir=tmp_path / "logs",
+        user_modules=[HARNESS_FILE],
+    )
+    schedd = htcondor2.Schedd()
+    run = f"ClusterId == {handle.cluster} || DAGManJobId == {handle.cluster}"
+    node = f'DAGManJobId == {handle.cluster} && DAGNodeName == "{NODE}"'
+    driver = f'DAGManJobId == {handle.cluster} && DAGNodeName == "driver"'
+    both = f"({node}) || ({driver})"
+    try:
+        assert wait_for(lambda: len(schedd.query(both, ["ClusterId"])) == 2, 120.0, 0.1), "no nodes"
+        schedd.act(htcondor2.JobAction.Hold, both, reason=CondorReason(HOLD_REASON))
+        started = [ad for ad in schedd.query(both, ["DAGNodeName", "NumJobStarts"]) if ad.get("NumJobStarts")]
+        assert started == [], f"a node started before the hold: {started}"
+        assert wait_for(lambda: not schedd.query(node, ["ClusterId"]), 180.0, 2.0), "svc0 stayed queued"
+        schedd.act(htcondor2.JobAction.Release, driver)
+        status = run_bounded(lambda: handle.wait(timeout=600.0, poll_s=2), 660.0)
+        log = str(handle.logs().get("driver.log", ""))
+        assert status == "failed", log[-4000:]
+        named = (
+            rf"\({NODE}\) ended before it announced: JobStatus=3, LastHoldReason='{re.escape(HOLD_REASON)}"
+        )
+        assert re.search(named, log), log[-4000:]
+    finally:
+        if schedd.query(run, ["ClusterId"]):
+            schedd.act(htcondor2.JobAction.Remove, run)
+        assert wait_for(lambda: not schedd.query(run, ["ClusterId"]), 180.0, 2.0), (
+            "the run outlived its removal"
+        )
 
 
 def test_on_a_pool_a_rerun_holds_the_queued_condor_pilot_and_releases_it(

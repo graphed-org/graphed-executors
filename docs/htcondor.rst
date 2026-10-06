@@ -446,12 +446,13 @@ announce and on the same pilots (``driver.log`` says ``rerun:``); the tasks that
 again.
 
 While the driver waits for an announce it reads the node's queue ad on the DAG's schedd. A node that
-left the queue or is held fails the try at once; so does an idle node no slot of the pool could ever
-run, counting the slots the run's own running jobs (and its running pilots) hold, named with its
-``RequestMemory``, ``RequestCpus`` and ``RequestGPUs``. An idle node that could run waits without a
-deadline, and ``timeout_s`` counts from its start. With ``pilots="condor"``, the run's queued pilots
-are held while a node waits, and released after. Where the schedd cannot be read, ``driver.log``
-says so in one line and the wait is ``timeout_s`` long.
+is held fails the try at once, naming its ``HoldReason``; so does one that left the queue, naming the
+``LastHoldReason`` (else the ``RemoveReason``) of its history row; so does an idle node no slot of
+the pool could ever run, counting the slots the run's own running jobs (and its running pilots) hold,
+named with its ``RequestMemory``, ``RequestCpus`` and ``RequestGPUs``. An idle node that could run
+waits without a deadline, and ``timeout_s`` counts from its start. With ``pilots="condor"``, the
+run's queued pilots are held while a node waits, and released after. Where the schedd cannot be read,
+``driver.log`` says so in one line and the wait is ``timeout_s`` long.
 
 The DAG is not spooled: the schedd and the nodes read the run directory, your ``user_modules`` and
 the services' inputs where they lie, so all of them must lie under the site's ``job_root``

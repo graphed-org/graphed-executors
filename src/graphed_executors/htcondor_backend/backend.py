@@ -64,6 +64,8 @@ R = TypeVar("R")
 N_WORKERS_WAIT_S = 600.0
 IDLE_LOG_S = 30.0  # between log lines of a service job still waiting for a slot
 _IDLE, _RUNNING = 1, 2  # JobStatus
+# a SERVICE node's periodic_remove takes a held node out of the queue, so only its history says why
+_GONE = ("LastHoldReason", "RemoveReason")
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,8 @@ _FLOOR = SubmitCapabilities(
 
 class _Announcer(Protocol):
     """What :meth:`HTCondorBackend._await_announce` reads of a job that announces: its announce ``key``, its
-    queue ``ad()`` (``{}`` once it is gone) and the ``dir`` its ``service.out``/``.err`` land in."""
+    queue ``ad()`` (once it is gone, its history row, else ``{}``) and the ``dir`` its ``service.out``/``.err``
+    land in."""
 
     key: str
     dir: Path | None
@@ -94,9 +97,10 @@ class _Unread(Exception):
 
 class _Node:
     """DAG SERVICE node ``key`` as :meth:`HTCondorBackend._await_announce` reads a service job: :meth:`ad` is
-    its queue ad within DAGMan job ``dag`` on ``schedd``. Its first idle ad is matched once against the
-    pool's slots less what the DAG's running jobs and ``claims()`` hold, and no slot raises
-    :class:`ServiceUnavailable` for service ``name``; DAGMan owns the node, so nothing acts on it."""
+    its queue ad within DAGMan job ``dag`` on ``schedd``, else, once it left the queue, its history row naming
+    why. Its first idle ad is matched once against the pool's slots less what the DAG's running jobs and
+    ``claims()`` hold, and no slot raises :class:`ServiceUnavailable` for service ``name``; DAGMan owns the
+    node, so nothing acts on it."""
 
     def __init__(
         self,
@@ -130,7 +134,23 @@ class _Node:
             raise _Unread(exc) from exc
         if refusal is not None:
             raise ServiceUnavailable(self._name, {"managed": refusal})
-        return ad
+        return ad if ads else self._departed(node)
+
+    def _departed(self, node: str) -> dict[str, Any]:
+        """The departed node's ``JobStatus`` and ``ExitCode`` with its ``LastHoldReason``, else its
+        ``RemoveReason``, from its history row; ``{}``, logged, when that row is missing or unreadable."""
+        try:
+            # match=1: a larger match scans a big schedd's whole history
+            rows = list(self._schedd.history(node, projection=["JobStatus", "ExitCode", *_GONE], match=1))
+        except Exception as exc:
+            logger.warning("SERVICE node %s left the queue; its history is unreadable (%r)", self.key, exc)
+            return {}
+        if not rows:
+            logger.warning("SERVICE node %s left the queue with no history row", self.key)
+            return {}
+        row = rows[0]
+        why = "LastHoldReason" if row.get("LastHoldReason") else "RemoveReason"
+        return {name: row[name] for name in ("JobStatus", "ExitCode", why) if name in row}
 
     def _refusal(self, node: str) -> str | None:
         machines = machine_ads(self._locate)
@@ -454,7 +474,9 @@ class HTCondorBackend:
             if got is not None:
                 return got
             ad = job.ad()
-            state = ", ".join(f"{name}={ad[name]!r}" for name in AD_ATTRS if name in ad) or "no job ad"
+            state = (
+                ", ".join(f"{name}={ad[name]!r}" for name in (*AD_ATTRS, *_GONE) if name in ad) or "no job ad"
+            )
             now = time.monotonic()
             if deadline is None and ad.get("JobStatus") == _RUNNING:
                 deadline = now + spec.timeout_s
@@ -502,7 +524,7 @@ class HTCondorBackend:
             handle = self._node(spec.name, node)
             if handle is not None:
                 got = self._await_announce(handle, spec)
-        except _Unread as exc:  # one line: driver.log readers count it
+        except _Unread as exc:
             logger.warning(
                 "SERVICE node %s (service %r): its queue ad is unreadable (%r); waiting for its announce alone",
                 node,
