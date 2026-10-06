@@ -367,8 +367,8 @@ workers answered"`` that none on another host did.
 
 **Checked again when a task fails.** A task that raises runs the same checks on its pilot. A service
 that no longer answers turns the failure into ``ServiceUnreachable``, whose reason ends with the task's
-own exception (also its ``__cause__``); with every service answering, the task's exception is raised
-as it was. Either way the run ends at its first failed task and cancels the tasks still queued.
+own exception; with every service answering, the task's exception is raised as it was. Either way
+the run ends at its first failed task and cancels the tasks still queued.
 
 **Kept warm across plans.** A started service lives as long as the run that started it. To use one
 server for several plans, start it yourself and pass its endpoints to the runner:
