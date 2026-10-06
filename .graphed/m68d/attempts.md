@@ -84,3 +84,11 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
   Both members (`announce.start`, `_on_driver`) read the listeners after each dial (addendum).
 - Extras: a listener that appears during the first dial is refused (driver) / passed over (announce);
   both fail on the scan-first order and pass after.
+
+## Iteration 8 — gates at 411ddcf (no code change)
+- macOS: frozen + extra 1208 passed / 140 skipped (frozen m68d 31 passed, 8 Linux/pool skips); per-file
+  >= 90 % (15 files); diff-cover vs 582d3dc 100 % (engine, submit/services); precommit ok (ruff, format,
+  mypy, coverage 97 %, sphinx -W); mypy --strict and --platform win32 clean.
+- `m68d-impl-pool`: ci.yml's test-htcondor set 596 passed / 10 skipped (frozen m68d 39/39); 99 % total,
+  per-file gate ok, diff-cover 99 % (one line: `queued_refusal`'s empty-machines return).
+- Fork CI on 411ddcf: run 37151741521 success; test-htcondor ran the m68d paths (598 passed, 8 skipped).
