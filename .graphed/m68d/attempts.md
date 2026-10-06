@@ -92,3 +92,18 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - `m68d-impl-pool`: ci.yml's test-htcondor set 596 passed / 10 skipped (frozen m68d 39/39); 99 % total,
   per-file gate ok, diff-cover 99 % (one line: `queued_refusal`'s empty-machines return).
 - Fork CI on 411ddcf: run 37151741521 success; test-htcondor ran the m68d paths (598 passed, 8 skipped).
+
+## Iteration 9 — review r1 repairs (F1–F6, S1, S2)
+- F1: `_run_fixed` drains nothing on the raise path (addendum "C1, the raise-path drain"); the reviewer's
+  drain tests: `[htcondor]` 30.3 s and the service-gone test 30.0 s at 8ced49b, both pass now.
+- F2: htcondor.rst drops the `__cause__` claim. F3–F6: the reviewer's tests, verbatim but for docstrings.
+- S1: `machine_ads` asks the collector for `MyType == "Machine" && SlotType =!= "Dynamic"`, no projection,
+  no client filter; `queued_refusal`'s empty-machines guard goes (both callers guard). Real `classad2`:
+  Partitionable/Static/no-SlotType kept, Dynamic dropped; a `!=` mutant fails the no-SlotType case.
+- S2: a node with no queue ad reads `history(<node>, …, match=1)` and the error names `LastHoldReason`,
+  else `RemoveReason`; empty/raising history logs one line and keeps "no job ad". Live leg: driver and
+  svc0 held (via `CondorReason`: htcondor2 drops a plain `str` reason) before either starts, svc0 removed
+  by its `periodic_remove`, the driver released: the error names the hold (fails at 8ced49b: "no job ad").
+- Gates at 2976dbf: macOS 1221 passed / 145 skipped (frozen m68d 31 + 8 guarded skips); per-file >= 90 %;
+  diff-cover 100 %; precommit ok; mypy strict + win32 clean. `m68d-impl-pool` test-htcondor set 614
+  passed / 10 skipped (frozen m68d 39/39), per-file ok, diff-cover 100 %.
