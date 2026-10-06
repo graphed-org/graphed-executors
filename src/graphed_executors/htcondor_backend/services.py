@@ -193,10 +193,7 @@ def queued_refusal(
     """Why no slot of ``machines`` could ever run the queued job whose whole ad is ``ad`` (``what`` names
     it), else ``None``: the ad (the request, the site's and the user's submit keys) must
     ``symmetricMatch`` a slot's ad whose free ``Memory``/``Cpus``/``GPUs``/``Disk`` are a partitionable
-    slot's totals, so a busy pool still matches, less what ``claims`` (running ads, by holder) hold there;
-    ``None`` when ``machines`` is empty."""
-    if not machines:
-        return None
+    slot's totals, so a busy pool still matches, less what ``claims`` (running ads, by holder) hold there."""
     import classad2  # noqa: PLC0415  (ships with the htcondor2 bindings)
 
     slots = [_as_whole(classad2.ClassAd(str(machine))) for machine in machines]
@@ -223,7 +220,9 @@ def machine_ads(locate: tuple[str, str] | None) -> list[Any]:
     name)`` names (``None``: the default collector)."""
     htc = launch._htcondor()
     collector = htc.Collector(locate[0]) if locate is not None else htc.Collector()
-    return [ad for ad in collector.query(constraint='MyType == "Machine"') if ad.get("SlotType") != "Dynamic"]
+    # in the collector, where dynamic slots can be most of a pool; `=!=` keeps an ad with no SlotType
+    slots = 'MyType == "Machine" && SlotType =!= "Dynamic"'
+    return list(collector.query(constraint=slots))  # whole ads: the job's Requirements may read any attribute
 
 
 def _as_whole(slot: Any) -> Any:
