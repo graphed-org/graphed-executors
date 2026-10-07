@@ -112,3 +112,12 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - design.rst and dask.rst: a completed run waits for its trailing events; a fixed-tree run that raises
   releases the monitor topic at once. `git grep -n "once trailing events drain" -- docs/` is empty
   (control `git grep -c "Monitoring rides" -- docs/design.rst` = 1); sphinx -W and precommit ok.
+
+## Iteration 11 — review r3 (R3-F1, R3-F2)
+- R3-F2: `_run_fixed_windowed` (a fixed tree with a `RunControl`) drains nothing on a raise and every
+  submitted leaf on a return, as `_run_fixed`; the reviewer's `test_m68d_windowed_drain.py[htcondor-True]`
+  raised after 30.3 s at d78d051 and passes now (the three other cases pass at both). design.rst and
+  dask.rst scope the monitor sentence to fixed-tree runs, with or without a `RunControl`.
+- R3-F1: design.rst says the port-ownership rule holds on Linux (`/proc`); elsewhere the check decides.
+- Gates at bad8047: macOS 1225 passed / 145 skipped (frozen m68d 31 + 8 guarded skips); per-file >= 90 %;
+  diff-cover 100 %; precommit ok (sphinx -W); mypy strict + win32 clean.
