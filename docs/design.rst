@@ -988,10 +988,11 @@ endpoint where it runs and then from a worker, through an ordinary task, because
 reaches may be firewalled from the execute nodes; a managed one must answer a worker on another host
 than its own unless that host is the driver's. A task that fails re-runs those checks where it ran:
 an exception's type cannot tell a dead service from a plan error, but asking the service can, and the
-run ends at that first failure either way. On Linux a started service's port counts only when the
-started process tree holds its listener (read from ``/proc``), because a check passes on any
-listener; elsewhere the check alone decides. The endpoints are bound into the plan before its first
-task and the value is resolved while the services are still up. A run's
+run ends at that first failure either way. On Linux, when ``/proc`` shows a listener on a started
+service's port, the port counts only if the started process tree holds it, because a check passes on
+any listener; with no listener visible there, and on other systems, the check alone decides. The
+endpoints are bound into the plan before its first task and the value is resolved while the services
+are still up. A run's
 services, its probe tasks and its queued tasks live exactly as long as the run: every acquisition
 registers its release when it returns, and each release logs its failure instead of raising, so the
 error you see is the first one. The engine names no service; the recipes are plain data in
