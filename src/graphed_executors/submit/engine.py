@@ -546,6 +546,7 @@ class SubmitRunner:
         ready: dict[int, SubmitFuture] = {}  # completed node -> its future, until a combine takes it
         key_to_task: dict[str, Task] = {}
         sent = done = n_combines = 0  # leaves submitted, leaves completed, combines submitted
+        drained = 0  # a raise drains nothing: a piggyback backend ships a leaf's events only in its result()
 
         def start(item: tuple[int, Task]) -> None:
             nonlocal sent
@@ -592,10 +593,11 @@ class SubmitRunner:
             )
             value, k = running_fold(iter(cast("list[tuple[int, R]]", pieces)), plan.combine, plan.empty)
             stopped = StopReason.CANCELLED if window.stopped else StopReason.EXHAUSTED
+            drained = sent
             return ExecResult(value, done, n_combines + k, stopped)
         finally:
-            if ctx.monitor_topic is not None:  # drain trailing worker events of every submitted leaf
-                _wait_until(lambda: events_seen[0] >= ctx.events_per_leaf * sent, _DRAIN_TIMEOUT_S)
+            if ctx.monitor_topic is not None:  # drain trailing worker events before unsubscribe
+                _wait_until(lambda: events_seen[0] >= ctx.events_per_leaf * drained, _DRAIN_TIMEOUT_S)
 
     # ---- adaptive path + stop (plan §1.2.4) ----
 
