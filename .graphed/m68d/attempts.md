@@ -121,3 +121,10 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - R3-F1: design.rst says the port-ownership rule holds on Linux (`/proc`); elsewhere the check decides.
 - Gates at bad8047: macOS 1225 passed / 145 skipped (frozen m68d 31 + 8 guarded skips); per-file >= 90 %;
   diff-cover 100 %; precommit ok (sphinx -W); mypy strict + win32 clean.
+
+## Iteration 12 — PR #49: test-dask diff-cover
+- test-dask's diff-cover (its own coverage, `.coveragerc-dask`) missed `_service_checked`, `listeners`/
+  `held_by` and `_on_driver`'s refusal: no m68d test was on its pytest line. ci.yml adds
+  `tests/frozen/m68d tests/extra/m68d` there. That job's steps, reproduced (aarch64 Linux, a51bee4 wheel,
+  distributed 2026.8.0): 487 passed / 14 skipped, per-file gate ok, diff-cover vs 582d3dc 54 % before
+  (macOS) and 100 % after (macOS and Linux).

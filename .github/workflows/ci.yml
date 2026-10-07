@@ -167,6 +167,7 @@ jobs:
             tests/frozen/m68c/test_m68c_submit_dask.py tests/frozen/m68c/test_m68c_submit_thread.py \
             tests/extra/m43 tests/extra/m44 tests/extra/m68a tests/extra/m68c \
             tests/extra/m69b/test_m69b_schedulable.py tests/extra/m69b/test_m69b_dask_driver_check.py \
+            tests/frozen/m68d tests/extra/m68d \
             --cov-config=.coveragerc-dask \
             --cov-branch --cov \
             --cov-report=term-missing
