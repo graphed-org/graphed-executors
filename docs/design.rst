@@ -799,14 +799,14 @@ graph, no dask-awkward. It submits opaque callables with explicit keys and futur
 edges, and inherits determinism, straggler tolerance and intact errors rather than re-deriving
 them. :doc:`dask` is the how-to; what follows is why the pieces are shaped the way they are.
 
-**The reduction is the same tree.** Leaves are ``process`` tasks; the merges are submitted up
-front with future dependencies in exactly the ``plan_tree`` shape. The driver waits on one root
-future. dask resolves each merge's arguments on whichever worker runs it and fetches inputs
-between workers, so the merges run off your submit node; a slow leaf blocks only its own path.
-Intermediates are released as their parent consumes them, so only ``O(log N)`` of them are live
-at once. The grouping is fixed by leaf index, never by submission or arrival order — which is the
-difference from an arrival-batched reduction, where the grouping varies with the order futures
-happen to be submitted.
+**The reduction is the same tree.** Leaves are ``process`` tasks; the merges are submitted up front
+with future dependencies in exactly the ``plan_tree`` shape. The driver waits for the root future
+and raises at the first future that fails. dask resolves each merge's arguments on whichever worker
+runs it and fetches inputs between workers, so the merges run off your submit node; a slow leaf
+blocks only its own path. Intermediates are released as their parent consumes them, so only
+``O(log N)`` of them are live at once. The grouping is fixed by leaf index, never by submission or
+arrival order — which is the difference from an arrival-batched reduction, where the grouping
+varies with the order futures happen to be submitted.
 
 **Keys are explicit and unique per run.** Every submit carries a namespaced key of the form
 ``graphed-<plan fingerprint>-<nonce>-leaf|combine-<i>``, submitted with ``pure=False``. The
@@ -826,9 +826,11 @@ you find leaves clustering onto the worker that first received it.
 ``open_once`` gives you the same file locality it does locally. It is registered idempotently, so
 workers that join late — an adaptive cluster, a batch queue trickling jobs in — get it too.
 
-**Monitoring rides dask's own event channel.** Workers log to a per-run namespaced topic, the
-driver subscribes for the duration and releases it in a ``finally`` once trailing events drain.
-As locally, emission is off the data path and errors are swallowed.
+**Monitoring rides dask's own event channel.** Workers log to a per-run namespaced topic, which
+the driver subscribes to for the run and releases in a ``finally``: a run that completes first
+waits for its trailing events, and a fixed-tree run that raises releases it at once, so the events
+of tasks that finished just before the raise may not arrive. As locally, emission is off the data
+path and errors are swallowed.
 
 Everything that touches dask lives under ``dask_backend`` and is imported lazily, so importing
 ``graphed_executors`` on a machine without dask installed works fine.

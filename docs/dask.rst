@@ -386,9 +386,11 @@ above:
 Watching a run
 --------------
 
-Pass any object with the ``graphed.core.execution.Monitor`` shape to ``dask_runner`` and you get
-one event per task as it is submitted, starts, finishes or errors, delivered over dask's
-structured-event channel on a topic private to that run:
+Pass any object with the ``graphed.core.execution.Monitor`` shape to ``dask_runner`` and it is
+told each time a task is submitted, starts, finishes or errors, over dask's structured-event
+channel on a topic private to that run. A run that completes delivers every event; a fixed-tree run
+that raises stops listening at once, so the events of tasks that finished just before the raise may
+not arrive:
 
 .. code-block:: python
 
