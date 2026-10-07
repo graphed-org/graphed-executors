@@ -107,3 +107,8 @@ Venv `~/vibe-coding/cloud/.venv-m68d` (macOS py3.12, graphed a51bee4, histogram 
 - Gates at 2976dbf: macOS 1221 passed / 145 skipped (frozen m68d 31 + 8 guarded skips); per-file >= 90 %;
   diff-cover 100 %; precommit ok; mypy strict + win32 clean. `m68d-impl-pool` test-htcondor set 614
   passed / 10 skipped (frozen m68d 39/39), per-file ok, diff-cover 100 %.
+
+## Iteration 10 — review r2 (R2-F1)
+- design.rst and dask.rst: a completed run waits for its trailing events; a fixed-tree run that raises
+  releases the monitor topic at once. `git grep -n "once trailing events drain" -- docs/` is empty
+  (control `git grep -c "Monitoring rides" -- docs/design.rst` = 1); sphinx -W and precommit ok.
