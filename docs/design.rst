@@ -826,11 +826,11 @@ you find leaves clustering onto the worker that first received it.
 ``open_once`` gives you the same file locality it does locally. It is registered idempotently, so
 workers that join late — an adaptive cluster, a batch queue trickling jobs in — get it too.
 
-**Monitoring rides dask's own event channel.** Workers log to a per-run namespaced topic, which
-the driver subscribes to for the run and releases in a ``finally``: a run that completes first
-waits for its trailing events, and a fixed-tree run that raises releases it at once, so the events
-of tasks that finished just before the raise may not arrive. As locally, emission is off the data
-path and errors are swallowed.
+**Monitoring rides dask's own event channel.** Workers log to a per-run namespaced topic, which the
+driver subscribes to for the run and releases in a ``finally``. A fixed-tree run, with or without a
+``RunControl``, that returns first waits for the trailing events of the tasks it submitted, and one
+that raises releases the topic at once, so the events of tasks that finished just before the raise
+may not arrive. As locally, emission is off the data path and errors are swallowed.
 
 Everything that touches dask lives under ``dask_backend`` and is imported lazily, so importing
 ``graphed_executors`` on a machine without dask installed works fine.
@@ -988,9 +988,10 @@ endpoint where it runs and then from a worker, through an ordinary task, because
 reaches may be firewalled from the execute nodes; a managed one must answer a worker on another host
 than its own unless that host is the driver's. A task that fails re-runs those checks where it ran:
 an exception's type cannot tell a dead service from a plan error, but asking the service can, and the
-run ends at that first failure either way. A started service's port counts only when the started
-process tree holds its listener, because a check passes on any listener. The endpoints are bound into
-the plan before its first task and the value is resolved while the services are still up. A run's
+run ends at that first failure either way. On Linux a started service's port counts only when the
+started process tree holds its listener (read from ``/proc``), because a check passes on any
+listener; elsewhere the check alone decides. The endpoints are bound into the plan before its first
+task and the value is resolved while the services are still up. A run's
 services, its probe tasks and its queued tasks live exactly as long as the run: every acquisition
 registers its release when it returns, and each release logs its failure instead of raising, so the
 error you see is the first one. The engine names no service; the recipes are plain data in
