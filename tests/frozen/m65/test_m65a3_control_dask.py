@@ -14,7 +14,7 @@ pytest.importorskip("distributed")
 import distributed
 import m65a3_bodies as b
 import m65a_probe as mp
-from graphed.core import RunControl
+from graphed.core import RunControl, TaskPhase
 
 from graphed_executors.dask_backend import dask_runner
 
@@ -65,13 +65,16 @@ def test_stop_condition_does_not_end_a_cancel_drain(client: Any, tmp_path: Path)
 
 
 @pytest.mark.parametrize("path", PATHS)
-def test_window_is_the_dask_task_slots(client: Any, path: str) -> None:
+def test_window_is_the_dask_task_slots(client: Any, path: str, tmp_path: Path) -> None:
+    entered, release = str(tmp_path / "entered"), str(tmp_path / "release")
     rec = mp.Recorder()
     ex = dask_runner(client, monitor=rec, replicate_broadcast=True)
     ex.control = RunControl()
-    res = mp.Background(
-        lambda: ex.run(mp.make_plan(mp.Probe(n=8, sleep_s=0.3), adaptive=PATHS[path]))
-    ).result()
+    probe = mp.Probe(n=8, hold_all=True, entered_path=entered, release_path=release)
+    run = mp.Background(lambda: ex.run(mp.make_plan(probe, adaptive=PATHS[path])))
+    mp.wait_until(lambda: rec.count(TaskPhase.STARTED) >= 4)  # no task finishes before the release
+    mp.touch(release)
+    res = run.result()
     assert res.value == (1,) * 8
     assert b.started_before_first_finished(rec) == 4
 
