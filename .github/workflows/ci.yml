@@ -165,6 +165,7 @@ jobs:
             tests/frozen/m65/test_m65b_push_submit.py tests/frozen/m65/test_m65b_push_dask.py \
             tests/frozen/m68a/test_scope_dask_memory.py \
             tests/frozen/m68c/test_m68c_submit_dask.py tests/frozen/m68c/test_m68c_submit_thread.py \
+            tests/frozen/m74/test_m74_dask.py \
             tests/extra/m43 tests/extra/m44 tests/extra/m68a tests/extra/m68c \
             tests/extra/m69b/test_m69b_schedulable.py tests/extra/m69b/test_m69b_dask_driver_check.py \
             --cov-config=.coveragerc-dask \
@@ -245,6 +246,7 @@ jobs:
             tests/frozen/m63/test_m63_submit_parsl.py \
             tests/frozen/m65/test_m65a3_control_parsl.py \
             tests/frozen/m68c/test_m68c_submit_parsl.py \
+            tests/frozen/m74/test_m74_parsl.py \
             --cov --cov-config=.coveragerc-parsl \
             --cov-branch --cov-fail-under=0
           # settle: force any lingering HTEX pool workers to flush their subprocess coverage
@@ -370,6 +372,7 @@ jobs:
             tests/frozen/m68c tests/extra/m68c \
             tests/frozen/m69b/test_histserv_cluster.py tests/frozen/m69b/test_histserv_managed.py \
             tests/frozen/m69b/test_service_order.py tests/extra/m69b \
+            tests/frozen/m74/test_m74_htcondor.py \
             --cov --cov-config=.coveragerc-htcondor \
             --cov-branch --cov-fail-under=0
           mv .coverage .coverage.driver
