@@ -103,6 +103,14 @@ An H→γγ analysis on graphed
   with ``plan(..., context=)``, on histserv servers; ``run_local.py`` saves them as UHI JSON, and
   ``run_lpc.py`` runs the analysis at the LPC from the HiggsDNA sample manifests (:doc:`hgg`).
 
+Fixed
+~~~~~
+
+* **A process-pool worker that starts slowly no longer fails the run.** Before the first task, the
+  process pool sends the plan's function to every worker; it gave up after 1000 quick rounds (about
+  3 s) while a worker was still starting, raising ``broadcast reached only 1/2 workers``. It now
+  waits up to 60 s for every worker.
+
 0.0.4
 -----
 
