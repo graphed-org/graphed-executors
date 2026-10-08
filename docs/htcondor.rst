@@ -300,10 +300,12 @@ exit code decides whether HTCondor runs it again:
    * - 1
      - Anything another attempt may get past: the run's workers were lost (every pilot preempted,
        say), pilots could not start, a service the plan needs could not be reached or started
-       (see `Services`_), or the driver failed before or after the run.
+       (see `Services`_), the checkpoint store could not be reached (see `Resuming on a retry`_),
+       or the driver failed before or after the run.
      - Twice
    * - 3
-     - The plan's own code raised; it would raise again.
+     - The plan's own code raised; it would raise again. Or the checkpoint store records another
+       environment (``EnvironmentChanged``).
      - No
    * - killed
      - The driver died before writing its result: out of memory, a signal, no interpreter in the
@@ -320,6 +322,49 @@ done, failed or removed, so ``wait(timeout=None)`` does not return while the job
 function defined in ``__main__``) is refused before anything is written or submitted, as for
 ``htcondor_runner``; a join or repartition plan's stage functions travel by value instead, so they
 are accepted.
+
+Resuming on a retry
+~~~~~~~~~~~~~~~~~~~
+
+A retry of the driver job (exit 1, or killed) starts the plan from the beginning unless you give
+it a checkpoint store:
+
+.. code-block:: python
+
+    # A recipe: this needs an HTCondor pool and a filesystem every slot mounts.
+    handle = submit_driverless(plan, site="lpc", image=IMAGE, n_pilots=8,
+                               request_memory_mb=16000, log_dir=work,
+                               user_modules=[my_tasks.__file__],
+                               store="/path/every/slot/mounts/ttbar-store")
+
+With ``store``, the driver wraps the plan with ``graphed.checkpoint.resumable`` on every try, before
+it starts a pilot, so each try recomputes only the tasks the earlier tries did not finish, and
+``driver.log`` says how many it reused (``12 of 40 tasks reused from ...``). ``salt`` and
+``accept_environment`` are passed through to ``resumable`` (:ref:`design-resume`). An edit to a
+local module or an editable install (a ``user_modules`` file, say) is not in the key, so change
+``salt`` when you change such code, or a retry reuses what the old code stored. A plan
+``resumable`` refuses, such as one filling histserv histograms, is refused by
+``submit_driverless`` with that ``TypeError`` before anything is written or submitted.
+
+Two outcomes are specific to the store. A store the driver cannot open or read exits 1 and is
+retried. A store whose environment record differs from the image's (another image, or new package
+versions) exits 3 with ``EnvironmentChanged`` in ``result.pkl``, naming each distribution that
+changed, before any pilot starts; retrying would refuse again. If the new environment is
+intended, resubmit with ``accept_environment=True``.
+
+**Where to put the store.** A try may land on another machine, and every pilot reads and writes the
+store itself, so a directory store must be on a filesystem the driver's slot and every pilot's
+mount; ``submit_driverless`` makes a relative path absolute against its working directory. The
+job's scratch directory is not one: it is gone when the try
+ends. Otherwise use an fsspec URL (``s3://bucket/prefix``) with
+``storage_options``.
+
+**Credentials.** ``storage_options`` travel in clear: in ``run.json``, which is transferred to the
+job like ``plan.pkl``, and inside each task's pickled process, which is signed but not encrypted.
+A secret that must not travel that way goes in a credential file every pilot can read (an
+``~/.aws/credentials``-style file your storage library reads by itself, on the shared filesystem),
+named by a non-secret option. Never put it in the job's ``environment``: that is readable by anyone
+who can query the job's ad.
 
 
 Services
@@ -443,7 +488,7 @@ A service node restarts a command that dies, up to three times, each on a port n
 earlier ones served, and announces the new endpoint. A task that then finds the service gone ends the
 run with ``ServiceUnreachable``, and the driver runs the plan again in the same job, against the new
 announce and on the same pilots (``driver.log`` says ``rerun:``); the tasks that had finished run
-again.
+again, unless the run has a ``store``, which serves them back.
 
 While the driver waits for an announce it reads the node's queue ad on the DAG's schedd. A node that
 is held fails the try at once, naming its ``HoldReason``; so does one that left the queue, naming the

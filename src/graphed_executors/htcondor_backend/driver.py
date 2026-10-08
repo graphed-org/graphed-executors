@@ -23,10 +23,11 @@ node's restarts.
   ``runner.run(plan)``: reading ``run.json`` or the plan, starting the pilots, and the driver's own
   service set (its endpoints and placement are environment; *this plan's decision*, plan-services D6).
   Inside ``runner.run``: a run whose workers were lost (a ``KilledWorker`` ``StageError``, e.g. every
-  pilot preempted; *owner ruling 2026-09-25*), and the run's own service phase or a failed task's re-check
-  of its services (``ServiceUnavailable``, ``ServiceUnreachable`` and a probe's raw ``WorkerLost``; *this
-  plan's decision*).
-- 3: every other exception from ``runner.run(plan)``: the plan's own error, deterministic, so the job's
+  pilot preempted; *owner ruling 2026-09-25*), a ``StoreUnavailable``, and the run's own service phase
+  or a failed task's re-check of its services (``ServiceUnavailable``, ``ServiceUnreachable`` and a
+  probe's raw ``WorkerLost``; *this plan's decision*).
+- 3: an ``EnvironmentChanged`` from making the plan resumable on ``run.json["store"]``, and every
+  other exception from ``runner.run(plan)``: the plan's own error, deterministic, so the job's
   ``retry_until`` (a DAG's ``RETRY driver 2 UNLESS-EXIT 3``) stops retrying it. A ``StageError``
   (*owner ruling 2026-09-25*) or a task's exception re-raised intact, such as a ``ValueError`` (*this
   plan's decision*).
@@ -45,6 +46,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, TextIO
 
+from graphed.checkpoint import EnvironmentChanged, StoreUnavailable, resumable
 from graphed.debug import StageError
 
 from graphed_executors.submit.services import (
@@ -147,10 +149,10 @@ def _result_blob(ok: bool, payload: object) -> bytes:
 
 def _exit_code(exc: Exception) -> int:
     """The exit of an exception from inside ``runner.run(plan)``: 1 (retried) for lost workers and for
-    the run's service phase, 3 (not retried) for everything else, the plan's own error."""
+    the run's service phase and the checkpoint store, 3 (not retried) for everything else, the plan's own error."""
     lost = isinstance(exc, StageError) and exc.cause_type == "KilledWorker"
-    service = isinstance(exc, ServiceUnavailable | ServiceUnreachable | WorkerLost)
-    return EXIT_FAILED if lost or service else EXIT_PLAN_ERROR
+    environment = isinstance(exc, ServiceUnavailable | ServiceUnreachable | WorkerLost | StoreUnavailable)
+    return EXIT_FAILED if lost or environment else EXIT_PLAN_ERROR
 
 
 def _attempt(
@@ -181,14 +183,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"driver pid={os.getpid()} dir={job}", file=log, flush=True)
         handler = logging.StreamHandler(log)
         handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-        package = logging.getLogger("graphed_executors")
-        level = package.level
-        package.addHandler(handler)  # service statuses and failed releases, in driver.log
-        package.setLevel(logging.INFO)
+        # service statuses, failed releases and the store's reused count, in driver.log
+        loggers = [logging.getLogger(name) for name in ("graphed_executors", "graphed.checkpoint")]
+        levels = [logger.level for logger in loggers]
+        for logger in loggers:
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
         try:
             run = json.loads((job / RUN_FILE).read_text())
             with open(job / PLAN_FILE, "rb") as f:
-                plan = pickle.load(f)
+                loaded = pickle.load(f)
+
+            def wrapped() -> Any:
+                """``loaded`` resumable on ``run.json["store"]``; ``resumable`` reads the done tasks as it wraps."""
+                if not run.get("store"):
+                    return loaded
+                return resumable(
+                    loaded,
+                    run["store"],
+                    storage_options=run.get("storage_options"),
+                    salt=run.get("salt", ""),
+                    accept_environment=bool(run.get("accept_environment")),
+                )
+
+            plan = wrapped()
             runner = _runner(run, job, log)
             try:
                 announced = run.get("announce_only") or {}
@@ -198,18 +216,22 @@ def main(argv: list[str] | None = None) -> int:
                     if not (isinstance(error, ServiceUnreachable) and error.name in announced):
                         break
                     print(f"rerun: {error}", file=log, flush=True)
+                    plan = wrapped()
             finally:
                 try:
                     runner.close()
                 except Exception:  # the run's outcome stands; the close failure is only logged
                     print("runner.close() failed:", file=log)
                     traceback.print_exc(file=log)
+        except EnvironmentChanged as exc:  # only resumable raises it; a retry would refuse again
+            error, code = exc, EXIT_PLAN_ERROR
         except Exception as exc:
             error, code = exc, EXIT_FAILED
         finally:
-            package.removeHandler(handler)
+            for logger, level in zip(loggers, levels, strict=True):
+                logger.removeHandler(handler)
+                logger.setLevel(level)
             handler.close()
-            package.setLevel(level)
         blob = _result_blob(True, result) if error is None else _result_blob(False, error)
         if error is not None:
             traceback.print_exception(error, file=log)

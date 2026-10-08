@@ -367,6 +367,84 @@ If you see ``PullTimeoutError`` on a legitimately huge batch rather than on a de
 a worker is unreachable — check that the pool is on one routable network before retrying.
 
 
+.. _design-resume:
+
+Resuming a killed run
+---------------------
+
+A driver that dies takes the run with it: on a rerun, every runner here starts over. To keep the
+finished work, wrap the plan with ``graphed.checkpoint.resumable(plan, store)`` before you run it.
+Each task's result is recorded in a content-addressed store as it finishes, and a rerun of the
+same plan recomputes only the tasks the store does not hold. Nothing about the runner changes:
+the thread and process pools, ``SubmitRunner`` over any backend, ``dask_runner``,
+``parsl_runner``, ``htcondor_runner`` and the peer reductions (``transport_run_plan``,
+``parsl_run_plan``) all run the wrapped plan as they run any other.
+
+.. code-block:: python
+
+    import numpy as np
+
+    from graphed.checkpoint import resumable
+    from graphed.core import Partition, Plan, Task
+    from graphed_executors.local import ThreadExecutor
+
+
+    def chunk(partition, resources):
+        return np.arange(partition.entry_start, partition.entry_stop, dtype=np.float64).sum()
+
+
+    plan = Plan(
+        process=chunk,
+        combine=lambda a, b: a + b,
+        empty=lambda: 0.0,
+        tasks=tuple(Task(i, Partition("toy", "Events", i * 1000, (i + 1) * 1000)) for i in range(8)),
+    )
+
+    rp = resumable(plan, "checkpoints/")
+    with ThreadExecutor(4) as pool:
+        print("reused:", rp.process.reused, " result:", pool.run(rp).value)
+
+Run it twice::
+
+    reused: 0  result: 31996000.0
+    reused: 8  result: 31996000.0
+
+Kill the first run halfway and the second reports the tasks that had finished and runs the rest.
+``reused`` is the count the store held when ``resumable`` was called; it is also logged at INFO on
+the ``graphed.checkpoint`` logger as ``"<n> of <T> tasks reused from <store>"``.
+
+**Where the stored results are read.** A stored task is still a task: it is scheduled like any
+other, and the worker that gets it decodes the stored result and hands it to the reduction tree.
+The driver decodes nothing, so a resume is as parallel as the run, and stored partials stream
+into the tree as they load. Because the tree groups by leaf index (`Why your result is the same on 1 worker and on
+100`_), a resumed run equals the uninterrupted one bit for bit, and a store a killed
+``ThreadExecutor`` run left resumes on ``transport_run_plan`` or ``parsl_run_plan`` just as well.
+
+**Where the store lives.** ``store`` is a root every worker opens itself: a directory on a
+filesystem every worker mounts, or an fsspec URL (``s3://...``) with ``storage_options``. A worker
+that cannot reach it raises ``graphed.checkpoint.StoreUnavailable`` naming the root; an exception
+from your own code arrives as itself.
+
+**What a key sees, and when a restart reuses nothing.** A task's key is what the worker runs,
+pickled the way cloudpickle ships it, plus its partition and a ``salt``. Installed versions are
+not in the key but in an environment record the store keeps: a rerun in a different environment
+raises ``graphed.checkpoint.EnvironmentChanged`` naming what changed, and
+``accept_environment=True`` records the new one and resumes. If a rerun reports ``reused: 0``
+when nothing changed, the process holds data ordered by set iteration (sort it, or set ``salt``),
+fills class-level state on a class defined in ``__main__`` (keep it on instances or in a module),
+or calls a numba kernel defined in ``__main__`` (keep kernels in a module). Process-global state
+other than ``ak.behavior`` (an environment variable, a file a task reads beyond its partition) is
+not in the key: change ``salt`` when it changes. Nor is an edit to a local module or an editable
+install (a ``user_modules`` file, say), whose functions pickle by name, so change ``salt`` when you
+change such code. graphed's checkpoint docs ("Resuming on any
+executor") give the full rules.
+
+**What is refused.** ``resumable`` raises ``TypeError`` before touching the store for a plan that
+pulls tasks from ``next_tasks``, for a process it cannot key (one holding a lock, say), and for a
+plan with ``services`` whose process does not declare ``checkpointable``: a histserv fill returns
+a receipt for state held in a server, which a store cannot hold.
+
+
 Watching a run
 --------------
 
@@ -1004,12 +1082,9 @@ signs pickles), from a directory that holds only the recipe's inputs.
 Not supported yet
 -----------------
 
-* **Resuming a killed cluster run.** A dask or parsl run that dies starts over.
-  ``graphed.checkpoint.run_resumable`` and ``run_shuffle_resumable`` resume — against a local
-  directory or a store at a URL any machine can reach — but they drive the partitions themselves,
-  one at a time; they are not runners, so there is no ``run_resumable(executor=dask_runner(...))``.
-  Use them where surviving a crash matters more than wall time, or split your run into pieces you
-  can resubmit.
+* **Resuming a plan that pulls tasks as it goes.** ``resumable`` needs a fixed task set; a plan with
+  ``next_tasks`` is refused, and no interior combine is stored, so a resumed run recombines every
+  partial (`Resuming a killed run`_).
 * **TaskVine and Work Queue.** ``ParslBackend`` refuses executor types it has not verified
   rather than guessing a capability vector, so those raise a ``TypeError`` naming the two
   supported classes. Use HTEX.
