@@ -56,15 +56,15 @@ def test_unused_storage_options_are_not_refused(tmp_path: Path, monkeypatch: pyt
 @pytest.mark.parametrize(
     ("store", "expected"),
     [
-        ("rel", "{cwd}/rel"),
-        (Path("rel"), "{cwd}/rel"),
-        (Path("a/../abs"), "{cwd}/abs"),
+        ("rel", Path("rel")),
+        (Path("rel"), Path("rel")),
+        (Path("a/../abs"), Path("abs")),
         ("s3://b/p", "s3://b/p"),
         ("file:///x", "file:///x"),
     ],
 )
 def test_run_json_holds_an_absolute_local_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Any, expected: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Any, expected: Path | str
 ) -> None:
     cwd = tmp_path / "sub"
     cwd.mkdir()
@@ -74,7 +74,8 @@ def test_run_json_holds_an_absolute_local_store(
     submit_driverless(
         leaf_plan(tmp_path), request_memory_mb=1024, log_dir=log_dir, user_modules=[HARNESS_FILE], store=store
     )
-    assert json.loads((log_dir / "run.json").read_text())["store"] == expected.format(cwd=cwd)
+    want = str(cwd / expected) if isinstance(expected, Path) else expected
+    assert json.loads((log_dir / "run.json").read_text())["store"] == want
 
 
 @pytest.mark.parametrize(("store", "error"), [(123, TypeError), ("", ValueError)])
