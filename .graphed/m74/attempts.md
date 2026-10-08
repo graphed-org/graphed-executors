@@ -21,3 +21,18 @@
   on a retry", dask/parsl "When things fail" paragraphs, improvements/limitations bullets replaced; sphinx -W ok.
 - Trap: a parsl coverage run's late HTEX worker data files landed in the repo root after cleanup and were combined
   into the next precommit run (84%, parsl files reported); deleting `.coverage.*` and rerunning gave 98%.
+
+## Iteration 3 — merge main (m68d #49), graphed pin 250023e
+- Merge (not rebase; freeze-m74 stays an ancestor). Only conflict: driver.py's module docstring exit list, merged to
+  carry both m68d's service re-check and m74's `StoreUnavailable` (1) / `EnvironmentChanged` (3).
+- m68d's in-job rerun reused the plan object wrapped once per try, which reruns what the first run stored:
+  `resumable` tags done tasks when it wraps. `driver.main` now re-wraps the loaded plan before each rerun
+  (addendum §2.8). tests/extra/m74/test_m74_driver_rerun.py: with a store the rerun serves task 0 and logs
+  "0 of 2" then "1 of 2 tasks reused"; without one task 0 runs again. The store leg failed before the re-wrap.
+- htcondor.rst's rerun paragraph says a store serves the finished tasks back.
+- Results on graphed 250023e (macOS): frozen+extra m74 16 passed; m68d + m67 frozen/extra 115 passed, 15 skipped;
+  CI main command 1629 passed, 8 failed + 5 errors = the grpc_health/histserv set, identical on origin/main.
+  The htcondor-scope run had two more failures (m68c parsl HTEX "no managers after 30s" under load); 3/3 pass alone.
+  Linux docker python:3.12: m74 htcondor + local, extra m74, m68d, m67 131 passed, 10 skipped (bindings/pool legs).
+- Gates: ruff, mypy --strict (plain and win32), sphinx -W, per-file gate (15 files), main diff-cover 100%,
+  htcondor diff-cover vs origin/main 100% (driver.py, driverless.py; 25 lines); frozen m74/m68d unchanged.
