@@ -84,6 +84,8 @@ R = TypeVar("R")
 T = TypeVar("T")
 # How long a peer driver waits for the root, counting only time the run is not paused.
 _PEER_ROOT_TIMEOUT_S = 300.0
+# How long a freshly spawned pool worker may take to boot and answer the driver.
+_WORKER_START_TIMEOUT_S = 60.0
 
 
 def _drain_queue(q: Any) -> None:
@@ -1363,7 +1365,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                 )
                 for a in worker_addrs
             ]
-            http_driver_handshake(driver_t, worker_addrs, timeout_s=60.0)
+            http_driver_handshake(driver_t, worker_addrs, timeout_s=_WORKER_START_TIMEOUT_S)
             return self._collect_peer(driver_t, plan, n, futs, pool, control)
         finally:
             driver_t.close()
@@ -1588,14 +1590,15 @@ class _ProcessExecutorBase(_BaseExecutor):
             return
         target = self.max_workers  # concrete (resolved in __init__) -- no private pool attribute
         seen: set[int] = set()
-        rounds = 0
-        while len(seen) < target and rounds < 1000:
+        # a deadline, not a round count: booted workers answer every round while a sibling still boots
+        t0 = time.monotonic()
+        while len(seen) < target and time.monotonic() - t0 < _WORKER_START_TIMEOUT_S:
             batch = [pool.submit(_prime_shared, token, payload) for _ in range(target - len(seen))]
             seen.update(f.result() for f in batch)  # a dead worker surfaces as BrokenProcessPool here
-            rounds += 1
         if len(seen) < target:  # never silently mark a token primed without full coverage (P1-3)
             raise RuntimeError(
-                f"broadcast reached only {len(seen)}/{target} workers after {rounds} rounds; "
+                f"broadcast reached only {len(seen)}/{target} workers in "
+                f"{time.monotonic() - t0:.1f}s; "
                 "refusing to cache an under-primed process (would KeyError on an unprimed worker)"
             )
         self._broadcast_tokens[token] = None

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import threading
 import time
 from collections.abc import Callable
@@ -12,7 +11,7 @@ from typing import Any
 import m65a3_bodies as b
 import m65a_probe as mp
 import pytest
-from graphed.core import Partition, RunControl, RunState, StopReason, TaskPhase
+from graphed.core import RunControl, RunState, StopReason, TaskPhase
 
 from graphed_executors.submit import SubmitFuture, SubmitRunner, ThreadBackend
 
@@ -99,63 +98,70 @@ class _Slots(ThreadBackend):
         return self._reads(i)
 
 
+def _gate(tmp_path: Path, name: str) -> dict[str, str]:
+    return {"entered_path": str(tmp_path / f"{name}-entered"), "release_path": str(tmp_path / f"{name}-release")}
+
+
+def _finished_at(rec: mp.Recorder, key: int) -> float:
+    return min(e.t for e in rec.events if e.phase is TaskPhase.FINISHED and e.key == key)
+
+
 @pytest.mark.parametrize("leg", LEGS)
-def test_window_floors_at_one_and_widens_on_reread(leg: str) -> None:
+def test_window_floors_at_one_and_widens_on_reread(leg: str, tmp_path: Path) -> None:
+    gate = _gate(tmp_path, "all")
     rec = mp.Recorder()
     ex = SubmitRunner(_Slots(lambda i: 0 if i == 0 else 4), monitor=rec)
     ex.control = RunControl()
-    plan = mp.make_plan(mp.Probe(n=8, sleep_s=0.3), adaptive=LEGS[leg])
-    res = mp.Background(lambda: ex.run(plan)).result(30)
+    plan = mp.make_plan(mp.Probe(n=8, hold_all=True, **gate), adaptive=LEGS[leg])
+    run = mp.Background(lambda: ex.run(plan))
+    mp.wait_until(lambda: rec.count(TaskPhase.STARTED) >= 4)  # no task finishes before the release
+    mp.touch(gate["release_path"])
+    res = run.result(30)
     assert res.value == (1,) * 8
     assert b.started_before_first_finished(rec) == 4
     if plan.next_tasks is not None:
         assert plan.next_tasks.calls == res.n_partitions + 1
 
 
-@dataclasses.dataclass(frozen=True)
-class _Slow0:
-    """Key 0 runs for 1 s, every other key for 0.05 s."""
-
-    def __call__(self, partition: Partition, resources: object) -> Any:
-        time.sleep(1.0 if partition.entry_start == 0 else 0.05)
-        return mp.partial("onehot", mp.N, partition.entry_start)
-
-
 @pytest.mark.parametrize("leg", LEGS)
-def test_timed_wake_sees_resume_and_new_slots(leg: str) -> None:
+def test_timed_wake_sees_resume_and_new_slots(leg: str, tmp_path: Path) -> None:
+    gate = _gate(tmp_path, "widen")
     joined = threading.Event()
-    t_flag: list[float] = []
-
-    def join() -> None:
-        t_flag.append(time.perf_counter())
-        joined.set()
-
     rec = mp.Recorder()
     ex = SubmitRunner(_Slots(lambda i: 8 if joined.is_set() else 1), monitor=rec)
     ex.control = RunControl()
-    plan = mp.make_plan(mp.Probe(n=8, sleep_s=1.0), adaptive=LEGS[leg])
-    threading.Timer(0.2, join).start()
-    res = mp.Background(lambda: ex.run(plan)).result(30)
+    plan = mp.make_plan(mp.Probe(n=8, sleep_s=0.05, hold_key=0, **gate), adaptive=LEGS[leg])
+    run = mp.Background(lambda: ex.run(plan))
+    assert mp._await_file(gate["entered_path"])
+    time.sleep(0.2)
+    t_flag = time.perf_counter()
+    joined.set()
+    mp.wait_until(lambda: rec.count(TaskPhase.STARTED) >= 2)  # key 0 is held until the release
+    mp.touch(gate["release_path"])
+    res = run.result(30)
     assert res.value == (1,) * 8
     t2 = sorted(e.t for e in rec.events if e.phase is TaskPhase.STARTED)[1]
-    assert 0 <= t2 - t_flag[0] < 0.3
+    assert t_flag <= t2 < _finished_at(rec, 0)
 
+    gate = _gate(tmp_path, "resume")
     ctl = RunControl()
     rec = mp.Recorder(on_first_finished=ctl.pause)
     ex = SubmitRunner(ThreadBackend(2), monitor=rec)
     ex.control = ctl
-    plan = dataclasses.replace(mp.make_plan(mp.Probe(), adaptive=LEGS[leg]), process=_Slow0())
+    plan = mp.make_plan(mp.Probe(sleep_s=0.05, hold_key=0, **gate), adaptive=LEGS[leg])
     run = mp.Background(lambda: ex.run(plan))
     assert rec.first_finished.wait(10)
     time.sleep(0.2)
     resumed = time.perf_counter()
     ctl.resume()
+    mp.wait_until(lambda: rec.count(TaskPhase.STARTED) > 2)
+    mp.touch(gate["release_path"])
     res = run.result()
     started = [e.t for e in rec.events if e.phase is TaskPhase.STARTED]
     later = [t for t in started if t > resumed]
     assert res.stopped is StopReason.EXHAUSTED
     assert len(started) - len(later) == 2
-    assert later and min(later) - resumed < 0.5
+    assert later and min(later) < _finished_at(rec, 0)
 
 
 class _Recording(ThreadBackend):
