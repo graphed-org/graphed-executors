@@ -340,7 +340,9 @@ it a checkpoint store:
 With ``store``, the driver wraps the plan with ``graphed.checkpoint.resumable`` on every try, before
 it starts a pilot, so each try recomputes only the tasks the earlier tries did not finish, and
 ``driver.log`` says how many it reused (``12 of 40 tasks reused from ...``). ``salt`` and
-``accept_environment`` are passed through to ``resumable`` (:ref:`design-resume`). A plan
+``accept_environment`` are passed through to ``resumable`` (:ref:`design-resume`). An edit to a
+local module or an editable install (a ``user_modules`` file, say) is not in the key, so change
+``salt`` when you change such code, or a retry reuses what the old code stored. A plan
 ``resumable`` refuses, such as one filling histserv histograms, is refused by
 ``submit_driverless`` with that ``TypeError`` before anything is written or submitted.
 
@@ -352,7 +354,8 @@ intended, resubmit with ``accept_environment=True``.
 
 **Where to put the store.** A try may land on another machine, and every pilot reads and writes the
 store itself, so a directory store must be on a filesystem the driver's slot and every pilot's
-mount, given as an absolute path. The job's scratch directory is not one: it is gone when the try
+mount; ``submit_driverless`` makes a relative path absolute against its working directory. The
+job's scratch directory is not one: it is gone when the try
 ends. Otherwise use an fsspec URL (``s3://bucket/prefix``) with
 ``storage_options``.
 

@@ -434,7 +434,9 @@ when nothing changed, the process holds data ordered by set iteration (sort it, 
 fills class-level state on a class defined in ``__main__`` (keep it on instances or in a module),
 or calls a numba kernel defined in ``__main__`` (keep kernels in a module). Process-global state
 other than ``ak.behavior`` (an environment variable, a file a task reads beyond its partition) is
-not in the key: change ``salt`` when it changes. graphed's checkpoint docs ("Resuming on any
+not in the key: change ``salt`` when it changes. Nor is an edit to a local module or an editable
+install (a ``user_modules`` file, say), whose functions pickle by name, so change ``salt`` when you
+change such code. graphed's checkpoint docs ("Resuming on any
 executor") give the full rules.
 
 **What is refused.** ``resumable`` raises ``TypeError`` before touching the store for a plan that

@@ -36,3 +36,16 @@
   Linux docker python:3.12: m74 htcondor + local, extra m74, m68d, m67 131 passed, 10 skipped (bindings/pool legs).
 - Gates: ruff, mypy --strict (plain and win32), sphinx -W, per-file gate (15 files), main diff-cover 100%,
   htcondor diff-cover vs origin/main 100% (driver.py, driverless.py; 25 lines); frozen m74/m68d unchanged.
+
+## Iteration 4 — review D1, N1, N2, exec-T1..T3
+- D1: `submit_driverless` makes a local `store` absolute (`os.path.abspath(os.fspath(store))`) before any check;
+  a `"://"` URL passes unchanged, a non-path store is a `TypeError` and `""` a `ValueError`, both before the
+  bindings. A relative store used to open in the job sandbox HTCondor deletes; a `Path` failed `json.dumps` after
+  the bindings. tests/extra/m74 `test_run_json_holds_an_absolute_local_store` / `test_a_bad_store_is_refused...`
+  fail at 43cec0a.
+- N2: `storage_options` are probed and written only with a store (`test_unused_storage_options_are_not_refused`).
+- N1: design.rst key paragraph and htcondor.rst "Resuming on a retry": edits to local modules / editable installs
+  are not in the key, change `salt`. "Where to put the store" says a relative path is made absolute.
+- Mutants M3, M5, M7a (`test_main_forwards_the_store_fields_and_restores_its_loggers`) and M16
+  (`test_check_resumable_refuses_before_the_process_is_pickled`) each fail only their new test.
+- mypy: `m74_harness` joins the bare-basename helper override (an extra test imports it).

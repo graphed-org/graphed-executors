@@ -236,7 +236,7 @@ def submit_driverless(
     retries: int = 3,
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
-    store: str | None = None,
+    store: str | os.PathLike[str] | None = None,
     storage_options: Mapping[str, Any] | None = None,
     salt: str = "",
     accept_environment: bool = False,
@@ -250,14 +250,20 @@ def submit_driverless(
     endpoints, which the driver job checks instead of starting those services. A service only a SERVICE
     node can host makes the run a DAG in a new ``<log_dir>/graphed-<nonce>/`` (the handle's
     ``log_dir``), whose ``log_dir``, ``user_modules`` and service inputs must lie under ``job_root``.
-    With ``store`` (a directory every pilot mounts, or an fsspec URL with ``storage_options``), the
-    driver runs ``graphed.checkpoint.resumable(plan, store, storage_options=..., salt=...,
-    accept_environment=...)`` on every try, so a retried driver recomputes only the tasks the store
-    does not hold. Everything is refused before the bindings are touched."""
-    if store is not None:  # first: pickling a refused plan's process can already start its services
-        check_resumable(plan)
-    options = dict(storage_options or {})
-    json.dumps(options)  # run.json carries them: refuse what JSON cannot hold before the bindings
+    With ``store`` (a directory every pilot mounts, made absolute here, or an fsspec URL with
+    ``storage_options``), the driver runs ``graphed.checkpoint.resumable(plan, store,
+    storage_options=..., salt=..., accept_environment=...)`` on every try, so a retried driver
+    recomputes only the tasks the store does not hold. Everything is refused before the bindings are
+    touched."""
+    options = dict(storage_options or {}) if store is not None else {}  # unused without a store
+    if store is not None:
+        # the driver's cwd is the job sandbox HTCondor deletes, so a local store must be absolute here
+        local = os.fspath(store)
+        if not local:
+            raise ValueError("store='' names no directory")
+        store = local if "://" in local else os.path.abspath(local)
+        check_resumable(plan)  # before any pickling: pickling a refused plan's process can start services
+        json.dumps(options)  # run.json carries them: refuse what JSON cannot hold before the bindings
     if pilots not in ("local", "condor"):
         raise ValueError(f"pilots={pilots!r}: 'local' (in the driver's slot) or 'condor' (jobs it submits)")
     endpoints = dict(services or {})
