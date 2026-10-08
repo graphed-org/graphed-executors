@@ -366,6 +366,12 @@ graphed turns that into a ``StageError`` naming the partition and the last worke
 Under co-located tasks the blame can land on an innocent partition, so treat the attribution as a
 strong hint rather than a verdict.
 
+**A driver that dies** takes the run with it, and a plain rerun starts over. Wrap the plan with
+``graphed.checkpoint.resumable(plan, store)`` and a rerun recomputes only the tasks the store does
+not hold, on ``dask_runner`` and ``transport_run_plan`` alike; the workers read the stored results,
+so ``store`` must be a directory every worker mounts or a URL they can all reach
+(:ref:`design-resume`).
+
 The two shuffle engines recover differently, and this is the same fixed-versus-elastic fork as
 above:
 
@@ -609,6 +615,4 @@ Not supported yet
   The laptop executors do support it.
 * **No peer-mode telemetry or run control** on the worker-to-worker reduction path: it emits no
   task events and takes no pause or cancel.
-* **No resume after a crash.** A dask run that dies starts over. ``graphed.checkpoint``'s
-  ``run_resumable`` resumes, against a local directory or a store at a URL, but runs the
-  partitions itself, one at a time, not on your cluster.
+* **Resuming a plan that pulls tasks as it goes** (``next_tasks``): ``resumable`` refuses it.

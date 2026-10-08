@@ -289,6 +289,12 @@ seconds if you pass ``start_htex(..., heartbeat_period=2)``. graphed recognises 
 ``ManagerLost`` anywhere in the exception chain and turns them into a ``StageError`` naming the
 task and the worker.
 
+**A driver that dies** takes the run with it, and a plain rerun starts over. Wrap the plan with
+``graphed.checkpoint.resumable(plan, store)`` and a rerun recomputes only the tasks the store does
+not hold, on ``parsl_runner`` and ``parsl_run_plan`` alike; the workers read the stored results,
+so ``store`` must be a directory every worker mounts or a URL they can all reach
+(:ref:`design-resume`).
+
 Under the peer exchange the same death restarts the whole shuffle onto the surviving workers, up
 to ``epoch_restarts_allowed`` (default 1), each restart tagged with a fresh run generation so
 leftovers from the failed attempt can never be picked up. Exhausting that budget raises an
@@ -324,6 +330,4 @@ Not supported yet
 * **Live event delivery through your driver.** Without a per-worker connection, events arrive at
   task completion, as above, so the dashboard updates in steps rather than continuously.
 * **Windows**, and CPython 3.14 / 3.14t, following parsl's own support.
-* **No resume after a crash.** A parsl run that dies starts over. ``graphed.checkpoint``'s
-  ``run_resumable`` resumes, against a local directory or a store at a URL, but runs the
-  partitions itself, one at a time, not on your pool.
+* **Resuming a plan that pulls tasks as it goes** (``next_tasks``): ``resumable`` refuses it.

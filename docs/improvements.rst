@@ -18,13 +18,16 @@ What does not work yet, and what to do instead.
   (``max_errors``) — not on the precision of the result. Set an event target and check the
   uncertainty yourself between runs.
 
-- **The runners here do not resume a killed run.** A dask or parsl run that dies starts over.
-  ``graphed.checkpoint.run_resumable`` does resume — against a local directory, or against a
-  store at a URL (an ``s3://`` bucket, a shared ``file://`` path) that any machine can reach —
-  but it processes the partitions one at a time in a single process. When a restart would cost
-  too much, split the work into smaller plans and combine their results, or save the analysis as
-  a ``graphed.core.DurablePlan`` and drive it with ``run_resumable`` where surviving a crash
-  matters more than wall time.
+- **A resumed run recombines every partial, and plans that pull tasks cannot resume.**
+  ``graphed.checkpoint.resumable(plan, store)`` resumes a killed run on every runner here
+  (:ref:`design-resume`), but it stores task results only, not interior combines, and refuses a
+  plan with ``next_tasks``. Each resumed task still costs one journal read on the driver and one
+  blob read on a worker, separate requests on an object store.
+
+- **Histserv fills do not resume.** A plan whose services hold its state (a histserv-backed
+  ``graphed_histogram`` plan) is refused by ``resumable`` and by ``submit_driverless(store=...)``,
+  since a store cannot hold a receipt for server state. Fill local histograms when the run must
+  survive its driver.
 
 - **A join or repartition plan runs one map task per source partition.** ``SubmitRunner`` runs a
   ``graphed.join_plan``/``shuffle_plan`` (:ref:`design-join-plan`) with no producer coalescing,
