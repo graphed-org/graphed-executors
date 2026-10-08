@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from graphed.checkpoint import check_resumable
 from graphed.core.execution import ExecResult, Plan
 from graphed.core.plan import DurablePlanV2
 from graphed.services import ServiceSpec, split_endpoint
@@ -235,6 +236,10 @@ def submit_driverless(
     retries: int = 3,
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
+    store: str | None = None,
+    storage_options: Mapping[str, Any] | None = None,
+    salt: str = "",
+    accept_environment: bool = False,
 ) -> RunHandle:
     """Submit ``plan`` as ONE job on ``site`` whose driver runs it over ``n_pilots`` pilots:
     ``pilots="local"`` starts them in the job's own slot (``request_cpus=n_pilots``), ``pilots="condor"``
@@ -245,7 +250,14 @@ def submit_driverless(
     endpoints, which the driver job checks instead of starting those services. A service only a SERVICE
     node can host makes the run a DAG in a new ``<log_dir>/graphed-<nonce>/`` (the handle's
     ``log_dir``), whose ``log_dir``, ``user_modules`` and service inputs must lie under ``job_root``.
-    Everything is refused before the bindings are touched."""
+    With ``store`` (a directory every pilot mounts, or an fsspec URL with ``storage_options``), the
+    driver runs ``graphed.checkpoint.resumable(plan, store, storage_options=..., salt=...,
+    accept_environment=...)`` on every try, so a retried driver recomputes only the tasks the store
+    does not hold. Everything is refused before the bindings are touched."""
+    if store is not None:  # first: pickling a refused plan's process can already start its services
+        check_resumable(plan)
+    options = dict(storage_options or {})
+    json.dumps(options)  # run.json carries them: refuse what JSON cannot hold before the bindings
     if pilots not in ("local", "condor"):
         raise ValueError(f"pilots={pilots!r}: 'local' (in the driver's slot) or 'condor' (jobs it submits)")
     endpoints = dict(services or {})
@@ -345,6 +357,10 @@ def submit_driverless(
         "announce_only": announce_only,
         "dag_dir": str(run_dir) if nodes else None,
         "extra_submit": launcher.extra_submit,
+        "store": store,
+        "storage_options": options,
+        "salt": salt,
+        "accept_environment": accept_environment,
     }
     (run_dir / RUN_FILE).write_text(json.dumps(run, indent=1))
     if not nodes:

@@ -14,12 +14,10 @@ concurrency:
 env:
   # the former core/debug/frontend/numpy/awkward siblings are now one consolidated package
   # Pinned, not @main: graphed is an unpinned upstream whose merges can redden this frozen suite with
-  # no local change. At graphed#63's merge commit on main (the resolve walk: resolve_services forwarded
-  # through collate and aggregate_plan), above the service surface of #58/#61 (ServiceSpec,
-  # split_endpoint, bind_services, require_bound) that m68a runs on. Moves to the first release carrying
-  # both. A git install builds the Rust core, so every job installing it needs a Rust
-  # toolchain.
-  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@a51bee4ff0b40c33cd68cca593f8a74c11d9f516"
+  # no local change. At graphed's ckpt-m74-resume branch (graphed.checkpoint.resumable, which m74 runs on)
+  # until it merges, then its merge commit on main. A git install builds the Rust core, so every job
+  # installing it needs a Rust toolchain.
+  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@da9c20ca0ef1b8fb104883fb3f5077e0b65da487"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
   # The frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
@@ -372,7 +370,7 @@ jobs:
             tests/frozen/m68c tests/extra/m68c \
             tests/frozen/m69b/test_histserv_cluster.py tests/frozen/m69b/test_histserv_managed.py \
             tests/frozen/m69b/test_service_order.py tests/extra/m69b \
-            tests/frozen/m74/test_m74_htcondor.py \
+            tests/frozen/m74/test_m74_htcondor.py tests/extra/m74 \
             --cov --cov-config=.coveragerc-htcondor \
             --cov-branch --cov-fail-under=0
           mv .coverage .coverage.driver
