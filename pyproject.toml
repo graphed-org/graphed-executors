@@ -52,6 +52,7 @@ parsl = ["parsl>=2026.7.20"]
 # the direct HTCondor backend (graphed_executors.htcondor_backend); the floor is the version the LPC
 # image resolves. No marker: the bindings ship Linux wheels only, so elsewhere the install fails loudly.
 htcondor = ["htcondor>=25.13"]
+taskvine = ["cloudpickle>=3"]
 
 [project.urls]
 Homepage = "https://github.com/graphed-org/graphed-executors"
