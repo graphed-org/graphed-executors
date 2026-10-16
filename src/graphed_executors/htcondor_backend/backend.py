@@ -54,7 +54,7 @@ from graphed_executors.submit.services import (
 from . import launch as _launch
 from . import server as _server
 from .launch import CLAIM_ATTRS, CondorPilots, PilotLauncher, located_schedd
-from .server import TaskServer, WorkerLost
+from .server import TaskServer, TaskTimedOut, WorkerLost
 from .services import AD_ATTRS, ServiceJob, machine_ads, queued_refusal
 from .sites import SITES, SiteProfile, counts_as_alive
 
@@ -393,7 +393,7 @@ class HTCondorBackend:
             fut.cancel()
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
-        return (exc.key, exc.pilot) if isinstance(exc, WorkerLost) else None
+        return (exc.key, exc.pilot) if isinstance(exc, WorkerLost | TaskTimedOut) else None
 
     def host_identity(self) -> str:
         """The driver's host as condor writes ``Machine`` for its slots: ``FULL_HOSTNAME`` attached (the

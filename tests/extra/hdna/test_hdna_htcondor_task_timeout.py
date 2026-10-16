@@ -1,5 +1,5 @@
-"""``task_timeout_s``: a task leased past the limit fails with ``TaskTimedOut`` naming its key, pilot and
-limit; its pilot stops, its late result is dropped, and a resumable rerun runs only that task (GW21)."""
+"""``task_timeout_s``: a task leased past the limit fails with a ``StageError`` naming its partition, caused
+by ``TaskTimedOut`` naming its key, pilot and limit; its pilot stops, its late result is dropped, and a resumable rerun runs only that task (GW21)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from _hdna_payloads import HangAt
 from graphed.checkpoint import Store, resumable
 from graphed.core import Partition
 from graphed.core.execution import Plan, Task
+from graphed.debug import StageError
 from m74_harness import leaf_plan, prepared_job, work_dirs
 
 from graphed_executors.htcondor_backend import (
@@ -77,10 +78,14 @@ def short_lease(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_a_task_past_the_timeout_fails_and_its_pilot_stops(tmp_path: Path) -> None:
     exits: list[int] = []
-    with pytest.raises(TaskTimedOut) as excinfo:
+    with pytest.raises(StageError) as excinfo:
         _run(_plan(tmp_path, hangs=1, hang_s=120.0), task_timeout_s=3.0, exits=exits)
     (hung,) = tmp_path.iterdir()
-    err = excinfo.value
+    stage = excinfo.value
+    assert stage.partition.startswith(HUNG + "::") and stage.cause_type == "TaskTimedOut"
+    assert "task_timeout_s=3.0" in stage.cause_message
+    err = stage.__cause__
+    assert isinstance(err, TaskTimedOut)
     assert err.key.endswith("-leaf-1") and err.seconds == 3.0
     assert f":{hung.name}:" in err.pilot  # the pilot is named hostname:pid:nonce
     assert str(err) == f"task {err.key} ran on pilot {err.pilot} longer than task_timeout_s=3.0"
@@ -111,7 +116,7 @@ def test_a_timed_out_task_s_late_result_is_dropped(monkeypatch: pytest.MonkeyPat
 def test_a_resumable_rerun_after_a_timeout_runs_only_the_timed_out_task(tmp_path: Path) -> None:
     attempts, store = tmp_path / "attempts", str(tmp_path / "store")
     attempts.mkdir()
-    with pytest.raises(TaskTimedOut):
+    with pytest.raises(StageError, match=r"task_timeout_s=3\.0"):
         _run(resumable(_plan(attempts, hangs=1, hang_s=120.0), store), task_timeout_s=3.0)
     assert Store(store).dead_letters() == []
     rerun = resumable(_plan(attempts, hangs=1, hang_s=120.0), store)

@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import CancelledError
@@ -88,3 +89,16 @@ def test_a_cancel_reaches_the_queued_attempt_on_tpe(tpe: Any, tmp_path: Path) ->
     with pytest.raises(CancelledError):
         queued.result(timeout=0)
     assert os.listdir(tmp_path) == []  # the attempt never ran
+
+
+def test_a_resubmit_the_executor_refuses_settles_with_its_error() -> None:
+    run_dir = tempfile.mkdtemp(prefix="gw21-bad-")
+    htex = start_htex(workers=1, run_dir=run_dir)
+    try:
+        fut = ParslBackend(htex).submit(time.sleep, 3, key="k", retries=2)
+        boom = RuntimeError("all blocks failed")
+        htex.set_bad_state_and_fail_all(boom)
+        assert fut.exception(timeout=15) is boom
+    finally:
+        stop_htex(htex)
+        shutil.rmtree(run_dir, ignore_errors=True)

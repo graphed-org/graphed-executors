@@ -72,7 +72,7 @@ def settle(fut: Future[Any], value: object = None, exc: BaseException | None = N
             fut.set_result(value)
 
 
-class TaskTimedOut(Exception):
+class TaskTimedOut(TimeoutError):
     """Task ``key`` ran on ``pilot`` longer than ``seconds``, the backend's ``task_timeout_s``."""
 
     def __init__(self, key: str, pilot: str, seconds: float) -> None:

@@ -247,9 +247,13 @@ def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) ->
             return
         exc = raw.exception()
         if exc is not None and left > 0 and not outer.cancelled():
-            current[0] = attempt()
-            current[0].add_done_callback(lambda r: watch(r, left - 1))
-            return
+            try:
+                current[0] = attempt()
+            except Exception as resubmit:  # a raise in a done-callback is only logged: settle instead
+                exc = resubmit
+            else:
+                current[0].add_done_callback(lambda r: watch(r, left - 1))
+                return
         with suppress(InvalidStateError):  # cancelled meanwhile
             if exc is None:
                 outer.set_result(raw.result())

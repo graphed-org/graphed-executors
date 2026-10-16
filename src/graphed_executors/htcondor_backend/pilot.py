@@ -3,8 +3,8 @@
 It registers with the driver's task server, beats from a daemon thread, and runs leased tasks one at a
 time until the server answers 410. It exits 0 when the driver is done with it and 2 when the driver
 refuses its signature. When the driver has been unreachable for a lease it sends itself SIGTERM, even in
-the middle of a task, so an orphan frees its batch slot; so does a beat answered 410 mid-task (the
-driver gave up on that task).
+the middle of a task, so an orphan frees its batch slot; so does any beat answered 410 mid-task (a
+timed-out task, or the driver closing).
 """
 
 from __future__ import annotations
