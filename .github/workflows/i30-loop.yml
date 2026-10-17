@@ -1,0 +1,49 @@
+name: i30-loop
+# scratch (#30): loop the m63 persistent-pool concurrency test on Windows to measure its hang rate
+on:
+  push:
+    branches: [scratch/i30-windows-loop]
+  workflow_dispatch:
+env:
+  GRAPHED: "graphed[awkward,numpy]==0.0.7"
+  CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
+  HISTOGRAM: "graphed-histogram[histserv] @ git+https://github.com/graphed-org/graphed-histogram@3830acaa26a9a5860892f263c0b0ca8c96efadb8"
+  TARGET: "tests/frozen/m63/test_m63_run_serialized.py::test_concurrent_runs_on_a_persistent_pool_keep_their_values[PinnedPoolExecutor]"
+jobs:
+  loop:
+    name: loop ${{ matrix.os }} py${{ matrix.python }} shard${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "${{ env.GRAPHED }}" "${{ env.CORPUS }}" "${{ env.HISTOGRAM }}"
+          python -m pip install -e ".[dev]" pytest-repeat psutil py-spy
+      - name: Loop the target
+        shell: bash
+        env:
+          PYTHONPATH: .scratch/i30
+          HANG_S: "60"
+        run: |
+          pytest "$TARGET" --count 150 -p hangdump -p no:cacheprovider -o faulthandler_timeout=280 -q -rf 2>&1 | tee loop.log || true
+          echo "SUMMARY $(grep -cE '^FAILED' loop.log) failed; hang dumps: $(grep -c '=== HANG' hang-dumps.txt 2>/dev/null || echo 0)"
+          tail -3 loop.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: loop-py${{ matrix.python }}-shard${{ matrix.shard }}
+          path: |
+            loop.log
+            hang-dumps.txt
