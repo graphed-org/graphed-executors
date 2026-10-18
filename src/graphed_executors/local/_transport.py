@@ -37,6 +37,8 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from ._portable import Portable
+
 _DEFAULT_MAXSIZE = 10000
 # How long :meth:`HttpTransport.close` waits for already-queued sends to be POSTed. The healthy path
 # never pays it (the sender is idle, so the sentinel returns immediately); it exists because the last
@@ -111,7 +113,7 @@ class PipeInbox:
         self._q = ctx.SimpleQueue()
 
     def put_nowait(self, item: object) -> None:
-        self._q.put(item)  # synchronous pipe write (no feeder): BLOCKS past the pipe buffer
+        self._q.put(Portable(item))  # synchronous pipe write (no feeder): BLOCKS past the pipe buffer
 
     def get_nowait(self) -> Any:
         if self._q._reader.poll():
@@ -333,7 +335,7 @@ class HttpTransport:
             target = self._registry.get(dest)
             if target is None:
                 continue
-            body = pickle.dumps((self.address, message))
+            body = pickle.dumps((self.address, Portable(message)))
             url = f"http://{target[0]}:{target[1]}/msg"
             # the sender thread is off the data path, so it RETRIES on a transient failure: peer
             # reduction needs delivery (a lost partial = wrong/missing result), and the receiver
