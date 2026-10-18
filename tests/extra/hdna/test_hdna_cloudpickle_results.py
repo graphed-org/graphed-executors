@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import multiprocessing
 import pickle
 from typing import Any
 
@@ -19,6 +20,7 @@ import graphed_executors.local._portable as portable
 import graphed_executors.local.executors as local_executors
 from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor
 from graphed_executors.local._portable import Portable
+from graphed_executors.local._transport import PipeInbox, build_transports
 
 ROUTES: dict[str, tuple[Any, dict[str, Any]]] = {
     "hub": (ProcessPoolExecutor, {"comms": None}),
@@ -40,7 +42,7 @@ def _plan(reduce: Any, combine: Any, empty: Any) -> Any:
 
 def _loads_seen(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     """Count, in this (driver) process, which loader each arriving value names."""
-    seen = {"from_pickle": 0, "from_cloudpickle": 0}
+    seen = {"from_value": 0, "from_cloudpickle": 0}
     for name in seen:
         real = getattr(portable, name)
 
@@ -77,7 +79,9 @@ def test_a_stdlib_picklable_partial_never_uses_cloudpickle(
 ) -> None:
     seen = _loads_seen(monkeypatch)
     assert _run(route, _plan(sum_all, add, zero), monkeypatch) == float(ak.sum(EVENTS.Jet.pt))
-    assert seen["from_cloudpickle"] == 0 and seen["from_pickle"] > 0, seen
+    assert seen["from_cloudpickle"] == 0, seen
+    # only the pool's result return is wrapped up front; peer sends wrap after a stdlib failure
+    assert (seen["from_value"] > 0) == route.startswith("hub"), seen
 
 
 def test_portable_tries_stdlib_pickle_first(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,7 +91,7 @@ def test_portable_tries_stdlib_pickle_first(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(cloudpickle, "dumps", refuse)
     value = {"a": [1.0, 2.0]}
     shipped = Portable(value)
-    assert not shipped.cloud and shipped.data == pickle.dumps(value, pickle.HIGHEST_PROTOCOL)
+    assert not shipped.cloud and shipped.value is value
     assert pickle.loads(pickle.dumps(shipped)) == value
 
 
@@ -104,3 +108,31 @@ def test_the_process_pool_entries_return_portable_values(monkeypatch: pytest.Mon
     merged = local_executors._proc_combine_task(concat, lam, lam)
     assert isinstance(leaf, Portable) and leaf.cloud and isinstance(merged, Portable) and merged.cloud
     assert ak.to_list(pickle.loads(pickle.dumps(merged))) == [1.0, 1.0]
+
+
+def test_an_ipc_inbox_wraps_only_what_stdlib_pickle_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _loads_seen(monkeypatch)
+    inbox = PipeInbox(multiprocessing.get_context("spawn"))
+    try:
+        inbox.put_nowait(("node", 1.0))
+        inbox.put_nowait(("node", lambda x: x + 1))
+        assert inbox.get(timeout=5) == ("node", 1.0)
+        assert inbox.get(timeout=5)[1](1) == 2
+    finally:
+        inbox.close()
+    assert seen == {"from_value": 0, "from_cloudpickle": 1}
+
+
+def test_an_http_send_wraps_only_what_stdlib_pickle_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _loads_seen(monkeypatch)
+    transports = build_transports("http", ("a", "b"))
+    try:
+        assert transports["a"].send("b", ("node", 1.0)) and transports["a"].send(
+            "b", ("node", lambda x: x + 1)
+        )
+        got = [transports["b"].recv(timeout=5) for _ in range(2)]
+    finally:
+        for t in transports.values():
+            t.close()
+    assert got[0] == ("a", ("node", 1.0)) and got[1] is not None and got[1][1][1](1) == 2
+    assert seen == {"from_value": 0, "from_cloudpickle": 1}
