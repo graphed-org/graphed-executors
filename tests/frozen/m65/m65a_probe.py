@@ -28,13 +28,17 @@ N = 40
 CONTROLS: dict[str, RunControl] = {}
 
 
-def _await_file(path: str, timeout_s: float = 10.0) -> bool:
+def wait_until(predicate: Callable[[], bool], timeout_s: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout_s
-    while not os.path.exists(path):
+    while not predicate():
         if time.monotonic() > deadline:
             return False
         time.sleep(0.005)
     return True
+
+
+def _await_file(path: str, timeout_s: float = 10.0) -> bool:
+    return wait_until(lambda: os.path.exists(path), timeout_s)
 
 
 def touch(path: str) -> None:
@@ -47,7 +51,7 @@ class Probe:
     """The task body: returns the partial for the key in ``partition.entry_start``.
 
     ``variant``: ``"onehot"`` (a tuple naming the key), ``"float"`` (a scalar whose sum depends on the
-    fold order at 40 tasks) or ``"int"`` (the key itself).
+    fold order at 40 tasks) or ``"int"`` (the key itself). ``hold_all`` holds every key as ``hold_key``.
     """
 
     n: int = N
@@ -59,10 +63,11 @@ class Probe:
     token: str = ""
     entered_path: str = ""
     release_path: str = ""
+    hold_all: bool = False
 
     def __call__(self, partition: Partition, resources: object) -> Any:
         key = partition.entry_start
-        if key in (self.fail_key, self.hold_key):
+        if self.hold_all or key in (self.fail_key, self.hold_key):
             touch(self.entered_path)
             _await_file(self.release_path)
             if key == self.fail_key:

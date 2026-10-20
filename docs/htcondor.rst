@@ -300,10 +300,12 @@ exit code decides whether HTCondor runs it again:
    * - 1
      - Anything another attempt may get past: the run's workers were lost (every pilot preempted,
        say), pilots could not start, a service the plan needs could not be reached or started
-       (see `Services`_), or the driver failed before or after the run.
+       (see `Services`_), the checkpoint store could not be reached (see `Resuming on a retry`_),
+       or the driver failed before or after the run.
      - Twice
    * - 3
-     - The plan's own code raised; it would raise again.
+     - The plan's own code raised; it would raise again. Or the checkpoint store records another
+       environment (``EnvironmentChanged``).
      - No
    * - killed
      - The driver died before writing its result: out of memory, a signal, no interpreter in the
@@ -320,6 +322,49 @@ done, failed or removed, so ``wait(timeout=None)`` does not return while the job
 function defined in ``__main__``) is refused before anything is written or submitted, as for
 ``htcondor_runner``; a join or repartition plan's stage functions travel by value instead, so they
 are accepted.
+
+Resuming on a retry
+~~~~~~~~~~~~~~~~~~~
+
+A retry of the driver job (exit 1, or killed) starts the plan from the beginning unless you give
+it a checkpoint store:
+
+.. code-block:: python
+
+    # A recipe: this needs an HTCondor pool and a filesystem every slot mounts.
+    handle = submit_driverless(plan, site="lpc", image=IMAGE, n_pilots=8,
+                               request_memory_mb=16000, log_dir=work,
+                               user_modules=[my_tasks.__file__],
+                               store="/path/every/slot/mounts/ttbar-store")
+
+With ``store``, the driver wraps the plan with ``graphed.checkpoint.resumable`` on every try, before
+it starts a pilot, so each try recomputes only the tasks the earlier tries did not finish, and
+``driver.log`` says how many it reused (``12 of 40 tasks reused from ...``). ``salt`` and
+``accept_environment`` are passed through to ``resumable`` (:ref:`design-resume`). An edit to a
+local module or an editable install (a ``user_modules`` file, say) is not in the key, so change
+``salt`` when you change such code, or a retry reuses what the old code stored. A plan
+``resumable`` refuses, such as one filling histserv histograms, is refused by
+``submit_driverless`` with that ``TypeError`` before anything is written or submitted.
+
+Two outcomes are specific to the store. A store the driver cannot open or read exits 1 and is
+retried. A store whose environment record differs from the image's (another image, or new package
+versions) exits 3 with ``EnvironmentChanged`` in ``result.pkl``, naming each distribution that
+changed, before any pilot starts; retrying would refuse again. If the new environment is
+intended, resubmit with ``accept_environment=True``.
+
+**Where to put the store.** A try may land on another machine, and every pilot reads and writes the
+store itself, so a directory store must be on a filesystem the driver's slot and every pilot's
+mount; ``submit_driverless`` makes a relative path absolute against its working directory. The
+job's scratch directory is not one: it is gone when the try
+ends. Otherwise use an fsspec URL (``s3://bucket/prefix``) with
+``storage_options``.
+
+**Credentials.** ``storage_options`` travel in clear: in ``run.json``, which is transferred to the
+job like ``plan.pkl``, and inside each task's pickled process, which is signed but not encrypted.
+A secret that must not travel that way goes in a credential file every pilot can read (an
+``~/.aws/credentials``-style file your storage library reads by itself, on the shared filesystem),
+named by a non-secret option. Never put it in the job's ``environment``: that is readable by anyone
+who can query the job's ad.
 
 
 Services
@@ -342,7 +387,9 @@ It tries three places, in order:
    fails its check is passed over, and the reason is kept.
 3. **One it starts**, from the spec's recipe: beside the driver when the recipe needs no image and
    no GPU and the site lets workers reach the driver's host (``service_hosts``), else as a job of its
-   own on the pool (see `Cluster-hosted services`_). It is stopped when the run ends.
+   own on the pool (see `Cluster-hosted services`_). It is stopped when the run ends. On Linux, a
+   start beside the driver whose port's listener the started process does not hold (another process
+   bound the port after the free-port scan) is refused, since a check passes on any listener.
 
 ``graphed_executors.submit.recipes`` has two recipes as plain data: ``triton(name, image,
 model_repository)`` (gRPC only, one port) and ``http_server(name)`` (Python's ``http.server``).
@@ -362,6 +409,11 @@ answer a pilot on another host than its own, unless that host is the driver's (a
 machine). A service no pilot can reach fails the run with ``ServiceUnreachable`` naming the endpoint, the worker and the reason; ``"no worker
 answered"`` means no pilot ran the probe within that wait, and ``"only same-host
 workers answered"`` that none on another host did.
+
+**Checked again when a task fails.** A task that raises runs the same checks on its pilot. A service
+that no longer answers turns the failure into ``ServiceUnreachable``, whose reason ends with the task's
+own exception; with every service answering, the task's exception is raised as it was. Either way
+the run ends at its first failed task and cancels the tasks still queued.
 
 **Kept warm across plans.** A started service lives as long as the run that started it. To use one
 server for several plans, start it yourself and pass its endpoints to the runner:
@@ -391,7 +443,8 @@ of its own on the pool, next to the pilots, for the length of the run. Every bui
 this (``"cluster"`` is in ``service_hosts`` wherever ``worker_ports`` is set). The job starts a small
 standard-library script (Python 3.9 or later, so it runs in an image with no venv) that takes the
 first free port of the site's ``worker_ports``, starts the recipe's command on it, runs the spec's
-check there, and then *announces* ``host:port`` to the runner's task server, signed with a secret
+check there (on Linux, a port whose listener the command's processes do not hold is passed over for
+the next), and then *announces* ``host:port`` to the runner's task server, signed with a secret
 made for that one service. While the job waits for a slot (idle, or spooling its inputs) the runner
 waits with it, with no deadline (`Schedulability`_), and logs the job's key and
 state on the ``graphed_executors`` logger at first and every 30 seconds; the spec's ``timeout_s``
@@ -431,6 +484,21 @@ there. ``status()`` reports the driver node (``held`` while it is held), and the
 try's exit; a DAG whose driver never returned a result raises ``RuntimeError`` naming
 ``run.dag.dagman.out``.
 
+A service node restarts a command that dies, up to three times, each on a port none of its
+earlier ones served, and announces the new endpoint. A task that then finds the service gone ends the
+run with ``ServiceUnreachable``, and the driver runs the plan again in the same job, against the new
+announce and on the same pilots (``driver.log`` says ``rerun:``); the tasks that had finished run
+again, unless the run has a ``store``, which serves them back.
+
+While the driver waits for an announce it reads the node's queue ad on the DAG's schedd. A node that
+is held fails the try at once, naming its ``HoldReason``; so does one that left the queue, naming the
+``LastHoldReason`` (else the ``RemoveReason``) of its history row; so does an idle node no slot of
+the pool could ever run, counting the slots the run's own running jobs (and its running pilots) hold,
+named with its ``RequestMemory``, ``RequestCpus`` and ``RequestGPUs``. An idle node that could run
+waits without a deadline, and ``timeout_s`` counts from its start. With ``pilots="condor"``, the
+run's queued pilots are held while a node waits, and released after. Where the schedd cannot be read,
+``driver.log`` says so in one line and the wait is ``timeout_s`` long.
+
 The DAG is not spooled: the schedd and the nodes read the run directory, your ``user_modules`` and
 the services' inputs where they lie, so all of them must lie under the site's ``job_root``
 (``SiteProfile.job_root``: ``/afs`` on lxplus, any path on ``generic``). Anything outside is
@@ -438,9 +506,10 @@ refused before anything is submitted. The LPC has no ``job_root``, so a driverle
 service that would need a node; the inference server its row names still serves that kind (leg 2).
 The check reads the path as written, not where a symlink points: an input under the root that is a
 symlink to a file outside it passes, and if the schedd cannot read that file the node is held. A held
-service node is removed (its ``periodic_remove``); each try of the driver then waits ``timeout_s``
-for its announce, so the run fails after three × ``timeout_s``, as it does for a service node that
-starts but never announces. A held driver node stays ``held`` until you release or remove it.
+service node is removed (its ``periodic_remove``), so each try of the driver that reads the schedd
+fails at once and the run fails after three tries; a service node that starts but never announces
+costs each try ``timeout_s``.
+A held driver node stays ``held`` until you release or remove it.
 
 **On lxplus, with a GPU.** An inference server for your ONNX models in ``models/`` (Triton's layout),
 reached from CPU pilots:
@@ -625,6 +694,11 @@ The arguments you will change
        check of its services from a worker); 1 by default.
    * - ``retries``
      - Has no effect here. The only retry is the one re-run of a task whose pilot was lost.
+   * - ``task_timeout_s``
+     - How long one task may run on a pilot; ``None`` (the default) sets no limit. A task past it
+       fails with a ``StageError`` naming its partition, caused by ``TaskTimedOut``, and its pilot
+       stops and frees its slot. ``submit_driverless`` takes it too. Under ``resumable`` a rerun runs
+       only that task.
    * - ``service_hosts``
      - Where services the runner starts may run: a subset of the site's ``("driver", "cluster")``
        (`Schedulability`_).

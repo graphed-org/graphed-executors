@@ -63,6 +63,7 @@ from ._peer import (
     ERROR_EVENT_DRAIN_S,
     OUTBOX_EXIT_WAIT_S,
     PeerControl,
+    _Outbox,
     http_driver_handshake,
     http_peer_actor,
     lifeline_neighbors,
@@ -84,6 +85,8 @@ R = TypeVar("R")
 T = TypeVar("T")
 # How long a peer driver waits for the root, counting only time the run is not paused.
 _PEER_ROOT_TIMEOUT_S = 300.0
+# How long a freshly spawned pool worker may take to boot and answer the driver.
+_WORKER_START_TIMEOUT_S = 60.0
 
 
 def _drain_queue(q: Any) -> None:
@@ -1137,11 +1140,11 @@ class _ProcessExecutorBase(_BaseExecutor):
         self._collector: threading.Thread | None = None
         self._collector_stop: threading.Event | None = None
         # M38 persistent peer state: reused across run()s when persistent=True so the worker spawn is
-        # paid once, like the hub pool. The full-registry path reuses on w; the identity-pinned path's
-        # topology depends on (n, w) so it also keys on n (a repeated plan never respawns either way).
+        # paid once, like the hub pool. Both paths reuse on w: a pinned worker reaches a merge target
+        # its spawn-time overlay lacks through the driver.
         self._peer_pool: _StdProcessPool | PinnedProcessPool | None = None
         self._peer_nworkers = 0
-        self._peer_n = 0
+        self._last_peer_relays = 0  # nodes the driver forwarded in the last pinned run
         self._peer_pinned = False  # which IPC path the live pool is (identity-pinned vs full-registry)
         self._warned_fd_budget = False  # fire the full-registry fd-budget warning at most once
         self._peer_registry: dict[str, Any] | None = None  # SimpleQueue inbox per address
@@ -1156,7 +1159,6 @@ class _ProcessExecutorBase(_BaseExecutor):
             self._peer_registry = None
         self._peer_driver = None
         self._peer_nworkers = 0
-        self._peer_n = 0
         self._peer_pinned = False
 
     # ---- M38 peer reduction across worker PROCESSES (cross-process transport) ----
@@ -1222,7 +1224,6 @@ class _ProcessExecutorBase(_BaseExecutor):
             and self._peer_pool is not None
             and self._peer_pinned == pinned
             and self._peer_nworkers == w
-            and (self._peer_n == n or not pinned)  # only the pinned topology depends on n
             and self._peer_registry is not None
             and self._peer_driver is not None
         )
@@ -1256,7 +1257,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                 )
             if self._persistent:
                 self._peer_pool, self._peer_registry, self._peer_driver = pool, registry, driver_t
-                self._peer_nworkers, self._peer_n, self._peer_pinned = w, n, pinned
+                self._peer_nworkers, self._peer_pinned = w, pinned
         factory = self._peer_profiler_factory()
         try:
             if pinned:
@@ -1363,7 +1364,7 @@ class _ProcessExecutorBase(_BaseExecutor):
                 )
                 for a in worker_addrs
             ]
-            http_driver_handshake(driver_t, worker_addrs, timeout_s=60.0)
+            http_driver_handshake(driver_t, worker_addrs, timeout_s=_WORKER_START_TIMEOUT_S)
             return self._collect_peer(driver_t, plan, n, futs, pool, control)
         finally:
             driver_t.close()
@@ -1385,12 +1386,19 @@ class _ProcessExecutorBase(_BaseExecutor):
         ctl = PeerControl(control, driver_t, n, plan.combine, plan.empty) if control is not None else None
         deadline = time.monotonic() + _PEER_ROOT_TIMEOUT_S
         out: tuple[R, int] | None = None
+        forward: _Outbox | None = None  # asynchronous, so a >64 KB node never parks this loop
+        self._last_peer_relays = 0
         try:
             while out is None:
                 got = driver_t.recv(timeout=0.05)
                 if got is not None and got[1][0] == "root":
                     out = got[1][1], n
                     break
+                if got is not None and got[1][0] == "via":
+                    forward = forward or _Outbox(driver_t)
+                    forward.send(got[1][1], got[1][2])
+                    self._last_peer_relays += 1
+                    continue
                 # worker STARTED/FINISHED/ERRORED -> monitor; a cancel hand-in -> the fold once all are in
                 if got is not None and not self._forward_peer_events(got[1]) and ctl is not None:
                     out = ctl.take(got[1])
@@ -1413,6 +1421,8 @@ class _ProcessExecutorBase(_BaseExecutor):
             # follows (the non-persistent ``finally``, the persistent discard) then never returns.
             if ctl is not None:
                 ctl.close(0.0)
+            if forward is not None:
+                forward.close(0.0)
             release_workers(driver_t)
             if isinstance(exc, Exception) and complete_events(self._run_monitor):
                 # the failing actor's last batch can land after the future check saw its failure
@@ -1426,6 +1436,8 @@ class _ProcessExecutorBase(_BaseExecutor):
             raise
         if ctl is not None:  # a queued tag lands in this run's inboxes before `done`
             ctl.close(OUTBOX_EXIT_WAIT_S)
+        if forward is not None:
+            forward.close(OUTBOX_EXIT_WAIT_S)
         release_workers(driver_t)
         if self._run_monitor is None:
             # Fast path (no monitor): workers see ``done`` immediately (the transport wakes on the
@@ -1588,14 +1600,15 @@ class _ProcessExecutorBase(_BaseExecutor):
             return
         target = self.max_workers  # concrete (resolved in __init__) -- no private pool attribute
         seen: set[int] = set()
-        rounds = 0
-        while len(seen) < target and rounds < 1000:
+        # a deadline, not a round count: booted workers answer every round while a sibling still boots
+        t0 = time.monotonic()
+        while len(seen) < target and time.monotonic() - t0 < _WORKER_START_TIMEOUT_S:
             batch = [pool.submit(_prime_shared, token, payload) for _ in range(target - len(seen))]
             seen.update(f.result() for f in batch)  # a dead worker surfaces as BrokenProcessPool here
-            rounds += 1
         if len(seen) < target:  # never silently mark a token primed without full coverage (P1-3)
             raise RuntimeError(
-                f"broadcast reached only {len(seen)}/{target} workers after {rounds} rounds; "
+                f"broadcast reached only {len(seen)}/{target} workers in "
+                f"{time.monotonic() - t0:.1f}s; "
                 "refusing to cache an under-primed process (would KeyError on an unprimed worker)"
             )
         self._broadcast_tokens[token] = None

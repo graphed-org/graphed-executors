@@ -4,6 +4,26 @@ What changed
 Unreleased
 ----------
 
+Requires ``graphed`` 0.0.8 or later.
+
+* A plan whose op is a lambda or closure, or whose partials carry a behavior holding a lambda, runs on
+  ``ProcessPoolExecutor`` with ``comms=None`` and ``comms="ipc"``; it failed to pickle. The fix is in
+  ``graphed`` 0.0.8 (graphed#82).
+* ``parsl_runner``'s ``retries`` takes effect: a failed task is resubmitted from the driver up to
+  ``retries`` times (default 3); it was ignored.
+* ``htcondor_runner``, ``submit_driverless`` and ``HTCondorBackend`` take ``task_timeout_s``, how long
+  one task may run on a pilot. Past it the task fails with a ``StageError`` caused by ``TaskTimedOut``, and its pilot stops and
+  frees its slot.
+* A cluster-hosted service's ``announce.py`` starts its child without a ``preexec_fn``, so the child no
+  longer runs the job's at-fork handlers before exec; under gRPC those could abort it (#53).
+* A persistent ``PinnedPoolExecutor`` keeps its worker processes when a plan's task count changes;
+  it respawned them on every such run, which on a slow Windows runner could exhaust the root timeout (#30).
+
+0.0.5
+-----
+
+Requires ``graphed`` 0.0.7 or later.
+
 Run on an HTCondor pool
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -65,6 +85,18 @@ Services a plan calls
 * A driverless run's ``extra_submit`` reaches the pilot jobs its driver job submits
   (``pilots="condor"``) as well as the driver job and its service nodes, as ``htcondor_runner``'s
   reaches its pilots.
+* A run over a fixed tree (``SubmitRunner``'s default path) raises at its first failed task instead of
+  after every task has run, and cancels the rest.
+* A task that fails with a service gone raises ``ServiceUnreachable`` naming the service, the worker
+  and the task's exception (a driverless job exits 1 and is retried); a plan error with its services
+  answering is raised as before.
+* On Linux, a started service's port counts only when the started process holds its listener: a port
+  another process bound after the scan is passed over by a cluster service job and refused beside the
+  driver.
+* A driverless DAG's ``SERVICE`` node restarts a service that dies (up to three times, each on a new
+  port), and the driver runs the plan again against the new endpoint (``rerun:`` in ``driver.log``).
+  The driver fails a try at once when a node it waits for left the queue, is held, or could never be
+  matched, and holds its queued ``pilots="condor"`` pilots meanwhile. See :doc:`htcondor`.
 * A driverless driver killed before it writes a result (out of memory, a signal, no interpreter) is
   retried like exit 1 instead of being held; after the last try ``result()`` raises ``RuntimeError:
   the driver exited before writing a result; see driver.log``.
@@ -74,9 +106,6 @@ Services a plan calls
   come before the join. The local executors and the peer reductions refuse one with a ``TypeError``
   naming ``SubmitRunner``. Its stage functions travel by value, so on HTCondor too (``htcondor_runner``,
   ``submit_driverless``) they may be lambdas or live in ``__main__``. See :ref:`design-join-plan`.
-* This needs ``graphed.services``, which no graphed release has yet (0.0.6 does not): CI installs
-  graphed from git, and graphed-executors will not be released until its ``graphed`` floor moves to
-  the release carrying the service surface and its resolve walk.
 
 An H→γγ analysis on graphed
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -84,12 +113,22 @@ An H→γγ analysis on graphed
 * ``examples/hgg``: a HiggsDNA-derived H→γγ inclusive processor translated to graphed, on coffea
   NanoEvents in graphed mode. One plan over a fileset of MC and data writes the original's parquet
   part for every chunk and returns each dataset's counters as coffea's Runner accumulates them,
-  and a new CI job checks it against the original script (:doc:`hgg`). It needs graphed's
-  multi-output plans (``aggregate_plan(writes=)``, ``collate``, ``parquet_write``), which CI
-  installs from git until a graphed release carries them.
+  and a new CI job checks it against the original script (:doc:`hgg`). It uses graphed 0.0.7's
+  multi-output plans (``aggregate_plan(writes=)``, ``collate``, ``parquet_write``).
 * Its value holds seven diphoton diagnostics per dataset (``analysis.DIAGNOSTICS``), filled locally or,
   with ``plan(..., context=)``, on histserv servers; ``run_local.py`` saves them as UHI JSON, and
   ``run_lpc.py`` runs the analysis at the LPC from the HiggsDNA sample manifests (:doc:`hgg`).
+
+Fixed
+~~~~~
+
+* Under peer reduction (``ProcessPoolExecutor`` with ``comms`` set), a worker whose partial fails to
+  send, such as one that does not pickle, raises that error at once; the run waited out the 300 s
+  root timeout and raised ``TimeoutError``.
+* **A process-pool worker that starts slowly no longer fails the run.** Before the first task, the
+  process pool sends the plan's function to every worker; it gave up after 1000 quick rounds (about
+  3 s) while a worker was still starting, raising ``broadcast reached only 1/2 workers``. It now
+  waits up to 60 s for every worker.
 
 0.0.4
 -----

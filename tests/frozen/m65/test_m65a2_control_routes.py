@@ -16,6 +16,8 @@ THREAD = [name for name, r in mp.ROUTES.items() if r.thread]
 ADAPTIVE = [name for name, r in mp.ROUTES.items() if r.adaptive]
 ONES = (1,) * mp.N
 ZEROS = (0,) * mp.N
+# A task handed out before the pause still starts after it; its worker may wait this long for a CPU.
+PAUSE_SETTLE_S = 2.0
 
 
 def _plan(route: str, probe: mp.Probe, **kw: Any) -> Any:
@@ -55,16 +57,24 @@ def test_unused_control_is_bit_identical(route: str) -> None:
 @pytest.mark.parametrize("route", ALL)
 def test_pause_stops_dispatch_then_resume_completes(route: str) -> None:
     ctl = RunControl()
-    rec = mp.Recorder(on_first_finished=ctl.pause)
+    paused_at: list[float] = []
+
+    def pause() -> None:
+        paused_at.append(time.perf_counter())
+        ctl.pause()
+
+    rec = mp.Recorder(on_first_finished=pause)
     ex = _controlled(route, ctl, rec)
     run = mp.Background(lambda: ex.run(_plan(route, mp.Probe(sleep_s=0.05))))
     assert rec.first_finished.wait(30)
-    time.sleep(0.4)
-    s1 = rec.count(TaskPhase.STARTED)
-    time.sleep(0.6)
-    s2 = rec.count(TaskPhase.STARTED)
+    time.sleep(PAUSE_SETTLE_S + 0.6)
+    resumed = time.perf_counter()
     ctl.resume()
     res = run.result()
+    # Counted by the workers' own start stamps, so event delivery lag cannot move a start between the two.
+    starts = [e.t for e in rec.events if e.phase is TaskPhase.STARTED]
+    s1 = sum(t < paused_at[0] + PAUSE_SETTLE_S for t in starts)
+    s2 = sum(t < resumed for t in starts)
     assert s1 == s2 < mp.N
     assert rec.submitted_at_first_finished == mp.N
     assert res.value == ONES

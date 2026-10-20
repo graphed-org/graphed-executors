@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graphed-executors"
-version = "0.0.4"
+version = "0.0.5"
 description = "Run a graphed plan on threads, processes, a dask cluster, or a parsl pool"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 # graphed carries the execution contract (Plan/Task/Partition), Session, and StageError.
-dependencies = ["graphed>=0.0.6", "cloudpickle"]
+dependencies = ["graphed>=0.0.8", "cloudpickle"]
 
 [project.optional-dependencies]
 # the backends + corpus are only needed to exercise realistic HEP analyses end-to-end in the suite
@@ -66,7 +66,7 @@ exclude = ["CLAUDE.md", ".graphed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "tests/frozen/m7", "tests/frozen/m10", "tests/frozen/m31", "tests/frozen/m34", "tests/frozen/m37", "tests/frozen/m65", "tests/frozen/m68a", "tests/frozen/m69a"]
+pythonpath = ["src", "tests/frozen/m7", "tests/frozen/m10", "tests/frozen/m31", "tests/frozen/m34", "tests/frozen/m37", "tests/frozen/m65", "tests/frozen/m68a", "tests/frozen/m69a", "tests/frozen/m74"]
 addopts = "-q"
 
 [tool.coverage.run]
@@ -138,10 +138,10 @@ exclude = ['^tests/frozen/m69a/data/inclusive_processor\.py$']
 # sibling helper modules are bases as well, so `import _big_partial` resolves the way pytest's
 # prepend import mode resolves it; the frozen dirs must NOT be, since a base there would put their
 # files back on bare basenames and un-match the override.
-mypy_path = ["src", ".", "tests/extra/m41", "tests/extra/m54", "examples/hgg"]
+mypy_path = ["src", ".", "tests/extra/hdna", "tests/extra/m41", "tests/extra/m54", "tests/extra/m68d", "examples/hgg"]
 explicit_package_bases = true
 
-# Read-only helpers under tests/frozen/{m44,m47,m63,m65,m68c} that tests import by bare basename: pytest
+# Read-only helpers under tests/frozen/{m44,m47,m63,m65,m68c,m68d,m74} that tests import by bare basename: pytest
 # puts them on sys.path, mypy knows them only as tests.frozen.mXX.<name>. They stay type-checked
 # under those dotted names; only the import site is Any.
 [[tool.mypy.overrides]]
@@ -153,6 +153,8 @@ module = [
   "m65a3_bodies",
   "m65b_probe",
   "m68c_harness",
+  "m68d_harness",
+  "m74_harness",
 ]
 ignore_missing_imports = true
 

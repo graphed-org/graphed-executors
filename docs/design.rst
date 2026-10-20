@@ -196,7 +196,9 @@ is 1024, but already at 32 where it is 256.
 its merge targets, and a small set of peers it may steal work from. Those peers are laid out as
 a hypercube — a wiring in which every worker reaches every other in ``log N`` hops while holding
 only ``log N`` addresses — so the whole address book is ``N log N`` instead of ``N²``. Same
-results, bit for bit; smaller footprint.
+results, bit for bit; smaller footprint. A persistent pool keeps its workers when a later plan has
+a different number of tasks: a merge target outside a worker's address book is reached through the
+driver.
 
 ``ProcessPoolExecutor`` warns and names ``PinnedPoolExecutor`` when its worker count would
 strain the descriptor budget. It warns rather than switching, so the pool you get is always the
@@ -338,9 +340,10 @@ attributed ``StageError`` naming the partition and the last worker that held it,
 handing you the raw scheduler error. The attribution can be unfair when several tasks shared the
 dead worker, and the message says so.
 
-Retries are the underlying library's, not a second layer on top: ``dask_runner``'s ``retries``
-forwards to dask's per-task retries, which resubmit on another worker. There is no graphed-level
-retry loop to double up with it. The default is 3, so a deterministic exception in your
+Retries are the underlying library's where it has them: ``dask_runner``'s ``retries`` forwards to
+dask's per-task retries, which resubmit on another worker, with no graphed-level loop on top.
+parsl keeps its retries in the DataFlowKernel, which ``parsl_runner`` does not use, so there the
+driver resubmits a failed task itself. The default is 3, so a deterministic exception in your
 ``process`` is executed four times before the driver sees it; ``retries=0`` while debugging.
 
 .. _design-epoch-restart:
@@ -365,6 +368,84 @@ died. You never get a raw scheduler exception, and you never get a hang.
 If you see ``PullTimeoutError`` on a legitimately huge batch rather than on a dead worker, raise
 ``pull_timeout_s`` before you spend the restart budget. If you see ``TransportDeliveryError``,
 a worker is unreachable — check that the pool is on one routable network before retrying.
+
+
+.. _design-resume:
+
+Resuming a killed run
+---------------------
+
+A driver that dies takes the run with it: on a rerun, every runner here starts over. To keep the
+finished work, wrap the plan with ``graphed.checkpoint.resumable(plan, store)`` before you run it.
+Each task's result is recorded in a content-addressed store as it finishes, and a rerun of the
+same plan recomputes only the tasks the store does not hold. Nothing about the runner changes:
+the thread and process pools, ``SubmitRunner`` over any backend, ``dask_runner``,
+``parsl_runner``, ``htcondor_runner`` and the peer reductions (``transport_run_plan``,
+``parsl_run_plan``) all run the wrapped plan as they run any other.
+
+.. code-block:: python
+
+    import numpy as np
+
+    from graphed.checkpoint import resumable
+    from graphed.core import Partition, Plan, Task
+    from graphed_executors.local import ThreadExecutor
+
+
+    def chunk(partition, resources):
+        return np.arange(partition.entry_start, partition.entry_stop, dtype=np.float64).sum()
+
+
+    plan = Plan(
+        process=chunk,
+        combine=lambda a, b: a + b,
+        empty=lambda: 0.0,
+        tasks=tuple(Task(i, Partition("toy", "Events", i * 1000, (i + 1) * 1000)) for i in range(8)),
+    )
+
+    rp = resumable(plan, "checkpoints/")
+    with ThreadExecutor(4) as pool:
+        print("reused:", rp.process.reused, " result:", pool.run(rp).value)
+
+Run it twice::
+
+    reused: 0  result: 31996000.0
+    reused: 8  result: 31996000.0
+
+Kill the first run halfway and the second reports the tasks that had finished and runs the rest.
+``reused`` is the count the store held when ``resumable`` was called; it is also logged at INFO on
+the ``graphed.checkpoint`` logger as ``"<n> of <T> tasks reused from <store>"``.
+
+**Where the stored results are read.** A stored task is still a task: it is scheduled like any
+other, and the worker that gets it decodes the stored result and hands it to the reduction tree.
+The driver decodes nothing, so a resume is as parallel as the run, and stored partials stream
+into the tree as they load. Because the tree groups by leaf index (`Why your result is the same on 1 worker and on
+100`_), a resumed run equals the uninterrupted one bit for bit, and a store a killed
+``ThreadExecutor`` run left resumes on ``transport_run_plan`` or ``parsl_run_plan`` just as well.
+
+**Where the store lives.** ``store`` is a root every worker opens itself: a directory on a
+filesystem every worker mounts, or an fsspec URL (``s3://...``) with ``storage_options``. A worker
+that cannot reach it raises ``graphed.checkpoint.StoreUnavailable`` naming the root; an exception
+from your own code arrives as itself.
+
+**What a key sees, and when a restart reuses nothing.** A task's key is what the worker runs,
+pickled the way cloudpickle ships it, plus its partition and a ``salt``. Installed versions are
+not in the key but in an environment record the store keeps: a rerun in a different environment
+raises ``graphed.checkpoint.EnvironmentChanged`` naming what changed, and
+``accept_environment=True`` records the new one and resumes. If a rerun reports ``reused: 0``
+when nothing changed, the process holds data ordered by set iteration (sort it, or set ``salt``),
+fills class-level state on a class defined in ``__main__`` (keep it on instances or in a module),
+or calls a numba kernel defined in ``__main__`` (keep kernels in a module). Process-global state
+other than ``ak.behavior`` (an environment variable, a file a task reads beyond its partition) is
+not in the key: change ``salt`` when it changes. Nor is an edit to a local module or an editable
+install (a ``user_modules`` file, say), whose functions pickle by name, so change ``salt`` when you
+change such code. graphed's checkpoint docs ("Resuming on any
+executor") give the full rules.
+
+**What is refused.** ``resumable`` raises ``TypeError`` before touching the store for a plan that
+pulls tasks from ``next_tasks``, for a process it cannot key (one holding a lock, say), and for a
+plan with ``services`` whose process does not declare ``checkpointable``: a histserv fill returns
+a receipt for state held in a server, which a store cannot hold.
 
 
 Watching a run
@@ -799,14 +880,14 @@ graph, no dask-awkward. It submits opaque callables with explicit keys and futur
 edges, and inherits determinism, straggler tolerance and intact errors rather than re-deriving
 them. :doc:`dask` is the how-to; what follows is why the pieces are shaped the way they are.
 
-**The reduction is the same tree.** Leaves are ``process`` tasks; the merges are submitted up
-front with future dependencies in exactly the ``plan_tree`` shape. The driver waits on one root
-future. dask resolves each merge's arguments on whichever worker runs it and fetches inputs
-between workers, so the merges run off your submit node; a slow leaf blocks only its own path.
-Intermediates are released as their parent consumes them, so only ``O(log N)`` of them are live
-at once. The grouping is fixed by leaf index, never by submission or arrival order — which is the
-difference from an arrival-batched reduction, where the grouping varies with the order futures
-happen to be submitted.
+**The reduction is the same tree.** Leaves are ``process`` tasks; the merges are submitted up front
+with future dependencies in exactly the ``plan_tree`` shape. The driver waits for the root future
+and raises at the first future that fails. dask resolves each merge's arguments on whichever worker
+runs it and fetches inputs between workers, so the merges run off your submit node; a slow leaf
+blocks only its own path. Intermediates are released as their parent consumes them, so only
+``O(log N)`` of them are live at once. The grouping is fixed by leaf index, never by submission or
+arrival order — which is the difference from an arrival-batched reduction, where the grouping
+varies with the order futures happen to be submitted.
 
 **Keys are explicit and unique per run.** Every submit carries a namespaced key of the form
 ``graphed-<plan fingerprint>-<nonce>-leaf|combine-<i>``, submitted with ``pure=False``. The
@@ -826,9 +907,11 @@ you find leaves clustering onto the worker that first received it.
 ``open_once`` gives you the same file locality it does locally. It is registered idempotently, so
 workers that join late — an adaptive cluster, a batch queue trickling jobs in — get it too.
 
-**Monitoring rides dask's own event channel.** Workers log to a per-run namespaced topic, the
-driver subscribes for the duration and releases it in a ``finally`` once trailing events drain.
-As locally, emission is off the data path and errors are swallowed.
+**Monitoring rides dask's own event channel.** Workers log to a per-run namespaced topic, which the
+driver subscribes to for the run and releases in a ``finally``. A fixed-tree run, with or without a
+``RunControl``, that returns first waits for the trailing events of the tasks it submitted, and one
+that raises releases the topic at once, so the events of tasks that finished just before the raise
+may not arrive. As locally, emission is off the data path and errors are swallowed.
 
 Everything that touches dask lives under ``dask_backend`` and is imported lazily, so importing
 ``graphed_executors`` on a machine without dask installed works fine.
@@ -967,9 +1050,15 @@ included, is retried. A driver killed before it writes its result is retried too
 writes a placeholder result before Python starts, because HTCondor holds a job whose declared outputs
 are missing. A plan with a service that needs an image or a GPU goes as a DAG instead: that job as
 its ``driver`` node beside one ``SERVICE`` node per such service, each announcing to whichever try of
-the driver is running. The run's outcome is the driver node's last try, never DAGMan's own exit,
-which depends on how strictly the site's DAGMan treats service nodes still idle or held at the end.
-A ``RunHandle`` is a few fields of JSON, so another session can pick the run up.
+the driver is running. DAGMan never retries a SERVICE node, so the node's own wrapper restarts a
+service that dies, on a port no earlier instance served, so that no worker's client cached by
+endpoint reaches the dead one; a run binds its endpoints once, so the driver answers a task's
+``ServiceUnreachable`` for such a service by running the plan again in the same job. While it waits,
+the driver reads the node's queue ad on the DAG's schedd, so a node that ended, is held, or that no
+slot could ever run fails the try at once instead of after ``timeout_s``. The run's outcome is the
+driver node's last try, never DAGMan's own exit, which depends on how strictly the site's DAGMan treats
+service nodes still idle or held at the end. A ``RunHandle`` is a few fields of JSON, so another
+session can pick the run up.
 
 **Services: an analysis names them, a run finds them.** A plan's ``services`` are requirements
 (graphed ``ServiceSpec``: a name, a kind, a readiness check, optionally a launch recipe); the endpoint
@@ -978,25 +1067,27 @@ run, on any backend, by three legs in order — an endpoint the user gave, the s
 kind, a managed start — and names every leg and why it did not apply when none does. It checks each
 endpoint where it runs and then from a worker, through an ordinary task, because a service the driver
 reaches may be firewalled from the execute nodes; a managed one must answer a worker on another host
-than its own unless that host is the driver's. The endpoints are bound into the plan before its first
-task and the value is resolved while the services are still up. A run's services, its probe tasks and
-its queued tasks live exactly as long as the run: every acquisition registers its release when it
-returns, and each release logs its failure instead of raising, so the error you see is the first one.
-The engine names no service; the recipes are plain data in ``graphed_executors.submit.recipes``.
-Cluster hosting is one duck-typed seam, a backend's ``host_service``/``release_service`` pair. The
-HTCondor backend fills it with a job per service that announces its endpoint, signed with a secret
-made for that one service (never the pilots' secret, which signs pickles), from a directory that holds
-only the recipe's inputs.
+than its own unless that host is the driver's. A task that fails re-runs those checks where it ran:
+an exception's type cannot tell a dead service from a plan error, but asking the service can, and the
+run ends at that first failure either way. On Linux, when ``/proc`` shows a listener on a started
+service's port, the port counts only if the started process tree holds it, because a check passes on
+any listener; with no listener visible there, and on other systems, the check alone decides. The
+endpoints are bound into the plan before its first task and the value is resolved while the services
+are still up. A run's
+services, its probe tasks and its queued tasks live exactly as long as the run: every acquisition
+registers its release when it returns, and each release logs its failure instead of raising, so the
+error you see is the first one. The engine names no service; the recipes are plain data in
+``graphed_executors.submit.recipes``. Cluster hosting is one duck-typed seam, a backend's
+``host_service``/``release_service`` pair. The HTCondor backend fills it with a job per service that
+announces its endpoint, signed with a secret made for that one service (never the pilots' secret, which
+signs pickles), from a directory that holds only the recipe's inputs.
 
 Not supported yet
 -----------------
 
-* **Resuming a killed cluster run.** A dask or parsl run that dies starts over.
-  ``graphed.checkpoint.run_resumable`` and ``run_shuffle_resumable`` resume — against a local
-  directory or a store at a URL any machine can reach — but they drive the partitions themselves,
-  one at a time; they are not runners, so there is no ``run_resumable(executor=dask_runner(...))``.
-  Use them where surviving a crash matters more than wall time, or split your run into pieces you
-  can resubmit.
+* **Resuming a plan that pulls tasks as it goes.** ``resumable`` needs a fixed task set; a plan with
+  ``next_tasks`` is refused, and no interior combine is stored, so a resumed run recombines every
+  partial (`Resuming a killed run`_).
 * **TaskVine and Work Queue.** ``ParslBackend`` refuses executor types it has not verified
   rather than guessing a capability vector, so those raise a ``TypeError`` naming the two
   supported classes. Use HTEX.
