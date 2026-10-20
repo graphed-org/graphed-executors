@@ -57,7 +57,9 @@ def test_an_http_actor_leaves_its_registry_wait_when_the_run_is_released() -> No
     t.start()
     try:
         got = driver.recv(timeout=10)
-        assert got is not None and got[1][0] == "hello", got
+        assert got is not None, "the actor never said hello"
+        message = got[1]
+        assert isinstance(message, tuple) and message[0] == "hello", got
         time.sleep(0.5)
         assert t.is_alive(), "the actor must wait for its registry while the run is live"
         release_w.close()
