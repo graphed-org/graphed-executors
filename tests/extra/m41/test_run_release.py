@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import _thread
 import multiprocessing
-import socket
 import threading
 import time
 
@@ -12,6 +11,7 @@ import pytest
 from _big_partial import BIG, plan
 
 from graphed_executors.local import ThreadExecutor, _peer
+from graphed_executors.local._transport import HttpTransport
 
 
 @pytest.mark.parametrize("comms", ["ipc", "http"])
@@ -31,9 +31,8 @@ def test_an_interrupted_thread_run_returns_promptly_and_leaves_no_actor(comms: s
 
 
 def test_an_http_actor_leaves_its_registry_wait_when_the_run_is_released() -> None:
-    with socket.socket() as s:  # a driver endpoint that is already gone: the hello is never answered
-        s.bind(("127.0.0.1", 0))
-        port = int(s.getsockname()[1])
+    driver = HttpTransport("driver")  # takes the hello, then never sends a registry
+    port = driver.port
     release_r, release_w = multiprocessing.Pipe(duplex=False)
     raised: list[BaseException] = []
 
@@ -56,10 +55,15 @@ def test_an_http_actor_leaves_its_registry_wait_when_the_run_is_released() -> No
 
     t = threading.Thread(target=actor, daemon=True)
     t.start()
-    time.sleep(0.5)
-    assert t.is_alive(), "the actor must wait for its registry while the run is live"
-    release_w.close()
-    t.join(5)
+    try:
+        got = driver.recv(timeout=10)
+        assert got is not None and got[1][0] == "hello", got
+        time.sleep(0.5)
+        assert t.is_alive(), "the actor must wait for its registry while the run is live"
+        release_w.close()
+        t.join(5)
+    finally:
+        driver.close()
     assert not t.is_alive(), "the released actor is still waiting for a registry"
     assert [type(e) for e in raised] == [RuntimeError]
     assert "left before sending the registry" in str(raised[0])
