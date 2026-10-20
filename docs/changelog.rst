@@ -21,7 +21,8 @@ Requires ``graphed`` 0.0.8 or later.
 * A partial or merge output that stdlib pickle refuses, such as one whose ``behavior`` holds a lambda the
   ``reduce`` step built, returns from ``ProcessPoolExecutor`` and ``PinnedPoolExecutor`` workers
   through cloudpickle on every route (``comms=None``, ``pooled_combines``, ``"ipc"``, ``"http"``); it
-  failed to pickle. Values stdlib pickle accepts are still sent with it (#65).
+  failed to pickle. HTCondor pilots and the HTCondor driver job carry such results the same way.
+  Values stdlib pickle accepts are still sent with it (#65).
 
 0.0.5
 -----

@@ -179,7 +179,8 @@ Two knobs shape this:
   node.
 
 However a partial crosses between processes — returned from a pool worker, sent to a pooled merge,
-or passed between peers over ``ipc`` or ``http`` — it is pickled with the standard library first.
+passed between peers over ``ipc`` or ``http``, or returned by an HTCondor pilot or driver job — it
+is pickled with the standard library first.
 Only a value stdlib pickle refuses, such as an awkward array whose ``behavior`` holds a lambda your
 ``reduce`` built, falls back to cloudpickle; a value neither can pickle fails the run with the
 pickling error.
