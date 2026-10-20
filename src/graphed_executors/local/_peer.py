@@ -35,6 +35,7 @@ from graphed.core import RunControl, RunState
 from graphed.core.execution import LocalResources, Partition, TaskEvent, TaskPhase, emit_task, partition_label
 from graphed.debug import StageError
 
+from ._pinned_pool import exit_with_driver
 from ._reduce import LazyReducer, running_fold
 from ._transport import HttpTransport, QueueTransport
 
@@ -819,6 +820,7 @@ def peer_pool_init(registry: dict[str, Any]) -> None:
     its own inbox + the peers' outboxes by address (no Manager server)."""
     global _peer_registry
     _peer_registry = registry
+    exit_with_driver()
 
 
 def pooled_peer_actor(

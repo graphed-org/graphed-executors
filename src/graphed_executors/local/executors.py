@@ -77,7 +77,7 @@ from ._peer import (
     slice_items,
     worker_outbox_addresses,
 )
-from ._pinned_pool import PinnedProcessPool
+from ._pinned_pool import PinnedProcessPool, exit_with_driver
 from ._portable import Portable
 from ._reduce import LazyReducer, plan_tree, running_fold, tree_reduce
 from ._transport import HttpTransport, PipeInbox, QueueTransport, build_transports
@@ -216,6 +216,7 @@ def _proc_init(
         _proc_drain_stop.set()
     if _proc_drain_thread is not None:
         _proc_drain_thread.join(timeout=_PROC_EXIT_JOIN_S)
+    exit_with_driver()
     _proc_resources = LocalResources()
     _proc_event_q = event_q
     _proc_profiler = _proc_buffer = _proc_drain_stop = _proc_drain_thread = _proc_monitor = None
@@ -1363,7 +1364,7 @@ class _ProcessExecutorBase(_BaseExecutor):
             pool = cast("_StdProcessPool", self._peer_pool)
         else:
             self._close_peer()
-            pool = _StdProcessPool(max_workers=w, mp_context=ctx)
+            pool = _StdProcessPool(max_workers=w, mp_context=ctx, initializer=exit_with_driver)
             if self._persistent:
                 self._peer_pool, self._peer_nworkers = pool, w
         assert pool is not None

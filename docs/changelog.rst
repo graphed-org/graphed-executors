@@ -31,6 +31,7 @@ Requires ``graphed`` 0.0.8 or later.
   ``comms="http"`` run interrupted before the registry handshake no longer hangs its pool shutdown
   (#72), and an interrupted ``ThreadExecutor`` peer run returns at once and leaves no actor thread
   behind; it waited 30 s per thread.
+* Process-pool workers exit when their driver process dies; they waited for work forever.
 
 0.0.5
 -----
