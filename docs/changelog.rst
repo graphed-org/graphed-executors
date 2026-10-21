@@ -1,10 +1,10 @@
 What changed
 ============
 
-Unreleased
-----------
+0.0.6
+-----
 
-Requires ``graphed`` 0.0.8 or later.
+Requires ``graphed`` 0.0.9 or later.
 
 * A plan whose op is a lambda or closure, or whose partials carry a behavior holding a lambda, runs on
   ``ProcessPoolExecutor`` with ``comms=None`` and ``comms="ipc"``; it failed to pickle. The fix is in
