@@ -114,7 +114,7 @@ class PipeInbox:
     every process that puts to it, so a peer worker writing to its driver + reduction peers ends up
     with ~``log(N)`` extra threads. With workers ≈ cores (the normal HEP batch slot) those
     idle-but-scheduled threads add context-switch pressure that measurably slows the workers'
-    compute (py-spy: 5 threads/ worker vs the hub's 1). ``SimpleQueue`` has **no feeder thread** —
+    compute (py-spy: 5 threads/worker vs the hub's 1). ``SimpleQueue`` has **no feeder thread** —
     ``put`` writes the pipe synchronously under a lock — so a peer worker holds one extra thread,
     not ``log(N)``. We wait/poll the reader side, which exposes ``poll(timeout)``, for the timed
     receives.
@@ -291,7 +291,7 @@ class HttpTransport:
 
     One sender thread PER DESTINATION, created on first use. A single shared sender would deliver
     in global order, so a destination that has stopped answering (a crashed worker whose server is
-    mid- shutdown accepts the connection and never responds) holds every later message hostage for
+    mid-shutdown accepts the connection and never responds) holds every later message hostage for
     its retries — including the driver's ``done`` for the workers that are still alive, which is
     exactly what the teardown waits on. Per destination, order is still preserved and a dead peer
     delays only its own messages.

@@ -301,7 +301,7 @@ def replay_reader_plane(
     """Reproduce the reference reader/disk-plane counters.
 
     By running the imported ``_stage2_gather`` over the fragment SIZES (size-only backend +
-    worker-address-keyed size-only cluster) — byte- identical to the local engine on identical
+    worker-address-keyed size-only cluster) — byte-identical to the local engine on identical
     inputs/budgets because the kernel is reused verbatim.
     """
     witness = ShuffleWitness(n_producer_tasks=n_tasks)
