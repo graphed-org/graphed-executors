@@ -1,4 +1,6 @@
-"""m68c: a ``join_plan`` whose ``reduce``/``combine`` live in ``__main__`` (a notebook's) runs through
+"""m68c: a ``join_plan`` whose ``reduce``/``combine`` live in ``__main__``.
+
+A ``join_plan`` whose ``reduce``/``combine`` live in ``__main__`` (a notebook's) runs through
 ``SubmitRunner(ThreadBackend)`` to ``SequentialRunner``'s value, with and without a bound service.
 """
 

@@ -1,9 +1,11 @@
-"""m69b ``run_lpc.py`` without a site: its manifests become each dataset's first ``--files`` files in
-``--parts`` steps, the attached run asks for the LPC row narrowed to ``--placement`` with the analysis
-shipped, the driverless run asks for a slot that holds the driver, its pilots and every server, both
-save the run's diagnostics, and each server's status line names when it was submitted and ready. The
-runner is a stand-in that runs the plan on threads beside the driver. Skips without coffea or higgs_dna
-unless ``GRAPHED_HGG_REQUIRED=1``, as ``hgg_harness`` does.
+"""m69b ``run_lpc.py`` without a site.
+
+Its manifests become each dataset's first ``--files`` files in ``--parts`` steps, the attached run
+asks for the LPC row narrowed to ``--placement`` with the analysis shipped, the driverless run asks
+for a slot that holds the driver, its pilots and every server, both save the run's diagnostics, and
+each server's status line names when it was submitted and ready. The runner is a stand-in that runs
+the plan on threads beside the driver. Skips without coffea or higgs_dna unless
+``GRAPHED_HGG_REQUIRED=1``, as ``hgg_harness`` does.
 """
 
 from __future__ import annotations

@@ -1,36 +1,39 @@
-"""The engine's service set: resolve each service a plan declares, check it, probe it from a worker, and
-release what was started when the submission that started it ends (plan-services §3.1, D2, D10).
+"""The engine's service set.
+
+Resolve each service a plan declares, check it, probe it from a worker, and release what was
+started when the submission that started it ends (plan-services §3.1, D2, D10).
 
 A plan's ``services`` are graphed ``ServiceSpec`` requirements; the engine names none of them. A
-:class:`ServiceSet` satisfies each spec by three legs, in order: (1) an endpoint the user gave, checked,
-and a failing one refuses the run naming it (an explicit instruction is never silently replaced); (2)
-the backend's site endpoint for the spec's ``kind`` (``backend.site_services``, duck-typed), checked, a
-failing one passed over with the reason kept in the status; (3) a managed start from the spec's
-``launch`` recipe: beside the driver (a stdlib ``Popen``) when the recipe has no image and no GPUs, the
-backend offers ``"driver"`` in ``service_hosts``, and the driver holds it (the ``resources["memory_mb"]``
-of the set's services beside the driver, this one included, sum to no more than the backend's
-``driver_memory_mb``, else the host's physical memory), else on the cluster through the backend's
-``host_service``/``release_service`` pair (D10: the capability IS the pair of methods). Nothing left
-raises :class:`ServiceUnavailable` naming each leg and why it did not apply. The resolving runs inside
-the backend's ``starting_services()`` context when it has one, a backend that holds its workers back
-while a plan's services start, and the resolving and the probe inside its ``starting_service_set()``
-context, a backend that starts one set at a time.
+:class:`ServiceSet` satisfies each spec by three legs, in order: (1) an endpoint the user gave,
+checked, and a failing one refuses the run naming it (an explicit instruction is never silently
+replaced); (2) the backend's site endpoint for the spec's ``kind`` (``backend.site_services``,
+duck-typed), checked, a failing one passed over with the reason kept in the status; (3) a managed
+start from the spec's ``launch`` recipe: beside the driver (a stdlib ``Popen``) when the recipe has
+no image and no GPUs, the backend offers ``"driver"`` in ``service_hosts``, and the driver holds it
+(the ``resources["memory_mb"]`` of the set's services beside the driver, this one included, sum to
+no more than the backend's ``driver_memory_mb``, else the host's physical memory), else on the
+cluster through the backend's ``host_service``/``release_service`` pair (D10: the capability IS the
+pair of methods). Nothing left raises :class:`ServiceUnavailable` naming each leg and why it did
+not apply. The resolving runs inside the backend's ``starting_services()`` context when it has one,
+a backend that holds its workers back while a plan's services start, and the resolving and the
+probe inside its ``starting_service_set()`` context, a backend that starts one set at a time.
 
-Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from a
-worker. Where the service runs, a dial passes on any listener, so a port another process listens on
-(:func:`listeners`, read from Linux ``/proc``) that the child's process tree does not hold
+Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from
+a worker. Where the service runs, a dial passes on any listener, so a port another process listens
+on (:func:`listeners`, read from Linux ``/proc``) that the child's process tree does not hold
 (:func:`held_by`) refuses the start. The worker probe is an ordinary ``backend.submit`` of
-:func:`_probe_services`, one task that runs every service's check and answers with :func:`host_identity`
-and each check's reason; each answer is awaited up to the largest ``timeout_s`` among the set's services. It is resubmitted under a fresh
-key (at most ``max(2, n_workers())`` times) until a host other than a managed service's own answers,
-and a service only its own host can reach passes only
-when that host is the driver's (one machine). Every acquisition registers its release on an
-``ExitStack`` the moment it returns, each release logs its failure and never raises, so the first
-exception is the one that surfaces and a raising release never skips a later one.
+:func:`_probe_services`, one task that runs every service's check and answers with
+:func:`host_identity` and each check's reason; each answer is awaited up to the largest
+``timeout_s`` among the set's services. It is resubmitted under a fresh key (at most ``max(2,
+n_workers())`` times) until a host other than a managed service's own answers, and a service only
+its own host can reach passes only when that host is the driver's (one machine). Every acquisition
+registers its release on an ``ExitStack`` the moment it returns, each release logs its failure and
+never raises, so the first exception is the one that surfaces and a raising release never skips a
+later one.
 
-A service lives in the scope of the submission that started it: :class:`SubmitRunner` enters one set
-per ``run`` under that run's nonce. A user keeps a service warm across plans by holding a started set
-and passing its :class:`Endpoints` as the runner's ``services`` (leg 1 for every run).
+A service lives in the scope of the submission that started it: :class:`SubmitRunner` enters one
+set per ``run`` under that run's nonce. A user keeps a service warm across plans by holding a
+started set and passing its :class:`Endpoints` as the runner's ``services`` (leg 1 for every run).
 """
 
 from __future__ import annotations
@@ -72,15 +75,17 @@ _MIB = 1 << 20
 _PORT_LOCK = threading.Lock()
 
 
-# ---- records and refusals ------------------------------------------------------------------------
+# ---- records and refusals -----------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class ServiceStatus:
-    """How one service of a set was satisfied: ``leg`` is ``"user"``, ``"site"`` or ``"managed"``;
-    ``host`` is ``"driver"`` or ``"cluster"`` for a managed one; ``identity`` is the host a managed
-    service runs on (``None`` for user and site endpoints, where any worker's passing answer passes);
-    ``detail`` keeps why earlier legs were passed over. Times are ``time.time()`` stamps.
+    """How one service of a set was satisfied: ``leg`` is ``"user"``, ``"site"`` or ``"managed"``.
+
+    ``host`` is ``"driver"`` or ``"cluster"`` for a managed one; ``identity`` is the host a
+    managed service runs on (``None`` for user and site endpoints, where any worker's passing
+    answer passes); ``detail`` keeps why earlier legs were passed over. Times are
+    ``time.time()`` stamps.
     """
 
     name: str
@@ -110,7 +115,9 @@ class ServiceUnavailable(Exception):
 
 
 class ServiceUnreachable(Exception):
-    """Service ``name`` at ``endpoint`` did not pass its check from a worker (``worker`` the answering
+    """Service ``name`` at ``endpoint`` did not pass its check from a worker.
+
+    Service ``name`` at ``endpoint`` did not pass its check from a worker (``worker`` the answering
     host's identity, empty when none answered); ``reason`` says why.
     """
 
@@ -127,8 +134,10 @@ class ServiceUnreachable(Exception):
 
 
 class Endpoints(Mapping[str, str]):
-    """A started set's endpoints (service name -> ``scheme://host:port``). :meth:`on_close` registers a
-    callback the set runs when it closes, before it releases any service.
+    """A started set's endpoints (service name -> ``scheme://host:port``).
+
+    :meth:`on_close` registers a callback the set runs when it closes, before it releases any
+    service.
     """
 
     def __init__(
@@ -156,12 +165,15 @@ class Endpoints(Mapping[str, str]):
         self._register(callback)
 
 
-# ---- host identity and readiness -----------------------------------------------------------------
+# ---- host identity and readiness ----------------------------------------------------------------
 
 
 def machine_ad(attr: str, env: str = "_CONDOR_MACHINE_AD") -> str | None:
-    """``attr`` of the ad file ``$<env>`` names (string quotes dropped; ``_CONDOR_JOB_AD`` for the job's own
-    ad), read without the bindings; ``None`` outside a job or when the ad has no such line.
+    """``attr`` of the ad file ``$<env>`` names.
+
+    ``attr`` of the ad file ``$<env>`` names (string quotes dropped; ``_CONDOR_JOB_AD`` for the
+    job's own ad), read without the bindings; ``None`` outside a job or when the ad has no such
+    line.
     """
     path = os.environ.get(env)
     if path and os.path.isfile(path):
@@ -174,15 +186,19 @@ def machine_ad(attr: str, env: str = "_CONDOR_MACHINE_AD") -> str | None:
 
 
 def host_identity() -> str:
-    """This host as the pool names it: ``Machine`` from ``$_CONDOR_MACHINE_AD`` (a container's own
-    hostname is not the execute node's), else ``socket.getfqdn()``.
+    """Return this host as the pool names it.
+
+    ``Machine`` from ``$_CONDOR_MACHINE_AD`` (a container's own hostname is not the execute
+    node's), else ``socket.getfqdn()``.
     """
     return machine_ad("Machine") or socket.getfqdn()
 
 
 def listeners(port: int, proc: str = "/proc") -> set[str]:
-    """The inodes of the sockets listening on ``port``, read from ``{proc}/net/tcp`` and ``{proc}/net/tcp6``;
-    a file that cannot be read contributes none, so a host without ``/proc`` has no listener here.
+    """Return the inodes of the sockets listening on ``port``.
+
+    Read from ``{proc}/net/tcp`` and ``{proc}/net/tcp6``; a file that cannot be read contributes
+    none, so a host without ``/proc`` has no listener here.
     """
     found: set[str] = set()
     for name in ("tcp", "tcp6"):
@@ -199,8 +215,11 @@ def listeners(port: int, proc: str = "/proc") -> set[str]:
 
 
 def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
-    """Whether ``pid`` and its descendants (each ``{proc}/<pid>/stat`` names its parent) hold every one of
-    ``inodes`` among their fds; a process whose ``stat`` or ``fd`` cannot be read holds none.
+    """Whether ``pid`` and its descendants hold every one of ``inodes`` among their fds.
+
+    Whether ``pid`` and its descendants (each ``{proc}/<pid>/stat`` names its parent) hold every
+    one of ``inodes`` among their fds; a process whose ``stat`` or ``fd`` cannot be read holds
+    none.
     """
     kids: dict[int, list[int]] = {}
     for entry in os.listdir(proc):
@@ -227,8 +246,9 @@ def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
 
 
 def physical_memory_mb() -> int:
-    """This host's physical memory in MiB: ``GlobalMemoryStatusEx`` on Windows, ``os.sysconf`` pages
-    elsewhere.
+    """Return this host's physical memory in MiB.
+
+    ``GlobalMemoryStatusEx`` on Windows, ``os.sysconf`` pages elsewhere.
     """
     if sys.platform == "win32":
         import ctypes  # noqa: PLC0415  (Windows only)
@@ -255,8 +275,10 @@ def physical_memory_mb() -> int:
 
 
 def minted_endpoint(check: str, host: str, port: int) -> str:
-    """The endpoint of a managed (plaintext) instance on ``host:port``: its scheme is the check's wire
-    (``http:`` -> ``http://``, ``grpc:`` -> ``grpc://``, ``tcp`` -> ``tcp://``).
+    """Return the endpoint of a managed (plaintext) instance on ``host:port``.
+
+    Its scheme is the check's wire (``http:`` -> ``http://``, ``grpc:`` -> ``grpc://``, ``tcp``
+    -> ``tcp://``).
     """
     scheme = _MINTED_SCHEME.get(check.partition(":")[0], "tcp")
     netloc = f"[{host}]" if ":" in host else host
@@ -266,12 +288,12 @@ def minted_endpoint(check: str, host: str, port: int) -> str:
 def check_ready(endpoint: str, check: str, timeout: float) -> str | None:
     """``None`` when ``endpoint`` passes ``check`` within ``timeout`` seconds, else why not.
 
-    ``tcp`` connects. ``http:<path>`` GETs ``<scheme>://<host:port><path>`` and is ready on a 2xx whose
-    content-type is not ``application/grpc*`` (a gRPC gateway answers 200 to every path). ``grpc:<svc>``
-    is the standard ``grpc.health.v1`` Check of ``<svc>`` (grpcio, imported here), over TLS exactly for
-    ``grpcs``, ready iff SERVING. A check runs only over a wire that carries it (``http:`` over
-    ``http(s)``, ``grpc:`` over ``grpc(s)``, ``tcp`` over any); a mismatch or an unknown form is refused
-    without dialling.
+    ``tcp`` connects. ``http:<path>`` GETs ``<scheme>://<host:port><path>`` and is ready on a 2xx
+    whose content-type is not ``application/grpc*`` (a gRPC gateway answers 200 to every path).
+    ``grpc:<svc>`` is the standard ``grpc.health.v1`` Check of ``<svc>`` (grpcio, imported here),
+    over TLS exactly for ``grpcs``, ready iff SERVING. A check runs only over a wire that carries
+    it (``http:`` over ``http(s)``, ``grpc:`` over ``grpc(s)``, ``tcp`` over any); a mismatch or an
+    unknown form is refused without dialling.
     """
     try:
         scheme, _hostport = split_endpoint(endpoint)
@@ -282,11 +304,17 @@ def check_ready(endpoint: str, check: str, timeout: float) -> str | None:
         return _check_tcp(endpoint, timeout)
     if kind == "http" and colon and arg.startswith("/"):
         if scheme not in ("http", "https"):
-            return f"check {check!r} runs over http:// or https://, not {scheme}:// ({endpoint}); not dialled"
+            return (
+                f"check {check!r} runs over http:// or https://, not {scheme}:// ({endpoint}); "
+                "not dialled"
+            )
         return _check_http(f"{endpoint}{arg}", timeout)
     if kind == "grpc" and colon:
         if scheme not in ("grpc", "grpcs"):
-            return f"check {check!r} runs over grpc:// or grpcs://, not {scheme}:// ({endpoint}); not dialled"
+            return (
+                f"check {check!r} runs over grpc:// or grpcs://, not {scheme}:// ({endpoint}); "
+                "not dialled"
+            )
         return _check_grpc(endpoint, arg, tls=scheme == "grpcs", timeout=timeout)
     return f"unknown check {check!r}: 'tcp', 'http:<path>' or 'grpc:<service>'; not dialled"
 
@@ -330,8 +358,10 @@ def _varint(n: int) -> bytes:
 
 
 def _check_grpc(endpoint: str, service: str, *, tls: bool, timeout: float) -> str | None:
-    """The health Check with grpcio alone: the one-field request and the reply as raw protobuf bytes
-    (generated stubs would add a dependency for a two-byte message).
+    """Run the health Check with grpcio alone.
+
+    The one-field request and the reply as raw protobuf bytes (generated stubs would add a
+    dependency for a two-byte message).
     """
     try:
         grpc: Any = importlib.import_module("grpc")
@@ -356,20 +386,24 @@ def _check_grpc(endpoint: str, service: str, *, tls: bool, timeout: float) -> st
 
 
 def _probe_services(checks: Sequence[tuple[str, str]]) -> tuple[str, tuple[str | None, ...]]:
-    """The worker probe task: this worker's :func:`host_identity` and each ``(endpoint, check)``'s
-    reason (``None`` = ready).
+    """Run the worker probe task.
+
+    This worker's :func:`host_identity` and each ``(endpoint, check)``'s reason (``None`` =
+    ready).
     """
     return host_identity(), tuple(
         check_ready(endpoint, check, PROBE_CHECK_S) for endpoint, check in checks
     )
 
 
-# ---- releases --------------------------------------------------------------------------------------
+# ---- releases -----------------------------------------------------------------------------------
 
 
 def release_quietly(what: str, fn: Callable[..., object], *args: object) -> None:
-    """Run one release step; its failure is logged, never raised, so the first exception is the one
-    that surfaces and a later release still runs. Every release in this package goes through it.
+    """Run one release step.
+
+    Its failure is logged, never raised, so the first exception is the one that surfaces and a
+    later release still runs. Every release in this package goes through it.
     """
     try:
         fn(*args)
@@ -390,15 +424,18 @@ def _stop_child(proc: subprocess.Popen[bytes], name: str) -> None:
 
 
 def _free_port(host: str, ports: tuple[int, int]) -> int:
-    """The first port of the inclusive range that binds on ``host`` now and that nothing answers a
-    connect on; the last error when none does.
+    """Return the first port of the inclusive range that binds on ``host`` now.
+
+    Return the first port of the inclusive range that binds on ``host`` now and that nothing
+    answers a connect on; the last error when none does.
 
     On POSIX the scan sets ``SO_REUSEADDR`` so a port whose earlier connections sit in TIME_WAIT is
-    not skipped (the managed child binds with it too, as ``http.server`` does; without it back-to-back
-    runs walk off a small range). On Linux a listener still refuses that bind, but on macOS/BSD
-    ``SO_REUSEADDR`` lets a specific-address bind pass a port another process holds on the wildcard
-    address, and on Windows a non-exclusive wildcard listener does not refuse a specific bind either;
-    the connect catches both: a port something listens on is never handed out.
+    not skipped (the managed child binds with it too, as ``http.server`` does; without it
+    back-to-back runs walk off a small range). On Linux a listener still refuses that bind, but on
+    macOS/BSD ``SO_REUSEADDR`` lets a specific-address bind pass a port another process holds on
+    the wildcard address, and on Windows a non-exclusive wildcard listener does not refuse a
+    specific bind either; the connect catches both: a port something listens on is never handed
+    out.
     """
     low, high = ports
     error: OSError = OSError(f"no port in {low}-{high}")
@@ -431,7 +468,7 @@ def _render(argv: Sequence[str], host: str, port: int) -> list[str]:
     return out
 
 
-# ---- the set ---------------------------------------------------------------------------------------
+# ---- the set ------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -441,8 +478,9 @@ class _Resolved:
 
 
 class ServiceSet:
-    """The services ``specs`` names, satisfied on ``backend`` by the three legs; a context manager
-    (``__enter__`` = :meth:`start`, ``__exit__`` = :meth:`close`).
+    """The services ``specs`` names, satisfied on ``backend`` by the three legs.
+
+    A context manager (``__enter__`` = :meth:`start`, ``__exit__`` = :meth:`close`).
 
     ``endpoints`` are leg-1 endpoints by service name, each ``scheme://host:port`` (refused here
     otherwise). ``scope`` names this set's probe keys and the keys ``host_service`` mints: a
@@ -479,7 +517,10 @@ class ServiceSet:
         return list(self._statuses)
 
     def start(self) -> Endpoints:
-        """Resolve, check and probe every spec; on any failure release what was acquired and raise."""
+        """Resolve, check and probe every spec.
+
+        On any failure release what was acquired and raise.
+        """
         if self._stack is not None:
             raise RuntimeError("this service set is already started")
         self._statuses = []
@@ -568,9 +609,10 @@ class ServiceSet:
         return self._record(spec, "managed", "cluster", endpoint, identity, started, detail)
 
     def _driver_refusal(self, size: int) -> str | None:
-        """Why ``size`` MiB more beside the driver does not fit, or ``None`` when it does: the set's
-        services there, this one included, must sum to no more than ``backend.driver_memory_mb``
-        (duck-typed), else the host's physical memory.
+        """Why ``size`` MiB more beside the driver does not fit, or ``None`` when it does.
+
+        The set's services there, this one included, must sum to no more than
+        ``backend.driver_memory_mb`` (duck-typed), else the host's physical memory.
         """
         limit = getattr(self.backend, "driver_memory_mb", None)
         source = "the backend's driver_memory_mb"
@@ -614,7 +656,8 @@ class ServiceSet:
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
                 left = deadline - time.monotonic()
                 reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
-                # read after the dial, which passes on any listener, so the one it reached is judged
+                # read after the dial, which passes on any listener, so the one it reached is
+                # judged
                 inodes = listeners(port)
                 if inodes and not held_by(proc.pid, inodes):
                     reason = f"port {port} on {host} is held by another process"
@@ -626,7 +669,10 @@ class ServiceSet:
                     reason = f"{spec.check!r} passed but the service exited with returncode {code}"
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
                 if time.monotonic() >= deadline:
-                    reason = f"{spec.check!r} never passed on {endpoint} within {spec.timeout_s}s: {reason_now}"
+                    reason = (
+                        f"{spec.check!r} never passed on {endpoint} within "
+                        f"{spec.timeout_s}s: {reason_now}"
+                    )
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
                 time.sleep(_POLL_S)
         return self._record(spec, "managed", "driver", endpoint, identity, started, detail)
@@ -660,10 +706,12 @@ class ServiceSet:
     # ---- the worker probe ----
 
     def _probe(self, resolved: Sequence[_Resolved], stack: contextlib.ExitStack) -> None:
-        """Probe every endpoint from a worker until each passes: a managed service needs an answer
-        from a host other than its own, or its own host must be the driver's. One task checks every
-        service; each answer is awaited up to the largest ``timeout_s`` among the set's services (the
-        set's one bound, not a per-service one), and at most ``max(2, n_workers())`` tasks are sent.
+        """Probe every endpoint from a worker until each passes.
+
+        A managed service needs an answer from a host other than its own, or its own host
+        must be the driver's. One task checks every service; each answer is awaited up to
+        the largest ``timeout_s`` among the set's services (the set's one bound, not a
+        per-service one), and at most ``max(2, n_workers())`` tasks are sent.
         """
         if not resolved:
             return

@@ -23,8 +23,10 @@ from .protocol import SubmitCapabilities, SubmitFuture
 
 
 class _ThreadEnv:
-    """A per-worker-thread :class:`WorkerEnv`: its own ``open_once`` resources and an ``emit`` that
-    delivers event dicts straight to the driver handler (shared memory — no head-node copy).
+    """A per-worker-thread :class:`WorkerEnv`.
+
+    Its own ``open_once`` resources and an ``emit`` that delivers event dicts straight to the
+    driver handler (shared memory — no head-node copy).
     """
 
     def __init__(self, backend: ThreadBackend) -> None:
@@ -39,9 +41,10 @@ class _ThreadEnv:
 
 
 class ThreadBackend:
-    """A :class:`SubmitBackend` over a stdlib thread pool. ``peer_data_movement=True`` (shared
-    memory), everything else ``False`` — no scatter, no pin, no per-task retries/resources, no
-    running-cancel, no worker file cache.
+    """A :class:`SubmitBackend` over a stdlib thread pool.
+
+    ``peer_data_movement=True`` (shared memory), everything else ``False`` — no scatter, no
+    pin, no per-task retries/resources, no running-cancel, no worker file cache.
     """
 
     capabilities = SubmitCapabilities(
@@ -78,8 +81,8 @@ class ThreadBackend:
         resources: Mapping[str, float] | None = None,
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
-        # `key`/`retries`/`priority`/`resources`/`workers` are best-effort hints this backend has no
-        # capability for -- silently ignored (correctness never depends on them).
+        # `key`/`retries`/`priority`/`resources`/`workers` are best-effort hints this backend has
+        # no capability for -- silently ignored (correctness never depends on them).
         return self._pool.submit(self._invoke, fn, args)
 
     def _invoke(self, fn: Callable[..., object], args: tuple[object, ...]) -> object:

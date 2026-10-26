@@ -1,5 +1,6 @@
-"""A fixed run with a monitor raises well within the drain timeout whatever leaves complete after it (C1's
-drain constraint).
+"""A fixed run with a monitor raises well within the drain timeout.
+
+Whatever leaves complete after it (C1's drain constraint).
 """
 
 from __future__ import annotations

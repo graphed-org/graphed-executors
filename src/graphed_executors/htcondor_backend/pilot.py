@@ -1,10 +1,10 @@
 """A pilot: ``python -m graphed_executors.htcondor_backend.pilot <url> <secret file>``.
 
-It registers with the driver's task server, beats from a daemon thread, and runs leased tasks one at a
-time until the server answers 410. It exits 0 when the driver is done with it and 2 when the driver
-refuses its signature. When the driver has been unreachable for a lease it sends itself SIGTERM, even in
-the middle of a task, so an orphan frees its batch slot; so does any beat answered 410 mid-task (a
-timed-out task, or the driver closing).
+It registers with the driver's task server, beats from a daemon thread, and runs leased tasks one
+at a time until the server answers 410. It exits 0 when the driver is done with it and 2 when the
+driver refuses its signature. When the driver has been unreachable for a lease it sends itself
+SIGTERM, even in the middle of a task, so an orphan frees its batch slot; so does any beat answered
+410 mid-task (a timed-out task, or the driver closing).
 """
 
 from __future__ import annotations
@@ -55,7 +55,8 @@ class _Driver:
             except OSError as exc:
                 if time.monotonic() - self.last_ok > self.lease_s:
                     print(f"driver {self.url} unreachable for {self.lease_s}s: {exc}", flush=True)
-                    # from either thread, mid-task too; a signal (not os._exit) lets coverage save its data
+                    # from either thread, mid-task too; a signal (not os._exit) lets coverage save
+                    # its data
                     os.kill(os.getpid(), signal.SIGTERM)
                 time.sleep(1.0)
                 continue

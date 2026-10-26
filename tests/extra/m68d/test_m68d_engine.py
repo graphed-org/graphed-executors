@@ -1,6 +1,8 @@
-"""m68d engine paths the frozen suite does not reach: a fixed run raising at a failed combine, not only at a
-failed leaf; the re-check naming the first service that fails among several, and a run behind a
-``RunControl`` window classified like the default path.
+"""m68d engine paths the frozen suite does not reach.
+
+A fixed run raising at a failed combine, not only at a failed leaf; the re-check naming the first
+service that fails among several, and a run behind a ``RunControl`` window classified like the
+default path.
 """
 
 from __future__ import annotations

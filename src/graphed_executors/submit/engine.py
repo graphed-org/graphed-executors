@@ -3,9 +3,9 @@
 One engine, N backends — the same factorization as the generic shuffle engine over
 ``ShuffleBackend``. The fixed path mirrors the local reduction topology EXACTLY: leaves are
 ``process`` tasks, combines follow the ``plan_tree`` shape as future dependencies, and the driver
-takes the value of the single root future (so bit-for-bit equality vs ``SequentialRunner`` is inherited,
-not re-derived), raising at the first task that fails. The adaptive path folds completions with
-``running_fold`` and cancels outstanding work on stop. Both are reused from
+takes the value of the single root future (so bit-for-bit equality vs ``SequentialRunner`` is
+inherited, not re-derived), raising at the first task that fails. The adaptive path folds
+completions with ``running_fold`` and cancels outstanding work on stop. Both are reused from
 ``graphed_executors.local._reduce`` — no duplication.
 
 The worker seam (plan §1.1, review r1 B1): per-run state travels as a picklable :class:`RunContext`
@@ -13,12 +13,12 @@ first argument; per-worker capability (``open_once`` resources + the event trans
 :class:`WorkerEnv` a BACKEND installs through its own module-level shim — never via an import here,
 so ``submit/`` names dask nowhere and ``test_submit_no_dask_import`` holds.
 
-A submission's scope is its run (plan-services §3.1): ``run`` opens one ``ExitStack`` and registers on
-it everything the submission acquires — the plan's :class:`ServiceSet` (``submit/services.py``) when
-``plan.services`` is non-empty, then a ``cancel`` of its plan tasks not yet done — so no service,
-record or queued task of a run outlives it or reaches another. The body runs on the plan with the
-run's endpoints bound (graphed's ``bind_services``, before the first plan-task submit), and the value
-is resolved against the plan while its services are still up.
+A submission's scope is its run (plan-services §3.1): ``run`` opens one ``ExitStack`` and registers
+on it everything the submission acquires — the plan's :class:`ServiceSet` (``submit/services.py``)
+when ``plan.services`` is non-empty, then a ``cancel`` of its plan tasks not yet done — so no
+service, record or queued task of a run outlives it or reaches another. The body runs on the plan
+with the run's endpoints bound (graphed's ``bind_services``, before the first plan-task submit),
+and the value is resolved against the plan while its services are still up.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ _MISSING = object()
 _DRAIN_TIMEOUT_S = 30.0  # bounded wait for trailing worker events before unsubscribing (off-path)
 
 
-# ---- the worker seam: RunContext (picklable arg) + WorkerEnv (backend-installed contextvar) ------
+# ---- the worker seam: RunContext (picklable arg) + WorkerEnv (backend-installed contextvar) -----
 
 
 @dataclass(frozen=True)
@@ -102,9 +102,11 @@ class RunContext:
 
 
 class WorkerEnv(Protocol):
-    """Per-worker capability the backend installs. ``resources`` backs ``open_once``; ``worker`` is
-    the backend's identity for this worker (a dask address / a thread name); ``emit`` ships event
-    dicts on the run's monitor topic (swallow-on-error — telemetry never breaks a run).
+    """Per-worker capability the backend installs.
+
+    ``resources`` backs ``open_once``; ``worker`` is the backend's identity for this worker (a
+    dask address / a thread name); ``emit`` ships event dicts on the run's monitor topic
+    (swallow-on-error — telemetry never breaks a run).
     """
 
     resources: WorkerResources
@@ -114,7 +116,9 @@ class WorkerEnv(Protocol):
 
 
 class _DefaultEnv:
-    """The process-global fallback env for a task run outside any backend shim (e.g. a bare
+    """The process-global fallback env for a task run outside any backend shim.
+
+    The process-global fallback env for a task run outside any backend shim (e.g. a bare
     ``process`` call): a shared :class:`LocalResources` and a no-op emit.
     """
 
@@ -142,21 +146,24 @@ def _reset_worker_env(token: contextvars.Token[WorkerEnv | None]) -> None:
 
 
 def current_env() -> WorkerEnv:
-    """The worker env a task fn reads for ``resources``/``emit`` — the backend-installed one, or the
-    process-global default when no shim wrapped the call.
+    """Return the worker env a task fn reads for ``resources``/``emit``.
+
+    The backend-installed one, or the process-global default when no shim wrapped the call.
     """
     env = _ENV.get()
     return env if env is not None else _DEFAULT_ENV
 
 
-# ---- broadcast-once worker-side token cache (mirror of local ``_shared_objects``) ----------------
+# ---- broadcast-once worker-side token cache (mirror of local ``_shared_objects``) ---------------
 
 _PAYLOAD_CACHE: OrderedDict[str, object] = OrderedDict()
 _PAYLOAD_CACHE_CAP = 32
 
 
 def _shared_payload(token: str, raw: bytes) -> object:
-    """Deserialize the broadcast payload ONCE per worker process (bounded FIFO cache keyed by
+    """Deserialize the broadcast payload ONCE per worker process.
+
+    Deserialize the broadcast payload ONCE per worker process (bounded FIFO cache keyed by
     ``token``) — even though the future's raw bytes are already cached by the backend per worker,
     the ``pickle.loads`` (and any ``__setstate__`` cost) must not repeat per task (dask/dask#5503).
     """
@@ -173,15 +180,20 @@ def _shared_payload(token: str, raw: bytes) -> object:
 
 
 def _identity(x: bytes) -> bytes:
-    """The broadcast identity future's body: place ``x`` once, referenced by many tasks."""
+    """Serve as the broadcast identity future's body.
+
+    It places ``x`` once, referenced by many tasks.
+    """
     return x
 
 
 def _event_dict(
     phase: TaskPhase, key: int, worker: str, label: str, n_entries: int, error: str | None
 ) -> dict[str, object]:
-    """A msgpack-safe TaskEvent as a plain dict (worker->driver transports require msgpack, not
-    pickle; ``phase`` is stringified explicitly so a StrEnum never leaks).
+    """Return a msgpack-safe TaskEvent as a plain dict.
+
+    Worker->driver transports require msgpack, not pickle; ``phase`` is stringified explicitly
+    so a StrEnum never leaks.
     """
     return {
         "phase": str(phase),
@@ -236,8 +248,10 @@ def _emit_phase(
 
 
 def _render_error(exc: BaseException) -> str:
-    """A concise picklable summary for the dashboard (a StageError already str()s to a user-mapped
-    message, so its own text is the best summary; anything else gets ``Type: message``).
+    """Return a concise picklable summary for the dashboard.
+
+    A StageError already str()s to a user-mapped message, so its own text is the best summary;
+    anything else gets ``Type: message``.
     """
     if isinstance(exc, StageError):
         return str(exc)
@@ -245,8 +259,10 @@ def _render_error(exc: BaseException) -> str:
 
 
 def _leaf_task(ctx: RunContext, payload: bytes, token: str, task: Task) -> object:
-    """Run one ``process`` on a worker, emitting STARTED then FINISHED/ERRORED (worker-side timing).
-    ``payload`` is the resolved broadcast bytes; the token cache deserializes it once per worker.
+    """Run one ``process`` on a worker, emitting STARTED then FINISHED/ERRORED.
+
+    Worker-side timing. ``payload`` is the resolved broadcast bytes; the token cache
+    deserializes it once per worker.
     """
     process = cast(
         "Callable[[Partition, WorkerResources], object]", _shared_payload(token, payload)
@@ -264,8 +280,10 @@ def _leaf_task(ctx: RunContext, payload: bytes, token: str, task: Task) -> objec
 
 
 def _combine_task(ctx: RunContext, payload: bytes, token: str, a: object, b: object) -> object:
-    """Reduce two partials on a worker. ``a``/``b`` are resolved by the backend (dask fetches them
-    peer-to-peer; ThreadBackend ``.result()``\\ s them). Combines emit no task events (leaf keys only).
+    r"""Reduce two partials on a worker.
+
+    ``a``/``b`` are resolved by the backend (dask fetches them peer-to-peer; ThreadBackend
+    ``.result()``\ s them). Combines emit no task events (leaf keys only).
     """
     combine = cast("Callable[[object, object], object]", _shared_payload(token, payload))
     return combine(a, b)
@@ -278,7 +296,10 @@ def _stage_task(payload: bytes, token: str, task: Task, *inputs: bytes) -> bytes
 
 
 def _map_task(payload: bytes, token: str, task: Task, *inputs: bytes) -> dict[int, bytes]:
-    """A ``map_write`` task, its payload split per dest so each (map, dest) edge moves one slice."""
+    """Run a ``map_write`` task, its payload split per dest.
+
+    Each (map, dest) edge then moves one slice.
+    """
     return split(_stage_task(payload, token, task, *inputs))
 
 
@@ -291,10 +312,11 @@ def _fingerprint(
 
 
 def _key(plan_fp: str, run_nonce: str, kind: str, idx: int) -> str:
-    """A namespaced, per-run-nonced, collision-proof task key (plan §1.2.3). The ``graphed-`` +
-    fingerprint prefix guarantees no key collides with a user string arg (dask/dask#9969); the nonce
-    makes an explicit ``key=`` re-execute across two ``run()`` calls instead of returning a cached
-    future.
+    """Return a namespaced, per-run-nonced, collision-proof task key (plan §1.2.3).
+
+    The ``graphed-`` + fingerprint prefix guarantees no key collides with a user string arg
+    (dask/dask#9969); the nonce makes an explicit ``key=`` re-execute across two ``run()``
+    calls instead of returning a cached future.
     """
     return f"graphed-{plan_fp}-{run_nonce}-{kind}-{idx}"
 
@@ -314,9 +336,11 @@ def _event_from_dict(d: dict[str, object]) -> TaskEvent:
 def _service_checked(
     checks: tuple[tuple[str, str, str], ...], fn: Callable[..., object], *args: object
 ) -> object:
-    """``fn(*args)``; when it raises, each ``(name, endpoint, check)`` is re-checked here, on the worker that
-    ran it, and the first that fails raises :class:`ServiceUnreachable` from the task's exception, which
-    is otherwise re-raised unchanged: a plan's own error beside a live service stays a plan error.
+    """``fn(*args)``.
+
+    When it raises, each ``(name, endpoint, check)`` is re-checked here, on the worker that ran it,
+    and the first that fails raises :class:`ServiceUnreachable` from the task's exception, which is
+    otherwise re-raised unchanged: a plan's own error beside a live service stays a plan error.
     """
     try:
         return fn(*args)
@@ -331,9 +355,11 @@ def _service_checked(
 
 
 class _RunTasks:
-    """One run's plan-task submits (the ``_RunLeaves`` idiom): only the futures not yet done are held,
-    since a held dask future pins its result in cluster memory, and :meth:`cancel` cancels those. With
-    ``checks`` (the run's services), every task runs through :func:`_service_checked`.
+    """One run's plan-task submits (the ``_RunLeaves`` idiom).
+
+    Only the futures not yet done are held, since a held dask future pins its result in cluster
+    memory, and :meth:`cancel` cancels those. With ``checks`` (the run's services), every task
+    runs through :func:`_service_checked`.
     """
 
     def __init__(
@@ -369,12 +395,14 @@ class _RunTasks:
 
 
 class SubmitRunner:
-    """A :class:`graphed.core.Executor` over any :class:`SubmitBackend`. ``run`` dispatches to the
-    adaptive path when the plan carries ``next_tasks``, else the fixed ``plan_tree`` future graph.
+    """A :class:`graphed.core.Executor` over any :class:`SubmitBackend`.
 
-    ``services`` (service name -> ``scheme://host:port``) are the leg-1 endpoints of every run, read
-    once at each run's start like ``monitor``; a user-held :class:`ServiceSet`'s endpoints keep its
-    services warm across runs.
+    ``run`` dispatches to the adaptive path when the plan carries ``next_tasks``, else the
+    fixed ``plan_tree`` future graph.
+
+    ``services`` (service name -> ``scheme://host:port``) are the leg-1 endpoints of every run,
+    read once at each run's start like ``monitor``; a user-held :class:`ServiceSet`'s endpoints
+    keep its services warm across runs.
     """
 
     def __init__(
@@ -406,8 +434,9 @@ class SubmitRunner:
 
     def submit(self, plan: Plan[R]) -> Future[ExecResult[R]]:
         """Queue ``plan`` and return a future of its :meth:`run` result without waiting for it.
-        Plans run one at a time in submit order; this blocks while ``max_in_flight`` submitted plans
-        are unfinished.
+
+        Plans run one at a time in submit order; this blocks while ``max_in_flight``
+        submitted plans are unfinished.
         """
         return self._plans.submit(plan)
 
@@ -421,10 +450,13 @@ class SubmitRunner:
     @overload
     def run(self, plan: DurablePlanV2) -> ExecResult[Any]: ...
     def run(self, plan: Plan[R] | DurablePlanV2) -> ExecResult[R] | ExecResult[Any]:
-        """Run ``plan``. Its services are resolved, checked, probed and bound before the first plan task
-        is submitted, and released, with any of its tasks not yet done, when ``run`` returns or raises.
-        A :class:`~graphed.core.DurablePlanV2` (a join or repartition) runs stage by stage to
-        ``plan.value`` of its last stage; a cancel returns ``value=None``.
+        """Run ``plan``.
+
+        Its services are resolved, checked, probed and bound before the first plan task is
+        submitted, and released, with any of its tasks not yet done, when ``run`` returns
+        or raises. A :class:`~graphed.core.DurablePlanV2` (a join or repartition) runs
+        stage by stage to ``plan.value`` of its last stage; a cancel returns
+        ``value=None``.
         """
         monitor = self.monitor
         control = self.control
@@ -550,7 +582,8 @@ class SubmitRunner:
                     key=key,
                     retries=self._retries,
                 )
-            # a combine settles only once all its inputs have, so the root alone learns of a failure late
+            # a combine settles only once all its inputs have, so the root alone learns of a
+            # failure late
             done_q: queue.Queue[SubmitFuture] = queue.Queue()
             for fut in futs.values():
                 fut.add_done_callback(done_q.put)
@@ -576,8 +609,10 @@ class SubmitRunner:
         events_seen: list[int],
         submits: _RunTasks,
     ) -> ExecResult[R]:
-        """``_run_fixed`` through a :class:`_Window`: the same ``plan_tree``, with each combine submitted
-        once both inputs completed, so a cancel leaves completed subtrees to fold by first leaf.
+        """``_run_fixed`` through a :class:`_Window`.
+
+        The same ``plan_tree``, with each combine submitted once both inputs completed, so
+        a cancel leaves completed subtrees to fold by first leaf.
         """
         backend = self.backend
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
@@ -841,9 +876,11 @@ class SubmitRunner:
     def _run_stages(
         self, plan: DurablePlanV2, control: RunControl | None, ctx: RunContext, submits: _RunTasks
     ) -> ExecResult[Any]:
-        """Submit each stage once the stages it reads have finished. A ``map_write`` task's payload
-        reaches each gather as that gather's slice alone: picked in a task beside it where the backend
-        moves data between workers, else picked here from its one fetch.
+        """Submit each stage once the stages it reads have finished.
+
+        A ``map_write`` task's payload reaches each gather as that gather's slice alone:
+        picked in a task beside it where the backend moves data between workers, else
+        picked here from its one fetch.
         """
         backend = self.backend
         peer = backend.capabilities.peer_data_movement
@@ -921,16 +958,20 @@ class SubmitRunner:
     # ---- helpers ----
 
     def _task_slots(self) -> int:
-        """The controlled window's size, floored at one: ``task_slots()`` where the backend has it
-        (off the pinned Protocol; it never waits), else ``n_workers()``.
+        """Return the controlled window's size, floored at one.
+
+        ``task_slots()`` where the backend has it (off the pinned Protocol; it never
+        waits), else ``n_workers()``.
         """
         task_slots = getattr(self.backend, "task_slots", None)
         slots = task_slots() if task_slots is not None else self.backend.n_workers()
         return max(1, int(slots))
 
     def _fill(self, window: _Window[T], in_flight: int, start: Callable[[T], None]) -> None:
-        """Start the held work the window releases; a full window holding work re-reads the slots and
-        resizes, so workers that joined since the last read are used.
+        """Start the held work the window releases.
+
+        A full window holding work re-reads the slots and resizes, so workers that joined
+        since the last read are used.
         """
         while True:
             items = window.take(in_flight)
@@ -946,7 +987,9 @@ class SubmitRunner:
                 return
 
     def _result(self, fut: SubmitFuture, key_to_task: dict[str, Task]) -> object:
-        """Resolve a future, translating a backend worker-death signal (``KilledWorker``) into an
+        """Resolve a future, translating a backend worker-death signal.
+
+        Resolve a future, translating a backend worker-death signal (``KilledWorker``) into an
         attributed :class:`StageError` (plan §1.4). Ordinary exceptions re-raise intact.
         """
         try:
@@ -979,7 +1022,8 @@ class SubmitRunner:
             cause_message=(
                 str(exc)
                 if isinstance(exc, TimeoutError)
-                else f"worker {last_worker} died (segfault/OOM/preemption suspected; note: blame can be "
+                else f"worker {last_worker} died (segfault/OOM/preemption suspected; note: blame "
+                "can be "
                 f"unfair under co-located tasks)"
             ),
             opt_level=0,
@@ -1009,8 +1053,9 @@ class SubmitRunner:
 
     def _profiler_payload(self, monitor: Monitor | None) -> bytes | None:
         # Worker-side statistical sampling is not wired for the dask backend in m42 (no frozen test
-        # exercises on_profile); the RunContext field is populated per the §1.1 contract so the seam
-        # is ready, but the shim does not start a profiler. ponytail: wire when a profile test lands.
+        # exercises on_profile); the RunContext field is populated per the §1.1 contract so the
+        # seam is ready, but the shim does not start a profiler. ponytail: wire when a profile test
+        # lands.
         if monitor is None:
             return None
         factory = monitor.worker_profiler_factory()

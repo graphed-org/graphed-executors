@@ -63,7 +63,10 @@ def empty_small() -> np.ndarray:
 
 
 def plan(n_floats: int, weights: Sequence[int], boom: Container[int] = ()) -> Plan[np.ndarray]:
-    """One leaf per weight (in ms); leaves in ``boom`` raise ``ValueError("kaboom")`` when they end."""
+    """One leaf per weight (in ms).
+
+    Leaves in ``boom`` raise ``ValueError("kaboom")`` when they end.
+    """
     process, empty = (process_big, empty_big) if n_floats == BIG else (process_small, empty_small)
     tasks = tuple(
         Task(k, Partition(f"{'boom' if k in boom else 'leaf'}{k}.root", "Events", 0, w))
@@ -84,9 +87,10 @@ def _entry(target: Callable[..., None], args: tuple[Any, ...], dump_path: str) -
 
 
 def _kill_tree(child: mp.process.BaseProcess) -> None:
-    """POSIX: kill the child AND its worker processes — a wedged pool's workers outlive their driver.
-    Windows has no process groups here, so it degrades to killing the child only and the orphaned
-    workers are left to the OS.
+    """POSIX: kill the child AND its worker processes.
+
+    A wedged pool's workers outlive their driver. Windows has no process groups here, so it
+    degrades to killing the child only and the orphaned workers are left to the OS.
     """
     assert child.pid is not None  # set once the child is started; killpg needs a real pid
     if sys.platform != "win32":

@@ -1,10 +1,11 @@
 """Cancelling parsl futures (tests/extra — NOT frozen).
 
-``ParslBackend.cancel`` leaves HTEX futures alone: HTEX never marks a future running, so a dispatched
-task's future still cancels, and its result then kills parsl's result thread with InvalidStateError,
-after which no task of that executor resolves (m68a's run scope cancels its pending plan tasks, which
-hung test-parsl this way). On TPE the cancel goes through. ``_ParslFuture.cancelled`` delegates, as
-the frozen m68a live test's probe recorder asks it on the HTCondor backend, which shares the adapter.
+``ParslBackend.cancel`` leaves HTEX futures alone: HTEX never marks a future running, so a
+dispatched task's future still cancels, and its result then kills parsl's result thread with
+InvalidStateError, after which no task of that executor resolves (m68a's run scope cancels its
+pending plan tasks, which hung test-parsl this way). On TPE the cancel goes through.
+``_ParslFuture.cancelled`` delegates, as the frozen m68a live test's probe recorder asks it on the
+HTCondor backend, which shares the adapter.
 """
 
 from __future__ import annotations

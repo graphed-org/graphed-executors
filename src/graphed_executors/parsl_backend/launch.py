@@ -1,5 +1,6 @@
-"""The canonical direct-HTEX recipe (plan §1.2 ``launch.py``, m46 IT3): ``start_htex`` /
-``stop_htex``.
+"""The canonical direct-HTEX recipe (plan §1.2 ``launch.py``, m46 IT3).
+
+``start_htex`` /``stop_htex``.
 
 ``start_htex`` encodes the three measured direct-use moves a DFK normally performs (§0.3, verified
 live on parsl 2026.7.20):
@@ -7,15 +8,15 @@ live on parsl 2026.7.20):
 1. set ``executor.run_dir`` (the DFK sets it per-executor);
 2. set + ``mkdir`` ``provider.script_dir`` (the DFK move at dflow.py:1107-1109);
 3. call ``executor.scale_out_facade(provider.init_blocks)`` after ``start()`` (executors "will not
-   initialize the blocks requested by any init_blocks parameter" — status_handling.py:45-48; the DFK
-   strategy does it at jobs/strategy.py:159).
+   initialize the blocks requested by any init_blocks parameter" — status_handling.py:45-48; the
+   DFK strategy does it at jobs/strategy.py:159).
 
-It also pins the fixed-blocks posture (``init_blocks == min_blocks == max_blocks`` — no strategy, no
-scale-in) that the peer-transport milestone relies on, and is the drift canary: parsl's weekly CalVer
-changing any of the three moves fails the first fixture loudly.
+It also pins the fixed-blocks posture (``init_blocks == min_blocks == max_blocks`` — no strategy,
+no scale-in) that the peer-transport milestone relies on, and is the drift canary: parsl's weekly
+CalVer changing any of the three moves fails the first fixture loudly.
 
-This is the ONLY module that constructs parsl objects; parsl is imported inside the functions so the
-package stays parsl-free at load (``test_parsl_no_cross_import``).
+This is the ONLY module that constructs parsl objects; parsl is imported inside the functions so
+the package stays parsl-free at load (``test_parsl_no_cross_import``).
 """
 
 from __future__ import annotations
@@ -32,18 +33,19 @@ def start_htex(
     encrypted: bool = False,
     heartbeat_period: int | None = None,
 ) -> Any:
-    """Start a direct-use ``HighThroughputExecutor`` with ``workers`` worker processes in one fixed
-    LocalProvider block. Returns the STARTED executor (feed it to :class:`ParslBackend`). The caller
-    owns teardown via :func:`stop_htex`.
+    """Start a direct-use ``HighThroughputExecutor`` with ``workers`` worker processes.
+
+    In one fixed LocalProvider block. Returns the STARTED executor (feed it to
+    :class:`ParslBackend`). The caller owns teardown via :func:`stop_htex`.
 
     ``heartbeat_period`` (seconds; ``None`` = the parsl default of 30) compresses the
-    SIGKILL->WorkerLost detection latency — measured 2 s -> ~1.65 s vs ~29.7 s at the default, so the
-    m47 worker-death restart surfaces promptly (the watchdog respawns the worker in place).
+    SIGKILL->WorkerLost detection latency — measured 2 s -> ~1.65 s vs ~29.7 s at the default, so
+    the m47 worker-death restart surfaces promptly (the watchdog respawns the worker in place).
 
     The caller's environment is deliberately NOT scrubbed — HTEX workers launch via the
     ``process_worker_pool`` console script and do NOT inherit the driver's ``sys.path``, so a test
-    harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here would
-    break worker-side imports of caller-defined task fns.
+    harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here
+    would break worker-side imports of caller-defined task fns.
     """
     # lazy: parsl is the optional extra
     from parsl.executors import HighThroughputExecutor  # noqa: PLC0415
@@ -73,7 +75,8 @@ def start_htex(
 
 
 def stop_htex(executor: Any) -> None:
-    """Shut the executor down, reaping the interchange, manager, and worker processes (a shutdown
-    that signals without joining leaks processes/ports across the fixture bill).
+    """Shut the executor down, reaping the interchange, manager, and worker processes.
+
+    A shutdown that signals without joining leaks processes/ports across the fixture bill.
     """
     executor.shutdown()

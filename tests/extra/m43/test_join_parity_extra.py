@@ -4,12 +4,12 @@ The frozen m43 suite exercises broadcast-INNER and shuffle-left/right/outer over
 the null rows come from the join kernel on two-sided dests). It does not reach three real
 correctness-parity paths of ``dask_run_join`` that mirror the local engine's F1/F2 contracts:
 
-1. **broadcast left/right/outer** — ``_dask_broadcast_join_part`` per-block narrowing + the once-only
-   never-matched-build-row tail (``_run_broadcast_join`` F2).
+1. **broadcast left/right/outer** — ``_dask_broadcast_join_part`` per-block narrowing + the
+   once-only never-matched-build-row tail (``_run_broadcast_join`` F2).
 2. **pure one-sided dests under shuffle** — the ``_dask_gather_join`` schema-carrier null-fill
    (``_run_shuffle_join`` F1) for a dest that got rows from ONLY one side.
-3. **a partitionless side** — an entirely empty build/probe (carrier ``None``): the present rows are
-   kept, never silently dropped.
+3. **a partitionless side** — an entirely empty build/probe (carrier ``None``): the present rows
+   are kept, never silently dropped.
 
 Each is validated against the LOCAL ``run_join`` on identical inputs with the SAME broadcast flag —
 so any divergence in routing, merge order, null-fill, or keying fails here. NON-VACUOUS: the
@@ -63,8 +63,10 @@ BACKEND_IDS = [type(b).__name__ for b in BACKENDS]
 def _make_side(
     backend: JoinBackend[Any, Any], keys: Sequence[int], field: str, values: Sequence[int]
 ) -> object:
-    """A 2-column (``__joinkey__`` + ``field``) block for whichever backend, via awkward's dict ctor
-    or a numpy structured array (mirrors the frozen harness ``make_side``, kept self-contained).
+    """Return a 2-column (``__joinkey__`` + ``field``) block for whichever backend.
+
+    Via awkward's dict ctor or a numpy structured array (mirrors the frozen harness ``make_side``,
+    kept self-contained).
     """
     if type(backend).__name__ == "AwkwardBackend":
         import awkward as ak  # noqa: PLC0415  (optional backend only)
@@ -117,9 +119,11 @@ PARTS = 4
 def test_broadcast_noninner_matches_local(
     backend: JoinBackend[Any, Any], how: str, runner: Any
 ) -> None:
-    """Tiny build + multi-block probe with a left-only key (13 -> an unmatched build row -> the
-    once-only tail) and a right-only key (17). Forced broadcast so the large side is never shuffled;
-    dask must equal local ``run_join(broadcast=True)`` content-addressed blocks.
+    """Tiny build + multi-block probe with a left-only key and a right-only key.
+
+    Tiny build + multi-block probe with a left-only key (13 -> an unmatched build row -> the
+    once-only tail) and a right-only key (17). Forced broadcast so the large side is never
+    shuffled; dask must equal local ``run_join(broadcast=True)`` content-addressed blocks.
     """
     left = [_make_side(backend, [1, 2, 3, 13], "lval", [10, 20, 30, 99])]
     right = [
@@ -141,10 +145,12 @@ def test_broadcast_noninner_matches_local(
 def test_broadcast_empty_probe_matches_local_no_crash(
     backend: JoinBackend[Any, Any], how: str, runner: Any
 ) -> None:
-    """G3 regression: forced broadcast with a NONEMPTY build and an EMPTY probe under left/outer. The
-    local engine guards its never-matched-build tail with ``if unmatched and right_blocks:`` and
-    degrades gracefully; the dask port must match, not ``IndexError`` on ``right_blocks[0]``.
-    NON-VACUOUS: without the guard this raises before returning; with it, it returns local's result.
+    """G3 regression: forced broadcast with a NONEMPTY build and an EMPTY probe under left/outer.
+
+    The local engine guards its never-matched-build tail with ``if unmatched and
+    right_blocks:`` and degrades gracefully; the dask port must match, not ``IndexError`` on
+    ``right_blocks[0]``. NON-VACUOUS: without the guard this raises before returning; with it,
+    it returns local's result.
     """
     left = [_make_side(backend, [1, 2, 3], "lval", [10, 20, 30])]
     right: list[object] = []
@@ -160,10 +166,12 @@ def test_broadcast_empty_probe_matches_local_no_crash(
 def test_shuffle_pure_one_sided_dests_match_local(
     backend: JoinBackend[Any, Any], how: str, runner: Any
 ) -> None:
-    """Keys chosen (verified via the backend's own ``partition``) so left routes to dests {0,3} and
+    """Keys chosen so left and right route to DISJOINT dests.
+
+    Keys chosen (verified via the backend's own ``partition``) so left routes to dests {0,3} and
     right to dest {1} — DISJOINT, so dest 0/3 are pure build-only and dest 1 pure probe-only,
-    exercising the ``_dask_gather_join`` schema-carrier null-fill (F1). Cross-engine content-addressed
-    equality vs local ``run_join(broadcast=False)``.
+    exercising the ``_dask_gather_join`` schema-carrier null-fill (F1). Cross-engine
+    content-addressed equality vs local ``run_join(broadcast=False)``.
     """
     left = [_make_side(backend, [3, 7, 4, 3], "lval", [1, 2, 3, 4])]  # -> dests {0, 3}
     right = [_make_side(backend, [2, 13, 2, 13], "rval", [5, 6, 7, 8])]  # -> dest {1}
@@ -183,9 +191,11 @@ def test_shuffle_pure_one_sided_dests_match_local(
 def test_shuffle_partitionless_side_matches_local(
     backend: JoinBackend[Any, Any], how: str, runner: Any
 ) -> None:
-    """An entirely empty side (carrier ``None``): the present rows survive. ``how=right`` keeps the
-    probe with an empty build; ``how=left`` keeps the build with an empty probe. Forced shuffle so
-    the (auto-broadcast-on-empty-build) cost choice does not intervene.
+    """An entirely empty side (carrier ``None``): the present rows survive.
+
+    ``how=right`` keeps the probe with an empty build; ``how=left`` keeps the build with an
+    empty probe. Forced shuffle so the (auto-broadcast-on-empty-build) cost choice does not
+    intervene.
     """
     rows = [_make_side(backend, [1, 2, 3, 1], "rval" if how == "right" else "lval", [9, 8, 7, 6])]
     left = [] if how == "right" else rows

@@ -1,5 +1,7 @@
-"""Coverage-policy rollout (ci/per-file-coverage-policy): closes `local/_pinned_pool.py` to the
-per-file >=90% gate. Not frozen; may be extended or replaced by later coverage work.
+"""Coverage-policy rollout (ci/per-file-coverage-policy).
+
+Closes `local/_pinned_pool.py` to the per-file >=90% gate. Not frozen; may be extended or replaced
+by later coverage work.
 """
 
 from __future__ import annotations
@@ -35,8 +37,11 @@ def _pp_sleep(seconds: float) -> None:
 
 
 class _FlakyResultQueue:
-    """A result queue whose first `.put` raises (simulating a pickling failure on an unpicklable
-    exception), so `_pinned_loop`'s fallback stand-in path is the only thing that reaches `.received`.
+    """A result queue whose first `.put` raises.
+
+    A result queue whose first `.put` raises (simulating a pickling failure on an unpicklable
+    exception), so `_pinned_loop`'s fallback stand-in path is the only thing that reaches
+    `.received`.
     """
 
     def __init__(self) -> None:
@@ -96,8 +101,9 @@ def test_shutdown_without_wait_terminates_still_running_workers() -> None:
     try:
         assert pool.workers_alive()
         # occupy the worker inside fn(*args) so it cannot reach call_q.get() and see the sentinel
-        # before shutdown checks is_alive() — without this the worker can race the sentinel and exit
-        # cleanly (exitcode 0), which is indistinguishable from terminate() to a bare is_alive() check.
+        # before shutdown checks is_alive() — without this the worker can race the sentinel and
+        # exit cleanly (exitcode 0), which is indistinguishable from terminate() to a bare
+        # is_alive() check.
         pool.submit(_pp_sleep, 5.0, worker=0)
         time.sleep(0.5)  # let the worker enter time.sleep before shutdown fires
         # skips the join loop; the worker is still mid-call -> terminate()
@@ -113,7 +119,9 @@ def test_shutdown_without_wait_terminates_still_running_workers() -> None:
 
 
 def test_reap_tolerates_a_result_for_an_unknown_call_id() -> None:
-    """An orphan `(cid, ok, value)` on the shared result queue (its Future already popped/expired)
+    """An orphan result must not crash the reaper thread.
+
+    An orphan `(cid, ok, value)` on the shared result queue (its Future already popped/expired)
     must not crash the reaper thread — later results still resolve normally.
     """
     ctx = multiprocessing.get_context("spawn")

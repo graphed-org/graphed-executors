@@ -1,6 +1,8 @@
-"""``DaskBackend`` (plan §1.3.2): a :class:`SubmitBackend` over a READY ``distributed.Client`` used
-as a dumb scheduler. Cluster construction (LocalCluster, SLURMCluster, LPCCondorCluster) is
-out-of-band user code — the verified ecosystem seam is "produce a Client, consume a Client".
+"""``DaskBackend`` (plan §1.3.2).
+
+A :class:`SubmitBackend` over a READY ``distributed.Client`` used as a dumb scheduler. Cluster
+construction (LocalCluster, SLURMCluster, LPCCondorCluster) is out-of-band user code — the verified
+ecosystem seam is "produce a Client, consume a Client".
 
 This module imports NOTHING from distributed at top level (only ``_lazy._distributed`` and, at
 construction time, ``_shim``), so ``graphed_executors.dask_backend`` imports leave ``distributed``
@@ -20,16 +22,18 @@ from ._lazy import _distributed
 
 
 class DaskBackend:
-    """A dask.distributed :class:`SubmitBackend`. Every submit is ``pure=False`` with an explicit
-    namespaced+nonced key (graphed's leaves are distinct-byte-range I/O reads and opaque
-    evaluations — exactly the class dask must NOT dedup by content tokenization). Payloads ship
-    once via an identity future (the coffea idiom, over ``scatter`` which breaks on scale-to-zero).
+    """A dask.distributed :class:`SubmitBackend`.
+
+    Every submit is ``pure=False`` with an explicit namespaced+nonced key (graphed's leaves are
+    distinct-byte-range I/O reads and opaque evaluations — exactly the class dask must NOT
+    dedup by content tokenization). Payloads ship once via an identity future (the coffea
+    idiom, over ``scatter`` which breaks on scale-to-zero).
     """
 
-    # The flags describe what the underlying dask LIBRARY supports, not what this MVP adapter wires:
-    # per_task_resources/pin_to_worker are real dask features (resources=/workers=), but `submit`
-    # does NOT auto-forward `resources` (an unsatisfiable hard constraint would stall the task in
-    # no-worker state — see `submit`). Enforcement is a future deployment-time opt-in.
+    # The flags describe what the underlying dask LIBRARY supports, not what this MVP adapter
+    # wires: per_task_resources/pin_to_worker are real dask features (resources=/workers=), but
+    # `submit` does NOT auto-forward `resources` (an unsatisfiable hard constraint would stall the
+    # task in no-worker state — see `submit`). Enforcement is a future deployment-time opt-in.
     capabilities = SubmitCapabilities(
         peer_data_movement=True,
         scatter_broadcast=True,
@@ -67,17 +71,19 @@ class DaskBackend:
         resources: Mapping[str, float] | None = None,
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
-        """``retries`` and ``priority`` ARE forwarded to ``client.submit``; ``resources`` is accepted
-        but **advisory-dropped** (NOT forwarded). dask treats ``resources=`` as a HARD scheduling
-        constraint, so a request for a resource no worker advertises (e.g. ``{"GPU": 1}``) pins the
-        task in no-worker state forever — that would make correctness depend on a hint, which §1.1
-        forbids. Enforcement on a resource-provisioned cluster is a future deployment-time opt-in
-        (e.g. a ``DaskBackend(enforce_resources=True)`` knob), recorded for m43/Phase-2.
+        """``retries`` and ``priority`` ARE forwarded to ``client.submit``.
 
-        ``workers`` (m44 §1.2) is a STRICT worker pin honoured only when ``pin_to_worker`` is true —
-        forwarded as ``workers=[…], allow_other_workers=False`` so the task ERRORS on worker loss
-        rather than migrating (the loud signal the epoch restart needs). Advisory-dropped otherwise,
-        mirroring the ``resources`` treatment.
+        ``resources`` is accepted but **advisory-dropped** (NOT forwarded). dask treats
+        ``resources=`` as a HARD scheduling constraint, so a request for a resource no
+        worker advertises (e.g. ``{"GPU": 1}``) pins the task in no-worker state forever —
+        that would make correctness depend on a hint, which §1.1 forbids. Enforcement on a
+        resource-provisioned cluster is a future deployment-time opt-in (e.g. a
+        ``DaskBackend(enforce_resources=True)`` knob), recorded for m43/Phase-2.
+
+        ``workers`` (m44 §1.2) is a STRICT worker pin honoured only when ``pin_to_worker`` is true
+        — forwarded as ``workers=[…], allow_other_workers=False`` so the task ERRORS on worker loss
+        rather than migrating (the loud signal the epoch restart needs). Advisory-dropped
+        otherwise, mirroring the ``resources`` treatment.
         """
         # Wrap in the worker shim so the neutral engine task fn runs under a WorkerEnv (§1.1). dask
         # resolves future args before invoking the shim, so wrapping is transparent to dependency
@@ -100,8 +106,8 @@ class DaskBackend:
         )
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
-        # An identity future placed once and referenced by many tasks (coffea pattern) — chosen over
-        # client.scatter (hardcoded worker-discovery timeout breaks scale-to-zero) and over
+        # An identity future placed once and referenced by many tasks (coffea pattern) — chosen
+        # over client.scatter (hardcoded worker-discovery timeout breaks scale-to-zero) and over
         # closure-per-task (serializes the payload per task, ~20x slowdown). token already carries
         # the run nonce, so the key is unique per run.
         future = self._client.submit(_identity, payload, key=f"graphed-bcast-{token}", pure=False)
@@ -133,7 +139,9 @@ class DaskBackend:
         return None  # the caller owns the client; closing it here would break a shared cluster
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
-        """Recognize a ``KilledWorker`` and return ``(failing_task_key, last_worker_address)`` so the
+        """Recognize a ``KilledWorker``.
+
+        Recognize a ``KilledWorker`` and return ``(failing_task_key, last_worker_address)`` so the
         engine can raise an attributed :class:`StageError` without importing distributed (§1.4).
         Everything else returns ``None`` — the engine re-raises it intact.
         """
@@ -153,10 +161,12 @@ def dask_runner(
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
 ) -> SubmitRunner:
-    """The user-facing one-liner: register the per-worker plugin on ``client`` and return a
-    :class:`SubmitRunner` over a :class:`DaskBackend`. ``close()`` does NOT close the caller's client.
-    ``retries`` is forwarded to dask (per-task); a Plan's per-task ``resources`` hints, if any, are
-    advisory only — this adapter does not enforce them yet (see :meth:`DaskBackend.submit`).
+    """Build the user-facing runner in one line.
+
+    Register the per-worker plugin on ``client`` and return a :class:`SubmitRunner` over a
+    :class:`DaskBackend`. ``close()`` does NOT close the caller's client. ``retries`` is
+    forwarded to dask (per-task); a Plan's per-task ``resources`` hints, if any, are advisory
+    only — this adapter does not enforce them yet (see :meth:`DaskBackend.submit`).
     ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``).
     """
     # lazy: distributed is the optional extra

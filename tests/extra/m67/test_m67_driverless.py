@@ -1,5 +1,7 @@
-"""m67 ``RunHandle`` and ``submit_driverless`` paths the frozen suite does not reach: collector failover,
-a job the schedd has forgotten, other job states, an unbounded wait, the logs a run returns.
+"""m67 ``RunHandle`` and ``submit_driverless`` paths the frozen suite does not reach.
+
+Collector failover, a job the schedd has forgotten, other job states, an unbounded wait, the logs a
+run returns.
 """
 
 from __future__ import annotations

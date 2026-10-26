@@ -1,9 +1,10 @@
 """The direct HTCondor backend, behind the ``[htcondor]`` optional extra.
 
-:class:`HTCondorBackend` launches pilot jobs (:class:`CondorPilots` through the ``htcondor2`` bindings, or
-:class:`LocalPilots` as local subprocesses) that pull pickled tasks from a driver-side task server.
-:func:`submit_driverless` runs a plan from inside one job instead, tracked by a :class:`RunHandle`.
-Importing this package imports no bindings: ``CondorPilots.start`` does, on first use.
+:class:`HTCondorBackend` launches pilot jobs (:class:`CondorPilots` through the ``htcondor2``
+bindings, or :class:`LocalPilots` as local subprocesses) that pull pickled tasks from a driver-side
+task server. :func:`submit_driverless` runs a plan from inside one job instead, tracked by a
+:class:`RunHandle`. Importing this package imports no bindings: ``CondorPilots.start`` does, on
+first use.
 """
 
 from __future__ import annotations

@@ -1,7 +1,9 @@
-"""m68d A paths the frozen suite does not reach: a DAG driver over condor pilots counts the runner's running
-pilots against a SERVICE node's room and holds its queued pilots while the node waits (over the recorded
-bindings, every OS, and once on a pool, where a rerun holds and releases a queued pilot); an idle node on a
-pool whose collector lists no slot waits for its announce unmatched.
+"""m68d A paths the frozen suite does not reach.
+
+A DAG driver over condor pilots counts the runner's running pilots against a SERVICE node's room
+and holds its queued pilots while the node waits (over the recorded bindings, every OS, and once on
+a pool, where a rerun holds and releases a queued pilot); an idle node on a pool whose collector
+lists no slot waits for its announce unmatched.
 """
 
 from __future__ import annotations
@@ -59,8 +61,9 @@ IDLE = 1
 
 
 class PilotSchedd:
-    """A :class:`NodeSchedd` over ``phases`` that also holds the runner's pilot jobs (``pilots``, cleared
-    before a close).
+    """A :class:`NodeSchedd` over ``phases`` that also holds the runner's pilot jobs.
+
+    ``pilots``, cleared before a close.
     """
 
     def __init__(self, phases: list[tuple[float, Any]]) -> None:
@@ -85,7 +88,11 @@ class PilotSchedd:
 
 
 def running_pilot() -> FakeAd:
-    """A pilot of the runner's cluster (the recorded submit answers ``DAG_ID``) holding 4000 MiB of the slot."""
+    """Return a pilot of the runner's cluster holding 4000 MiB of the slot.
+
+    A pilot of the runner's cluster (the recorded submit answers ``DAG_ID``) holding 4000 MiB of
+    the slot.
+    """
     return FakeAd(
         ClusterId=DAG_ID,
         ProcId=0,
@@ -99,7 +106,10 @@ def running_pilot() -> FakeAd:
 def condor_dag_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schedd: PilotSchedd
 ) -> Iterator[tuple[HTCondorBackend, FakeHTCondor]]:
-    """A DAG driver node's backend over condor pilots (none submitted yet) on the recorded bindings."""
+    """Yield a DAG driver node's backend over condor pilots on the recorded bindings.
+
+    A DAG driver node's backend over condor pilots (none submitted yet) on the recorded bindings.
+    """
     monkeypatch.setattr(server_mod, "POLL_S", 0.2)
     monkeypatch.setitem(sys.modules, "classad2", fake_classad2())
     monkeypatch.setenv(
@@ -175,14 +185,20 @@ def test_an_idle_node_on_a_pool_listing_no_slot_waits_for_its_announce(
 
 
 def publish_pair(backend: HTCondorBackend, dag: Path) -> None:
-    """The driver's url and svc0's announce secret in ``dag``, as ``driver._runner`` publishes them."""
+    """Publish the driver's url and svc0's announce secret in ``dag``.
+
+    As ``driver._runner`` publishes them.
+    """
     dag.mkdir(parents=True, exist_ok=True)
     (dag / "graphed-secret").write_text(backend._server.announce_secret([NODE]).hex())
     (dag / "driver.url").write_text(backend._server.url)
 
 
 class HistorySchedd(PilotSchedd):
-    """A :class:`PilotSchedd` whose history answers ``rows``, or raises ``refuse``; asks are logged."""
+    """A :class:`PilotSchedd` whose history answers ``rows``, or raises ``refuse``.
+
+    Asks are logged.
+    """
 
     def __init__(
         self, phases: list[tuple[float, Any]], rows: list[Any], refuse: str | None = None
@@ -288,7 +304,10 @@ def test_on_a_pool_a_node_held_and_removed_before_the_driver_looks_is_named_by_i
         status = run_bounded(lambda: handle.wait(timeout=600.0, poll_s=2), 660.0)
         log = str(handle.logs().get("driver.log", ""))
         assert status == "failed", log[-4000:]
-        named = rf"\({NODE}\) ended before it announced: JobStatus=3, LastHoldReason='{re.escape(HOLD_REASON)}"
+        named = (
+            rf"\({NODE}\) ended before it announced: JobStatus=3, "
+            rf"LastHoldReason='{re.escape(HOLD_REASON)}"
+        )
         assert re.search(named, log), log[-4000:]
     finally:
         if schedd.query(run, ["ClusterId"]):

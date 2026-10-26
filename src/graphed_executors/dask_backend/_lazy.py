@@ -1,9 +1,9 @@
 """Lazy ``distributed`` accessor (plan §1.3.1) — the repo's optional-dep idiom (no ``HAS_X`` flag).
 
-``graphed_executors.dask_backend`` imports NOTHING from dask/distributed at module import time; only
-constructing :class:`DaskBackend` touches this accessor, so ``test_submit_no_dask_import`` (imports
-the package, asserts ``"distributed" not in sys.modules``) stays satisfiable while the backend is
-still implementable against the pinned signatures.
+``graphed_executors.dask_backend`` imports NOTHING from dask/distributed at module import time;
+only constructing :class:`DaskBackend` touches this accessor, so ``test_submit_no_dask_import``
+(imports the package, asserts ``"distributed" not in sys.modules``) stays satisfiable while the
+backend is still implementable against the pinned signatures.
 """
 
 from __future__ import annotations

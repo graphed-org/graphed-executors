@@ -1,5 +1,8 @@
-"""``task_timeout_s``: a task leased past the limit fails with a ``StageError`` naming its partition, caused
-by ``TaskTimedOut`` naming its key, pilot and limit; its pilot stops, its late result is dropped, and a resumable rerun runs only that task (GW21).
+"""``task_timeout_s``: a task leased past the limit fails.
+
+A task leased past the limit fails with a ``StageError`` naming its partition, caused by
+``TaskTimedOut`` naming its key, pilot and limit; its pilot stops, its late result is dropped, and
+a resumable rerun runs only that task (GW21).
 """
 
 from __future__ import annotations
@@ -38,7 +41,10 @@ HUNG = "mem://gw21-p1"
 
 
 def _run(plan: Plan[int], task_timeout_s: float | None, exits: list[int] | None = None) -> Any:
-    """Run ``plan`` on two local pilots; ``exits`` collects the pids of pilots that exit mid-run."""
+    """Run ``plan`` on two local pilots.
+
+    ``exits`` collects the pids of pilots that exit mid-run.
+    """
     pilots = LocalPilots(pythonpath=[HERE])
     backend = HTCondorBackend(pilots, 2, host="127.0.0.1", task_timeout_s=task_timeout_s)
     out: dict[str, Any] = {}

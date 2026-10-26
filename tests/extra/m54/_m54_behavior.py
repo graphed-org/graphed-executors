@@ -1,5 +1,7 @@
-"""A behavior registered on the BACKEND only, importable by a spawned worker through the
-``backend="module:factory"`` import reference of ``aggregate_plan``.
+"""A behavior registered on the BACKEND only.
+
+Importable by a spawned worker through the ``backend="module:factory"`` import reference of
+``aggregate_plan``.
 """
 
 from __future__ import annotations

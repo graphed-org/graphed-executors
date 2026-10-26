@@ -1,4 +1,8 @@
-"""The driver passes ``run.json``'s store fields to ``resumable`` and leaves its loggers as it found them."""
+"""The driver passes ``run.json``'s store fields to ``resumable``.
+
+The driver passes ``run.json``'s store fields to ``resumable`` and leaves its loggers as it found
+them.
+"""
 
 from __future__ import annotations
 

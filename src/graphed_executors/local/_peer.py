@@ -1,22 +1,22 @@
 """Peer reduction (M38): the tree reduction runs **across the workers, off the driver**.
 
-The driver is no longer the combine hub. Each worker owns a contiguous **leaf range** and reduces it
-with the lazy index tree (:mod:`_reduce`); the partials that straddle a range boundary are handed
-**worker→worker** over a :class:`graphed.core.execution.WorkerTransport`. The driver only collects the
-final root.
+The driver is no longer the combine hub. Each worker owns a contiguous **leaf range** and reduces
+it with the lazy index tree (:mod:`_reduce`); the partials that straddle a range boundary are
+handed **worker→worker** over a :class:`graphed.core.execution.WorkerTransport`. The driver only
+collects the final root.
 
 Why it stays **bit-for-bit identical** to the existing (hub) path — even for non-associative float
-combines like histogram addition: every node keeps its **global** ``(level, pos)`` identity in the one
-fixed ``plan_tree`` (even position = left operand, odd = right, unpaired carries up). Distributing the
-*combines* across workers never changes the *grouping*, so the result is the same down to the last
-ULP. Determinism is independent of message timing — a parked node waits for its fixed sibling, whoever
-sends it whenever.
+combines like histogram addition: every node keeps its **global** ``(level, pos)`` identity in the
+one fixed ``plan_tree`` (even position = left operand, odd = right, unpaired carries up).
+Distributing the *combines* across workers never changes the *grouping*, so the result is the same
+down to the last ULP. Determinism is independent of message timing — a parked node waits for its
+fixed sibling, whoever sends it whenever.
 
-Ownership routing (the segment-tree merge): node ``(level, pos)`` is owned by the worker holding its
-leftmost leaf ``pos << level``. The parent of a pair is owned by the **even** child's owner, so a
-worker that forms an **odd** node it doesn't own ships it to that owner; an **even** node parks until
-its odd sibling arrives (locally or from a peer). Only the O(log N) boundary nodes ever cross the
-wire. Termination is a driver ``done`` broadcast once the root (owned by worker 0) arrives — no
+Ownership routing (the segment-tree merge): node ``(level, pos)`` is owned by the worker holding
+its leftmost leaf ``pos << level``. The parent of a pair is owned by the **even** child's owner, so
+a worker that forms an **odd** node it doesn't own ships it to that owner; an **even** node parks
+until its odd sibling arrives (locally or from a peer). Only the O(log N) boundary nodes ever cross
+the wire. Termination is a driver ``done`` broadcast once the root (owned by worker 0) arrives — no
 fragile message counting, no barrier.
 """
 
@@ -52,22 +52,24 @@ _MISSING: Any = object()
 DRIVER = "driver"
 
 # Only steal after a worker has been idle this long — long enough that a BALANCED run (all workers
-# finish within ~ms of each other) completes before any steal fires, so stealing is near-free on the
-# common case; short enough that a genuinely imbalanced load (a straggler idle for 100s of ms) still
-# rebalances promptly. Without this, idle workers fire spurious steals near the end of balanced runs
-# and add coordination tail latency for no benefit.
+# finish within ~ms of each other) completes before any steal fires, so stealing is near-free on
+# the common case; short enough that a genuinely imbalanced load (a straggler idle for 100s of ms)
+# still rebalances promptly. Without this, idle workers fire spurious steals near the end of
+# balanced runs and add coordination tail latency for no benefit.
 STEAL_DELAY = 0.01
-# After the first request, back off exponentially up to this cap while requests keep being DENIED, so
-# an idle worker during a balanced run's reduction tail doesn't storm peers with steal-requests (the
-# denial traffic alone — even with zero successful steals — measurably slowed uniform runs). A
+# After the first request, back off exponentially up to this cap while requests keep being DENIED,
+# so an idle worker during a balanced run's reduction tail doesn't storm peers with steal-requests
+# (the denial traffic alone — even with zero successful steals — measurably slowed uniform runs). A
 # successful steal resets the backoff, so a genuine straggler is still drained promptly.
 MAX_STEAL_BACKOFF = 0.1
 # How long an exiting endpoint waits for its queued sends to land. A healthy send completes in
-# microseconds (every live peer and the driver are reading); the bound exists only for the crash case,
-# where a peer stopped reading for good and the parked pipe write can never complete — the actor must
-# still return so the pool can be torn down, and the driver must still reach its own teardown.
+# microseconds (every live peer and the driver are reading); the bound exists only for the crash
+# case, where a peer stopped reading for good and the parked pipe write can never complete — the
+# actor must still return so the pool can be torn down, and the driver must still reach its own
+# teardown.
 OUTBOX_EXIT_WAIT_S = 5.0
-# How long a failed run's driver keeps forwarding event batches that land after the failure surfaced.
+# How long a failed run's driver keeps forwarding event batches that land after the failure
+# surfaced.
 ERROR_EVENT_DRAIN_S = 0.5
 # Serialize the off-thread profiler at most ~1/s (its sampler keeps running continuously; only the
 # flush + ship is throttled), never per leaf — the M37 R20.7 discipline.
@@ -75,31 +77,35 @@ PROFILE_FLUSH_INTERVAL = 1.0
 
 
 def make_bounds(n: int, n_workers: int) -> list[int]:
-    """Contiguous leaf-range boundaries: worker ``w`` owns leaves ``[bounds[w], bounds[w+1])``. Use
-    ``n_workers <= n`` so every range is non-empty (the executor clamps).
+    """Contiguous leaf-range boundaries: worker ``w`` owns leaves ``[bounds[w], bounds[w+1])``.
+
+    Use ``n_workers <= n`` so every range is non-empty (the executor clamps).
     """
     return [(i * n) // n_workers for i in range(n_workers + 1)]
 
 
 def worker_of(leaf: int, bounds: list[int]) -> int:
-    """The worker index owning ``leaf`` (the range containing it)."""
+    """Return the worker index owning ``leaf`` (the range containing it)."""
     return max(0, min(len(bounds) - 2, bisect.bisect_right(bounds, leaf) - 1))
 
 
 # ---- bounded communication overlay (M38 P7): O(log N) degree, not all-to-all ------------------
 #
-# To keep the IPC registry sub-quadratic (so a worker inherits O(log N) inbox handles, not all N), and
-# to keep the HTTP transport's connection count sub-quadratic on large farms, each worker talks to only
-# O(log N) peers: its *reduction* partners (the binomial-style segment-tree send targets) plus a fixed
-# *hypercube lifeline* overlay for work-stealing. The lifeline graph (X10 GLB / Saraswat et al.) is a
-# low-degree, low-diameter, symmetric hypercube — work still routes anywhere, scaling to thousands of
-# workers — and hierarchical/lifeline victim selection scales better than random all-to-all (HotSLAW).
+# To keep the IPC registry sub-quadratic (so a worker inherits O(log N) inbox handles, not all N),
+# and to keep the HTTP transport's connection count sub-quadratic on large farms, each worker talks
+# to only O(log N) peers: its *reduction* partners (the binomial-style segment-tree send targets)
+# plus a fixed *hypercube lifeline* overlay for work-stealing. The lifeline graph (X10 GLB /
+# Saraswat et al.) is a low-degree, low-diameter, symmetric hypercube — work still routes anywhere,
+# scaling to thousands of workers — and hierarchical/lifeline victim selection scales better than
+# random all-to-all (HotSLAW).
 
 
 def lifeline_neighbors(idx: int, w: int) -> set[int]:
-    """Hypercube lifeline neighbours of worker ``idx`` among ``w`` workers: ``idx ^ 2^k`` for each
-    ``2^k < w`` (skipping out-of-range when ``w`` is not a power of two). **Symmetric** (so a steal
-    request and its response use the same edge), degree and diameter O(log w).
+    """Hypercube lifeline neighbours of worker ``idx`` among ``w`` workers.
+
+    ``idx ^ 2^k`` for each ``2^k < w`` (skipping out-of-range when ``w`` is not a power of
+    two). **Symmetric** (so a steal request and its response use the same edge), degree and
+    diameter O(log w).
     """
     out: set[int] = set()
     k = 1
@@ -112,10 +118,12 @@ def lifeline_neighbors(idx: int, w: int) -> set[int]:
 
 
 class _EdgeRecorder:
-    """A :class:`graphed.core.execution.WorkerTransport`-shaped stub used only to compute the static
-    reduction topology: it records each ``send`` destination and queues ``node`` hand-offs so a
-    value-free in-process replay of the reduction propagates fully. Reusing the real
-    :meth:`PeerReducer.settle` guarantees the topology never diverges from the runtime reduction.
+    """A :class:`graphed.core.execution.WorkerTransport`-shaped stub.
+
+    Used only to compute the static reduction topology: it records each ``send`` destination and
+    queues ``node`` hand-offs so a value-free in-process replay of the reduction propagates fully.
+    Reusing the real :meth:`PeerReducer.settle` guarantees the topology never diverges from the
+    runtime reduction.
     """
 
     def __init__(
@@ -147,8 +155,10 @@ class _EdgeRecorder:
 def reduction_edges(
     n: int, bounds: list[int], worker_addresses: tuple[str, ...]
 ) -> dict[str, set[str]]:
-    """Per worker, the set of addresses it sends reduction partials to (incl. ``DRIVER`` for the root
-    holder). A static, value-free replay of the real reduction — deterministic from ``(n, bounds)``.
+    """Per worker, the set of addresses it sends reduction partials to (incl.
+
+    ``DRIVER`` for the root holder). A static, value-free replay of the real reduction —
+    deterministic from ``(n, bounds)``.
     """
     edges: dict[str, set[str]] = {}
     pending: deque[tuple[str, Any]] = deque()
@@ -169,8 +179,9 @@ def reduction_edges(
 def worker_outbox_addresses(
     n: int, bounds: list[int], worker_addresses: tuple[str, ...]
 ) -> dict[str, set[str]]:
-    """For each worker address, the bounded set of peer addresses it must be able to send to:
-    reduction targets + symmetric hypercube lifelines + ``DRIVER``. O(log N) per worker, so the IPC
+    """For each worker address, the bounded set of peer addresses it must be able to send to.
+
+    Reduction targets + symmetric hypercube lifelines + ``DRIVER``. O(log N) per worker, so the IPC
     registry a worker inherits (its inbox + these peers' inboxes) is O(log N), total O(N log N).
     """
     redges = reduction_edges(n, bounds, worker_addresses)
@@ -187,8 +198,10 @@ def worker_outbox_addresses(
 
 
 class PeerReducer(Generic[R]):
-    """Per-worker reduction state: feed local partials + peer nodes, keep/route/park by ownership,
-    bubbling up the one global fixed tree. Worker 0 forms and ships the root to the driver.
+    """Per-worker reduction state.
+
+    Feed local partials + peer nodes, keep/route/park by ownership, bubbling up the one global
+    fixed tree. Worker 0 forms and ships the root to the driver.
     """
 
     def __init__(
@@ -216,7 +229,10 @@ class PeerReducer(Generic[R]):
         self.forward = False  # after a cancel: every node goes to the driver instead of settling
 
     def hand_in(self) -> list[tuple[int, int, R]]:
-        """Stop settling (a cancel): return the parked nodes and forward every later one to the driver."""
+        """Stop settling (a cancel).
+
+        Return the parked nodes and forward every later one to the driver.
+        """
         self.forward = True
         parked = [(level, pos, value) for (level, pos), value in self._present.items()]
         self._present.clear()
@@ -229,9 +245,11 @@ class PeerReducer(Generic[R]):
         return self._workers[worker_of(pos << level, self._bounds)]
 
     def settle(self, level: int, pos: int, value: R) -> None:
-        """Place a node and bubble it up: combine with present siblings, route odd nodes owned by a
-        peer to that peer, park nodes still missing a sibling. Same (level,pos)/left-right rule as the
-        flat tree, so the grouping is identical regardless of who runs the combine or when.
+        """Place a node and bubble it up.
+
+        Combine with present siblings, route odd nodes owned by a peer to that peer, park
+        nodes still missing a sibling. Same (level,pos)/left-right rule as the flat tree,
+        so the grouping is identical regardless of who runs the combine or when.
         """
         if self.forward:
             self._t.send(DRIVER, ("item", level, pos, value))
@@ -278,8 +296,10 @@ def run_peer_worker(
     poll_timeout: float = 0.05,
     prebuffered: Sequence[tuple[str, Any]] = (),
 ) -> None:
-    """Run one worker: settle every local ``(leaf, partial)``, then drain peer hand-offs until the
-    driver broadcasts ``done`` (sent once the root has arrived — all combines are then complete).
+    """Run one worker.
+
+    Settle every local ``(leaf, partial)``, then drain peer hand-offs until the driver
+    broadcasts ``done`` (sent once the root has arrived — all combines are then complete).
 
     ``prebuffered`` are messages already received off the transport (e.g. ``node`` hand-offs that
     raced ahead of the HTTP discovery handshake); they are processed before resuming live ``recv``.
@@ -317,9 +337,10 @@ def collect_peer_root(
     poll_timeout: float = 0.05,
     timeout_s: float | None = None,
 ) -> R:
-    """Driver side: wait for worker 0's root, then broadcast ``done`` to release the workers. For an
-    empty plan there is no root — return the identity. ``timeout_s`` (if set) bounds the wait so a lost
-    root surfaces as a ``TimeoutError`` instead of hanging.
+    """Driver side: wait for worker 0's root, then broadcast ``done`` to release the workers.
+
+    For an empty plan there is no root — return the identity. ``timeout_s`` (if set) bounds the
+    wait so a lost root surfaces as a ``TimeoutError`` instead of hanging.
     """
     if n == 0:
         driver_transport.broadcast(("done",))
@@ -347,19 +368,20 @@ def collect_peer_root(
 class _Outbox:
     """One daemon thread per endpoint that performs EVERY send on the caller's behalf.
 
-    The IPC inbox write is **synchronous** (``PipeInbox`` over ``SimpleQueue``, no feeder thread), so a
-    message larger than the OS pipe buffer (~64 KB) — any real reduction partial — parks the writer
-    until the peer reads. A caller that sends on its own thread is not reading its own inbox while
-    parked, and work-stealing supplies the sideways/upward edge that closes a wait cycle: a thief
-    returning a ``leaf`` UP while the owner sends a ``node`` DOWN, or a tiny ``steal_req`` stuck on the
-    victim inbox's write lock behind a third worker's big write. Enqueueing instead keeps the actor in
-    ``poll``/``recv``, so every inbox of a LIVE peer stays drained. One thread ⇒ send order preserved.
+    The IPC inbox write is **synchronous** (``PipeInbox`` over ``SimpleQueue``, no feeder thread),
+    so a message larger than the OS pipe buffer (~64 KB) — any real reduction partial — parks the
+    writer until the peer reads. A caller that sends on its own thread is not reading its own inbox
+    while parked, and work-stealing supplies the sideways/upward edge that closes a wait cycle: a
+    thief returning a ``leaf`` UP while the owner sends a ``node`` DOWN, or a tiny ``steal_req``
+    stuck on the victim inbox's write lock behind a third worker's big write. Enqueueing instead
+    keeps the actor in ``poll``/``recv``, so every inbox of a LIVE peer stays drained. One thread ⇒
+    send order preserved.
 
-    A peer that CRASHED, though, never reads again, and a write already parked in its pipe cannot be
-    interrupted. So the thread is a daemon and :meth:`close` waits only a bounded time: whoever is
-    shutting down returns on schedule and the abandoned write dies with the process. That is the whole
-    guarantee — sends are asynchronous and exit is bounded, NOT that every queued message is delivered
-    when a peer has stopped reading.
+    A peer that CRASHED, though, never reads again, and a write already parked in its pipe cannot
+    be interrupted. So the thread is a daemon and :meth:`close` waits only a bounded time: whoever
+    is shutting down returns on schedule and the abandoned write dies with the process. That is the
+    whole guarantee — sends are asynchronous and exit is bounded, NOT that every queued message is
+    delivered when a peer has stopped reading.
     """
 
     def __init__(self, transport: Any) -> None:
@@ -392,8 +414,10 @@ class _Outbox:
                 self._error = exc
 
     def close(self, timeout: float) -> BaseException | None:
-        """Stop the thread, waiting at most ``timeout`` for the queued sends to land (the ``root`` and
-        the final events must land on a healthy exit). Returns a send failure for the caller to raise.
+        """Stop the thread, waiting at most ``timeout`` for the queued sends to land.
+
+        The ``root`` and the final events must land on a healthy exit. Returns a send
+        failure for the caller to raise.
         """
         self._q.put(None)
         if timeout > 0:
@@ -404,16 +428,18 @@ class _Outbox:
 def release_workers(transport: Any) -> None:
     """Deliver the reduction's ``done`` OFF the caller's thread, one thread per destination.
 
-    Same blocking-write hazard as :class:`_Outbox`, seen from the driver: a worker that crashed stops
-    reading its inbox, a peer's parked partial still holds that inbox's cross-process write lock, and
-    the driver's own ``done`` then waits on the lock forever — with the worker error already in hand
-    and the pool teardown one line away. Per destination, not one broadcast thread, because that one
-    thread would park on the dead worker and leave every LIVE worker behind it unreleased — which is
-    what the teardown is waiting for. A live worker is polling, so it is released immediately.
+    Same blocking-write hazard as :class:`_Outbox`, seen from the driver: a worker that crashed
+    stops reading its inbox, a peer's parked partial still holds that inbox's cross-process write
+    lock, and the driver's own ``done`` then waits on the lock forever — with the worker error
+    already in hand and the pool teardown one line away. Per destination, not one broadcast thread,
+    because that one thread would park on the dead worker and leave every LIVE worker behind it
+    unreleased — which is what the teardown is waiting for. A live worker is polling, so it is
+    released immediately.
 
     An :class:`HttpTransport` already buffers every send onto its own sender thread, so there the
     release is enqueued on THIS thread instead: a helper thread could otherwise enqueue *after* the
-    caller's ``close()`` has drained the outbound queue, losing the release exactly when it is needed.
+    caller's ``close()`` has drained the outbound queue, losing the release exactly when it is
+    needed.
     """
 
     def fire(dest: str) -> None:
@@ -436,10 +462,11 @@ _TAGS = {RunState.RUNNING: "resume", RunState.PAUSED: "pause", RunState.CANCELLE
 class PeerControl(Generic[R]):
     """The driver side of a controlled peer run (plan-A2 A2-2), used on every driver poll.
 
-    :meth:`relay` tells every worker a state change, through one :class:`_Outbox` per destination (a
-    worker that stopped reading parks only its own sender; one thread keeps pause→resume in order), or
-    inline on an :class:`HttpTransport`, whose sends are already off-thread. :meth:`take` collects the
-    workers' cancel hand-ins and folds them once they cover every processed leaf.
+    :meth:`relay` tells every worker a state change, through one :class:`_Outbox` per destination
+    (a worker that stopped reading parks only its own sender; one thread keeps pause→resume in
+    order), or inline on an :class:`HttpTransport`, whose sends are already off-thread.
+    :meth:`take` collects the workers' cancel hand-ins and folds them once they cover every
+    processed leaf.
     """
 
     def __init__(
@@ -474,7 +501,9 @@ class PeerControl(Generic[R]):
         return state is RunState.PAUSED
 
     def take(self, payload: Any) -> tuple[R, int] | None:
-        """Consume a hand-in message; once complete, the fold of the completed leaves and their count.
+        """Consume a hand-in message.
+
+        Once complete, the fold of the completed leaves and their count.
 
         Items cover completed leaves only, each at most once, so covered == processed means every
         completed leaf is in hand.
@@ -490,7 +519,8 @@ class PeerControl(Generic[R]):
             self._processed.values()
         ):
             return None
-        # The fixed tree first, so sibling nodes the workers stopped settling combine as it combines them.
+        # The fixed tree first, so sibling nodes the workers stopped settling combine as it
+        # combines them.
         tree: LazyReducer[R] = LazyReducer(self._n, self._combine, self._empty)
         for (level, pos), value in self._items.items():
             tree.feed(pos, value, level)
@@ -502,7 +532,10 @@ class PeerControl(Generic[R]):
             self._covered += min((pos + 1) << level, self._n) - (pos << level)
 
     def close(self, timeout: float) -> None:
-        """Stop the senders, waiting up to ``timeout`` each for queued tags; call before ``done``."""
+        """Stop the senders, waiting up to ``timeout`` each for queued tags.
+
+        Call before ``done``.
+        """
         for box in self._outboxes.values():
             box.close(timeout)
         self._outboxes.clear()
@@ -511,7 +544,10 @@ class PeerControl(Generic[R]):
 def slice_items(
     partitions: Sequence[Partition], bounds: list[int], worker_addresses: tuple[str, ...]
 ) -> dict[str, list[tuple[int, Partition]]]:
-    """Split the key-ordered partitions into each worker's ``[(leaf, partition), ...]`` by leaf range."""
+    """Split the key-ordered partitions into each worker's leaf range.
+
+    Split the key-ordered partitions into each worker's ``[(leaf, partition), ...]`` by leaf range.
+    """
     out: dict[str, list[tuple[int, Partition]]] = {a: [] for a in worker_addresses}
     for leaf, part in enumerate(partitions):
         out[worker_addresses[worker_of(leaf, bounds)]].append((leaf, part))
@@ -541,39 +577,42 @@ def process_and_reduce(
     keys: Sequence[int] | None = None,
     complete: bool = False,
 ) -> dict[str, int]:
-    """The per-worker actor: run ``process`` on its leaves, peer-reduce over the transport, and return
-    witness counters. Runs in a thread (ThreadExecutor) or a worker process (ProcessExecutor).
+    """Run the per-worker actor.
 
-    **Work-stealing** (``steal=True``, the default): a worker that drains its own leaves steals from a
-    busy peer. Stealing redistributes only the ``process`` work — the leaf's **owner still settles it**
-    into the reduction (a thief ships the computed partial back as a ``leaf`` message), so the fixed
-    tree and the result are **unchanged**: stealing moves *where* a leaf is computed, never *where* it
-    reduces. The loop interleaves a non-blocking inbox drain between leaves, so a busy worker answers
-    steal requests; every send is handed to the :class:`_Outbox` thread, so the actor never blocks
-    writing to a peer (the R20.7 rule) and its own inbox is always being drained — the property that
-    makes a send cycle between peers impossible for partials larger than the OS pipe buffer. The
-    actor also RETURNS in bounded time: a peer that crashed stops reading, so the exit wait for queued
-    sends is capped (``OUTBOX_EXIT_WAIT_S``) and an abandoned write dies with the worker process.
+    Run ``process`` on its leaves, peer-reduce over the transport, and return witness counters.
+    Runs in a thread (ThreadExecutor) or a worker process (ProcessExecutor).
 
-    ``resources`` (its ``open_once`` cache) is supplied by the caller; ``close_resources=False`` keeps
-    it open across runs (a persistent pool reusing file handles, like the hub path).
+    **Work-stealing** (``steal=True``, the default): a worker that drains its own leaves steals
+    from a busy peer. Stealing redistributes only the ``process`` work — the leaf's **owner still
+    settles it** into the reduction (a thief ships the computed partial back as a ``leaf``
+    message), so the fixed tree and the result are **unchanged**: stealing moves *where* a leaf is
+    computed, never *where* it reduces. The loop interleaves a non-blocking inbox drain between
+    leaves, so a busy worker answers steal requests; every send is handed to the :class:`_Outbox`
+    thread, so the actor never blocks writing to a peer (the R20.7 rule) and its own inbox is
+    always being drained — the property that makes a send cycle between peers impossible for
+    partials larger than the OS pipe buffer. The actor also RETURNS in bounded time: a peer that
+    crashed stops reading, so the exit wait for queued sends is capped (``OUTBOX_EXIT_WAIT_S``) and
+    an abandoned write dies with the worker process.
 
-    ``release`` is the read end of the run's one-way pipe, whose only write end the driver holds. It
-    reads EOF once the driver closes that end on any exit of the run, or dies, and the actor then
-    leaves as on ``done``: the driver needs no worker address to fire it.
+    ``resources`` (its ``open_once`` cache) is supplied by the caller; ``close_resources=False``
+    keeps it open across runs (a persistent pool reusing file handles, like the hub path).
 
-    ``emit`` events carry ``keys[leaf]`` (the leaf index without ``keys``); ``lean`` drops STARTED and
-    the label; a ``monitor_factory`` builds this actor's own monitor, which then gets the task events
-    and profile trees that would otherwise ship to the driver. ``complete`` makes a failing actor wait,
-    bounded, for its queued sends (its last event batch included) before it raises.
+    ``release`` is the read end of the run's one-way pipe, whose only write end the driver holds.
+    It reads EOF once the driver closes that end on any exit of the run, or dies, and the actor
+    then leaves as on ``done``: the driver needs no worker address to fire it.
+
+    ``emit`` events carry ``keys[leaf]`` (the leaf index without ``keys``); ``lean`` drops STARTED
+    and the label; a ``monitor_factory`` builds this actor's own monitor, which then gets the task
+    events and profile trees that would otherwise ship to the driver. ``complete`` makes a failing
+    actor wait, bounded, for its queued sends (its last event batch included) before it raises.
     """
     outbox = _Outbox(transport)  # the reducer's node/root sends go through it too
     reducer: PeerReducer[R] = PeerReducer(address, outbox, n, bounds, worker_addresses, combine)
     mine: deque[tuple[int, Partition]] = deque(items)  # leaves to PROCESS (own + stolen)
     # dedup settled nodes/leaves (a reliable transport may retry)
     seen: set[tuple[int, int]] = set()
-    # victims this worker may steal from: the bounded lifeline overlay when given (O(log N), so the IPC
-    # registry stays sub-quadratic), else every peer (the in-process / full-mesh case).
+    # victims this worker may steal from: the bounded lifeline overlay when given (O(log N), so the
+    # IPC registry stays sub-quadratic), else every peer (the in-process / full-mesh case).
     peers = (
         steal_peers
         if steal_peers is not None
@@ -619,8 +658,9 @@ def process_and_reduce(
             outbox.send(DRIVER, ("events", events.copy()))
             events.clear()
 
-    # off-thread profiler parity with the hub: a worker samples its task thread and ships the flamegraph
-    # tree to the driver (forwarded to monitor.on_profile), throttled so the serialize is never per-leaf.
+    # off-thread profiler parity with the hub: a worker samples its task thread and ships the
+    # flamegraph tree to the driver (forwarded to monitor.on_profile), throttled so the serialize
+    # is never per-leaf.
     profiler = None
     last_flush = time.monotonic()
     if profiler_factory is not None:
@@ -659,13 +699,13 @@ def process_and_reduce(
             # Hand ONE leaf from the FAR end (steal-one, Blumofe-Leiserson / Cilk). NOT steal-half:
             # under many idle thieves hitting one victim, serialized "half each" drains the victim
             # geometrically (keeps W/2^k) and over-concentrates work on the first thief -> worse
-            # makespan for our coarse, independent partitions. Steal-one lets k thieves each take one
-            # leaf fairly with no cascade; steals are cheap relative to a partition, so the extra
-            # steal attempts cost ~nothing. (`len > 1`: never give away the leaf I'm about to run.)
-            # Each grant carries its own id (a negative level, never a node's), so the thief keeps a
-            # response retried by an at-least-once transport once, and a leaf granted twice twice.
-            # Only an owned leaf is granted: the thief returns it to its owner, and the victim is the
-            # only owner guaranteed to be in the thief's bounded overlay.
+            # makespan for our coarse, independent partitions. Steal-one lets k thieves each take
+            # one leaf fairly with no cascade; steals are cheap relative to a partition, so the
+            # extra steal attempts cost ~nothing. (`len > 1`: never give away the leaf I'm about to
+            # run.) Each grant carries its own id (a negative level, never a node's), so the thief
+            # keeps a response retried by an at-least-once transport once, and a leaf granted twice
+            # twice. Only an owned leaf is granted: the thief returns it to its owner, and the
+            # victim is the only owner guaranteed to be in the thief's bounded overlay.
             thief = payload[1]
             if steal and len(mine) > 1 and owner(mine[-1][0]) == address:
                 stats["given"] += 1
@@ -767,9 +807,9 @@ def process_and_reduce(
         # let the queued sends land, but never hang here
         send_error = outbox.close(OUTBOX_EXIT_WAIT_S)
     except BaseException:
-        # this run is already failing: don't wait on sends to a peer that may never read again (unless
-        # the monitor asked for complete events), and don't let a send failure displace the actor's
-        # own exception.
+        # this run is already failing: don't wait on sends to a peer that may never read again
+        # (unless the monitor asked for complete events), and don't let a send failure displace the
+        # actor's own exception.
         outbox.close(OUTBOX_EXIT_WAIT_S if complete else 0.0)
         raise
     finally:
@@ -785,9 +825,10 @@ def process_and_reduce(
     }
 
 
-# A per-WORKER-PROCESS resource cache reused across run()s of a persistent pool, so a worker reopens a
-# file at most once over its whole life (file locality across runs — the hub path's _proc_resources
-# does the same). One peer actor runs at a time per process, so no intra-process concurrency.
+# A per-WORKER-PROCESS resource cache reused across run()s of a persistent pool, so a worker
+# reopens a file at most once over its whole life (file locality across runs — the hub path's
+# _proc_resources does the same). One peer actor runs at a time per process, so no intra-process
+# concurrency.
 _peer_proc_resources: LocalResources | None = None
 
 
@@ -798,14 +839,14 @@ def _worker_proc_resources() -> LocalResources:
     return _peer_proc_resources
 
 
-# ---- identity-pinned worker specialisation (M38 P7), driven by PinnedProcessPool -----------------
+# ---- identity-pinned worker specialisation (M38 P7), driven by PinnedProcessPool ----------------
 #
-# An identity-pinned worker is spawned ONCE, owns ``address`` for life, and inherits ONLY its inbox +
-# the outboxes of its O(log N) overlay peers (so the IPC registry is sub-quadratic, not O(N²)). A later
-# run whose merge targets fall outside that overlay sends those nodes through the driver. The
-# pool delivers each run's ``_pinned_peer_actor`` call over a per-worker control channel SEPARATE from
-# the reduction transport, so reduction/steal messages that race ahead simply wait in the transport
-# inbox (no buffering hack) and the witness/error come back as the call's Future result.
+# An identity-pinned worker is spawned ONCE, owns ``address`` for life, and inherits ONLY its inbox
+# + the outboxes of its O(log N) overlay peers (so the IPC registry is sub-quadratic, not O(N²)). A
+# later run whose merge targets fall outside that overlay sends those nodes through the driver. The
+# pool delivers each run's ``_pinned_peer_actor`` call over a per-worker control channel SEPARATE
+# from the reduction transport, so reduction/steal messages that race ahead simply wait in the
+# transport inbox (no buffering hack) and the witness/error come back as the call's Future result.
 
 # (address, transport, steal_peers) per worker
 _pinned: tuple[str, Any, tuple[str, ...]] | None = None
@@ -814,8 +855,10 @@ _pinned: tuple[str, Any, tuple[str, ...]] | None = None
 def pinned_peer_init(
     address: str, inbox: Any, outboxes: dict[str, Any], steal_peers: tuple[str, ...]
 ) -> None:
-    """``PinnedProcessPool`` per-worker initializer: stash this worker's identity + its inherited
-    transport (inbox + the O(log N) outboxes) + its steal lifelines as a process global.
+    """``PinnedProcessPool`` per-worker initializer.
+
+    Stash this worker's identity + its inherited transport (inbox + the O(log N) outboxes) +
+    its steal lifelines as a process global.
     """
     global _pinned
     _pinned = (
@@ -841,8 +884,10 @@ def pinned_peer_actor(
     complete: bool = False,
     release: Any = None,
 ) -> dict[str, int]:
-    """One run of the pinned worker: peer-reduce its leaves over the inherited transport, return the
-    witness (the call's Future carries it back, and re-raises a worker error intact — M6/M7).
+    """One run of the pinned worker.
+
+    Peer-reduce its leaves over the inherited transport, return the witness (the call's Future
+    carries it back, and re-raises a worker error intact — M6/M7).
     """
     assert _pinned is not None, "pinned_peer_init must run as the pool worker initializer"
     address, transport, steal_peers = _pinned
@@ -869,20 +914,23 @@ def pinned_peer_actor(
     )
 
 
-# ---- full-registry IPC actor (small/medium w): the ProcessPoolExecutor path -----------------------
+# ---- full-registry IPC actor (small/medium w): the ProcessPoolExecutor path ---------------------
 #
-# For small/medium worker counts the all-inherit registry (every worker inherits every inbox) is the
-# fast, simplest IPC path — a ``ProcessPoolExecutor`` whose initializer hands each worker the full
-# registry of SimpleQueue inboxes. The O(N²) inheritance is a non-issue while N is well under the
-# per-process fd limit; the executor switches to the bounded identity-pinned pool (PinnedProcessPool)
-# only when N approaches that limit (large many-core machines) — see ``ProcessExecutor._peer_ipc``.
+# For small/medium worker counts the all-inherit registry (every worker inherits every inbox) is
+# the fast, simplest IPC path — a ``ProcessPoolExecutor`` whose initializer hands each worker the
+# full registry of SimpleQueue inboxes. The O(N²) inheritance is a non-issue while N is well under
+# the per-process fd limit; the executor switches to the bounded identity-pinned pool
+# (PinnedProcessPool) only when N approaches that limit (large many-core machines) — see
+# ``ProcessExecutor._peer_ipc``.
 
 _peer_registry: dict[str, Any] | None = None
 
 
 def peer_pool_init(registry: dict[str, Any]) -> None:
-    """``ProcessPoolExecutor`` initializer: stash the inherited full registry so each actor resolves
-    its own inbox + the peers' outboxes by address (no Manager server).
+    """``ProcessPoolExecutor`` initializer.
+
+    Stash the inherited full registry so each actor resolves its own inbox + the peers'
+    outboxes by address (no Manager server).
     """
     global _peer_registry
     _peer_registry = registry
@@ -906,8 +954,10 @@ def pooled_peer_actor(
     complete: bool = False,
     release: Any = None,
 ) -> dict[str, int]:
-    """Picklable pool entry point: resolve this actor's inbox/outboxes from the inherited full registry
-    (set by :func:`peer_pool_init`) keyed by ``address``, then delegate to :func:`ipc_peer_actor`. Any
+    """Picklable pool entry point.
+
+    Resolve this actor's inbox/outboxes from the inherited full registry (set by
+    :func:`peer_pool_init`) keyed by ``address``, then delegate to :func:`ipc_peer_actor`. Any
     worker can serve any address because every worker inherited the full registry at spawn.
     """
     assert _peer_registry is not None, "peer_pool_init must run as the pool initializer"
@@ -953,10 +1003,12 @@ def ipc_peer_actor(
     complete: bool = False,
     release: Any = None,
 ) -> dict[str, int]:
-    """Module-level (picklable) IPC actor: build the queue transport from the ``inbox``/``outboxes``
-    handed in, then process + peer-reduce. The ``ProcessExecutor`` peer path uses
-    :func:`pinned_peer_actor` (transport from the per-worker init); this explicit-queue form is used to
-    exercise the actor in-process. Reuses the process resource cache across runs (file locality).
+    """Module-level (picklable) IPC actor.
+
+    Build the queue transport from the ``inbox``/``outboxes`` handed in, then process +
+    peer-reduce. The ``ProcessExecutor`` peer path uses :func:`pinned_peer_actor` (transport
+    from the per-worker init); this explicit-queue form is used to exercise the actor
+    in-process. Reuses the process resource cache across runs (file locality).
     """
     transport = QueueTransport(address, inbox, outboxes)
     return process_and_reduce(
@@ -982,7 +1034,10 @@ def ipc_peer_actor(
 
 
 def released(release: Any) -> bool:
-    """Whether the run's release pipe (see :func:`process_and_reduce`) has been closed by its driver."""
+    """Whether the run's release pipe has been closed by its driver.
+
+    Whether the run's release pipe (see :func:`process_and_reduce`) has been closed by its driver.
+    """
     if release is None:
         return False
     try:
@@ -1010,9 +1065,11 @@ def http_peer_actor(
     complete: bool = False,
     release: Any = None,
 ) -> dict[str, int]:
-    """Module-level (picklable) HTTP actor for ``ProcessExecutor``: bind a loopback server, announce
-    ``(host, port)`` to the driver, wait for the assembled registry (buffering any node hand-offs that
-    race ahead), then process + peer-reduce. Proves the transport works across real processes.
+    """Module-level (picklable) HTTP actor for ``ProcessExecutor``.
+
+    Bind a loopback server, announce ``(host, port)`` to the driver, wait for the assembled
+    registry (buffering any node hand-offs that race ahead), then process + peer-reduce. Proves
+    the transport works across real processes.
     """
     transport = HttpTransport(address)
     transport.set_registry({DRIVER: (driver_host, driver_port)})
@@ -1061,8 +1118,10 @@ def http_peer_actor(
 def http_driver_handshake(
     driver_transport: HttpTransport, worker_addresses: tuple[str, ...], *, timeout_s: float = 30.0
 ) -> None:
-    """Driver side of the HTTP discovery: gather each worker's announced ``(host, port)``, assemble the
-    full registry, and send it to every worker so they can address each other.
+    """Driver side of the HTTP discovery.
+
+    Gather each worker's announced ``(host, port)``, assemble the full registry, and send it to
+    every worker so they can address each other.
     """
     registry: dict[str, tuple[str, int]] = {DRIVER: (driver_transport.host, driver_transport.port)}
     deadline = time.monotonic() + timeout_s

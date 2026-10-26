@@ -1,16 +1,19 @@
-"""m69b schedulability paths the frozen suite does not reach: the physical-memory read on the other OS's branch,
-the driver check's fall-through to a cluster host and its refusal beside the earlier legs, the per-start sum,
-a size-less spec; a driver job's slot ``Memory``; the condor announce wait's idle log cadence and a deadline
-that outlives an eviction; the collector query, a partitionable slot's totals, and a job that left the queue
-before its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; the
-backend's close removing a waiting job in its own thread, a serialized stop() done once, no submit after a
-stop or once the waits are stopped; no pilot submitted for a need beside a starting service once the run
-ends, while a held one is still released, a wait for submitted pilots ended by close() alone, and a
-pilot submit in flight that close() waits for and removes; a wait timed from the pilots' submit or from
-its call, whichever is later, and a wait below min_pilots that is not the first need's; a held pilot
-counted alive, a running pilot's claim taken out of its slot, a later plan's failed service start releasing
-the pilots it held, a driver job's too-big service refused naming the sizes, and graphed's release leaving a
-user's hold (that one on a real schedd). The rest run over stand-ins.
+"""m69b schedulability paths the frozen suite does not reach.
+
+The physical-memory read on the other OS's branch, the driver check's fall-through to a cluster
+host and its refusal beside the earlier legs, the per-start sum, a size-less spec; a driver job's
+slot ``Memory``; the condor announce wait's idle log cadence and a deadline that outlives an
+eviction; the collector query, a partitionable slot's totals, and a job that left the queue before
+its match; a pool whose collector lists no slot (submit and wait); a node's disk counted whole; the
+backend's close removing a waiting job in its own thread, a serialized stop() done once, no submit
+after a stop or once the waits are stopped; no pilot submitted for a need beside a starting service
+once the run ends, while a held one is still released, a wait for submitted pilots ended by close()
+alone, and a pilot submit in flight that close() waits for and removes; a wait timed from the
+pilots' submit or from its call, whichever is later, and a wait below min_pilots that is not the
+first need's; a held pilot counted alive, a running pilot's claim taken out of its slot, a later
+plan's failed service start releasing the pilots it held, a driver job's too-big service refused
+naming the sizes, and graphed's release leaving a user's hold (that one on a real schedd). The rest
+run over stand-ins.
 """
 
 from __future__ import annotations
@@ -50,10 +53,13 @@ from graphed_executors.submit.services import (
 )
 
 MIB = 1 << 20
-LISTEN = "import socket, sys, time; s = socket.create_server((sys.argv[1], int(sys.argv[2]))); time.sleep(120)"
+LISTEN = (
+    "import socket, sys, time; s = socket.create_server((sys.argv[1], int(sys.argv[2]))); "
+    "time.sleep(120)"
+)
 
 
-# ---- the host's physical memory ------------------------------------------------------------------------
+# ---- the host's physical memory -----------------------------------------------------------------
 
 
 def test_the_windows_branch_reads_total_physical_memory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,12 +95,14 @@ def test_the_posix_branch_multiplies_pages(monkeypatch: pytest.MonkeyPatch) -> N
     assert physical_memory_mb() == 3072
 
 
-# ---- the engine's driver check ---------------------------------------------------------------------------
+# ---- the engine's driver check ------------------------------------------------------------------
 
 
 class HostingBackend(ThreadBackend):
-    """``ThreadBackend(1)`` holding ``driver_memory_mb`` beside the driver and hosting the rest "on the
-    cluster" as listeners here, or refusing them with ``refuse``.
+    """``ThreadBackend(1)`` holding ``driver_memory_mb`` beside the driver.
+
+    ``ThreadBackend(1)`` holding ``driver_memory_mb`` beside the driver and hosting the rest "on
+    the cluster" as listeners here, or refusing them with ``refuse``.
     """
 
     service_hosts = ("driver", "cluster")
@@ -183,7 +191,7 @@ def test_a_service_without_a_size_fits_any_driver(backends: list[HostingBackend]
     assert [(s.leg, s.host) for s in services.statuses()] == [("managed", "driver")]
 
 
-# ---- machine ads ----------------------------------------------------------------------------------------
+# ---- machine ads --------------------------------------------------------------------------------
 
 
 def test_machine_ad_reads_one_attribute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,7 +255,7 @@ def test_a_driver_job_refuses_a_service_too_big_for_its_slot_naming_the_sizes(
         backend.close()
 
 
-# ---- the announce wait ------------------------------------------------------------------------------------
+# ---- the announce wait --------------------------------------------------------------------------
 
 
 class Answers:
@@ -315,7 +323,7 @@ def test_the_deadline_outlives_an_eviction(
         condor._await_announce(job, quick)
 
 
-# ---- the pool's slots -------------------------------------------------------------------------------------
+# ---- the pool's slots ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("locate", [None, ("cm.example:9618", "schedd.example")])
@@ -379,12 +387,14 @@ def test_a_job_waiting_only_on_a_busy_node_s_disk_matches() -> None:
     assert job.symmetricMatch(_as_whole(classad2.ClassAd(busy)))
 
 
-# ---- a whole backend over a stand-in pool -------------------------------------------------------------------
+# ---- a whole backend over a stand-in pool -------------------------------------------------------
 
 
 class Pool:
-    """``htcondor2`` over a schedd whose every job answers ``status`` (``None``: gone) and a collector that
-    lists no slot; ``log`` records submits (by batch name) and actions.
+    """``htcondor2`` over a schedd whose every job answers ``status``.
+
+    ``htcondor2`` over a schedd whose every job answers ``status`` (``None``: gone) and a collector
+    that lists no slot; ``log`` records submits (by batch name) and actions.
     """
 
     def __init__(self, status: int | None) -> None:
@@ -580,7 +590,7 @@ def test_no_service_job_is_submitted_once_the_waits_are_stopped(
         backend.close()
 
 
-# ---- the runner's own pilots --------------------------------------------------------------------------
+# ---- the runner's own pilots --------------------------------------------------------------------
 
 
 def pilot_submits(pool: Pool) -> list[str]:
@@ -913,8 +923,10 @@ def test_a_running_job_s_claim_leaves_the_slot_it_runs_in() -> None:
 
 
 class SlotPool(Pool):
-    """``Pool`` whose collector lists one 1000 MiB partitionable slot; the schedd answers a job's ad (its
-    request, as ``classad2``) and, once the job is in ``running``, its claim on that slot.
+    """``Pool`` whose collector lists one 1000 MiB partitionable slot.
+
+    The schedd answers a job's ad (its request, as ``classad2``) and, once the job is in
+    ``running``, its claim on that slot.
     """
 
     SLOT = (

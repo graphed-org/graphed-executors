@@ -1,5 +1,7 @@
-"""m68c ``SubmitRunner`` on a hand-built ``DurablePlanV2`` over ``ThreadBackend``: a failed stage task stops
-the run at its barrier, and a cancel during the last stage returns no value.
+"""m68c ``SubmitRunner`` on a hand-built ``DurablePlanV2`` over ``ThreadBackend``.
+
+A failed stage task stops the run at its barrier, and a cancel during the last stage returns no
+value.
 """
 
 from __future__ import annotations

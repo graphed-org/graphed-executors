@@ -1,5 +1,7 @@
-"""A failed task re-checks every service of the plan (plan §2 C2: checks built from the endpoints bound for
-``plan.services``), not only the first.
+"""A failed task re-checks every service of the plan, not only the first.
+
+A failed task re-checks every service of the plan (plan §2 C2: checks built from the endpoints
+bound for ``plan.services``), not only the first.
 """
 
 from __future__ import annotations

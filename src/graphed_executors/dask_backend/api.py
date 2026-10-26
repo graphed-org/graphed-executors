@@ -1,28 +1,34 @@
-"""The unified shuffle facade — THE front door to the two dask shuffle engines (m45-facade-plan, r2).
+"""The unified shuffle facade.
 
-``run_repartition`` / ``run_join`` take a single ``shuffle_method="auto"|"transport"|"tasks"`` knob and
-dispatch over the frozen m43 as-tasks engine (``shuffle.py``) and m44 worker-transport engine
-(``transport_shuffle.py``), so users pick an engine with ONE word instead of juggling both entry points
-(the "too many knobs" directive). ``"auto"`` is capability-static: transport iff the backend supports
-BOTH strict worker pinning and peer data movement, else the as-tasks engine — it does NOT inspect cluster
-elasticity, so adaptive-cluster users pass ``shuffle_method="tasks"`` explicitly.
+THE front door to the two dask shuffle engines (m45-facade-plan, r2).
 
-This is a THIN dispatcher — zero engine logic. It (1) resolves the method from capabilities, (2) rejects a
-transport-only knob that was explicitly set while the resolution landed on ``"tasks"`` (a loud ``ValueError``
-naming the knob, never a silent drop), and (3) forwards to the engine, returning its own result object
-unchanged. ``mem_budget_bytes`` on ``run_join`` is COMMON (both joins bound their working set with it).
+``run_repartition`` / ``run_join`` take a single ``shuffle_method="auto"|"transport"|"tasks"`` knob
+and dispatch over the frozen m43 as-tasks engine (``shuffle.py``) and m44 worker-transport engine
+(``transport_shuffle.py``), so users pick an engine with ONE word instead of juggling both entry
+points (the "too many knobs" directive). ``"auto"`` is capability-static: transport iff the backend
+supports BOTH strict worker pinning and peer data movement, else the as-tasks engine — it does NOT
+inspect cluster elasticity, so adaptive-cluster users pass ``shuffle_method="tasks"`` explicitly.
 
-Return type is the union ``ShuffleResult | TransportShuffleResult``: the portable contract is the COMMON
-triple ``dest_block_hashes`` / ``value`` / ``witness``; ``.partitions`` (tasks) and ``.transport``
-(transport) are engine-specific extras. The extra doubles as resolution observability — a result carrying
-``.transport`` proves the transport engine ran (useful for "why was auto slow on my adaptive cluster").
+This is a THIN dispatcher — zero engine logic. It (1) resolves the method from capabilities, (2)
+rejects a transport-only knob that was explicitly set while the resolution landed on ``"tasks"`` (a
+loud ``ValueError`` naming the knob, never a silent drop), and (3) forwards to the engine,
+returning its own result object unchanged. ``mem_budget_bytes`` on ``run_join`` is COMMON (both
+joins bound their working set with it).
 
-Callers needing ``monitor=`` / ``retries=`` use the still-public ``dask_run_*`` / ``transport_run_*`` entry
-points directly; the facade always builds ``SubmitRunner(dbackend)`` internally (a caller-supplied runner
-would open a ``runner.backend is not dbackend`` consistency hole between resolution and dispatch).
+Return type is the union ``ShuffleResult | TransportShuffleResult``: the portable contract is the
+COMMON triple ``dest_block_hashes`` / ``value`` / ``witness``; ``.partitions`` (tasks) and
+``.transport`` (transport) are engine-specific extras. The extra doubles as resolution
+observability — a result carrying ``.transport`` proves the transport engine ran (useful for "why
+was auto slow on my adaptive cluster").
 
-Dask-import-free at module load (F13): the engine-run functions and ``SubmitRunner`` are deferred into the
-function bodies; only the dask-free result dataclasses are imported at top for the union annotation.
+Callers needing ``monitor=`` / ``retries=`` use the still-public ``dask_run_*`` /
+``transport_run_*`` entry points directly; the facade always builds ``SubmitRunner(dbackend)``
+internally (a caller-supplied runner would open a ``runner.backend is not dbackend`` consistency
+hole between resolution and dispatch).
+
+Dask-import-free at module load (F13): the engine-run functions and ``SubmitRunner`` are deferred
+into the function bodies; only the dask-free result dataclasses are imported at top for the union
+annotation.
 """
 
 from __future__ import annotations
@@ -63,10 +69,13 @@ def run_repartition(
     pull_timeout_s: float | None = None,
     epoch_restarts_allowed: int | None = None,
 ) -> ShuffleResult | TransportShuffleResult:
-    """Hash-repartition ``src_blocks`` into ``parts`` dests via the ``shuffle_method``-selected engine.
-    ``n_tasks`` / ``fetch_budget_bytes`` / ``disk_budget_bytes`` / ``holder_budget_bytes`` /
-    ``pull_timeout_s`` / ``epoch_restarts_allowed`` are transport-only (setting one while resolution lands
-    on ``"tasks"`` raises); ``salt`` is common. ``epoch_restarts_allowed=None`` maps to the engine default (1).
+    """Hash-repartition ``src_blocks`` into ``parts`` dests via the selected engine.
+
+    Hash-repartition ``src_blocks`` into ``parts`` dests via the ``shuffle_method``-selected
+    engine. ``n_tasks`` / ``fetch_budget_bytes`` / ``disk_budget_bytes`` / ``holder_budget_bytes``
+    / ``pull_timeout_s`` / ``epoch_restarts_allowed`` are transport-only (setting one while
+    resolution lands on ``"tasks"`` raises); ``salt`` is common. ``epoch_restarts_allowed=None``
+    maps to the engine default (1).
     """
     resolved = resolve_shuffle_method(shuffle_method, dbackend.capabilities)
     _reject_transport_only_knobs(
@@ -123,10 +132,12 @@ def run_join(
     pull_timeout_s: float | None = None,
     epoch_restarts_allowed: int | None = None,
 ) -> ShuffleResult | TransportShuffleResult:
-    """Distributed relational hash JOIN via the ``shuffle_method``-selected engine. ``on`` / ``how`` /
-    ``broadcast`` / ``salt`` / ``mem_budget_bytes`` are COMMON (both engines bound their working set with
-    ``mem_budget_bytes``); ``holder_budget_bytes`` / ``pull_timeout_s`` / ``epoch_restarts_allowed`` are
-    transport-only (setting one while resolution lands on ``"tasks"`` raises).
+    """Distributed relational hash JOIN via the ``shuffle_method``-selected engine.
+
+    ``on`` / ``how`` /``broadcast`` / ``salt`` / ``mem_budget_bytes`` are COMMON (both engines
+    bound their working set with ``mem_budget_bytes``); ``holder_budget_bytes`` /
+    ``pull_timeout_s`` / ``epoch_restarts_allowed`` are transport-only (setting one while
+    resolution lands on ``"tasks"`` raises).
     """
     resolved = resolve_shuffle_method(shuffle_method, dbackend.capabilities)
     _reject_transport_only_knobs(

@@ -1,8 +1,10 @@
-"""m68a HTCondor paths the frozen suite does not reach: a driver-job backend over self-submitted pilots
-(``pilots="condor"``) takes its service ports from its row's ``worker_ports``; ``CondorPilots.stop``
-still removes its cluster when counting the live pilots fails, and fetches a finished spooled job's
-logs first; a driverless submit whose spool fails removes the job it queued; a failed release is
-logged, not raised. No bindings: every schedd here is a recorder.
+"""m68a HTCondor paths the frozen suite does not reach.
+
+A driver-job backend over self-submitted pilots (``pilots="condor"``) takes its service ports from
+its row's ``worker_ports``; ``CondorPilots.stop`` still removes its cluster when counting the live
+pilots fails, and fetches a finished spooled job's logs first; a driverless submit whose spool
+fails removes the job it queued; a failed release is logged, not raised. No bindings: every schedd
+here is a recorder.
 """
 
 from __future__ import annotations
@@ -32,7 +34,10 @@ from graphed_executors.submit.services import ServiceStatus, ServiceUnavailable,
 
 
 class Schedd:
-    """A recording schedd: ``query`` answers ``queue``; ``spool_raises`` makes ``spool`` raise it."""
+    """A recording schedd: ``query`` answers ``queue``.
+
+    ``spool_raises`` makes ``spool`` raise it.
+    """
 
     def __init__(
         self, queue: list[dict[str, Any]], spool_raises: BaseException | None = None
@@ -161,8 +166,10 @@ def test_the_driver_restores_the_package_logger(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("name", [*sorted(SITES), "synthetic"])
 def test_site_rows_pickle_copy_and_replace(name: str) -> None:
-    """``services`` is a mappingproxy (the frozen-mapping defaults rule); the row still pickles,
-    deep-copies and replaces, as graphed's ``Launch`` does, and comes back read-only.
+    """``services`` is a mappingproxy (the frozen-mapping defaults rule).
+
+    The row still pickles, deep-copies and replaces, as graphed's ``Launch`` does, and comes
+    back read-only.
     """
     row = SITES.get(name) or SiteProfile(
         name="m68a-synthetic",

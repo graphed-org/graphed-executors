@@ -1,9 +1,11 @@
-"""m68a ``ServiceSet`` and the engine's service phase over ``ThreadBackend`` and small duck-typed
-backends: each leg, each refusal, the probe's identity rule and bound, the release of what a failed
-start acquired, and the engine's bind/resolve around a run. The frozen suite pins these through its
-harness; these witnesses keep ``submit/`` gated in the ``test-dask`` job, which runs no frozen m68a
-protocol file, and reach the branches a correct run never takes (a child that dies after its check
-passes, a child that ignores ``terminate``, graphed's resolve walk once it lands).
+"""m68a ``ServiceSet`` and the engine's service phase.
+
+Over ``ThreadBackend`` and small duck-typed backends: each leg, each refusal, the probe's identity
+rule and bound, the release of what a failed start acquired, and the engine's bind/resolve around a
+run. The frozen suite pins these through its harness; these witnesses keep ``submit/`` gated in the
+``test-dask`` job, which runs no frozen m68a protocol file, and reach the branches a correct run
+never takes (a child that dies after its check passes, a child that ignores ``terminate``,
+graphed's resolve walk once it lands).
 """
 
 from __future__ import annotations
@@ -31,12 +33,12 @@ from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit import services as svc
 from graphed_executors.submit.recipes import http_server
 
-# ---- servers, plans, backends ------------------------------------------------------------------------
+# ---- servers, plans, backends -------------------------------------------------------------------
 
 
 @contextlib.contextmanager
 def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
-    """An HTTP server on loopback answering ``status`` (after ``ok_first`` 200s, 503)."""
+    """Serve ``status`` on loopback (after ``ok_first`` 200s, 503)."""
     gets = [0]
 
     class Handler(BaseHTTPRequestHandler):
@@ -65,7 +67,7 @@ def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
 
 
 def free_ports() -> tuple[int, int]:
-    """A range of one port that was free a moment ago."""
+    """Return a range of one port that was free a moment ago."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = int(sock.getsockname()[1])
@@ -135,7 +137,10 @@ class Duck(ThreadBackend):
 
 
 class Hosting(Duck):
-    """Hosts a service on the cluster as an in-process HTTP server reported on ``service_identity``."""
+    """Hosts a service on the cluster as an in-process HTTP server.
+
+    Reported on ``service_identity``.
+    """
 
     def __init__(
         self, service_identity: str, driver_identity: str, *, release_raises: bool = False
@@ -177,7 +182,7 @@ def statuses(caplog: pytest.LogCaptureFixture) -> list[svc.ServiceStatus]:
     return [r.status for r in caplog.records if hasattr(r, "status")]
 
 
-# ---- the legs through the engine -----------------------------------------------------------------------
+# ---- the legs through the engine ----------------------------------------------------------------
 
 
 def test_a_given_endpoint_binds_and_the_value_is_resolved(
@@ -241,7 +246,7 @@ def test_no_leg_and_a_recipe_that_needs_the_cluster_are_refused() -> None:
         backend.close()
 
 
-# ---- managed beside the driver -------------------------------------------------------------------------
+# ---- managed beside the driver ------------------------------------------------------------------
 
 
 def test_a_child_that_exits_before_its_check_passes() -> None:
@@ -317,7 +322,7 @@ def test_a_child_that_ignores_terminate_is_killed(monkeypatch: pytest.MonkeyPatc
     assert proc.calls == ["terminate", "wait(0.01)", "kill", "wait(None)"]
 
 
-# ---- on the cluster, and the probe ---------------------------------------------------------------------
+# ---- on the cluster, and the probe --------------------------------------------------------------
 
 
 def hosted() -> ServiceSpec:
@@ -384,12 +389,14 @@ def test_statuses_are_stamped_when_the_set_closes() -> None:
     backend.close()
 
 
-# ---- the engine ----------------------------------------------------------------------------------------
+# ---- the engine ---------------------------------------------------------------------------------
 
 
 def test_graphed_s_resolve_walk_is_what_a_run_returns(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The engine hands the run's value to ``graphed.services.resolve_services`` with the bound plan
-    and returns what it gives back; a process without the hook comes back unchanged.
+    """The engine hands the run's value to ``graphed.services.resolve_services``.
+
+    With the bound plan and returns what it gives back; a process without the hook comes back
+    unchanged.
     """
     seen: list[Any] = []
     real = graphed_services.resolve_services
@@ -455,7 +462,9 @@ def test_the_http_server_recipe_serves_its_root(tmp_path: Any) -> None:
 
 
 def test_the_scan_skips_a_port_something_answers_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A port whose bind passes (as on macOS/BSD beside a wildcard listener) is still skipped when a
+    """A port whose bind passes is still skipped when a connect is answered.
+
+    A port whose bind passes (as on macOS/BSD beside a wildcard listener) is still skipped when a
     connect is answered; the next one is handed out.
     """
     with socket.socket() as listener:

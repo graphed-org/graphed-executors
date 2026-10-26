@@ -1,18 +1,20 @@
 """The driver-side task server pilots pull from.
 
 Every request is a POST of a pickle signed with the run's secret (``X-Graphed-Sig``, the hex
-HMAC-SHA256 of the body); a missing or wrong signature is answered 403 before anything is unpickled.
-Routes: ``/hello`` registers a pilot, ``/next`` long-polls a task lease, ``/beat`` keeps the pilot's
-leases alive, ``/result`` settles a task's future.
+HMAC-SHA256 of the body); a missing or wrong signature is answered 403 before anything is
+unpickled. Routes: ``/hello`` registers a pilot, ``/next`` long-polls a task lease, ``/beat`` keeps
+the pilot's leases alive, ``/result`` settles a task's future.
 
-``/announce`` is the one plain-text route: a cluster-hosted service's job posts ``key host:port identity``,
-signed with a per-call announce secret (:meth:`TaskServer.announce_secret`) that is valid for that key
-only and signs no pickle, so a service job never holds the secret that runs code here.
+``/announce`` is the one plain-text route: a cluster-hosted service's job posts ``key host:port
+identity``, signed with a per-call announce secret (:meth:`TaskServer.announce_secret`) that is
+valid for that key only and signs no pickle, so a service job never holds the secret that runs code
+here.
 
-A task waits in PENDING until its future arguments are done, then queues. Its first lease moves it to
-RUNNING. A pilot silent for ``LEASE_S`` is lost: each task it held is re-queued once, and a second loss
-fails it with :class:`WorkerLost`. A task leased longer than ``task_timeout_s`` fails with
-:class:`TaskTimedOut` and its pilot is lost. When no pilot is left and none can come, queued tasks fail too.
+A task waits in PENDING until its future arguments are done, then queues. Its first lease moves it
+to RUNNING. A pilot silent for ``LEASE_S`` is lost: each task it held is re-queued once, and a
+second loss fails it with :class:`WorkerLost`. A task leased longer than ``task_timeout_s`` fails
+with :class:`TaskTimedOut` and its pilot is lost. When no pilot is left and none can come, queued
+tasks fail too.
 """
 
 from __future__ import annotations
@@ -41,8 +43,9 @@ from graphed_executors.local._transport import LookupFreeHTTPServer
 from graphed_executors.parsl_backend._shim import _parsl_task_shim
 from graphed_executors.parsl_backend.backend import _ParslFuture
 
-# A pilot beats every LEASE_S / 6, so it is lost after six missed beats: that rides out a task holding
-# the GIL and a transient network drop. Read at call time, never copied, so a test can shorten it.
+# A pilot beats every LEASE_S / 6, so it is lost after six missed beats: that rides out a task
+# holding the GIL and a transient network drop. Read at call time, never copied, so a test can
+# shorten it.
 LEASE_S = 30.0
 POLL_S = 10.0  # the /next long-poll bound
 
@@ -52,7 +55,10 @@ _HOSTPORT = re.compile(r".+:[0-9]+")
 
 
 class WorkerLost(Exception):
-    """A task's pilot was lost twice (``pilot`` names the last one), or no pilot is left to run it."""
+    """A task's pilot was lost twice (``pilot`` names the last one).
+
+    A task's pilot was lost twice (``pilot`` names the last one), or no pilot is left to run it.
+    """
 
     def __init__(self, key: str, pilot: str) -> None:
         super().__init__(key, pilot)
@@ -116,9 +122,12 @@ def _bind(port_range: tuple[int, int]) -> _Http:
 
 
 class TaskServer:
-    """Binds the first free port of ``port_range`` (inclusive) on all interfaces and advertises
+    """Binds the first free port of ``port_range`` (inclusive) on all interfaces.
+
+    Binds the first free port of ``port_range`` (inclusive) on all interfaces and advertises
     ``http://{host}:{port}``. ``launcher`` is asked how many pilots can still come, and its
-    ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit) bounds a lease.
+    ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit) bounds a
+    lease.
     """
 
     def __init__(
@@ -138,7 +147,8 @@ class TaskServer:
         self._beats: dict[str, float] = {}
         self._lost: set[str] = set()
         self._closed = False
-        # announces wait on their own condition: a notify meant for a leasing pilot is never taken here
+        # announces wait on their own condition: a notify meant for a leasing pilot is never taken
+        # here
         self._announced = threading.Condition()
         self._announce_secrets: dict[str, bytes] = {}
         self._announces: dict[str, tuple[str, str]] = {}
@@ -155,8 +165,10 @@ class TaskServer:
     def add(
         self, key: str, fn: Callable[..., object], args: tuple[object, ...], fut: Future[Any]
     ) -> None:
-        """Queue ``fn(*args)`` once every future argument is done; a failed one fails ``fut`` with its
-        exception, so a lost pilot reaches the dependents of any arity unchanged.
+        """Queue ``fn(*args)`` once every future argument is done.
+
+        A failed one fails ``fut`` with its exception, so a lost pilot reaches the
+        dependents of any arity unchanged.
         """
         deps = [a for a in args if isinstance(a, _ParslFuture)]
         remaining = [len(deps)]
@@ -222,7 +234,7 @@ class TaskServer:
     # ---- cluster-hosted services ----
 
     def announce_secret(self, keys: list[str]) -> bytes:
-        """A fresh secret that signs ``/announce`` for ``keys`` only."""
+        """Return a fresh secret that signs ``/announce`` for ``keys`` only."""
         secret = secrets.token_bytes(32)
         with self._announced:
             for key in keys:
@@ -243,7 +255,10 @@ class TaskServer:
             return self._announces.pop(key, None)
 
     def announce(self, body: bytes, sig: bytes) -> HTTPStatus:
-        """Record ``key host:port identity`` when ``sig`` verifies against ``key``'s announce secret."""
+        """Record ``key host:port identity``.
+
+        When ``sig`` verifies against ``key``'s announce secret.
+        """
         try:
             fields = body.decode().split()
         except UnicodeDecodeError:
@@ -273,7 +288,7 @@ class TaskServer:
             return not (self._closed or pilot in self._lost)
 
     def lease(self, pilot: str) -> tuple[int, bytes] | None:
-        """The next task for ``pilot``, or None after ``POLL_S`` or once it should stop."""
+        """Return the next task for ``pilot``, or None after ``POLL_S`` or once it should stop."""
         deadline = time.monotonic() + POLL_S
         with self._cond:
             while self.beat(pilot):
@@ -292,7 +307,10 @@ class TaskServer:
             return None
 
     def result(self, pilot: str, tid: int, ok: bool, blob: bytes) -> None:
-        """Settle task ``tid`` from ``pilot``; a result from a pilot that no longer holds the lease is dropped."""
+        """Settle task ``tid`` from ``pilot``.
+
+        A result from a pilot that no longer holds the lease is dropped.
+        """
         self.beat(pilot)
         with self._cond:
             task = self._tasks.get(tid)
@@ -350,7 +368,10 @@ class TaskServer:
             starving = bool(self._queue) and set(self._beats) <= self._lost
         # the launcher is asked only when work waits with no pilot: a schedd query is not free
         if starving and self._launcher.alive() == 0:
-            where = f"no pilots left; see {getattr(self._launcher, 'log_dir', None) or 'the launcher logs'}"
+            where = (
+                "no pilots left; see "
+                f"{getattr(self._launcher, 'log_dir', None) or 'the launcher logs'}"
+            )
             with self._cond:
                 for tid in self._queue:
                     task = self._tasks.pop(tid)

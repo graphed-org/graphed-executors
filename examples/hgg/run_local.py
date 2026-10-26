@@ -1,7 +1,9 @@
-"""Run the H->gg translation over NanoAOD files of one dataset on this machine, print its counters and
-save its diagnostics as UHI JSON.
+"""Run the H->gg translation over NanoAOD files of one dataset on this machine.
 
-python examples/hgg/run_local.py FILE [FILE ...] --dataset MC --year 2024 --parts 4 --workers 4 --out output_inclusive
+Print its counters and save its diagnostics as UHI JSON.
+
+python examples/hgg/run_local.py FILE [FILE ...] --dataset MC --year 2024 --parts 4 --workers 4
+--out output_inclusive
 """
 
 from __future__ import annotations
@@ -21,7 +23,10 @@ from graphed_executors.submit import SubmitRunner, ThreadBackend
 
 
 def num_entries(uri: str) -> int:
-    """The file's entry count, from coffea's lazy (virtual) NanoEvents, which reads no branch for it."""
+    """Return the file's entry count, from coffea's lazy (virtual) NanoEvents.
+
+    Which reads no branch for it.
+    """
     return len(NanoEventsFactory.from_root({uri: "Events"}, mode="virtual").events())
 
 
@@ -45,8 +50,9 @@ def fileset(uris: list[str], dataset: str, parts: int) -> dict[str, dict[str, An
 
 
 def report(value: Mapping[str, Any], histograms: str) -> None:
-    """Print each dataset's counters as JSON and save its diagnostics, ``{dataset: {name: histogram}}``,
-    as UHI JSON at ``histograms``.
+    """Print each dataset's counters as JSON and save its diagnostics.
+
+    ``{dataset: {name: histogram}}``, as UHI JSON at ``histograms``.
     """
     print(
         json.dumps(

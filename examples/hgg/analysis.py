@@ -1,7 +1,9 @@
-"""Inclusive H -> gamma gamma processor on graphed (a translation of the owner's ``inclusive_processor.py``).
+"""Inclusive H -> gamma gamma processor on graphed.
 
-The processor is the original's, method for method, in the spelling a deferred array needs: events are
-coffea NanoEvents in ``mode="graphed"``, ``gak`` stands in for ``ak``, ``gak.with_field`` for
+A translation of the owner's ``inclusive_processor.py``.
+
+The processor is the original's, method for method, in the spelling a deferred array needs: events
+are coffea NanoEvents in ``mode="graphed"``, ``gak`` stands in for ``ak``, ``gak.with_field`` for
 assignment, and every place the original forces a value (``int()``, ``len()``, ``.to_numpy()``,
 ``bool()`` guards) becomes a plan output or disappears.
 
@@ -12,7 +14,8 @@ that chunk's sums in the part's metadata, beside the counters that the runner tr
 
     fileset = {"MC": {"mc.root": {"object_path": "Events", "steps": [[0, 100], [100, 200]]}}}
     plan = analysis.plan(fileset, year="2024", out="out")
-    SequentialRunner().run(plan).value   # {dataset: {**counters, "diagnostics": {name: bh.Histogram}}}
+    SequentialRunner().run(plan).value   # {dataset: {**counters, "diagnostics": {name:
+    bh.Histogram}}}
 
 The diagnostics are local boost histograms; with a ``graphed_histogram.histserv.Context`` they fill
 on the context's histserv servers, which the plan declares as services for the runner to start.
@@ -61,7 +64,10 @@ def jme_json_path(relative: str) -> str:
 
 
 def metaconditions() -> dict[str, Any]:
-    """The triggers and MET filters, from the metaconditions JSON the original's ``__main__`` loads."""
+    """Return the triggers and MET filters.
+
+    From the metaconditions JSON the original's ``__main__`` loads.
+    """
     text = resources.files("higgs_dna.metaconditions").joinpath("Era2022_v1.json").read_text()
     loaded: dict[str, Any] = json.loads(text)
     return loaded
@@ -101,7 +107,10 @@ LUMIMASK_PLUGIN = ExternalPlugin(
 
 
 def lumi_mask(run: Array, lumi: Array, year: str) -> Array:
-    """The certified (run, lumi) pairs of ``year``'s golden JSON, read where the original reads it."""
+    """Return the certified (run, lumi) pairs of ``year``'s golden JSON.
+
+    The JSON is read where the original reads it.
+    """
     for base in ("2016", "2022", "2023", "2024"):
         if year and base in year:
             year = base
@@ -239,7 +248,10 @@ def get_higgs_truth_attributes(events: Any) -> tuple[Any, Any]:
 
 
 class HggInclusiveProcessor:
-    """The original's processor; ``process`` returns what a plan writes and counts instead of doing it."""
+    """The original's processor.
+
+    ``process`` returns what a plan writes and counts instead of doing it.
+    """
 
     # photon preselection cuts
     min_pt_photon = 25.0
@@ -301,9 +313,18 @@ class HggInclusiveProcessor:
     prefixes: ClassVar[dict[str, str]] = {"pho_lead": "lead", "pho_sublead": "sublead"}
 
     GOLDEN_JSON: ClassVar[dict[str, str]] = {
-        "2016": "CAF/certification/Collisions16/Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt",
-        "2017": "CAF/certification/Collisions17/Cert_294927-306462_13TeV_UL2017_Collisions17_GoldenJSON.txt",
-        "2018": "CAF/certification/Collisions18/Cert_314472-325175_13TeV_Legacy2018_Collisions18_JSON.txt",
+        "2016": (
+            "CAF/certification/Collisions16/"
+            "Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt"
+        ),
+        "2017": (
+            "CAF/certification/Collisions17/"
+            "Cert_294927-306462_13TeV_UL2017_Collisions17_GoldenJSON.txt"
+        ),
+        "2018": (
+            "CAF/certification/Collisions18/"
+            "Cert_314472-325175_13TeV_Legacy2018_Collisions18_JSON.txt"
+        ),
         "2022": "CAF/certification/Collisions22/Cert_Collisions2022_355100_362760_Golden.json",
         "2023": "CAF/certification/Collisions23/Cert_Collisions2023_366442_370790_Golden.json",
         "2024": "CAF/certification/Collisions24/Cert_Collisions2024_378981_386951_Golden.json",
@@ -396,7 +417,10 @@ class HggInclusiveProcessor:
 
     @staticmethod
     def add_photon_sc_eta(photons: Any, PV: Any) -> Any:
-        """Add the supercluster eta (``ScEta``): stored from NanoAOD v13, else projected from the PV."""
+        """Add the supercluster eta (``ScEta``).
+
+        Stored from NanoAOD v13, else projected from the PV.
+        """
         if "superclusterEta" in photons.fields:
             return gak.with_field(photons, photons.superclusterEta, "ScEta")
 
@@ -410,8 +434,9 @@ class HggInclusiveProcessor:
         tg_theta_over_2 = gak.where(tg_theta_over_2 == 1.0, 1 - 1e-10, tg_theta_over_2)
         tg_theta = 2 * tg_theta_over_2 / (1 - tg_theta_over_2 * tg_theta_over_2)
 
-        # barrel: project onto a cylinder of radius R = 130 cm; the original fills a zeros_like(PV_x)
-        # buffer by masked assignment, so every branch keeps PV_x's dtype and unmatched rows stay 0
+        # barrel: project onto a cylinder of radius R = 130 cm; the original fills a
+        # zeros_like(PV_x) buffer by masked assignment, so every branch keeps PV_x's dtype and
+        # unmatched rows stay 0
         R = 130.0
         zero = gak.zeros_like(PV_x)
         atan = numpy.arctan(PV_y / PV_x)
@@ -586,7 +611,10 @@ class HggInclusiveProcessor:
         return jetId_cut & pt_cut & eta_cut & dr_pho_lead & dr_pho_sublead & dr_ele & dr_muo
 
     def add_jet_variables(self, diphotons: Any, events: Any, year: str) -> Any:
-        """Cleaned, pT-ordered jets; attach the jet-counting / leading-jet columns to the diphotons."""
+        """Return cleaned, pT-ordered jets.
+
+        Attach the jet-counting / leading-jet columns to the diphotons.
+        """
         nano_version = self.resolve_nano_version(events)
         raw = events.Jet
         jets = gak.zip(
@@ -761,8 +789,10 @@ class HggInclusiveProcessor:
         return gak.with_field(diphotons, value, "sigma_m_over_m")
 
     def diphoton_to_ak_array(self, diphotons: Any) -> Any:
-        """The flat output columns: photon legs prefixed ``lead_``/``sublead_``, the rest as-is,
-        without the per-photon copy of the event-level rho, in the sorted order the original writes.
+        """Return the flat output columns.
+
+        Photon legs prefixed ``lead_``/``sublead_``, the rest as-is, without the per-photon
+        copy of the event-level rho, in the sorted order the original writes.
         """
         output = {}
         for field in gak.fields(diphotons):
@@ -776,8 +806,9 @@ class HggInclusiveProcessor:
         return gak.zip({k: output[k] for k in sorted(output) if "lead_fixedGridRhoAll" not in k})
 
     def process(self, events: Any) -> dict[str, Any]:
-        """The flat diphoton record, the counters, and the part's key-value metadata (its arrays
-        are this chunk's sums).
+        """Return the flat diphoton record, the counters, and the part's key-value metadata.
+
+        Its arrays are this chunk's sums.
         """
         self.resolve_nano_version(events)
         dataset_name = events.metadata["dataset"]
@@ -866,7 +897,10 @@ class HggInclusiveProcessor:
 
 @dataclass(frozen=True)
 class Counters:
-    """A chunk's counters as the original returns them, from the plan's values (paths follow them)."""
+    """A chunk's counters as the original returns them, from the plan's values.
+
+    Paths follow them.
+    """
 
     names: tuple[str, ...]
 
@@ -889,7 +923,10 @@ def accumulate(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
 
 
 def part_name(partition: Partition) -> str:
-    """The original's part name (``<file>_<tree>_<start>-<stop>``), with the file's stem for its UUID."""
+    """Return the original's part name (``<file>_<tree>_<start>-<stop>``).
+
+    With the file's stem for its UUID.
+    """
     if partition.is_blind:
         raise ValueError(
             f"{partition.uri} has no entry range to name its part from: give every file explicit "
@@ -915,8 +952,9 @@ DIAGNOSTICS: dict[str, tuple[str, tuple[int, float, float]]] = {
 
 
 def diagnostics(record: Any, context: histserv.Context | None = None) -> dict[str, ghb.Histogram]:
-    """The ``DIAGNOSTICS`` of the flat diphoton ``record``: local boost histograms, or histserv
-    histograms on ``context``'s servers.
+    """Return the ``DIAGNOSTICS`` of the flat diphoton ``record``.
+
+    Local boost histograms, or histserv histograms on ``context``'s servers.
     """
     out: dict[str, ghb.Histogram] = {}
     for name, (column, (bins, low, high)) in DIAGNOSTICS.items():
@@ -936,8 +974,10 @@ def _counters(value: Mapping[str, Any]) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class HggReduce:
-    """A chunk's counters beside its ``"diagnostics"``: ``counters`` reads the plan's first values,
-    ``histograms`` (the diagnostics' ``pieces.reduce``) each fill at its compiled position.
+    """A chunk's counters beside its ``"diagnostics"``.
+
+    ``counters`` reads the plan's first values, ``histograms`` (the diagnostics'
+    ``pieces.reduce``) each fill at its compiled position.
     """
 
     counters: Counters
@@ -953,7 +993,10 @@ class HggReduce:
 
 @dataclass(frozen=True)
 class HggCombine:
-    """Two values combined: the counters by :func:`accumulate`, the diagnostics by ``histograms``."""
+    """Two values combined.
+
+    The counters by :func:`accumulate`, the diagnostics by ``histograms``.
+    """
 
     histograms: Any
 
@@ -980,8 +1023,9 @@ def dataset_plan(
     out: str,
     context: histserv.Context | None = None,
 ) -> Plan[dict[str, Any]]:
-    """One dataset's plan over coffea's ``files`` mapping, whose files each give explicit "steps";
-    its diagnostics fill on ``context``'s servers when one is given.
+    """One dataset's plan over coffea's ``files`` mapping, whose files each give explicit "steps".
+
+    Its diagnostics fill on ``context``'s servers when one is given.
     """
     events = NanoEventsFactory.from_root(
         dict(files), schemaclass=NanoAODSchema, mode="graphed", metadata={"dataset": dataset}
@@ -1018,10 +1062,12 @@ def plan(
     out: str,
     context: histserv.Context | None = None,
 ) -> Plan[dict[str, Any]]:
-    """One plan over coffea's ``{dataset: files}``: ``run(plan).value`` is ``{dataset: {**counters,
-    "diagnostics": {name: histogram}}}``, and each chunk's part lands at
-    ``out/<dataset>/nominal/<file stem>_Events_<start>-<stop>.parquet``. Every dataset's diagnostics
-    fill on ``context``'s servers when one is given.
+    """One plan over coffea's ``{dataset: files}``.
+
+    ``run(plan).value`` is ``{dataset: {**counters, "diagnostics": {name: histogram}}}``, and
+    each chunk's part lands at ``out/<dataset>/nominal/<file
+    stem>_Events_<start>-<stop>.parquet``. Every dataset's diagnostics fill on ``context``'s
+    servers when one is given.
     """
     return collate(
         {

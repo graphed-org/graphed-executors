@@ -1,4 +1,6 @@
-"""A worker holding stolen leaves never grants one on, so every stolen partial reaches its owner over
+"""A worker holding stolen leaves never grants one on.
+
+A worker holding stolen leaves never grants one on, so every stolen partial reaches its owner over
 the pinned pool's bounded overlay.
 """
 

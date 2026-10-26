@@ -1,5 +1,6 @@
-"""Every product HTTP server binds and answers without ``socket.getfqdn``, whose reverse lookup stalls on
-macOS CI runners and leaves a bound server not listening.
+"""Every product HTTP server binds and answers without ``socket.getfqdn``.
+
+Whose reverse lookup stalls on macOS CI runners and leaves a bound server not listening.
 """
 
 from __future__ import annotations

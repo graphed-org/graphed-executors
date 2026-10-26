@@ -1,5 +1,6 @@
-"""A fixed run with a monitor raises well within the drain timeout, with a control attached (the windowed path)
-or without.
+"""A fixed run with a monitor raises well within the drain timeout.
+
+With a control attached (the windowed path) or without.
 """
 
 from __future__ import annotations

@@ -1,4 +1,7 @@
-"""A worker-produced value stdlib pickle refuses comes back through cloudpickle; one it accepts never does (#65)."""
+"""A worker-produced value stdlib pickle refuses comes back through cloudpickle.
+
+One it accepts never does (#65).
+"""
 
 from __future__ import annotations
 

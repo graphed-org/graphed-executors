@@ -1,5 +1,7 @@
-"""#30: a persistent ``PinnedPoolExecutor`` keeps its workers when a plan's task count changes; a merge
-target outside a worker's spawn-time overlay is reached through the driver, so no worker gains a handle.
+"""#30: a persistent ``PinnedPoolExecutor`` keeps its workers when a plan's task count changes.
+
+A merge target outside a worker's spawn-time overlay is reached through the driver, so no worker
+gains a handle.
 """
 
 from __future__ import annotations

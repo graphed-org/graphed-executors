@@ -39,7 +39,8 @@ route = sys.argv[2]
 if route == "pinned":
     ex = PinnedPoolExecutor(max_workers=2, steal=False, monitor=None)
 else:
-    ex = ProcessPoolExecutor(max_workers=2, steal=False, monitor=None, comms=None if route == "hub" else route)
+    comms = None if route == "hub" else route
+    ex = ProcessPoolExecutor(max_workers=2, steal=False, monitor=None, comms=comms)
 ex.run(pid_plan(sys.argv[1], (200, 3000)))
 """
 

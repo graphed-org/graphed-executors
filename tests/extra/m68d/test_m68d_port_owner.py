@@ -1,6 +1,8 @@
-"""m68d port-race decisions the frozen suite reaches only on Linux: a driver-hosted start and ``announce.py``'s
-start refuse a port whose listener the child's process tree does not hold. The ``/proc`` probe answers here
-are stand-ins (the probe itself is the frozen suite's), so these run on every OS.
+"""m68d port-race decisions the frozen suite reaches only on Linux.
+
+A driver-hosted start and ``announce.py``'s start refuse a port whose listener the child's process
+tree does not hold. The ``/proc`` probe answers here are stand-ins (the probe itself is the frozen
+suite's), so these run on every OS.
 """
 
 from __future__ import annotations
@@ -93,7 +95,11 @@ def test_announce_moves_past_a_port_whose_listener_its_child_does_not_hold(
 def bound_during_the_dial(
     module: Any, check: str, monkeypatch: pytest.MonkeyPatch, port: int
 ) -> list[bool]:
-    """``module``'s ``check`` passes, and ``port`` gains a listener nobody's tree holds as the first dial runs."""
+    """``module``'s ``check`` passes.
+
+    ``module``'s ``check`` passes, and ``port`` gains a listener nobody's tree holds as the first
+    dial runs.
+    """
     bound: list[bool] = []
 
     def dial(*args: Any, **kwargs: Any) -> None:

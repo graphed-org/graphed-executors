@@ -1,4 +1,4 @@
-"""The hub broadcast waits for a pool worker that boots long after its sibling, up to a deadline."""
+"""The hub broadcast waits, up to a deadline, for a worker that boots long after its sibling."""
 
 from __future__ import annotations
 

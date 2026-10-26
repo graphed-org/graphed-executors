@@ -1,5 +1,7 @@
-"""Coverage-policy rollout (ci/per-file-coverage-policy): closes `local/_transport.py` to the
-per-file >=90% gate. Not frozen; may be extended or replaced by later coverage work.
+"""Coverage-policy rollout (ci/per-file-coverage-policy).
+
+Closes `local/_transport.py` to the per-file >=90% gate. Not frozen; may be extended or replaced by
+later coverage work.
 """
 
 from __future__ import annotations
@@ -11,19 +13,19 @@ import time
 
 import pytest
 
-from graphed_executors.local import _transport as T
+from graphed_executors.local import _transport
 from graphed_executors.local._transport import HttpTransport, PipeInbox, build_transports
 
 
 def test_is_routable_host_rejects_a_non_ip_string() -> None:
-    assert T.is_routable_host("not-an-ip") is False
+    assert _transport.is_routable_host("not-an-ip") is False
 
 
 def test_detect_routable_host_prefers_the_hostname_address_when_routable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(socket, "gethostbyname", lambda _name: "10.0.0.5")
-    assert T._detect_routable_host() == "10.0.0.5"
+    assert _transport._detect_routable_host() == "10.0.0.5"
 
 
 def test_detect_routable_host_falls_back_to_the_udp_probe_when_hostname_is_loopback(
@@ -45,7 +47,7 @@ def test_detect_routable_host_falls_back_to_the_udp_probe_when_hostname_is_loopb
             pass
 
     monkeypatch.setattr(socket, "socket", lambda *a, **k: _FakeSocket())
-    assert T._detect_routable_host() == "172.16.0.9"
+    assert _transport._detect_routable_host() == "172.16.0.9"
 
 
 def test_detect_routable_host_returns_none_when_the_udp_probe_fails(
@@ -64,20 +66,20 @@ def test_detect_routable_host_returns_none_when_the_udp_probe_fails(
             pass
 
     monkeypatch.setattr(socket, "socket", lambda *a, **k: _FailSocket())
-    assert T._detect_routable_host() is None
+    assert _transport._detect_routable_host() is None
 
 
 def test_select_advertise_host_raises_when_nothing_is_detected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(T, "_detect_routable_host", lambda: None)
+    monkeypatch.setattr(_transport, "_detect_routable_host", lambda: None)
     with pytest.raises(ValueError, match="no routable"):
-        T.select_advertise_host()
+        _transport.select_advertise_host()
 
 
 def test_select_advertise_host_returns_the_detected_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(T, "_detect_routable_host", lambda: "10.1.2.3")
-    assert T.select_advertise_host() == "10.1.2.3"
+    monkeypatch.setattr(_transport, "_detect_routable_host", lambda: "10.1.2.3")
+    assert _transport.select_advertise_host() == "10.1.2.3"
 
 
 def test_pipe_inbox_get_returns_a_ready_item() -> None:

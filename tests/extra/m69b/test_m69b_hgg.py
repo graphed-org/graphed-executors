@@ -1,6 +1,8 @@
-"""m69b H->gg paths the frozen suite does not reach: ``run_local`` prints the counters and saves the
-diagnostics as UHI JSON that reads back bit for bit, and the analysis's empty value is the identity of its
-combine. Skips without coffea or higgs_dna unless ``GRAPHED_HGG_REQUIRED=1``, as ``hgg_harness`` does.
+"""m69b H->gg paths the frozen suite does not reach.
+
+``run_local`` prints the counters and saves the diagnostics as UHI JSON that reads back bit for
+bit, and the analysis's empty value is the identity of its combine. Skips without coffea or
+higgs_dna unless ``GRAPHED_HGG_REQUIRED=1``, as ``hgg_harness`` does.
 """
 
 from __future__ import annotations

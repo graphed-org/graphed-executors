@@ -1,7 +1,9 @@
-"""m68b B1 paths the frozen suite does not reach: ``announce.py``'s identity fallback, an exhausted port
-range, a ``service/`` mount point, a port another process took after the scan, the watched pair while it
-is missing or torn, a child that exits after it was ready; ``ServiceJob``'s refusals of a job it cannot
-build, and a ``stop()`` before any submit. No bindings and no pool; ``announce.py`` runs in process.
+"""m68b B1 paths the frozen suite does not reach.
+
+``announce.py``'s identity fallback, an exhausted port range, a ``service/`` mount point, a port
+another process took after the scan, the watched pair while it is missing or torn, a child that
+exits after it was ready; ``ServiceJob``'s refusals of a job it cannot build, and a ``stop()``
+before any submit. No bindings and no pool; ``announce.py`` runs in process.
 """
 
 from __future__ import annotations
@@ -31,11 +33,12 @@ posix = pytest.mark.skipif(
     reason="announce.py is POSIX-only: Windows delivers SIGTERM as TerminateProcess",
 )
 
-# a child that listens on its port (argv[1]) and exits with argv[2] after argv[3] seconds, or at once on
-# port argv[4]
+# a child that listens on its port (argv[1]) and exits with argv[2] after argv[3] seconds, or at
+# once on port argv[4]
 LISTENER = (
     "import socket, sys, time\n"
-    "port, code, after, quit_on = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])\n"
+    "port, code, after, quit_on = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), "
+    "int(sys.argv[4])\n"
     "if port == quit_on:\n"
     "    sys.exit(code)\n"
     "s = socket.socket()\n"
@@ -48,7 +51,10 @@ LISTENER = (
 
 
 def free_ports(n: int) -> list[int]:
-    """``n`` consecutive ports ``free()`` accepts, scanned from a per-process base so concurrent runs differ."""
+    """``n`` consecutive ports ``free()`` accepts.
+
+    Scanned from a per-process base so concurrent runs differ.
+    """
     for low in range(31000 + os.getpid() % 1000 * 20, 60000, 97):
         ports = list(range(low, low + n))
         if all(ann.free(p) for p in ports):
@@ -70,8 +76,10 @@ def listeners(ports: list[int]) -> Iterator[None]:
 
 @pytest.fixture
 def job_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """A job dir as the cwd on a machine named ``localhost``, and ``CHILD`` restored (and any child it
-    names reaped) afterwards.
+    """Yield a job dir as the cwd on a machine named ``localhost``.
+
+    Yield a job dir as the cwd on a machine named ``localhost`` and ``CHILD`` restored (and any
+    child it names reaped) afterwards.
     """
     monkeypatch.chdir(tmp_path)
     (tmp_path / "service").mkdir()
@@ -103,7 +111,7 @@ def config(ports: list[int], **fields: Any) -> dict[str, Any]:
     }
 
 
-# ---- announce.py ----------------------------------------------------------------------------------------
+# ---- announce.py --------------------------------------------------------------------------------
 
 
 def test_identity_is_the_machine_ad_s_else_the_fqdn(
@@ -165,8 +173,8 @@ def test_a_port_taken_after_the_scan_moves_on_to_the_next(
     assert asked[low] == 2
 
 
-# starts the child with announce's start() in a process whose at-fork child handler exits 86, as gRPC's
-# restarts its pollers in a forked child
+# starts the child with announce's start() in a process whose at-fork child handler exits 86, as
+# gRPC's restarts its pollers in a forked child
 AT_FORK_PROBE = (
     "import json, os, sys\n"
     "from graphed_executors.htcondor_backend import announce as ann\n"
@@ -272,7 +280,7 @@ def test_a_child_that_exits_after_ready_ends_the_job_with_its_code(
     assert "ready pid=" in out and "the child exited 5" in out and "orphaned" not in out
 
 
-# ---- ServiceJob -------------------------------------------------------------------------------------------
+# ---- ServiceJob ---------------------------------------------------------------------------------
 
 
 def web(**launch: Any) -> ServiceSpec:

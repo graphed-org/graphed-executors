@@ -1,8 +1,9 @@
-"""m68a ``check_ready``, ``host_identity`` and the small pieces of ``submit/services.py`` the frozen suite
-reaches only through the whole path: every readiness form against in-process servers (the gRPC ones when
-grpcio and its reference health servicer are installed), the endpoint form, the minted scheme, the
-request encoding, a missing grpcio, and the ``Endpoints`` map. These run in the ``test-dask`` job too,
-which gates ``submit/`` on its own suite.
+"""m68a ``check_ready``, ``host_identity`` and the small pieces of ``submit/services.py``.
+
+The frozen suite reaches only through the whole path: every readiness form against in-process
+servers (the gRPC ones when grpcio and its reference health servicer are installed), the endpoint
+form, the minted scheme, the request encoding, a missing grpcio, and the ``Endpoints`` map. These
+run in the ``test-dask`` job too, which gates ``submit/`` on its own suite.
 """
 
 from __future__ import annotations
@@ -28,8 +29,9 @@ TIMEOUT_S = 5.0
 
 @contextlib.contextmanager
 def http_server(status: int = 200, ctype: str = "text/plain") -> Iterator[str]:
-    """An HTTP server on loopback answering every GET with ``status`` and ``ctype``; yields its
-    ``http://`` endpoint.
+    """Serve every GET on loopback with ``status`` and ``ctype``.
+
+    Yields its ``http://`` endpoint.
     """
 
     class Handler(BaseHTTPRequestHandler):

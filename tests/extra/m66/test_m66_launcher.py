@@ -1,4 +1,7 @@
-"""m66 launcher paths a single personal pool cannot reach: collector failover and the default log_dir."""
+"""m66 launcher paths a single personal pool cannot reach.
+
+Collector failover and the default log_dir.
+"""
 
 from __future__ import annotations
 
@@ -108,8 +111,10 @@ def test_the_default_log_dir_is_fresh_under_the_sandbox_root(
 
 
 class CredBindings:
-    """Bindings and schedd in one: the credd answers ``stored``, ``issue_credentials`` raises ``error``
-    when given, and each call lands in ``log`` in order.
+    """Bindings and schedd in one.
+
+    The credd answers ``stored``, ``issue_credentials`` raises ``error`` when given, and each
+    call lands in ``log`` in order.
     """
 
     CredType = SimpleNamespace(Kerberos="krb")

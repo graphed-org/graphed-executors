@@ -1,6 +1,8 @@
-"""m66 task-server and pilot paths the frozen suite does not drive: a cancelled queued task, an idle long poll,
-a stale or unusable result, close with held tasks, an exhausted port range, a malformed signature header,
-pilots sharing a hostname and pid, and a pilot orphaned by its driver, idle or mid-task.
+"""m66 task-server and pilot paths the frozen suite does not drive.
+
+A cancelled queued task, an idle long poll, a stale or unusable result, close with held tasks, an
+exhausted port range, a malformed signature header, pilots sharing a hostname and pid, and a pilot
+orphaned by its driver, idle or mid-task.
 """
 
 from __future__ import annotations
@@ -108,8 +110,14 @@ def die_once(marker: str) -> str:
 
 
 def start_pilot(url: str, secret: Path, prelude: str = "") -> subprocess.Popen[str]:
-    """A pilot on this interpreter with this directory importable; ``prelude`` runs first."""
-    code = f"{prelude}\nimport sys\nfrom graphed_executors.htcondor_backend import pilot\nsys.exit(pilot.main(sys.argv[1:]))"
+    """Start a pilot on this interpreter with this directory importable.
+
+    ``prelude`` runs first.
+    """
+    code = (
+        f"{prelude}\nimport sys\nfrom graphed_executors.htcondor_backend import "
+        "pilot\nsys.exit(pilot.main(sys.argv[1:]))"
+    )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([HERE, os.environ.get("PYTHONPATH", "")])}
     return subprocess.Popen(
         [sys.executable, "-c", code, url, str(secret)],
@@ -182,7 +190,8 @@ def test_a_malformed_signature_header_is_refused(capfd: pytest.CaptureFixture[st
         host, port = ts.url.removeprefix("http://").split(":")
         with socket.create_connection((host, int(port)), timeout=30) as conn:
             conn.sendall(
-                b"POST /hello HTTP/1.1\r\nHost: x\r\nX-Graphed-Sig: \xe9\r\nContent-Length: 0\r\n\r\n"
+                b"POST /hello HTTP/1.1\r\nHost: x\r\nX-Graphed-Sig: \xe9\r\nContent-Length: "
+                b"0\r\n\r\n"
             )
             # to EOF: closing early resets the server's write
             reply = b"".join(iter(lambda: conn.recv(4096), b""))

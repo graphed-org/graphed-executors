@@ -1,12 +1,14 @@
-"""m47 mutation re-verification follow-up: the ``has_captured`` guard at the epoch-loop return
-(``transport_peer.py`` — ``if not errs and has_captured:``) is DEFENSE-IN-DEPTH for a state no
-black-box injection can construct (measured, fixup seam finding 2: retry semantics close the gap —
-a driver-side root drop with budget < SEND_RETRIES re-lands the root; budget >= SEND_RETRIES errs
-the sender's task, so ``errs`` fills). The mutation review's MUT3 (``if not errs:``) therefore
-survives every frozen scenario. This white-box unit test forces the exact guarded state by
-stubbing ``_drive_reduce`` and pins the loss-safety contract at the guard itself: empty ``errs``
-with NO captured root must RAISE the attributed no-root ``StageError`` — never return a result
-(whose value slot would be ``None``/identity, §1.4 "No silent None anywhere").
+"""m47 mutation re-verification follow-up.
+
+The ``has_captured`` guard at the epoch-loop return (``transport_peer.py`` — ``if not errs and
+has_captured:``) is DEFENSE-IN-DEPTH for a state no black-box injection can construct (measured,
+fixup seam finding 2: retry semantics close the gap — a driver-side root drop with budget <
+SEND_RETRIES re-lands the root; budget >= SEND_RETRIES errs the sender's task, so ``errs`` fills).
+The mutation review's MUT3 (``if not errs:``) therefore survives every frozen scenario. This
+white-box unit test forces the exact guarded state by stubbing ``_drive_reduce`` and pins the
+loss-safety contract at the guard itself: empty ``errs`` with NO captured root must RAISE the
+attributed no-root ``StageError`` — never return a result (whose value slot would be
+``None``/identity, §1.4 "No silent None anywhere").
 
 Discriminates: MUT3 returns ``TransportExecResult(None, …)`` here — ``pytest.raises`` reports
 DID NOT RAISE (kill measured against the applied mutant in the re-verification log); an

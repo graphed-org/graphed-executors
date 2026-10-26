@@ -1,10 +1,12 @@
-"""Per-site HTCondor submit profiles and the schedd choice, as data: nothing here imports the bindings.
+"""Per-site HTCondor submit profiles and the schedd choice, as data.
+
+Nothing here imports the bindings.
 
 A :class:`SiteProfile` holds the submit keys a site needs (templates over ``{image}``, ``{uid}``,
-``{user}`` and ``{home}``), whether its schedd needs spooled sandboxes, whether pilots get the driver's
-venv shipped as ``env.tgz``, the directory trees its schedd and its jobs read, how to find a schedd, the
-driver-side ports its execute nodes can reach, and the services the site hosts (kind -> endpoint), the
-second leg of a run's service set.
+``{user}`` and ``{home}``), whether its schedd needs spooled sandboxes, whether pilots get the
+driver's venv shipped as ``env.tgz``, the directory trees its schedd and its jobs read, how to find
+a schedd, the driver-side ports its execute nodes can reach, and the services the site hosts (kind
+-> endpoint), the second leg of a run's service set.
 """
 
 from __future__ import annotations
@@ -31,17 +33,19 @@ _SPOOLING_INPUT = 16
 
 @dataclass(frozen=True)
 class SiteProfile:
-    """``schedd_query`` is ``(param naming the collectors, constraint)``; ``None`` means the user's own
-    ``SCHEDD_HOST``. ``sandbox_root`` (a template over ``{user}``) is the only tree the site's schedd
-    reads, so ``log_dir`` must lie under it. ``driver_ports`` is the inclusive range the task server
-    binds on the submit host. ``service_ports`` is the range of login-node ports execute nodes reach for
-    a service beside the driver, ``worker_ports`` the range one execute node reaches on another; ``None``
-    means no such port was measured open. ``jobs_can_submit`` is whether a job there may submit jobs.
-    ``job_root`` is the tree the schedd and every job read and write directly, so a job-submitted
-    cluster's ``initialdir`` and a DAG's directory and inputs must lie under it (``"/"``: every path;
-    ``None``: no such tree).
-    ``services`` maps a service ``kind`` to the endpoint (``scheme://host:port``) the site hosts it
-    at; a value that is not one fails construction naming the row.
+    """``schedd_query`` is ``(param naming the collectors, constraint)``.
+
+    ``None`` means the user's own ``SCHEDD_HOST``. ``sandbox_root`` (a template over
+    ``{user}``) is the only tree the site's schedd reads, so ``log_dir`` must lie under it.
+    ``driver_ports`` is the inclusive range the task server binds on the submit host.
+    ``service_ports`` is the range of login-node ports execute nodes reach for a service beside
+    the driver, ``worker_ports`` the range one execute node reaches on another; ``None`` means
+    no such port was measured open. ``jobs_can_submit`` is whether a job there may submit jobs.
+    ``job_root`` is the tree the schedd and every job read and write directly, so a
+    job-submitted cluster's ``initialdir`` and a DAG's directory and inputs must lie under it
+    (``"/"``: every path; ``None``: no such tree). ``services`` maps a service ``kind`` to the
+    endpoint (``scheme://host:port``) the site hosts it at; a value that is not one fails
+    construction naming the row.
     """
 
     name: str
@@ -66,8 +70,8 @@ class SiteProfile:
         object.__setattr__(self, "services", MappingProxyType(dict(self.services)))
 
     def __reduce__(self) -> tuple[Any, ...]:
-        # a mappingproxy neither pickles nor deep-copies; the constructor re-wraps the plain dict (as
-        # graphed's Launch does)
+        # a mappingproxy neither pickles nor deep-copies; the constructor re-wraps the plain dict
+        # (as graphed's Launch does)
         values = [getattr(self, f.name) for f in fields(self)]
         return (
             type(self),
@@ -88,7 +92,8 @@ SITES: Mapping[str, SiteProfile] = {
         name="lpc",
         submit={
             "use_x509userproxy": "true",
-            # without an explicit path the LPC schedd looks in /tmp and fails with "unable to read proxy"
+            # without an explicit path the LPC schedd looks in /tmp and fails with "unable to read
+            # proxy"
             "x509userproxy": "{home}/x509up_u{uid}",
             "+DesiredOS": '"EL9"',
             "MY.SingularityImage": '"{image}"',
@@ -98,10 +103,12 @@ SITES: Mapping[str, SiteProfile] = {
         sandbox_root="/uscmst1b_scratch/lpc1/3DayLifetime/{user}",
         schedd_query=(
             "FERMIHTC_REMOTE_POOL",
-            'FERMIHTC_DRAIN_LPCSCHEDD=?=FALSE && FERMIHTC_SCHEDD_TYPE=?="CMSLPC" && MaxJobsRunning!=0',
+            'FERMIHTC_DRAIN_LPCSCHEDD=?=FALSE && FERMIHTC_SCHEDD_TYPE=?="CMSLPC" && '
+            "MaxJobsRunning!=0",
         ),
         driver_ports=(10000, 10100),
-        # the task server binds driver_ports first, so a service scanning from 10001 cannot take its port
+        # the task server binds driver_ports first, so a service scanning from 10001 cannot take
+        # its port
         service_ports=(10001, 10100),
         worker_ports=(10000, 10100),
         jobs_can_submit=False,
@@ -119,7 +126,8 @@ SITES: Mapping[str, SiteProfile] = {
         ship_env=True,
         sandbox_root=None,
         schedd_query=None,
-        # batch nodes are refused on 10000 at a login node; CERN opens 8786 there for a dask scheduler
+        # batch nodes are refused on 10000 at a login node; CERN opens 8786 there for a dask
+        # scheduler
         driver_ports=(8786, 8786),
         # 8786 is the only login port open to batch nodes, and the task server holds it
         service_ports=None,
@@ -142,7 +150,7 @@ SITES: Mapping[str, SiteProfile] = {
 
 
 def schedd_weight(ad: Mapping[str, Any]) -> float:
-    """The LPC ``condor_submit`` wrapper's load score; lower is better."""
+    """Return the LPC ``condor_submit`` wrapper's load score; lower is better."""
     return float(
         0.7 * ad["RecentDaemonCoreDutyCycle"] * 100
         + 0.2 * ad["ShadowsRunning"] / ad["MaxJobsRunning"] * 100

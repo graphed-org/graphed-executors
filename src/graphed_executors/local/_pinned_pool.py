@@ -5,16 +5,17 @@ It conforms to the ``concurrent.futures.Executor`` shape — ``submit`` returns 
 exception propagation for free). It differs from ``ProcessPoolExecutor`` in exactly the way peer
 reduction needs and the stdlib pool cannot provide:
 
-* **Workers are NOT interchangeable.** Worker ``i`` is spawned once, runs ``init_fn(*init_args[i])`` to
-  inherit its OWN resources (here: a *bounded* peer-transport subset — its inbox + the outboxes of its
-  O(log N) overlay peers), and owns that identity for life. A ``submit`` therefore MUST name its worker
-  (``submit(fn, *args, worker=i)``); work is not handed to "any free worker".
+* **Workers are NOT interchangeable.** Worker ``i`` is spawned once, runs
+  ``init_fn(*init_args[i])`` to inherit its OWN resources (here: a *bounded* peer-transport subset
+  — its inbox + the outboxes of its O(log N) overlay peers), and owns that identity for life. A
+  ``submit`` therefore MUST name its worker (``submit(fn, *args, worker=i)``); work is not handed
+  to "any free worker".
 * **Per-worker bounded inherited state.** Because each worker is spawned with its own ``init_args``
-  (not the pool's shared ``initargs``), the registry a worker inherits is O(log N), so the whole pool
-  is O(N log N) — not the O(N²) every-worker-inherits-every-queue of an ``initargs`` registry.
+  (not the pool's shared ``initargs``), the registry a worker inherits is O(log N), so the whole
+  pool is O(N log N) — not the O(N²) every-worker-inherits-every-queue of an ``initargs`` registry.
 
-The control channel (per-worker ``submit`` calls) is separate from whatever transport the workers use
-among themselves, so peer messages that race ahead of a call simply wait in that transport — no
+The control channel (per-worker ``submit`` calls) is separate from whatever transport the workers
+use among themselves, so peer messages that race ahead of a call simply wait in that transport — no
 buffering dance here.
 """
 
@@ -30,8 +31,10 @@ from typing import Any
 
 
 def exit_with_driver() -> None:
-    """Pool-worker initializer step: exit this process once the driver that spawned it dies. A pool
-    worker otherwise waits on its call queue forever, since every worker holds a write end of it.
+    """Pool-worker initializer step: exit this process once the driver that spawned it dies.
+
+    A pool worker otherwise waits on its call queue forever, since every worker holds a write
+    end of it.
     """
     parent = multiprocessing.parent_process()
     if parent is not None:
@@ -51,9 +54,11 @@ def _pinned_loop(
     call_q: Any,
     result_q: Any,
 ) -> None:
-    """The generic pinned-worker body: run the per-worker initializer once (inheriting this worker's
-    resources), then serve ``(cid, fn, args)`` calls from this worker's control queue until the
-    shutdown sentinel, returning each result (or a picklable error) on the shared result queue.
+    """Run the generic pinned-worker body.
+
+    Run the per-worker initializer once (inheriting this worker's resources), then serve
+    ``(cid, fn, args)`` calls from this worker's control queue until the shutdown sentinel,
+    returning each result (or a picklable error) on the shared result queue.
     """
     exit_with_driver()
     init_fn(*init_args)
@@ -108,10 +113,12 @@ class PinnedProcessPool(Executor):
         )
         self._reaper.start()
 
-    def submit(
+    def submit(  # type: ignore[override]
         self, fn: Callable[..., Any], /, *args: Any, worker: int, **kwargs: Any
-    ) -> Future[Any]:  # type: ignore[override]
-        """Run ``fn(*args)`` on the pinned worker ``worker``; return a ``Future``. (No task kwargs —
+    ) -> Future[Any]:
+        """Run ``fn(*args)`` on the pinned worker ``worker``; return a ``Future``.
+
+        Run ``fn(*args)`` on the pinned worker ``worker``; return a ``Future`` (No task kwargs —
         ``worker`` is the only keyword, since pinned workers are addressed, not pooled.)
         """
         if kwargs:
@@ -138,8 +145,10 @@ class PinnedProcessPool(Executor):
                 fut.set_result(value) if ok else fut.set_exception(value)
 
     def workers_alive(self) -> bool:
-        """Backstop for a HARD worker crash (no error message shipped): the driver can detect it and
-        fail instead of waiting on a Future that will never resolve.
+        """Backstop for a HARD worker crash (no error message shipped).
+
+        The driver can detect it and fail instead of waiting on a Future that will never
+        resolve.
         """
         return all(p.is_alive() for p in self._procs)
 

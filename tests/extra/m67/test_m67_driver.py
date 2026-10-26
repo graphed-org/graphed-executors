@@ -1,7 +1,8 @@
-"""m67 driver-entry and launcher paths the frozen suite does not reach: the host fallback, an outcome
-that does not pickle, the default schedd's name, ``service_hosts`` with worker ports alone, the exit
-code of a run whose workers were lost, a failing close, the entry run under ``-W error``, and the
-pilot cluster in ``driver.log``.
+"""m67 driver-entry and launcher paths the frozen suite does not reach.
+
+The host fallback, an outcome that does not pickle, the default schedd's name, ``service_hosts``
+with worker ports alone, the exit code of a run whose workers were lost, a failing close, the entry
+run under ``-W error``, and the pilot cluster in ``driver.log``.
 """
 
 from __future__ import annotations

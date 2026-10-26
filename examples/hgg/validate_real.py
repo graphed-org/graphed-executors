@@ -2,9 +2,9 @@
 
 For the first file of ``GluGluHto2G_M-125_amcatnlo_2024`` and of ``DataC_2024`` (the HiggsDNA 2024
 sample manifests) it prints the file's entry count, splits ``[0, --entry-stop)`` into ``--parts``
-ranges, runs the original processor (the m69a oracle) on those ranges and ONE graphed plan over both
-files, and prints each part's ``compare_part`` result and each dataset's accumulated counters beside
-the plan's. Exits 1 on any difference.
+ranges, runs the original processor (the m69a oracle) on those ranges and ONE graphed plan over
+both files, and prints each part's ``compare_part`` result and each dataset's accumulated counters
+beside the plan's. Exits 1 on any difference.
 
     python examples/hgg/validate_real.py --parts 2 [--entry-stop N] [--out DIR]
 """
@@ -32,7 +32,10 @@ MC = (
     f"{STORE}/mc/RunIII2024Summer24NanoAODv15/GluGluH-Hto2G_Par-M-125_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/"
     "NANOAODSIM/150X_mcRun3_2024_realistic_v2-v2/120000/acebfb52-a25b-48bc-b9f6-80fe54a98d56.root"
 )
-DATA = f"{STORE}/data/Run2024C/EGamma0/NANOAOD/MINIv6NANOv15-v1/2540000/3151ab41-a5bd-48f1-be40-449b760a60e6.root"
+DATA = (
+    f"{STORE}/data/Run2024C/EGamma0/NANOAOD/MINIv6NANOv15-v1/2540000/"
+    "3151ab41-a5bd-48f1-be40-449b760a60e6.root"
+)
 
 
 def main(argv: list[str] | None = None) -> int:

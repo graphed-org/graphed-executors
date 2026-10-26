@@ -1,8 +1,9 @@
-"""m69b placement paths the frozen suite does not reach: ``service_hosts`` narrows an attached backend's hosts
-in the row's order and gates the cluster capability with them, a driver job's hosts narrow the same way, a
-refusal comes before the task server binds, and the engine's managed leg reads the narrowed tuple. No
-bindings and no pool: the schedd is a stand-in that accepts a submit and lists no job, the launcher one that
-starts nothing.
+"""m69b placement paths the frozen suite does not reach.
+
+``service_hosts`` narrows an attached backend's hosts in the row's order and gates the cluster
+capability with them, a driver job's hosts narrow the same way, a refusal comes before the task
+server binds, and the engine's managed leg reads the narrowed tuple. No bindings and no pool: the
+schedd is a stand-in that accepts a submit and lists no job, the launcher one that starts nothing.
 """
 
 from __future__ import annotations
@@ -20,7 +21,10 @@ from graphed_executors.submit.services import ServiceSet, ServiceUnavailable
 
 
 def bindings() -> Any:
-    """``htcondor2`` as ``CondorPilots`` starts and stops one cluster on a schedd that lists no job."""
+    """``htcondor2`` as ``CondorPilots`` starts and stops one cluster.
+
+    On a schedd that lists no job.
+    """
     schedd = SimpleNamespace(
         submit=lambda desc, count=0, spool=False: SimpleNamespace(cluster=lambda: 77),
         query=lambda constraint="", projection=None: [],

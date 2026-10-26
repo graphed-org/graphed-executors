@@ -1,10 +1,11 @@
-"""m44 (d): the M39-M41 shuffle / relational-join engine hosted on dask workers over the worker
-transport (m44-transport-plan §1.4, Impl Target 5). An **O(T+P) scheduler graph** — exactly ``T``
-strict-pinned ``_transport_map_task`` producers + ``P`` strict-pinned ``_transport_gather_task`` (or
-``_transport_gather_join``) consumers + a CONSTANT control tail, with NO ``T*P`` pick tier: the map
-tasks register their per-dest wires in the holder's plugin block store and the gather tasks PULL
-their dest's fragments worker→worker over ``graphed_block_pull`` (the pull-model data plane), so the
-bulk bytes never ride a task return or the driver.
+"""m44 (d): the M39-M41 shuffle / relational-join engine hosted on dask workers.
+
+Over the worker transport (m44-transport-plan §1.4, Impl Target 5). An **O(T+P) scheduler graph** —
+exactly ``T`` strict-pinned ``_transport_map_task`` producers + ``P`` strict-pinned
+``_transport_gather_task`` (or ``_transport_gather_join``) consumers + a CONSTANT control tail,
+with NO ``T*P`` pick tier: the map tasks register their per-dest wires in the holder's plugin block
+store and the gather tasks PULL their dest's fragments worker→worker over ``graphed_block_pull``
+(the pull-model data plane), so the bulk bytes never ride a task return or the driver.
 
 The compute BODIES + the reader-plane sizing replay MOVED to
 :mod:`graphed_executors.common.transport_tasks` (plan §1.6 m47) so the parsl peer-exchange engine
@@ -12,7 +13,8 @@ runs the SAME bodies. This module keeps the O(T+P) DRIVER (submit/barrier/restar
 module-level **wrapper** task fns with the exact submit names the m45 dispatch spy records
 (``_transport_map_task`` / ``_transport_gather_task`` / ``_transport_gather_join`` /
 ``_transport_broadcast_join_part``), each binding a dask block plane
-(``_get_plugin``/``pull_blocks``, deferred so this module imports on the dask-free main matrix, F13).
+(``_get_plugin``/``pull_blocks``, deferred so this module imports on the dask-free main matrix,
+F13).
 """
 
 from __future__ import annotations
@@ -48,17 +50,21 @@ from ._transport_run import (
 
 
 def _skey(epoch: str, *parts: object) -> str:
-    """A per-epoch, collision-proof task key: the ``graphed-`` prefix cannot collide with a user
-    string arg (dask/dask#9969) and the fresh epoch nonce re-executes across runs / restarts.
+    """Return a per-epoch, collision-proof task key.
+
+    The ``graphed-`` prefix cannot collide with a user string arg (dask/dask#9969) and the
+    fresh epoch nonce re-executes across runs / restarts.
     """
     return "graphed-transport-" + epoch + "-" + "-".join(str(p) for p in parts)
 
 
-# ---- the dask block plane the wrapper task fns bind (deferred distributed-touching imports) -------
+# ---- the dask block plane the wrapper task fns bind (deferred distributed-touching imports) -----
 class _DaskBlockPlane:
-    """The block plane over the dask worker plugin: ``store_block``/``record`` on the holder side,
-    ``pull_blocks`` worker→worker on the puller side. Constructed IN-TASK so the distributed-touching
-    imports stay deferred (F13). ``plugin`` is ``None`` for a pull-only (gather) task.
+    """The block plane over the dask worker plugin.
+
+    ``store_block``/``record`` on the holder side, ``pull_blocks`` worker→worker on the puller
+    side. Constructed IN-TASK so the distributed-touching imports stay deferred (F13).
+    ``plugin`` is ``None`` for a pull-only (gather) task.
     """
 
     def __init__(self, plugin: Any, epoch: str) -> None:
@@ -79,7 +85,7 @@ class _DaskBlockPlane:
         return list(pull_blocks(self._epoch, holder_addr, digests, timeout_s=timeout_s))
 
 
-# ---- module-level spawn-safe wrapper task fns (the m45 spy pins these __name__s) ------------------
+# ---- module-level spawn-safe wrapper task fns (the m45 spy pins these __name__s) ----------------
 def _transport_map_task(
     spec: Any,
     backend: Any,
@@ -150,10 +156,12 @@ def _transport_broadcast_join_part(
 def _collect_maps(
     map_futs: Sequence[Any], k: int
 ) -> tuple[dict[int, dict[int, tuple[str, int]]], dict[str, int], dict[int, int], int]:
-    """Barrier: harvest every producer's fragment into per-task manifests keyed to its holder node
-    (``holder_i = t % k``), the digest→size table for the replay, and the map-side witness pieces. A
-    stage-1 producer death propagates raw from ``fut.result()`` straight to ``_run_with_restarts``,
-    which classifies it (restart-worthy) exactly as it does a gather death.
+    """Barrier.
+
+    Harvest every producer's fragment into per-task manifests keyed to its holder node (``holder_i
+    = t % k``), the digest→size table for the replay, and the map-side witness pieces. A stage-1
+    producer death propagates raw from ``fut.result()`` straight to ``_run_with_restarts``, which
+    classifies it (restart-worthy) exactly as it does a gather death.
     """
     manifests: dict[int, dict[int, tuple[str, int]]] = {}
     size_of: dict[str, int] = {}
@@ -185,13 +193,15 @@ def transport_run_repartition(
     pull_timeout_s: float | None = None,
     epoch_restarts_allowed: int = 1,
 ) -> TransportShuffleResult:
-    """Hash-repartition ``src_blocks`` into ``parts`` dests as an O(T+P) dask graph over the worker
-    transport. ``dest_block_hashes`` are byte-identical across runs AND equal to the local
-    ``run_repartition`` on identical inputs. ``fetch_budget_bytes`` / ``disk_budget_bytes`` bound the
-    reader plane (accounted by the driver-side replay); ``holder_budget_bytes`` bounds the producer
-    retention (F12); ``pull_timeout_s`` widens the per-holder block-pull ceiling for large batches (R4).
-    A worker death restarts the whole run under a fresh epoch up to ``epoch_restarts_allowed``, else
-    surfaces as an attributed ``StageError`` (§1.5).
+    """Hash-repartition ``src_blocks`` into ``parts`` dests as an O(T+P) dask graph.
+
+    Over the worker transport. ``dest_block_hashes`` are byte-identical across runs AND equal to
+    the local ``run_repartition`` on identical inputs. ``fetch_budget_bytes`` /
+    ``disk_budget_bytes`` bound the reader plane (accounted by the driver-side replay);
+    ``holder_budget_bytes`` bounds the producer retention (F12); ``pull_timeout_s`` widens the
+    per-holder block-pull ceiling for large batches (R4). A worker death restarts the whole run
+    under a fresh epoch up to ``epoch_restarts_allowed``, else surfaces as an attributed
+    ``StageError`` (§1.5).
     """
     require_pin(dbackend)
     from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
@@ -286,15 +296,18 @@ def transport_run_join(
     pull_timeout_s: float | None = None,
     epoch_restarts_allowed: int = 1,
 ) -> TransportShuffleResult:
-    """Distributed relational hash JOIN over the worker transport. ``broadcast=None`` lets the pinned
-    ``parts``-keyed cost rule choose (F6 — never the live worker count); ``True``/``False`` honour a
-    plan-recorded choice. Shuffle path: two co-partitioned repartitions (same ``salt``) + P per-dest
-    ``_transport_gather_join`` tasks reusing ``_join_with_budget`` (spill counters match the local
-    engine exactly). Broadcast path: the build side ships once via ``dbackend.broadcast`` and each probe
-    block is joined by a pinned ``_transport_broadcast_join_part`` — the large side never shuffles.
-    ``holder_budget_bytes`` bounds BOTH sides' producer retention on the shuffle path (F12, mirrors
-    repartition); ``pull_timeout_s`` widens the per-holder block-pull ceiling (R4). Neither applies to
-    the broadcast path (the build side ships via ``broadcast``, not the holder store).
+    """Distributed relational hash JOIN over the worker transport.
+
+    ``broadcast=None`` lets the pinned ``parts``-keyed cost rule choose (F6 — never the live
+    worker count); ``True``/``False`` honour a plan-recorded choice. Shuffle path: two
+    co-partitioned repartitions (same ``salt``) + P per-dest ``_transport_gather_join`` tasks
+    reusing ``_join_with_budget`` (spill counters match the local engine exactly). Broadcast
+    path: the build side ships once via ``dbackend.broadcast`` and each probe block is joined
+    by a pinned ``_transport_broadcast_join_part`` — the large side never shuffles.
+    ``holder_budget_bytes`` bounds BOTH sides' producer retention on the shuffle path (F12,
+    mirrors repartition); ``pull_timeout_s`` widens the per-holder block-pull ceiling (R4).
+    Neither applies to the broadcast path (the build side ships via ``broadcast``, not the
+    holder store).
     """
     require_pin(dbackend)
     from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
@@ -347,8 +360,9 @@ def transport_run_join(
                 k,
             )
 
-    # join task granularity keys on the side block counts, not a caller n_tasks; the restart driver's
-    # ``t`` arg is unused (``_t``) — the map fan-out is min(k, n_side) inside each attempt.
+    # join task granularity keys on the side block counts, not a caller n_tasks; the restart
+    # driver's ``t`` arg is unused (``_t``) — the map fan-out is min(k, n_side) inside each
+    # attempt.
     return _run_with_restarts(
         dbackend,
         max(len(left_blocks), len(right_blocks)),
@@ -600,10 +614,12 @@ def _run_with_restarts(
     attempt_fn: Any,
     pull_timeout_s: float | None = None,
 ) -> TransportShuffleResult:
-    """Run ``attempt_fn`` under a fresh epoch, restarting the WHOLE run on a restart-worthy failure
-    (worker death / exhausted send / pull timeout) up to ``epoch_restarts_allowed`` — else an attributed
-    ``StageError``. Worker addresses are re-read each attempt so a restart after a death pins onto the
-    SURVIVORS. ``pull_timeout_s`` (when given) overrides the spec's block-pull ceiling (R4).
+    """Run ``attempt_fn`` under a fresh epoch.
+
+    Restarting the WHOLE run on a restart-worthy failure (worker death / exhausted send / pull
+    timeout) up to ``epoch_restarts_allowed`` — else an attributed ``StageError``. Worker addresses
+    are re-read each attempt so a restart after a death pins onto the SURVIVORS. ``pull_timeout_s``
+    (when given) overrides the spec's block-pull ceiling (R4).
     """
     transport = TransportWitness()
     per_worker: dict[str, dict[str, int]] = {}

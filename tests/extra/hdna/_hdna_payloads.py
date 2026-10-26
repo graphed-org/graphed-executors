@@ -54,8 +54,11 @@ def nothing() -> None:
 
 @dataclass(frozen=True)
 class FailFirst:
-    """A task process that raises on its first ``failures`` attempts at each partition and returns 1
-    after; each attempt leaves a marker file under ``marks``, so the count crosses worker processes.
+    """A task process that raises on its first ``failures`` attempts at each partition.
+
+    A task process that raises on its first ``failures`` attempts at each partition and returns 1
+    after; each attempt leaves a marker file under ``marks``, so the count crosses worker
+    processes.
     """
 
     marks: str
@@ -74,8 +77,9 @@ class FailFirst:
 
 @dataclass(frozen=True)
 class HangAt:
-    """Sleeps ``hang_s`` on the first ``hangs`` attempts at ``uri`` and returns 1 otherwise; each
-    attempt there leaves a file named by its pid under ``attempts``.
+    """Sleeps ``hang_s`` on the first ``hangs`` attempts at ``uri`` and returns 1 otherwise.
+
+    Each attempt there leaves a file named by its pid under ``attempts``.
     """
 
     uri: str
@@ -96,7 +100,7 @@ class HangAt:
 
 
 def scale_by(k: float) -> Any:
-    """A closure over ``k``: pickle by reference cannot name it."""
+    """Return a closure over ``k``: pickle by reference cannot name it."""
     return lambda x: x * k
 
 
@@ -133,5 +137,5 @@ def empty_array() -> ak.Array:
 
 
 def lambda_behavior_reduce(values: Any) -> ak.Array:
-    """A partial whose behavior the reduce step builds itself, holding a local lambda."""
+    """Return a partial whose behavior the reduce step builds itself, holding a local lambda."""
     return ak.Array(ak.Array(values[0]).layout, behavior={"f": lambda x: x})

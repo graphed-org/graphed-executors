@@ -1,8 +1,11 @@
-"""m69b: servers that each fit the pool's largest slot (plan-services.md §5.2 "Ordering"), on the pool (the
-``test-htcondor`` job): two of a set that fit it together both serve a first plan; of two that do not, the
-later is refused naming the earlier, which keeps its slot to the run's end, and is removed before it runs;
-two plans run from two threads, whose servers fit it one plan at a time, both end with their values. The
-servers are sized from the slot, as ``test_service_order.py`` sizes its pilots.
+"""m69b: servers that each fit the pool's largest slot, on the pool.
+
+Servers that each fit the pool's largest slot (plan-services.md §5.2 "Ordering"), on the pool (the
+``test-htcondor`` job): two of a set that fit it together both serve a first plan; of two that do
+not, the later is refused naming the earlier, which keeps its slot to the run's end, and is removed
+before it runs; two plans run from two threads, whose servers fit it one plan at a time, both end
+with their values. The servers are sized from the slot, as ``test_service_order.py`` sizes its
+pilots.
 """
 
 from __future__ import annotations
@@ -60,8 +63,9 @@ def pool_runner(tmp_path: Path) -> Any:
 
 
 def run_two(tmp_path: Path, share: float, tag: str) -> tuple[Any, int, Any]:
-    """Run a one-task plan over two servers of ``share`` of the largest slot each; the schedd, the run's
-    start (a ``QDate``), and its value or the exception it raised.
+    """Run a one-task plan over two servers of ``share`` of the largest slot each.
+
+    The schedd, the run's start (a ``QDate``), and its value or the exception it raised.
     """
     htc = order.require_pool()
     plan = two_server_plan(tag, ("web1", "web2"), int(order.largest_slot_mb(htc) * share))
@@ -77,7 +81,7 @@ def run_two(tmp_path: Path, share: float, tag: str) -> tuple[Any, int, Any]:
 
 
 def servers(schedd: Any, t0: int) -> list[int]:
-    """The run's service jobs' clusters, in submit order."""
+    """Return the run's service jobs' clusters, in submit order."""
     ads = schedd.history(f"{SERVICE_JOBS} && QDate >= {t0}", ["ClusterId"], match=10)
     return sorted(int(ad["ClusterId"]) for ad in ads)
 

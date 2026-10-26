@@ -1,5 +1,7 @@
-"""The pool's slot ads (A2's match): the collector drops the dynamic slots and returns whole ads, so a pool
-whose dynamic slots outnumber the rest is never pulled through the driver.
+"""The pool's slot ads (A2's match).
+
+The collector drops the dynamic slots and returns whole ads, so a pool whose dynamic slots
+outnumber the rest is never pulled through the driver.
 """
 
 from __future__ import annotations

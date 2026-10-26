@@ -1,4 +1,7 @@
-"""m66: the driver-side port range is site data (lxplus batch nodes reach only 8786 on a login node)."""
+"""m66: the driver-side port range is site data.
+
+Lxplus batch nodes reach only 8786 on a login node.
+"""
 
 from __future__ import annotations
 

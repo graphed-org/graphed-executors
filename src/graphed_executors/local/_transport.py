@@ -1,24 +1,26 @@
-"""Inter-worker comms backends (M38): concrete :class:`graphed.core.execution.WorkerTransport`
-implementations for single-machine executors.
+"""Inter-worker comms backends (M38).
+
+Concrete :class:`graphed.core.execution.WorkerTransport` implementations for single-machine
+executors.
 
 Two interchangeable backends behind one interface — the seam peer reduction and work-stealing ride,
 and the seam a future *distributed* executor reuses unchanged:
 
 - :class:`QueueTransport` — **IPC** (the default). Per-endpoint inbox queue + a registry of peers'
   inboxes. ``queue.Queue`` for the in-process / thread-pool case; a :class:`PipeInbox`
-  (``multiprocessing.SimpleQueue``, **no feeder thread**) for the process pool (queue-type-agnostic —
-  it only uses ``put_nowait`` / ``get_nowait`` / ``get``). A ``PipeInbox`` send is a synchronous pipe
-  write, so it blocks above the OS pipe buffer: a caller that must keep reading (or keep going) hands
-  its sends to a separate thread — ``_peer._Outbox`` for a worker, ``_peer.release_workers`` for the
-  driver's teardown broadcast.
-- :class:`HttpTransport` — **HTTP** over loopback. Each endpoint runs a tiny stdlib ``http.server`` in
-  a daemon thread; ``send`` enqueues to a local outbound buffer that a background sender thread POSTs
-  to the destination (so ``send`` stays non-blocking, exactly like the M37 dashboard client). Fully
-  exercisable in-process (every endpoint a thread); a real distributed executor swaps the loopback
-  registry for remote hosts.
+  (``multiprocessing.SimpleQueue``, **no feeder thread**) for the process pool (queue-type-agnostic
+  — it only uses ``put_nowait`` / ``get_nowait`` / ``get``). A ``PipeInbox`` send is a synchronous
+  pipe write, so it blocks above the OS pipe buffer: a caller that must keep reading (or keep
+  going) hands its sends to a separate thread — ``_peer._Outbox`` for a worker,
+  ``_peer.release_workers`` for the driver's teardown broadcast.
+- :class:`HttpTransport` — **HTTP** over loopback. Each endpoint runs a tiny stdlib ``http.server``
+  in a daemon thread; ``send`` enqueues to a local outbound buffer that a background sender thread
+  POSTs to the destination (so ``send`` stays non-blocking, exactly like the M37 dashboard client).
+  Fully exercisable in-process (every endpoint a thread); a real distributed executor swaps the
+  loopback registry for remote hosts.
 
-Both honour the contract: message order/delivery are not guaranteed, and reduction determinism is the
-protocol layer's job (it keys by leaf index).
+Both honour the contract: message order/delivery are not guaranteed, and reduction determinism is
+the protocol layer's job (it keys by leaf index).
 """
 
 from __future__ import annotations
@@ -40,19 +42,21 @@ from typing import Any
 from ._portable import PICKLE_ERRORS, Portable
 
 _DEFAULT_MAXSIZE = 10000
-# How long :meth:`HttpTransport.close` waits for already-queued sends to be POSTed. The healthy path
-# never pays it (the sender is idle, so the sentinel returns immediately); it exists because the last
-# messages an endpoint queues are the ones teardown depends on — the driver's ``done`` release, whose
-# loss leaves the workers unreleased and the pool shutdown waiting on them. A dead destination refuses
-# fast, so even the crash case usually costs milliseconds, not the bound.
+# How long :meth:`HttpTransport.close` waits for already-queued sends to be POSTed. The healthy
+# path never pays it (the sender is idle, so the sentinel returns immediately); it exists because
+# the last messages an endpoint queues are the ones teardown depends on — the driver's ``done``
+# release, whose loss leaves the workers unreleased and the pool shutdown waiting on them. A dead
+# destination refuses fast, so even the crash case usually costs milliseconds, not the bound.
 CLOSE_DRAIN_S = 5.0
 
 
 # ---- routable-address selection (M39 §6.1 / B4) -------------------------------------------------
 def is_routable_host(host: str) -> bool:
-    """True iff ``host`` is a concrete address a PEER can dial — NOT loopback (``127.0.0.0/8`` / ``::1``)
-    and NOT the bind-all wildcard (``0.0.0.0`` / ``::``). Private ranges (10.x, 192.168.x) ARE routable
-    (they are exactly the cluster-internal addresses). A non-IP string is not routable.
+    """Return True iff ``host`` is a concrete address a PEER can dial.
+
+    NOT loopback (``127.0.0.0/8`` / ``::1``) and NOT the bind-all wildcard (``0.0.0.0`` /
+    ``::``). Private ranges (10.x, 192.168.x) ARE routable (they are exactly the
+    cluster-internal addresses). A non-IP string is not routable.
     """
     try:
         ip = ipaddress.ip_address(host)
@@ -62,8 +66,10 @@ def is_routable_host(host: str) -> bool:
 
 
 def _detect_routable_host() -> str | None:
-    """A concrete non-loopback IP for this host, or ``None``. Tries the hostname's resolved address,
-    then the source address a UDP socket would use toward a public IP (no packet is actually sent).
+    """Return a concrete non-loopback IP for this host, or ``None``.
+
+    Tries the hostname's resolved address, then the source address a UDP socket would use
+    toward a public IP (no packet is actually sent).
     """
     with contextlib.suppress(OSError):
         candidate = socket.gethostbyname(socket.gethostname())
@@ -82,9 +88,11 @@ def _detect_routable_host() -> str | None:
 
 
 def select_advertise_host(candidate: str | None = None) -> str:
-    """The address to ANNOUNCE to peers (the transport may BIND ``0.0.0.0``, but it must never
-    announce loopback/wildcard — a peer cannot dial those). Validates an explicit ``candidate`` or
-    auto-detects one; raises ``ValueError`` on loopback/``0.0.0.0`` (or when none is available).
+    """Return the address to ANNOUNCE to peers.
+
+    The transport may BIND ``0.0.0.0``, but it must never announce loopback/wildcard — a peer
+    cannot dial those. Validates an explicit ``candidate`` or auto-detects one; raises
+    ``ValueError`` on loopback/``0.0.0.0`` (or when none is available).
     """
     if candidate is not None:
         if not is_routable_host(candidate):
@@ -97,21 +105,25 @@ def select_advertise_host(candidate: str | None = None) -> str:
 
 
 class PipeInbox:
-    """A cross-process inbox over ``multiprocessing.SimpleQueue``, adapted to the small ``queue.Queue``
-    API :class:`QueueTransport` uses (``put_nowait`` / ``get_nowait`` / ``get(timeout)``).
+    """A cross-process inbox over ``multiprocessing.SimpleQueue``.
 
-    Why not ``multiprocessing.Queue``: that spawns a background **feeder thread per queue** in every
-    process that puts to it, so a peer worker writing to its driver + reduction peers ends up with
-    ~``log(N)`` extra threads. With workers ≈ cores (the normal HEP batch slot) those idle-but-scheduled
-    threads add context-switch pressure that measurably slows the workers' compute (py-spy: 5 threads/
-    worker vs the hub's 1). ``SimpleQueue`` has **no feeder thread** — ``put`` writes the pipe
-    synchronously under a lock — so a peer worker holds one extra thread, not ``log(N)``. We wait/poll
-    the reader side, which exposes ``poll(timeout)``, for the timed receives.
+    Adapted to the small ``queue.Queue`` API :class:`QueueTransport` uses (``put_nowait`` /
+    ``get_nowait`` /``get(timeout)``).
 
-    ``put_nowait`` therefore **blocks** whenever the message exceeds the OS pipe buffer (~64 KB) until
-    the peer reads — a reduction partial (many histograms, or systematic universes) easily does, and a
-    parked write holds this inbox's write lock against everyone else. Callers keep that safe by never
-    sending from the thread that has to keep reading: see ``_peer._Outbox`` / ``_peer.release_workers``.
+    Why not ``multiprocessing.Queue``: that spawns a background **feeder thread per queue** in
+    every process that puts to it, so a peer worker writing to its driver + reduction peers ends up
+    with ~``log(N)`` extra threads. With workers ≈ cores (the normal HEP batch slot) those
+    idle-but-scheduled threads add context-switch pressure that measurably slows the workers'
+    compute (py-spy: 5 threads/ worker vs the hub's 1). ``SimpleQueue`` has **no feeder thread** —
+    ``put`` writes the pipe synchronously under a lock — so a peer worker holds one extra thread,
+    not ``log(N)``. We wait/poll the reader side, which exposes ``poll(timeout)``, for the timed
+    receives.
+
+    ``put_nowait`` therefore **blocks** whenever the message exceeds the OS pipe buffer (~64 KB)
+    until the peer reads — a reduction partial (many histograms, or systematic universes) easily
+    does, and a parked write holds this inbox's write lock against everyone else. Callers keep that
+    safe by never sending from the thread that has to keep reading: see ``_peer._Outbox`` /
+    ``_peer.release_workers``.
     """
 
     def __init__(self, ctx: Any) -> None:
@@ -139,9 +151,10 @@ class PipeInbox:
 
 
 class QueueTransport:
-    """IPC transport: a per-endpoint inbox queue plus a registry of peers' inboxes. ``queue.Queue``
-    (threads / in-process) or :class:`PipeInbox` (processes) — it only calls ``put_nowait`` /
-    ``get_nowait`` / ``get``, so the queue type is the caller's choice.
+    """IPC transport: a per-endpoint inbox queue plus a registry of peers' inboxes.
+
+    ``queue.Queue`` (threads / in-process) or :class:`PipeInbox` (processes) — it only calls
+    ``put_nowait`` /``get_nowait`` / ``get``, so the queue type is the caller's choice.
     """
 
     def __init__(
@@ -182,16 +195,17 @@ class QueueTransport:
 
     def recv(self, timeout: float | None = None) -> tuple[str, object] | None:
         try:
-            return (
+            return (  # type: ignore[no-any-return]
                 self._inbox.get(timeout=timeout)
                 if timeout is not None
                 else self._inbox.get_nowait()
-            )  # type: ignore[no-any-return]
+            )
         except queue.Empty:
             return None
 
     def close(self) -> None:
-        # queue.Queue needs no teardown; a multiprocessing.Queue is closed by its owner (the driver).
+        # queue.Queue needs no teardown; a multiprocessing.Queue is closed by its owner (the
+        # driver).
         pass
 
 
@@ -227,8 +241,11 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class LookupFreeHTTPServer(ThreadingHTTPServer):
-    """A ``ThreadingHTTPServer`` that binds without ``HTTPServer.server_bind``'s ``socket.getfqdn``, a
-    reverse lookup that can stall for tens of seconds while the socket is bound but not yet listening.
+    """A ``ThreadingHTTPServer`` that binds without ``socket.getfqdn``.
+
+    A ``ThreadingHTTPServer`` that binds without ``HTTPServer.server_bind``'s ``socket.getfqdn``, a
+    reverse lookup that can stall for tens of seconds while the socket is bound but not yet
+    listening.
     """
 
     def server_bind(self) -> None:
@@ -240,7 +257,8 @@ class LookupFreeHTTPServer(ThreadingHTTPServer):
 
 class _InboxServer(LookupFreeHTTPServer):
     # threaded + a deep listen backlog so concurrent worker POSTs are never refused: a refused POST
-    # would *drop* a partial, and a dropped partial (unlike dropped telemetry) stalls the reduction.
+    # would *drop* a partial, and a dropped partial (unlike dropped telemetry) stalls the
+    # reduction.
     daemon_threads = True
     request_queue_size = 256
 
@@ -265,16 +283,18 @@ class _InboxServer(LookupFreeHTTPServer):
 
 
 class HttpTransport:
-    """HTTP transport over loopback. Each endpoint serves an inbox at ``/msg`` and ships outbound
-    messages from background sender threads (so ``send`` is non-blocking). Build a connected set with
+    """HTTP transport over loopback.
+
+    Each endpoint serves an inbox at ``/msg`` and ships outbound messages from background
+    sender threads (so ``send`` is non-blocking). Build a connected set with
     :func:`build_http_transports`, which assigns ports and wires the registry.
 
-    One sender thread PER DESTINATION, created on first use. A single shared sender would deliver in
-    global order, so a destination that has stopped answering (a crashed worker whose server is mid-
-    shutdown accepts the connection and never responds) holds every later message hostage for its
-    retries — including the driver's ``done`` for the workers that are still alive, which is exactly
-    what the teardown waits on. Per destination, order is still preserved and a dead peer delays only
-    its own messages.
+    One sender thread PER DESTINATION, created on first use. A single shared sender would deliver
+    in global order, so a destination that has stopped answering (a crashed worker whose server is
+    mid- shutdown accepts the connection and never responds) holds every later message hostage for
+    its retries — including the driver's ``done`` for the workers that are still alive, which is
+    exactly what the teardown waits on. Per destination, order is still preserved and a dead peer
+    delays only its own messages.
     """
 
     def __init__(
@@ -386,10 +406,10 @@ class HttpTransport:
 
     def close(self) -> None:
         # Sentinel FIRST, `_stop` only after the lanes have drained (or the bound expired): setting
-        # `_stop` up front made the sender's loop condition false with messages still queued, silently
-        # dropping them. Once `_stop` is set the in-retry check abandons the rest, which is what keeps
-        # this bounded when a destination is unreachable rather than merely refusing. The lanes drain
-        # concurrently, so the bound is shared, not paid once per destination.
+        # `_stop` up front made the sender's loop condition false with messages still queued,
+        # silently dropping them. Once `_stop` is set the in-retry check abandons the rest, which
+        # is what keeps this bounded when a destination is unreachable rather than merely refusing.
+        # The lanes drain concurrently, so the bound is shared, not paid once per destination.
         with self._lock:
             lanes = list(self._lanes.values())
         for q, _ in lanes:
@@ -406,8 +426,10 @@ class HttpTransport:
 
 
 def build_http_transports(addresses: tuple[str, ...]) -> dict[str, HttpTransport]:
-    """Build a connected set of loopback HTTP transports: bind each endpoint's server (so it has a
-    port), then hand every endpoint the full ``{address: (host, port)}`` registry.
+    """Build a connected set of loopback HTTP transports.
+
+    Bind each endpoint's server (so it has a port), then hand every endpoint the full
+    ``{address: (host, port)}`` registry.
     """
     transports = {addr: HttpTransport(addr) for addr in addresses}
     registry = {addr: (t.host, t.port) for addr, t in transports.items()}
@@ -417,7 +439,10 @@ def build_http_transports(addresses: tuple[str, ...]) -> dict[str, HttpTransport
 
 
 def build_transports(kind: str, addresses: tuple[str, ...]) -> dict[str, Any]:
-    """Factory: ``"ipc"`` -> :func:`build_ipc_transports`, ``"http"`` -> :func:`build_http_transports`."""
+    """Build the transports of ``kind``.
+
+    ``"ipc"`` -> :func:`build_ipc_transports`, ``"http"`` -> :func:`build_http_transports`.
+    """
     if kind == "ipc":
         return build_ipc_transports(addresses)
     if kind == "http":

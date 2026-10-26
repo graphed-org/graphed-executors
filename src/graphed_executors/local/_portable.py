@@ -1,5 +1,7 @@
-"""Carry a worker-produced value across a process boundary: stdlib pickle, or cloudpickle when stdlib
-pickle refuses it (a lambda or local class the user's value holds, e.g. in an awkward ``behavior``).
+"""Carry a worker-produced value across a process boundary.
+
+Stdlib pickle, or cloudpickle when stdlib pickle refuses it (a lambda or local class the user's
+value holds, e.g. in an awkward ``behavior``).
 """
 
 from __future__ import annotations
@@ -18,12 +20,18 @@ def from_value(value: Any) -> Any:
 
 
 def from_cloudpickle(data: bytes) -> Any:
-    """Load a cloudpickled value; a separate name from :func:`from_value` so the fallback is visible."""
+    """Load a cloudpickled value.
+
+    A separate name from :func:`from_value` so the fallback is visible.
+    """
     return pickle.loads(data)
 
 
 class Portable:
-    """Pickles as its value when stdlib pickle can, else as cloudpickle bytes; unpickles to the value."""
+    """Pickles as its value when stdlib pickle can, else as cloudpickle bytes.
+
+    Unpickles to the value.
+    """
 
     __slots__ = ("cloud", "value")
 

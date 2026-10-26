@@ -3,14 +3,15 @@
 ``transport_run_repartition`` / ``transport_run_join`` seat ``k`` persistent peers (one per worker
 slot), each of which — INSIDE its task — maps its owned src range into its endpoint's block store,
 announces a manifest to the driver, awaits the driver's aggregated pull assignment, then PULLS its
-owned dests' fragments peer→peer over ``/pull`` (coalesced one request per holder, evict-after-serve)
-and gathers/joins them. Bytes move peer↔peer over the block plane; only the final dest blocks + the
-counters ride the task return (once, like the m44 dask returns). Reader-plane fetch budgets are a
-driver-side replay of the imported ``_stage2_gather`` (``common.transport_tasks.replay_reader_plane``,
-the SAME code the dask job gates); join budgets are the real per-dest ``_join_with_budget``.
+owned dests' fragments peer→peer over ``/pull`` (coalesced one request per holder,
+evict-after-serve) and gathers/joins them. Bytes move peer↔peer over the block plane; only the
+final dest blocks + the counters ride the task return (once, like the m44 dask returns).
+Reader-plane fetch budgets are a driver-side replay of the imported ``_stage2_gather``
+(``common.transport_tasks.replay_reader_plane``, the SAME code the dask job gates); join budgets
+are the real per-dest ``_join_with_budget``.
 
-Reuses the driver primitives (barrier / registry / probe / restart) from ``transport_peer``; imports
-NOTHING from parsl or ``dask_backend`` (F13 / G9).
+Reuses the driver primitives (barrier / registry / probe / restart) from ``transport_peer``;
+imports NOTHING from parsl or ``dask_backend`` (F13 / G9).
 """
 
 from __future__ import annotations
@@ -57,12 +58,13 @@ _MSG_WAIT_S = 120.0
 _COLLECT_S = 120.0  # bound on the driver's manifest/gathered collection
 
 
-# ---- the parsl block plane over the peer's http endpoint (self-fragments read locally) -----------
+# ---- the parsl block plane over the peer's http endpoint (self-fragments read locally) ----------
 class _HttpBlockPlane:
-    """The ``map_task_body`` / ``gather*`` plane over an ``EscalatingHttpTransport``: ``store_block``
-    puts into the endpoint's /pull store; ``pull_blocks`` reads SELF-owned fragments locally (never
-    over HTTP, so they are not billed to ``bytes_served``) and CROSS fragments over the real /pull
-    route (billed at the serving holder).
+    """The ``map_task_body`` / ``gather*`` plane over an ``EscalatingHttpTransport``.
+
+    ``store_block`` puts into the endpoint's /pull store; ``pull_blocks`` reads SELF-owned
+    fragments locally (never over HTTP, so they are not billed to ``bytes_served``) and CROSS
+    fragments over the real /pull route (billed at the serving holder).
     """
 
     def __init__(self, ep: Any) -> None:
@@ -91,7 +93,7 @@ class _HttpBlockPlane:
         return [got[d] for d in digests]
 
 
-# ---- the peer shuffle body (called INSIDE _parsl_peer_main) --------------------------------------
+# ---- the peer shuffle body (called INSIDE _parsl_peer_main) -------------------------------------
 def _peer_shuffle_body(
     ep: Any,
     spec: dict[str, Any],
@@ -174,7 +176,9 @@ def _gather_repartition(
     assign: dict[int, dict[str, list[Any]]],
     pull_timeout_s: float,
 ) -> tuple[dict[int, Any], dict[int, str], dict[str, int]]:
-    """Coalesce ALL of this peer's cross-fragment pulls to ONE request per holder (the <= k*k incast
+    """Coalesce ALL of this peer's cross-fragment pulls to ONE request per holder.
+
+    Coalesce ALL of this peer's cross-fragment pulls to ONE request per holder (the <= k*k incast
     bound), then reassemble each owned dest in ascending-producer order — byte-identical to local.
     """
     by_holder: dict[str, list[str]] = {}
@@ -262,8 +266,10 @@ def _build_assignment(
     k: int,
     sides: tuple[str, ...],
 ) -> dict[str, dict[int, dict[str, list[tuple[str, str]]]]]:
-    """For each dest d, owner = ``worker_addrs[d % k]``; its per-side pulls are ``[(holder, digest)]``
-    in ascending-producer (== ascending-src) order — the frozen deterministic merge.
+    """For each dest d, owner = ``worker_addrs[d % k]``.
+
+    Its per-side pulls are ``[(holder, digest)]`` in ascending-producer (== ascending-src)
+    order — the frozen deterministic merge.
     """
     dests: set[int] = set()
     for m in manifests.values():
@@ -293,8 +299,10 @@ def _collect_tagged(
     driver_counts: dict[str, int],
     timeout_s: float,
 ) -> tuple[dict[str, Any], bool]:
-    """Collect k ``tag`` messages at the driver, returning ``(collected, errored)``. ``errored`` is
-    True if a peer future failed mid-collection (restart-worthy — stop waiting for the dead peer).
+    """Collect k ``tag`` messages at the driver, returning ``(collected, errored)``.
+
+    ``errored`` is True if a peer future failed mid-collection (restart-worthy — stop waiting
+    for the dead peer).
     """
     collected: dict[str, Any] = {}
     deadline = time.monotonic() + timeout_s
@@ -339,8 +347,10 @@ def _run_shuffle(
     registry_rewrite: Any,
     assemble: Any,
 ) -> TransportShuffleResult:
-    """The shared shuffle driver: seat k peers, rendezvous+probe, aggregate manifests, broadcast the
-    pull assignment, collect results, and restart the whole run on a restart-worthy failure.
+    """Run the shared shuffle driver.
+
+    Seat k peers, rendezvous+probe, aggregate manifests, broadcast the pull assignment, collect
+    results, and restart the whole run on a restart-worthy failure.
     """
     from .transport_peer import _BARRIER_DEFAULT_S  # noqa: PLC0415
 
@@ -365,7 +375,8 @@ def _run_shuffle(
                 _parsl_peer_main_ref(),
                 make_peer_spec(nonce, driver_ep, worker_addrs, k, i, addr),
                 key=f"graphed-parsl-shuffle-{nonce}-{i}",
-                # ponytail: k persistent tasks gang-schedule by slot saturation (pin_to_worker=False)
+                # ponytail: k persistent tasks gang-schedule by slot saturation
+                # (pin_to_worker=False)
             )
             for i, addr in enumerate(worker_addrs)
         }
@@ -418,9 +429,11 @@ def _run_shuffle(
 
 
 def _shuffle_stage_error(exc: BaseException, pbackend: Any) -> Any:
-    """Wrap a run-fatal shuffle failure as an attributed ``StageError`` that NAMES the actual death
-    signal (``WorkerLost``/``ManagerLost``/``PullTimeoutError``/``TransportDeliveryError``) — unlike
-    the shared ``build_stage_error`` (which renders a described death as ``cause_type='KilledWorker'``,
+    """Wrap a run-fatal shuffle failure as an attributed ``StageError``.
+
+    That NAMES the actual death signal
+    (``WorkerLost``/``ManagerLost``/``PullTimeoutError``/``TransportDeliveryError``) — unlike the
+    shared ``build_stage_error`` (which renders a described death as ``cause_type='KilledWorker'``,
     losing the parsl signal whose ``str`` never carries its class name), the m47 driver layers the
     victim-worker context on top of the named signal (backend.describe_failure's own note).
     """
@@ -516,9 +529,11 @@ def transport_run_repartition(
     barrier_timeout_s: float | None = None,
     registry_rewrite: Any = None,
 ) -> TransportShuffleResult:
-    """Hash-repartition ``src_blocks`` into ``parts`` dests over the k-peer transport. Byte-identical
-    to the local ``run_repartition``. ``fetch_budget_bytes`` bounds the reader plane (driver-side
-    replay); a probe failure raises ``ProbeUnreachable`` (the facade decides error vs fallback).
+    """Hash-repartition ``src_blocks`` into ``parts`` dests over the k-peer transport.
+
+    Byte-identical to the local ``run_repartition``. ``fetch_budget_bytes`` bounds the reader
+    plane (driver-side replay); a probe failure raises ``ProbeUnreachable`` (the facade decides
+    error vs fallback).
     """
     n_src = len(src_blocks)
 
@@ -578,8 +593,10 @@ def _repartition_witness(
     n_src: int,
     fetch_budget: int | None,
 ) -> ShuffleWitness:
-    """The reader-plane fetch counters via the SAME ``replay_reader_plane`` the dask job gates, over
-    the collected manifests (producer i = peer i = holder i).
+    """Return the reader-plane fetch counters via the SAME ``replay_reader_plane``.
+
+    The dask job gates the same replay. It runs over the collected manifests (producer i = peer
+    i = holder i).
     """
     idx_of = {a: i for i, a in enumerate(worker_addrs)}
     replay: dict[int, dict[int, tuple[str, int]]] = {}
@@ -615,9 +632,11 @@ def transport_run_join(
     epoch_restarts_allowed: int = 1,
     barrier_timeout_s: float | None = None,
 ) -> TransportShuffleResult:
-    """Distributed relational hash JOIN over the k-peer transport (SHUFFLE join — the peer plane never
-    head-node-routes a broadcast build side; ``broadcast`` is accepted but the shuffle path is always
-    taken). Rows == the local ``run_join``; ``mem_budget_bytes`` bounds the per-dest ``_join_with_budget``.
+    """Distributed relational hash JOIN over the k-peer transport.
+
+    SHUFFLE join — the peer plane never head-node-routes a broadcast build side; ``broadcast``
+    is accepted but the shuffle path is always taken. Rows == the local ``run_join``;
+    ``mem_budget_bytes`` bounds the per-dest ``_join_with_budget``.
     """
     n_left, n_right = len(left_blocks), len(right_blocks)
     left_carrier = left_blocks[0] if left_blocks else None

@@ -7,11 +7,12 @@ content-address, so a per-(dest,t) evict pops that shared digest on the first re
 
 The fix defers eviction to once-per-unique-digest after all refs are pulled. This guards it:
 
-- NON-VACUITY: against the pre-fix code ``run_repartition`` raises ``KeyError`` before returning, so the
-  test ERRORS (never reaches an assert). Post-fix it returns and every assert holds.
-- DISCRIMINATION: (1) the steal path is actually engaged (``steals > 0`` — else the co-location that
-  triggers the bug never happens); (2) every row is conserved AND uncorrupted (a gather that dropped the
-  second, same-digest ref would lose rows); (3) bytes flowed (``bytes_transferred > 0``).
+- NON-VACUITY: against the pre-fix code ``run_repartition`` raises ``KeyError`` before returning,
+  so the test ERRORS (never reaches an assert). Post-fix it returns and every assert holds.
+- DISCRIMINATION: (1) the steal path is actually engaged (``steals > 0`` — else the co-location
+  that triggers the bug never happens); (2) every row is conserved AND uncorrupted (a gather that
+  dropped the second, same-digest ref would lose rows); (3) bytes flowed (``bytes_transferred >
+  0``).
 """
 
 from __future__ import annotations

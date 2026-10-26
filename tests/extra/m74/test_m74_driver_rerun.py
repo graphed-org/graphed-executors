@@ -1,4 +1,6 @@
-"""A driver's in-job rerun after a SERVICE node re-announces runs the plan ``resumable`` wrapped, so
+"""A driver's in-job rerun after a SERVICE node re-announces runs the plan ``resumable`` wrapped.
+
+A driver's in-job rerun after a SERVICE node re-announces runs the plan ``resumable`` wrapped, so
 with a store the tasks the first run finished are served, not run again.
 """
 

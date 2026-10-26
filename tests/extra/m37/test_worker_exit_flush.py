@@ -1,4 +1,4 @@
-"""A process worker's exit flush delivers the batch its drain thread already took, within a bound."""
+"""A process worker's exit flush delivers its drain thread's taken batch within a bound."""
 
 from __future__ import annotations
 
@@ -30,7 +30,8 @@ class _SlowDrainSend:
 
 def _boom_after_drain_takes_it(delay: float, partition: Partition, resources: object) -> int:
     executors._proc_event_q = _SlowDrainSend(executors._proc_event_q, delay)
-    # runs before the exit flush (LIFO), outlasting one drain tick so the drain thread holds ERRORED
+    # runs before the exit flush (LIFO), outlasting one drain tick so the drain thread holds
+    # ERRORED
     atexit.register(time.sleep, 3 * executors._PROC_DRAIN_INTERVAL)
     raise ValueError("boom")
 

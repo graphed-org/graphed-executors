@@ -1,8 +1,9 @@
-"""m69b: the driver check on a dask runner, whose backend hosts nothing on a cluster. A managed service that fits
-``driver_memory_mb`` starts beside the driver and serves tasks the dask workers run; one that does not, or one
-above the host's physical memory when the backend sets no limit, is refused before it starts, naming both
-sizes. Runs in the ``test-dask`` job (``importorskip("distributed")`` in the fixture, so the file collects
-anywhere).
+"""m69b: the driver check on a dask runner, whose backend hosts nothing on a cluster.
+
+A managed service that fits ``driver_memory_mb`` starts beside the driver and serves tasks the dask
+workers run; one that does not, or one above the host's physical memory when the backend sets no
+limit, is refused before it starts, naming both sizes. Runs in the ``test-dask`` job
+(``importorskip("distributed")`` in the fixture, so the file collects anywhere).
 """
 
 from __future__ import annotations

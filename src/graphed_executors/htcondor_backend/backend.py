@@ -1,24 +1,27 @@
-"""``HTCondorBackend``: a :class:`SubmitBackend` at the all-False floor whose workers are pilots it
-launches itself. Pilots pull pickled tasks from the backend's :class:`TaskServer` and post results
-back; the driver resolves future arguments before a task is queued, so pilots never talk to each other.
+"""``HTCondorBackend``.
 
-The backend's service surface is duck-typed, read by the engine's service set (``submit/services.py``):
-``site_services``, ``service_hosts`` (which the caller may narrow) and ``service_ports`` come from the
-site row, ``advertise_host`` is the task server's host, ``host_identity()`` names the driver's host as
-condor writes it for that host's slots, and ``driver_memory_mb`` bounds the services beside the driver (a
-driver job's slot ``Memory``; ``None``, the host's physical memory). Attached, the row is the launcher's
-profile; in a driver job (``in_job=``) it is the job's own site row. Attached over ``CondorPilots`` on a
-row with ``"cluster"`` hosts, ``host_service``/``release_service`` run a service as its own job
-(:class:`~graphed_executors.htcondor_backend.services.ServiceJob`) that announces its endpoint to the task
-server's ``/announce``: a job no slot of the pool could ever run is removed and refused, and a job waiting
-for a slot is waited for with no deadline (an exception leaving the runner's ``with`` block ends the wait),
-its ``timeout_s`` counted from its start. A run's service jobs go before its pilots: the first plan's
-servers announce before the pilots are submitted, and a later plan's wait with the runner's queued pilots
-held and are matched beside its running ones. In a driver job
-a managed service starts beside the driver, or, when it is one of the run's DAG SERVICE nodes
-(``announced=``), is resolved by that node's announce: the driver job submits no service job, and the
-wait reads the node's queue ad on the DAG's schedd (``schedd_locate=``), so a node that ended, is held,
-or that no slot could ever run fails it at once.
+A :class:`SubmitBackend` at the all-False floor whose workers are pilots it launches itself. Pilots
+pull pickled tasks from the backend's :class:`TaskServer` and post results back; the driver
+resolves future arguments before a task is queued, so pilots never talk to each other.
+
+The backend's service surface is duck-typed, read by the engine's service set
+(``submit/services.py``): ``site_services``, ``service_hosts`` (which the caller may narrow) and
+``service_ports`` come from the site row, ``advertise_host`` is the task server's host,
+``host_identity()`` names the driver's host as condor writes it for that host's slots, and
+``driver_memory_mb`` bounds the services beside the driver (a driver job's slot ``Memory``;
+``None``, the host's physical memory). Attached, the row is the launcher's profile; in a driver job
+(``in_job=``) it is the job's own site row. Attached over ``CondorPilots`` on a row with
+``"cluster"`` hosts, ``host_service``/``release_service`` run a service as its own job
+(:class:`~graphed_executors.htcondor_backend.services.ServiceJob`) that announces its endpoint to
+the task server's ``/announce``: a job no slot of the pool could ever run is removed and refused,
+and a job waiting for a slot is waited for with no deadline (an exception leaving the runner's
+``with`` block ends the wait), its ``timeout_s`` counted from its start. A run's service jobs go
+before its pilots: the first plan's servers announce before the pilots are submitted, and a later
+plan's wait with the runner's queued pilots held and are matched beside its running ones. In a
+driver job a managed service starts beside the driver, or, when it is one of the run's DAG SERVICE
+nodes (``announced=``), is resolved by that node's announce: the driver job submits no service job,
+and the wait reads the node's queue ad on the DAG's schedd (``schedd_locate=``), so a node that
+ended, is held, or that no slot could ever run fails it at once.
 """
 
 from __future__ import annotations
@@ -81,9 +84,10 @@ _FLOOR = SubmitCapabilities(
 
 
 class _Announcer(Protocol):
-    """What :meth:`HTCondorBackend._await_announce` reads of a job that announces: its announce ``key``, its
-    queue ``ad()`` (once it is gone, its history row, else ``{}``) and the ``dir`` its ``service.out``/``.err``
-    land in.
+    """What :meth:`HTCondorBackend._await_announce` reads of a job that announces.
+
+    Its announce ``key``, its queue ``ad()`` (once it is gone, its history row, else ``{}``)
+    and the ``dir`` its ``service.out``/``.err`` land in.
     """
 
     key: str
@@ -93,15 +97,20 @@ class _Announcer(Protocol):
 
 
 class _Unread(Exception):
-    """A DAG SERVICE node's queue ad could not be read: the bindings, the locate or a query failed."""
+    """A DAG SERVICE node's queue ad could not be read.
+
+    The bindings, the locate or a query failed.
+    """
 
 
 class _Node:
-    """DAG SERVICE node ``key`` as :meth:`HTCondorBackend._await_announce` reads a service job: :meth:`ad` is
-    its queue ad within DAGMan job ``dag`` on ``schedd``, else, once it left the queue, its history row naming
-    why. Its first idle ad is matched once against the pool's slots less what the DAG's running jobs and
-    ``claims()`` hold, and no slot raises :class:`ServiceUnavailable` for service ``name``; DAGMan owns the
-    node, so nothing acts on it.
+    """DAG SERVICE node ``key`` as :meth:`HTCondorBackend._await_announce` reads a service job.
+
+    :meth:`ad` is its queue ad within DAGMan job ``dag`` on ``schedd``, else, once it left the
+    queue, its history row naming why. Its first idle ad is matched once against the pool's
+    slots less what the DAG's running jobs and ``claims()`` hold, and no slot raises
+    :class:`ServiceUnavailable` for service ``name``; DAGMan owns the node, so nothing acts on
+    it.
     """
 
     def __init__(
@@ -139,8 +148,11 @@ class _Node:
         return ad if ads else self._departed(node)
 
     def _departed(self, node: str) -> dict[str, Any]:
-        """The departed node's ``JobStatus`` and ``ExitCode`` with its ``LastHoldReason``, else its
-        ``RemoveReason``, from its history row; ``{}``, logged, when that row is missing or unreadable.
+        """Return the departed node's exit status and reasons from its history row.
+
+        The departed node's ``JobStatus`` and ``ExitCode`` with its ``LastHoldReason``, else its
+        ``RemoveReason``, from its history row; ``{}``, logged, when that row is missing or
+        unreadable.
         """
         try:
             # match=1: a larger match scans a big schedd's whole history
@@ -175,22 +187,25 @@ class _Node:
 
 
 class HTCondorBackend:
-    """Starts a task server and ``n_pilots`` pilots through ``launcher``; :meth:`close` removes them.
-    Pilot jobs whose services are jobs too (``CondorPilots`` with ``host_service``) are submitted at
-    the first need of a worker, put off while a plan's services start (:meth:`starting_services`) and
-    never made once the run ends, and that need waits once for ``min_pilots``, counted from the submit.
+    """Starts a task server and ``n_pilots`` pilots through ``launcher``.
+
+    :meth:`close` removes them. Pilot jobs whose services are jobs too (``CondorPilots`` with
+    ``host_service``) are submitted at the first need of a worker, put off while a plan's
+    services start (:meth:`starting_services`) and never made once the run ends, and that need
+    waits once for ``min_pilots``, counted from the submit.
 
     ``host`` is the name pilots dial back to (default: this machine's FQDN); the server binds the
     first free port of ``port_range`` on all interfaces, by default the ``driver_ports`` of the
-    launcher's site profile (``generic`` for a launcher without one). ``in_job`` is the site row of the
-    driver job this backend runs in (``driver.py`` passes it), else ``None`` (attached). ``announced`` maps
-    each service a SERVICE node of the driver job's DAG hosts to the node id it announces under; the DAG's
-    directory is ``dag_dir``, and ``schedd_locate=(pool, name)`` names its schedd, where the wait for a
-    node's announce reads the node's queue ad.
-    ``service_hosts`` narrows where a managed service may run to a subset of the hosts the row offers
-    (``None``: all of them); a host it does not offer is refused before the task server starts.
-    ``task_timeout_s`` bounds how long one task may run on a pilot (``None``, the default: no limit);
-    past it the task fails with :class:`TaskTimedOut` and the pilot stops, freeing its slot.
+    launcher's site profile (``generic`` for a launcher without one). ``in_job`` is the site row of
+    the driver job this backend runs in (``driver.py`` passes it), else ``None`` (attached).
+    ``announced`` maps each service a SERVICE node of the driver job's DAG hosts to the node id it
+    announces under; the DAG's directory is ``dag_dir``, and ``schedd_locate=(pool, name)`` names
+    its schedd, where the wait for a node's announce reads the node's queue ad.
+    ``service_hosts`` narrows where a managed service may run to a subset of the hosts the row
+    offers (``None``: all of them); a host it does not offer is refused before the task server
+    starts. ``task_timeout_s`` bounds how long one task may run on a pilot (``None``, the default:
+    no limit); past it the task fails with :class:`TaskTimedOut` and the pilot stops, freeing its
+    slot.
     """
 
     def __init__(
@@ -225,7 +240,8 @@ class HTCondorBackend:
             offered if service_hosts is None else tuple(h for h in offered if h in service_hosts)
         )
         self.service_ports: tuple[int, int] | None
-        # the engine holds the services beside the driver to it; None reads the host's physical memory
+        # the engine holds the services beside the driver to it; None reads the host's physical
+        # memory
         self.driver_memory_mb: int | None = None
         if in_job is None:
             self.site_services = profile.services
@@ -285,12 +301,16 @@ class HTCondorBackend:
             else:
                 launcher.start(self._server.url, self._server.secret, n_pilots)
             stack.callback(release_quietly, "the pilots", launcher.stop)
-            # closed first: pilots see 410 and exit before they are stopped (a second close is a no-op)
+            # closed first: pilots see 410 and exit before they are stopped (a second close is a
+            # no-op)
             stack.callback(release_quietly, "the task server", self._server.close)
             self._stack = stack.pop_all()
 
     def _need(self) -> None:
-        """A need of a worker (:meth:`n_workers`, :meth:`submit` or :meth:`wait_for_pilots`)."""
+        """Record a need of a worker.
+
+        :meth:`n_workers`, :meth:`submit` and :meth:`wait_for_pilots` each need one.
+        """
         with self._pilots_lock:
             if self._starting:
                 self._wanted = True
@@ -298,9 +318,12 @@ class HTCondorBackend:
                 self._move_pilots()
 
     def _move_pilots(self) -> None:
-        """Release the pilots a plan's services held, or submit deferred ones; under ``_pilots_lock``."""
-        # pilots move only once no plan is starting its services, and none is submitted once the run ends
-        # (a release still runs: the plans the drain finishes may need them)
+        """Release the pilots a plan's services held, or submit deferred ones.
+
+        Under ``_pilots_lock``.
+        """
+        # pilots move only once no plan is starting its services, and none is submitted once the
+        # run ends (a release still runs: the plans the drain finishes may need them)
         if self._held:
             assert isinstance(self.launcher, CondorPilots)
             self.launcher.release_held()
@@ -311,15 +334,18 @@ class HTCondorBackend:
 
     @contextmanager
     def starting_service_set(self) -> Iterator[None]:
-        """A plan's service set starting, through its probe (:meth:`ServiceSet.start`): one at a time, so no
-        set waits for room or a pilot that another starting set holds while that set waits for its own. A set
-        waiting its turn raises once the runner closes (:meth:`stop_waiting`, :meth:`close`), within one
-        ``POLL_S``, whatever the starting set is waiting for.
+        """Hold a plan's service set starting, through its probe (:meth:`ServiceSet.start`).
+
+        One at a time, so no set waits for room or a pilot that another starting set holds
+        while that set waits for its own. A set waiting its turn raises once the runner
+        closes (:meth:`stop_waiting`, :meth:`close`), within one ``POLL_S``, whatever the
+        starting set is waiting for.
         """
         while not self._set_start.acquire(timeout=_server.POLL_S):
             if self._closing.is_set():
                 raise RuntimeError(
-                    "a plan's services still waited for another plan's to start when the runner closed"
+                    "a plan's services still waited for another plan's to start when the runner "
+                    "closed"
                 )
         try:
             yield
@@ -328,9 +354,11 @@ class HTCondorBackend:
 
     @contextmanager
     def starting_services(self) -> Iterator[None]:
-        """A plan's services starting (:class:`ServiceSet`'s resolve phase): a need of a worker meanwhile
-        is recorded, and the last phase to end moves the pilots a need asked for or a server held, its
-        services started or failed (a failure is logged; the next need retries it).
+        """Hold a plan's services starting (:class:`ServiceSet`'s resolve phase).
+
+        A need of a worker meanwhile is recorded, and the last phase to end moves the
+        pilots a need asked for or a server held, its services started or failed (a failure
+        is logged; the next need retries it).
         """
         with self._pilots_lock:
             self._starting += 1
@@ -350,16 +378,20 @@ class HTCondorBackend:
             self.wait_for_pilots(self.min_pilots)
 
     def n_workers(self) -> int:
-        """Pilots registered and live right now. The first call, or the first :meth:`submit`, waits
-        once for ``min_pilots``, submitting deferred pilots first.
+        """Pilots registered and live right now.
+
+        The first call, or the first :meth:`submit`, waits once for ``min_pilots``,
+        submitting deferred pilots first.
         """
         self._need_worker()
         return self._server.live_pilots()
 
     def wait_for_pilots(self, n: int, timeout: float = N_WORKERS_WAIT_S) -> int:
-        """Wait for ``n`` live pilots, a need of a worker at each poll; ``timeout`` counts from the call,
-        or from the pilots' submit when a plan's service start defers it. A wait for ``min_pilots`` or
-        more is the first need's wait; once the run ends, a wait no pilot can end raises.
+        """Wait for ``n`` live pilots, a need of a worker at each poll.
+
+        ``timeout`` counts from the call, or from the pilots' submit when a plan's service
+        start defers it. A wait for ``min_pilots`` or more is the first need's wait; once
+        the run ends, a wait no pilot can end raises.
         """
         called = time.monotonic()
         while True:
@@ -392,8 +424,10 @@ class HTCondorBackend:
         resources: Mapping[str, float] | None = None,
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
-        """Never blocks on a future argument: the task queues once its arguments are done. The hints
-        are ignored. The first call, or the first :meth:`n_workers`, waits once for ``min_pilots``.
+        """Never blocks on a future argument: the task queues once its arguments are done.
+
+        The hints are ignored. The first call, or the first :meth:`n_workers`, waits once
+        for ``min_pilots``.
         """
         self._need_worker()
         raw: Future[Any] = Future()
@@ -421,22 +455,26 @@ class HTCondorBackend:
         return (exc.key, exc.pilot) if isinstance(exc, WorkerLost | TaskTimedOut) else None
 
     def host_identity(self) -> str:
-        """The driver's host as condor writes ``Machine`` for its slots: ``FULL_HOSTNAME`` attached (the
-        only bindings use here), the job's own machine ad in a driver job.
+        """Return the driver's host as condor writes ``Machine`` for its slots.
+
+        ``FULL_HOSTNAME`` attached (the only bindings use here), the job's own machine ad
+        in a driver job.
         """
         if self._in_job is not None:
             return host_identity()
         return str(_launch._htcondor().param["FULL_HOSTNAME"])
 
     def _host_service(self, spec: ServiceSpec, scope: str) -> tuple[str, str, str]:
-        """Run ``spec`` as a :class:`ServiceJob` and wait for its announce: ``(endpoint, identity, key)``
-        once it is ready where it runs. A job no slot of the pool could ever run raises
-        :class:`ServiceUnavailable` (a pool whose collector lists no slot is not asked); one that ends,
-        is held, or has not announced within ``spec.timeout_s`` of its start raises. Each is removed,
-        and every failure forgets the call's announce secret. Once the pilots are submitted (a later
-        plan), the first call holds their queued jobs until the plan's services have started or failed.
-        The match counts each slot less what the running pilots (kept until the runner closes) and the
-        set's earlier servers (keys of ``scope``, kept until the run ends) hold.
+        """Run ``spec`` as a :class:`ServiceJob` and wait for its announce.
+
+        ``(endpoint, identity, key)`` once it is ready where it runs. A job no slot of the
+        pool could ever run raises :class:`ServiceUnavailable` (a pool whose collector
+        lists no slot is not asked); one that ends, is held, or has not announced within
+        ``spec.timeout_s`` of its start raises. Each is removed, and every failure forgets
+        the call's announce secret. Once the pilots are submitted (a later plan), the first
+        call holds their queued jobs until the plan's services have started or failed. The
+        match counts each slot less what the running pilots (kept until the runner closes)
+        and the set's earlier servers (keys of ``scope``, kept until the run ends) hold.
         """
         assert isinstance(self.launcher, CondorPilots)
         machines = machine_ads(self.launcher.schedd_locate)
@@ -452,7 +490,10 @@ class HTCondorBackend:
                 ]
             for sibling in siblings:
                 if sibling.cluster is not None:
-                    server = f"its server {sibling.spec.name!r} (cluster {sibling.cluster}, whose slot stays taken until the run ends)"
+                    server = (
+                        f"its server {sibling.spec.name!r} (cluster {sibling.cluster}, whose "
+                        "slot stays taken until the run ends)"
+                    )
                     claims[server] = self.launcher.running_claims(
                         f"ClusterId == {sibling.cluster}"
                     )
@@ -479,9 +520,11 @@ class HTCondorBackend:
         return minted_endpoint(spec.check, host, int(port)), identity, key
 
     def _hold_queued(self) -> None:
-        """Hold the runner's queued pilot jobs, once submitted, so none takes the room a service waits for,
-        until the plan's services have started or failed (:meth:`starting_services` releases them); under
-        ``_pilots_lock``.
+        """Hold the runner's queued pilot jobs, once submitted.
+
+        Hold the runner's queued pilot jobs, once submitted, so none takes the room a service waits
+        for, until the plan's services have started or failed (:meth:`starting_services` releases
+        them); under ``_pilots_lock``.
         """
         if (
             isinstance(self.launcher, CondorPilots)
@@ -492,16 +535,24 @@ class HTCondorBackend:
             self._held = True
 
     def _pilot_claims(self) -> dict[str, list[Any]]:
-        """The running ads of the runner's pilot jobs, by holder (none before they are submitted)."""
+        """Return the running ads of the runner's pilot jobs, by holder.
+
+        None before they are submitted.
+        """
         launcher = self.launcher
         if not isinstance(launcher, CondorPilots) or launcher.cluster is None:
             return {}
-        pilots = f"the runner's running pilots (cluster {launcher.cluster[1]}, whose slots stay taken until it closes)"
+        pilots = (
+            f"the runner's running pilots (cluster {launcher.cluster[1]}, whose slots stay "
+            "taken until it closes)"
+        )
         return {pilots: launcher.running_claims()}
 
     def _await_announce(self, job: _Announcer, spec: ServiceSpec) -> tuple[str, str]:
-        """The job's announce. No deadline runs while it waits for a slot (idle, or held while its input
-        spools), which is logged at the first such answer and every ``IDLE_LOG_S`` and ends when the
+        """Wait for and return the job's announce.
+
+        No deadline runs while it waits for a slot (idle, or held while its input spools),
+        which is logged at the first such answer and every ``IDLE_LOG_S`` and ends when the
         backend closes; ``timeout_s`` counts from the first answer that it runs.
         """
         deadline: float | None = None
@@ -526,7 +577,8 @@ class HTCondorBackend:
             # before the ad check: close() removes the job
             if deadline is None and self._closing.is_set():
                 raise RuntimeError(
-                    f"service {spec.name!r} ({job.key}) still waited for a slot when the runner closed: {state}"
+                    f"service {spec.name!r} ({job.key}) still waited for a slot when the runner "
+                    f"closed: {state}"
                 )
             if not counts_as_alive(ad):
                 raise RuntimeError(
@@ -539,22 +591,29 @@ class HTCondorBackend:
                     logged = now
             elif now >= deadline:
                 raise TimeoutError(
-                    f"service {spec.name!r} ({job.key}) did not announce within timeout_s={spec.timeout_s} "
+                    f"service {spec.name!r} ({job.key}) did not announce within "
+                    f"timeout_s={spec.timeout_s} "
                     f"of its start: {state}"
                 )
 
     def _release_service(self, key: str) -> None:
-        """Stop the service ``host_service`` started under ``key``; its announces are refused first."""
+        """Stop the service ``host_service`` started under ``key``.
+
+        Its announces are refused first.
+        """
         self._server.forget_announce([key])
         self._services.pop(key).stop()
 
     def _host_announced(self, spec: ServiceSpec, scope: str) -> tuple[str, str, str]:
-        """``spec``'s SERVICE node's announce: ``(endpoint, identity, node id)``, with the runner's queued pilot
-        jobs held meanwhile. Where the DAG's schedd is at hand (``schedd_locate``, and ``$_CONDOR_JOB_AD``
-        naming the DAGMan job), the wait is :meth:`_await_announce`'s over the node's queue ad: a node that
-        left the queue or is held raises at once, an idle one no slot could ever run raises
-        :class:`ServiceUnavailable`, and ``timeout_s`` counts from its first running answer. Otherwise, and
-        from a failing import, locate or query on (logged once), the wait is ``timeout_s`` long.
+        """``spec``'s SERVICE node's announce.
+
+        ``(endpoint, identity, node id)``, with the runner's queued pilot jobs held
+        meanwhile. Where the DAG's schedd is at hand (``schedd_locate``, and
+        ``$_CONDOR_JOB_AD`` naming the DAGMan job), the wait is :meth:`_await_announce`'s
+        over the node's queue ad: a node that left the queue or is held raises at once, an
+        idle one no slot could ever run raises :class:`ServiceUnavailable`, and
+        ``timeout_s`` counts from its first running answer. Otherwise, and from a failing
+        import, locate or query on (logged once), the wait is ``timeout_s`` long.
         """
         node = self._announced.get(spec.name)
         if node is None:
@@ -571,7 +630,8 @@ class HTCondorBackend:
                 got = self._await_announce(handle, spec)
         except _Unread as exc:
             logger.warning(
-                "SERVICE node %s (service %r): its queue ad is unreadable (%r); waiting for its announce alone",
+                "SERVICE node %s (service %r): its queue ad is unreadable (%r); waiting for its "
+                "announce alone",
                 node,
                 spec.name,
                 exc.__cause__,
@@ -587,8 +647,11 @@ class HTCondorBackend:
         return minted_endpoint(spec.check, host, int(port)), got[1], node
 
     def _node(self, name: str, key: str) -> _Node | None:
-        """DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd, or ``None`` when ``schedd_locate``
-        or the job ad's ``DAGManJobId`` is missing; :class:`_Unread` when the bindings or the locate fail.
+        """DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd.
+
+        DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd, or ``None`` when
+        ``schedd_locate`` or the job ad's ``DAGManJobId`` is missing; :class:`_Unread` when the
+        bindings or the locate fail.
         """
         dag = machine_ad("DAGManJobId", env="_CONDOR_JOB_AD")
         if self._schedd_locate is None or dag is None:
@@ -603,19 +666,24 @@ class HTCondorBackend:
             raise _Unread(exc) from exc
 
     def _release_announced(self, key: str) -> None:
-        """Nothing: a pending announce of node ``key`` is its restart's, which the next set resolves, and
+        """Nothing.
+
+        A pending announce of node ``key`` is its restart's, which the next set resolves, and
         DAGMan removes the node when the DAG ends.
         """
 
     def stop_waiting(self) -> None:
-        """End every wait for a service job that has no slot yet, within one ``POLL_S``: the job is
-        removed and its run raises. A job that has started keeps its ``timeout_s``; no service job is
-        submitted after this.
+        """End every wait for a service job that has no slot yet, within one ``POLL_S``.
+
+        The job is removed and its run raises. A job that has started keeps its
+        ``timeout_s``; no service job is submitted after this.
         """
         self._closing.set()
 
     def close(self) -> None:
-        """Remove every service job this backend submitted, in the calling thread (a wait for one, or
+        """Remove every service job this backend submitted, in the calling thread.
+
+        Remove every service job this backend submitted, in the calling thread (a wait for one, or
         for pilots, then raises), stop serving (pilots see 410 and exit), stop the pilots, free the
         port; each step runs even when an earlier one fails, and each failure is logged.
         """
@@ -637,8 +705,10 @@ class _MainProbe(pickle.Unpickler):
 
 
 def _require_importable(obj: object, role: str) -> None:
-    """Refuse ``obj`` when a pilot could not unpickle it: a lambda or local function does not pickle,
-    and a ``__main__`` global pickles here but names a module the pilot does not have.
+    """Refuse ``obj`` when a pilot could not unpickle it.
+
+    A lambda or local function does not pickle, and a ``__main__`` global pickles here but
+    names a module the pilot does not have.
     """
     try:
         _MainProbe(io.BytesIO(pickle.dumps(obj))).load()
@@ -650,8 +720,9 @@ def _require_importable(obj: object, role: str) -> None:
 
 
 def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[str]) -> None:
-    """Refuse ``plan`` when a pilot could not import one of the V1 ``roles`` the caller ships; a
-    ``DurablePlanV2``'s stage processes travel by value, so pilots need not import them.
+    """Refuse ``plan`` when a pilot could not import one of the V1 ``roles`` the caller ships.
+
+    A ``DurablePlanV2``'s stage processes travel by value, so pilots need not import them.
     """
     if isinstance(plan, DurablePlanV2):
         return
@@ -661,9 +732,11 @@ def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[st
 
 
 class HTCondorRunner(SubmitRunner):
-    """A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import, and whose backend waits for
-    ``min_pilots`` at its first need of a worker, so pilots that never start are an error instead of a
-    queue that never drains.
+    """A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import.
+
+    A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import, and whose backend waits
+    for ``min_pilots`` at its first need of a worker, so pilots that never start are an error
+    instead of a queue that never drains.
     """
 
     backend: HTCondorBackend
@@ -705,7 +778,9 @@ class HTCondorRunner(SubmitRunner):
         self.close()
 
     def close(self) -> None:
-        """Finish every submitted plan, a service's wait for a slot included, then close the backend,
+        """Finish every submitted plan, a service's wait for a slot included.
+
+        Finish every submitted plan, a service's wait for a slot included, then close the backend,
         which removes every job the runner submitted, also when that wait is interrupted.
         """
         try:
@@ -735,12 +810,13 @@ def htcondor_runner(
     service_hosts: Sequence[str] | None = None,
     task_timeout_s: float | None = None,
 ) -> HTCondorRunner:
-    """``n_pilots`` pilot jobs on the ``site`` pool behind an :class:`HTCondorRunner`;
-    ``runner.close()`` removes them. ``port_range`` is the driver-side port range; default from the
-    site profile. ``services`` are the runner's given service endpoints. ``service_hosts`` narrows
-    where a managed service runs to a subset of the site's, such as ``("cluster",)``; a host the site
-    does not offer is refused before any pilot is submitted. ``task_timeout_s`` is
-    :class:`HTCondorBackend`'s.
+    """``n_pilots`` pilot jobs on the ``site`` pool behind an :class:`HTCondorRunner`.
+
+    ``runner.close()`` removes them. ``port_range`` is the driver-side port range; default from
+    the site profile. ``services`` are the runner's given service endpoints. ``service_hosts``
+    narrows where a managed service runs to a subset of the site's, such as ``("cluster",)``; a
+    host the site does not offer is refused before any pilot is submitted. ``task_timeout_s``
+    is :class:`HTCondorBackend`'s.
     """
     pilots = CondorPilots(
         site,

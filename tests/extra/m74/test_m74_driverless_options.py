@@ -1,4 +1,4 @@
-"""m74 ``submit_driverless(store=...)`` refusals and store paths the frozen suite does not reach."""
+"""m74 ``submit_driverless(store=...)`` refusals and store paths the frozen suite misses."""
 
 from __future__ import annotations
 

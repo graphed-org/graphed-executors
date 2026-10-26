@@ -1,5 +1,6 @@
-"""m68b part B2 extras: the in-job backend's SERVICE-node paths and a driver-node state the frozen suite
-does not reach.
+"""m68b part B2 extras.
+
+The in-job backend's SERVICE-node paths and a driver-node state the frozen suite does not reach.
 """
 
 from __future__ import annotations
@@ -199,7 +200,10 @@ def _gpu_plan() -> Plan[tuple[str, ...]]:
 
 
 class _SubmitType:
-    """``htcondor2.Submit``: a call's ``issue_credentials`` and each ``from_dag``'s options are recorded."""
+    """``htcondor2.Submit``.
+
+    A call's ``issue_credentials`` and each ``from_dag``'s options are recorded.
+    """
 
     def __init__(self, bindings: _DagBindings) -> None:
         self.bindings = bindings
@@ -213,8 +217,9 @@ class _SubmitType:
 
 
 class _DagBindings:
-    """Bindings whose schedd's ``BIN`` is ``/schedd/bin`` and whose credd holds ``stored``; ``log`` records
-    the ``RemoteParam`` lookups, credential calls and submits in order.
+    """Bindings whose schedd's ``BIN`` is ``/schedd/bin`` and whose credd holds ``stored``.
+
+    ``log`` records the ``RemoteParam`` lookups, credential calls and submits in order.
     """
 
     param = {"SCHEDD_HOST": "s1", "COLLECTOR_HOST": "pool"}  # noqa: RUF012  (read only)

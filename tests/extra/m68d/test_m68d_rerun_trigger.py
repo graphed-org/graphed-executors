@@ -1,5 +1,7 @@
-"""The rerun trigger is ServiceUnreachable only (addendum "B2, the rerun trigger"): a run raising
-ServiceUnavailable for a SERVICE node's service ends the try with exit 1 and no rerun.
+"""The rerun trigger is ServiceUnreachable only (addendum "B2, the rerun trigger").
+
+A run raising ServiceUnavailable for a SERVICE node's service ends the try with exit 1 and no
+rerun.
 """
 
 from __future__ import annotations

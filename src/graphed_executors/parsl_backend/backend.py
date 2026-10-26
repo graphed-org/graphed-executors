@@ -1,8 +1,10 @@
-"""``ParslBackend`` (plan §1.2): a :class:`SubmitBackend` over a **started** parsl executor used
-via DIRECT executor submit — no DFK. The DFK unwraps future args on the head node anyway
-(dflow.py:863-901), so it would add a global singleton + config-global retries/caching (fighting the
-determinism gate) for zero capability gain; direct ``executor.submit(func, resource_specification,
-*args)`` is public (executor.py:690) and measured working with three integration moves the
+"""``ParslBackend`` (plan §1.2).
+
+A :class:`SubmitBackend` over a **started** parsl executor used via DIRECT executor submit — no
+DFK. The DFK unwraps future args on the head node anyway (dflow.py:863-901), so it would add a
+global singleton + config-global retries/caching (fighting the determinism gate) for zero
+capability gain; direct ``executor.submit(func, resource_specification, *args)`` is public
+(executor.py:690) and measured working with three integration moves the
 :mod:`~graphed_executors.parsl_backend.launch` helper encodes.
 
 Per-INSTANCE capability vectors (plan §1.1): ``ParslBackend(HighThroughputExecutor)`` is the
@@ -58,9 +60,11 @@ _WORKER_DEATH_NAMES = ("WorkerLost", "ManagerLost")
 
 
 class _ParslFuture:
-    """A thin :class:`SubmitFuture` over a parsl future. ``result()`` unwraps the ``(result, events)``
-    shim envelope and dispatches the buffered monitor events to the backend's driver-side handler
-    registry exactly once (completion-granularity piggyback); ``done``/``exception``/``cancel``/``cancelled``
+    """A thin :class:`SubmitFuture` over a parsl future.
+
+    ``result()`` unwraps the ``(result, events)`` shim envelope and dispatches the buffered
+    monitor events to the backend's driver-side handler registry exactly once
+    (completion-granularity piggyback); ``done``/``exception``/``cancel``/``cancelled``
     delegate.
     """
 
@@ -110,9 +114,11 @@ class ParslBackend:
             self._is_htex = False
         else:
             raise TypeError(
-                "ParslBackend supports a started parsl HighThroughputExecutor or ThreadPoolExecutor "
+                "ParslBackend supports a started parsl HighThroughputExecutor or "
+                "ThreadPoolExecutor "
                 f"(the two verified executor classes), got {type(executor).__name__!r} — TaskVine/"
-                "WorkQueue are the Phase-2 extension seam (per-instance honesty means not vouching "
+                "WorkQueue are the Phase-2 extension seam (per-instance honesty means not "
+                "vouching "
                 "for an unverified executor's capability vector)"
             )
         self._executor = executor
@@ -120,10 +126,11 @@ class ParslBackend:
 
     @property
     def peer_transport(self) -> bool:
-        """m47: True on HTEX (the §1.4 peer plane runs on distinct worker PROCESSES), False on TPE
-        (driver-process threads — a 'peer exchange' there is loopback head-node routing). A
-        parsl_backend-private attribute the facade gates ``shuffle_method='transport'`` on; NEVER a
-        ``SubmitCapabilities`` field (the frozen 7-field vector stays unchanged).
+        """m47: True on HTEX (the §1.4 peer plane runs on distinct worker PROCESSES), False on TPE.
+
+        Driver-process threads — a 'peer exchange' there is loopback head-node routing. A
+        parsl_backend-private attribute the facade gates ``shuffle_method='transport'`` on;
+        NEVER a ``SubmitCapabilities`` field (the frozen 7-field vector stays unchanged).
         """
         return self._is_htex
 
@@ -147,8 +154,9 @@ class ParslBackend:
         return total
 
     def task_slots(self) -> int:
-        """Tasks the executor runs at once, without :meth:`n_workers`' wait: 0 on an HTEX with no
-        manager connected yet.
+        """Tasks the executor runs at once, without :meth:`n_workers`' wait.
+
+        0 on an HTEX with no manager connected yet.
         """
         return self._count_htex_workers() if self._is_htex else int(self._executor.max_threads)
 
@@ -170,15 +178,18 @@ class ParslBackend:
         resources: Mapping[str, float] | None = None,
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
-        """Resolve any :class:`_ParslFuture` args DRIVER-side (parsl workers cannot resolve a
+        """Resolve any :class:`_ParslFuture` args DRIVER-side.
+
+        Resolve any :class:`_ParslFuture` args DRIVER-side (parsl workers cannot resolve a
         driver-process future — the §1.1 head-node round-trip that makes ``peer_data_movement``
         False), then submit the concrete values wrapped in the module-level shim. ``resource_spec``
         is ``{"priority": p}`` on HTEX iff ``p != 0`` (the one key HTEX forwards, executor.py:393)
         else ``{}``; ALWAYS ``{}`` on TPE (measured: it raises ``InvalidResourceSpecification`` on
-        anything else). A failed task is resubmitted from the driver up to ``retries`` times: parsl's
-        own retries live in the DFK this backend does not use. ``key``/``resources``/``workers`` are
-        advisory hints this backend ignores. The shim wrap happens HERE, after any spy seam, so a
-        submitted-fn-name witness records the raw ``fn`` (design-minor-3).
+        anything else). A failed task is resubmitted from the driver up to ``retries`` times:
+        parsl's own retries live in the DFK this backend does not use.
+        ``key``/``resources``/``workers`` are advisory hints this backend ignores. The shim wrap
+        happens HERE, after any spy seam, so a submitted-fn-name witness records the raw ``fn``
+        (design-minor-3).
         """
         resolved = tuple(a.result() if isinstance(a, _ParslFuture) else a for a in args)
         spec: dict[str, int] = {"priority": priority} if (self._is_htex and priority) else {}
@@ -194,8 +205,8 @@ class ParslBackend:
         return _ParslFuture(raw, self._handlers)
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
-        # degenerate on scatter_broadcast=False (the ThreadBackend form): the task fn receives the raw
-        # bytes directly; each consuming task ships its own copy through the submit host.
+        # degenerate on scatter_broadcast=False (the ThreadBackend form): the task fn receives the
+        # raw bytes directly; each consuming task ships its own copy through the submit host.
         return payload
 
     def subscribe_events(
@@ -209,12 +220,14 @@ class ParslBackend:
         return unsub
 
     def cancel(self, futures: Sequence[Any]) -> None:
-        """Best-effort, pre-run only (``cancel_running=False``); a no-op on HTEX. HTEX's futures are
-        never marked running, so a dispatched task's future still cancels, and when its result lands
-        parsl's result thread raises ``InvalidStateError`` on it and dies: every later task of the
-        executor then never resolves, and the thread's zmq socket stays open, so a later collection of
-        its context blocks in ``term()`` (the ``transport_peer`` cleanup avoids cancel for the same
-        reason). A TPE future is cancelled only if its thread has not taken it.
+        """Best-effort, pre-run only (``cancel_running=False``); a no-op on HTEX.
+
+        HTEX's futures are never marked running, so a dispatched task's future still
+        cancels, and when its result lands parsl's result thread raises
+        ``InvalidStateError`` on it and dies: every later task of the executor then never
+        resolves, and the thread's zmq socket stays open, so a later collection of its
+        context blocks in ``term()`` (the ``transport_peer`` cleanup avoids cancel for the
+        same reason). A TPE future is cancelled only if its thread has not taken it.
         """
         if self._is_htex:
             return
@@ -227,17 +240,19 @@ class ParslBackend:
         return None  # the caller owns the executor; the launch helper documents teardown
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
-        """Map a parsl ``WorkerLost``/``ManagerLost`` (matched by CLASS NAME anywhere in the exception
+        """Map a parsl ``WorkerLost``/``ManagerLost`` to an attributable worker death.
+
+        Map a parsl ``WorkerLost``/``ManagerLost`` (matched by CLASS NAME anywhere in the exception
         chain — never by parsl identity, so this module stays parsl-import-free at load) to the
         ``(failing_key, last_worker)`` string 2-tuple the engine turns into an attributed
-        :class:`StageError`. Unlike a dask ``KilledWorker`` (whose ``.task`` is the graphed key that
-        ``key_to_task`` resolves to a partition), a parsl worker-loss exception carries no graphed
-        task key — so BOTH slots are the death message (``str(exc)``: parsl's ``WorkerLost`` /
-        ``ManagerLost`` render as "…loss of worker N on host H", naming the dead worker). The engine
-        then attributes to a NON-EMPTY, meaningful unit (``StageError.partition`` / ``frame.filename``
-        = the death message) rather than to an empty key; an m47 worker-death driver, which knows
-        which partitions the dead peer owned, layers its partition context on top. Anything unrelated
-        returns ``None``.
+        :class:`StageError`. Unlike a dask ``KilledWorker`` (whose ``.task`` is the graphed key
+        that ``key_to_task`` resolves to a partition), a parsl worker-loss exception carries no
+        graphed task key — so BOTH slots are the death message (``str(exc)``: parsl's
+        ``WorkerLost`` / ``ManagerLost`` render as "…loss of worker N on host H", naming the dead
+        worker). The engine then attributes to a NON-EMPTY, meaningful unit
+        (``StageError.partition`` / ``frame.filename`` = the death message) rather than to an empty
+        key; an m47 worker-death driver, which knows which partitions the dead peer owned, layers
+        its partition context on top. Anything unrelated returns ``None``.
         """
         seen: set[int] = set()
         node: BaseException | None = exc
@@ -251,8 +266,10 @@ class ParslBackend:
 
 
 def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) -> Future[Any]:
-    """A future of ``attempt()`` that calls ``attempt`` again on each failure, ``retries`` times at most.
-    With ``cancels``, cancelling it cancels the attempt in flight (never on HTEX: see ``cancel``).
+    """Return a future of ``attempt()`` that calls ``attempt`` again on each failure.
+
+    ``retries`` times at most. With ``cancels``, cancelling it cancels the attempt in flight (never
+    on HTEX: see ``cancel``).
     """
     outer: Future[Any] = Future()
     current: list[Any] = []
@@ -292,9 +309,11 @@ def parsl_runner(
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
 ) -> SubmitRunner:
-    """The user-facing one-liner: a :class:`SubmitRunner` over a :class:`ParslBackend` on a started
-    parsl executor. ``close()`` does NOT shut the caller's executor down (the launch helper documents
-    teardown via ``stop_htex``). ``services`` are the runner's given service endpoints.
+    """Build the user-facing runner in one line.
+
+    A :class:`SubmitRunner` over a :class:`ParslBackend` on a started parsl executor.
+    ``close()`` does NOT shut the caller's executor down (the launch helper documents teardown
+    via ``stop_htex``). ``services`` are the runner's given service endpoints.
     """
     return SubmitRunner(
         ParslBackend(executor),

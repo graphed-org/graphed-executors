@@ -1,15 +1,18 @@
-"""m44 remediation witnesses (non-gating): the R2 silent-empty-root fix and the R4 pull-timeout
-classification. Both are discriminating against the exact pre-remediation behaviour.
+"""m44 remediation witnesses (non-gating).
+
+The R2 silent-empty-root fix and the R4 pull-timeout classification. Both are discriminating
+against the exact pre-remediation behaviour.
 
 R2 — a peer reduction that completes with NO captured root must RAISE (restart-worthy
-``TransportDeliveryError`` → §1.5), never silently return ``plan.empty()`` (the identity value). The
-``_select_root`` helper is the pure, clock-free seam that decision routes through; a genuinely-``None``
-reduction root must still resolve to ``None`` (not raise, not empty) — the ``_NO_ROOT`` sentinel is what
-disambiguates it. The integration arm proves the new ``root_timeout_s`` kwarg is actually forwarded to
-``collect_peer_root`` (a hardcoded 30.0 would fail it), via a recording monkeypatch seam — no clock.
+``TransportDeliveryError`` → §1.5), never silently return ``plan.empty()`` (the identity value).
+The ``_select_root`` helper is the pure, clock-free seam that decision routes through; a
+genuinely-``None`` reduction root must still resolve to ``None`` (not raise, not empty) — the
+``_NO_ROOT`` sentinel is what disambiguates it. The integration arm proves the new
+``root_timeout_s`` kwarg is actually forwarded to ``collect_peer_root`` (a hardcoded 30.0 would
+fail it), via a recording monkeypatch seam — no clock.
 
-R4 — a block-plane ``PullTimeoutError`` is classified restart-worthy so a timed-out holder restarts the
-whole run onto the survivors instead of leaking a bare timeout as an opaque ``StageError``.
+R4 — a block-plane ``PullTimeoutError`` is classified restart-worthy so a timed-out holder restarts
+the whole run onto the survivors instead of leaking a bare timeout as an opaque ``StageError``.
 """
 
 from __future__ import annotations
@@ -28,7 +31,8 @@ from graphed_executors.dask_backend._transport_run import is_restart_worthy, sor
 from graphed_executors.dask_backend.transport import PullTimeoutError, TransportDeliveryError
 from graphed_executors.dask_backend.transport_peer import _MISSING, _select_root
 
-# import the frozen harness by path (importing, not editing — the integrity rule forbids only edits)
+# import the frozen harness by path (importing, not editing — the integrity rule forbids only
+# edits)
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m44"))
 
 
@@ -45,14 +49,16 @@ def test_peer_root_fallback_when_driver_missing() -> None:
 
 
 def test_none_peer_root_is_kept_not_treated_as_missing() -> None:
-    # the pre-r2 bug: `r.get("root") is not None` skipped a captured None root and defaulted to empty.
-    # has_root=True with root=None must resolve to None (the real reduction value), never raise/empty.
+    # the pre-r2 bug: `r.get("root") is not None` skipped a captured None root and defaulted to
+    # empty. has_root=True with root=None must resolve to None (the real reduction value), never
+    # raise/empty.
     results = {"a": {"has_root": True, "root": None}}
     assert _select_root(_MISSING, results, _MISSING) is None
 
 
 def test_no_captured_root_raises_not_empty() -> None:
-    # the core R2 discrimination: driver lost the root AND no peer captured one ⇒ RAISE, never empty.
+    # the core R2 discrimination: driver lost the root AND no peer captured one ⇒ RAISE, never
+    # empty.
     results = {"a": {"has_root": False, "root": None}, "b": {"has_root": False, "root": None}}
     with pytest.raises(TransportDeliveryError, match="no captured root"):
         _select_root(_MISSING, results, _MISSING)
@@ -111,15 +117,17 @@ def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(
         "the run diverged"
     )
     assert seen.get("timeout_s") == 7.5, (
-        f"root_timeout_s was not forwarded to collect_peer_root (saw {seen.get('timeout_s')!r}); a "
+        f"root_timeout_s was not forwarded to collect_peer_root (saw {seen.get('timeout_s')!r}); "
+        "a "
         "hardcoded _ROOT_TIMEOUT_S=30.0 fails this"
     )
 
 
 # ---- REMEDIATION-2: a transient-empty scheduler_info must not crash the pin math ----------------
 class _FakeClient:
-    """A client whose ``scheduler_info`` returns an EMPTY worker set until ``wait_for_workers`` is
-    called (the stale-``_scheduler_identity``-cache-until-refresh race), then the real set.
+    """A client whose ``scheduler_info`` returns an EMPTY worker set until ``wait_for_workers``.
+
+    Is called (the stale-``_scheduler_identity``-cache-until-refresh race), then the real set.
     """
 
     def __init__(self, real_workers: dict[str, object]) -> None:
@@ -141,9 +149,10 @@ class _FakeBackend:
 
 
 def test_sorted_addresses_survives_a_transient_empty_scheduler_info() -> None:
-    # The exact CI-only mechanism, unit-level + clock-free: the first scheduler_info read is a stale
-    # empty snapshot. Pre-fix, sorted_addresses returned () -> callers do k=max(1,0)=1 then
-    # addresses[i%k] on an EMPTY tuple -> IndexError: tuple index out of range (the transport-run crash).
+    # The exact CI-only mechanism, unit-level + clock-free: the first scheduler_info read is a
+    # stale empty snapshot. Pre-fix, sorted_addresses returned () -> callers do k=max(1,0)=1 then
+    # addresses[i%k] on an EMPTY tuple -> IndexError: tuple index out of range (the transport-run
+    # crash).
     client = _FakeClient({"tcp://127.0.0.1:1": {}, "tcp://127.0.0.1:2": {}})
     got = sorted_addresses(_FakeBackend(client))
     assert got == ("tcp://127.0.0.1:1", "tcp://127.0.0.1:2"), (
@@ -154,8 +163,8 @@ def test_sorted_addresses_survives_a_transient_empty_scheduler_info() -> None:
 
 
 def test_populated_scheduler_info_is_not_needlessly_re_read() -> None:
-    # discrimination: when the FIRST read already has workers, no wait/re-read happens (the guard is
-    # scoped to the empty case, not a blanket double-read).
+    # discrimination: when the FIRST read already has workers, no wait/re-read happens (the guard
+    # is scoped to the empty case, not a blanket double-read).
     client = _FakeClient({"tcp://127.0.0.1:9": {}})
     client.refreshed = True
     assert sorted_addresses(_FakeBackend(client)) == ("tcp://127.0.0.1:9",)
@@ -168,9 +177,9 @@ def test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # End-to-end: force the CI interleaving on a REAL cluster (scheduler_info empty until the fix's
-    # wait_for_workers refreshes it) and drive the exact failing scenario (how=left, LEFT partitionless).
-    # Pre-fix: addresses=() -> IndexError -> StageError (the reported crash). Post-fix: the empty snapshot
-    # is re-read and the join returns the 0-row pass-through.
+    # wait_for_workers refreshes it) and drive the exact failing scenario (how=left, LEFT
+    # partitionless). Pre-fix: addresses=() -> IndexError -> StageError (the reported crash).
+    # Post-fix: the empty snapshot is re-read and the join returns the 0-row pass-through.
     from transport_harness import (  # noqa: PLC0415  (frozen harness, imported by path above)
         build_dask_backend,
         install_transport_plugin,
@@ -217,7 +226,8 @@ def test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join(
             timeout_s=120.0,
         )
     assert "error" not in outcome, (
-        f"a transient-empty scheduler_info crashed the zero-partition join: {outcome.get('error')!r}"
+        "a transient-empty scheduler_info crashed the zero-partition join: "
+        f"{outcome.get('error')!r}"
     )
     assert total_result_rows(outcome["result"].value) == 0, (
         "left/left-empty should pass through 0 rows"
