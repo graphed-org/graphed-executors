@@ -118,8 +118,8 @@ class PinnedProcessPool(Executor):
     ) -> Future[Any]:
         """Run ``fn(*args)`` on the pinned worker ``worker``; return a ``Future``.
 
-        Run ``fn(*args)`` on the pinned worker ``worker``; return a ``Future`` (No task kwargs —
-        ``worker`` is the only keyword, since pinned workers are addressed, not pooled.)
+        No task kwargs — ``worker`` is the only keyword, since pinned workers are addressed, not
+        pooled.
         """
         if kwargs:
             raise TypeError("PinnedProcessPool tasks take no keyword arguments")

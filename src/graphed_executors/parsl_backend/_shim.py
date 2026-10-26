@@ -80,10 +80,10 @@ def _parsl_task_shim(
 ) -> tuple[object, list[EventBatch]]:
     """Run ``fn(*args)`` under a :class:`_ParslWorkerEnv` on the worker.
 
-    Run ``fn(*args)`` under a :class:`_ParslWorkerEnv` on the worker, returning ``(result,
-    buffered_events)``. Future args were already resolved DRIVER-side by ``ParslBackend.submit``
-    (parsl workers cannot resolve a driver-process future — §1.1); a raising ``fn`` propagates
-    through parsl's serialized exception path (no envelope on the error arc).
+    Returns ``(result, buffered_events)``. Future args were already resolved DRIVER-side by
+    ``ParslBackend.submit`` (parsl workers cannot resolve a driver-process future — §1.1); a
+    raising ``fn`` propagates through parsl's serialized exception path (no envelope on the error
+    arc).
     """
     env = _ParslWorkerEnv()
     token = set_worker_env(env)

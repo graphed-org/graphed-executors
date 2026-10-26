@@ -121,8 +121,8 @@ def listeners(port: int, proc: str = "/proc") -> set[str]:
 def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
     """Whether ``pid`` and its descendants hold every one of ``inodes`` among their fds.
 
-    Whether ``pid`` and its descendants hold every one of ``inodes`` among their fds (the engine's
-    rule, copied); a process whose ``stat`` or ``fd`` cannot be read holds none.
+    This is the engine's rule, copied; a process whose ``stat`` or ``fd`` cannot be read holds
+    none.
     """
     kids: dict[int, list[int]] = {}
     for entry in os.listdir(proc):

@@ -182,16 +182,15 @@ class ParslBackend:
     ) -> SubmitFuture:
         """Resolve any :class:`_ParslFuture` args DRIVER-side.
 
-        Resolve any :class:`_ParslFuture` args DRIVER-side (parsl workers cannot resolve a
-        driver-process future — the §1.1 head-node round-trip that makes ``peer_data_movement``
-        False), then submit the concrete values wrapped in the module-level shim. ``resource_spec``
-        is ``{"priority": p}`` on HTEX iff ``p != 0`` (the one key HTEX forwards, executor.py:393)
-        else ``{}``; ALWAYS ``{}`` on TPE (measured: it raises ``InvalidResourceSpecification`` on
-        anything else). A failed task is resubmitted from the driver up to ``retries`` times:
-        parsl's own retries live in the DFK this backend does not use.
-        ``key``/``resources``/``workers`` are advisory hints this backend ignores. The shim wrap
-        happens HERE, after any spy seam, so a submitted-fn-name witness records the raw ``fn``
-        (design-minor-3).
+        Parsl workers cannot resolve a driver-process future — the §1.1 head-node round-trip that
+        makes ``peer_data_movement`` False. Then submit the concrete values wrapped in the
+        module-level shim. ``resource_spec`` is ``{"priority": p}`` on HTEX iff ``p != 0`` (the one
+        key HTEX forwards, executor.py:393) else ``{}``; ALWAYS ``{}`` on TPE (measured: it raises
+        ``InvalidResourceSpecification`` on anything else). A failed task is resubmitted from the
+        driver up to ``retries`` times: parsl's own retries live in the DFK this backend does not
+        use. ``key``/``resources``/``workers`` are advisory hints this backend ignores. The shim
+        wrap happens HERE, after any spy seam, so a submitted-fn-name witness records the raw
+        ``fn`` (design-minor-3).
         """
         resolved = tuple(a.result() if isinstance(a, _ParslFuture) else a for a in args)
         spec: dict[str, int] = {"priority": priority} if (self._is_htex and priority) else {}

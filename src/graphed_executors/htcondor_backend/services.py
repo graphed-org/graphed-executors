@@ -157,9 +157,8 @@ class ServiceJob:
     def submit(self) -> None:
         """Write the files into a new ``service-<key>/`` under the launcher's ``log_dir``.
 
-        Write the files into a new ``service-<key>/`` under the launcher's ``log_dir`` and submit
-        one job; its removal is registered the moment ``schedd.submit`` returns, so a failed spool
-        leaves none. A job already stopped is not submitted.
+        Then submit one job; its removal is registered the moment ``schedd.submit`` returns, so a
+        failed spool leaves none. A job already stopped is not submitted.
         """
         launcher = self.launcher
         assert launcher._schedd is not None and launcher.log_dir is not None, (
@@ -189,10 +188,9 @@ class ServiceJob:
     ) -> str | None:
         """:func:`queued_refusal` of this queued job.
 
-        :func:`queued_refusal` of this queued job (its claims, by holder, the running ads of the
-        runner's pilots, which keep their slots until the runner closes, and of the set's earlier
-        servers, which keep theirs until the run ends); ``None`` when ``machines`` is empty or the
-        job left the queue.
+        Its claims are, by holder, the running ads of the runner's pilots, which keep their slots
+        until the runner closes, and of the set's earlier servers, which keep theirs until the run
+        ends; ``None`` when ``machines`` is empty or the job left the queue.
         """
         # a collector that lists no slot says nothing about the pool: submit and wait
         if not machines:
@@ -205,10 +203,9 @@ class ServiceJob:
     def stop(self) -> None:
         """Remove the job at once.
 
-        Remove the job at once (a service never exits by itself; a spooled job that completed is
-        retrieved first, so its ``service.out``/``.err`` come back), then drop its secret file.
-        Calls from any threads are serialized and only the first does that: each returns once it
-        has run.
+        A service never exits by itself; a spooled job that completed is retrieved first, so its
+        ``service.out``/``.err`` come back. Then drop its secret file. Calls from any threads are
+        serialized and only the first does that: each returns once it has run.
         """
         with self._lock:
             if self._stopped:  # Windows refuses an unlink racing another one: access denied
@@ -224,11 +221,10 @@ def queued_refusal(
 ) -> str | None:
     """Why no slot of ``machines`` could ever run the queued job whose whole ad is ``ad``.
 
-    Why no slot of ``machines`` could ever run the queued job whose whole ad is ``ad`` (``what``
-    names it), else ``None``: the ad (the request, the site's and the user's submit keys) must
-    ``symmetricMatch`` a slot's ad whose free ``Memory``/``Cpus``/``GPUs``/``Disk`` are a
-    partitionable slot's totals, so a busy pool still matches, less what ``claims`` (running ads,
-    by holder) hold there.
+    ``what`` names the job. ``None`` when some slot could: the ad (the request, the site's and the
+    user's submit keys) must ``symmetricMatch`` a slot's ad whose free
+    ``Memory``/``Cpus``/``GPUs``/``Disk`` are a partitionable slot's totals, so a busy pool still
+    matches, less what ``claims`` (running ads, by holder) hold there.
     """
     import classad2  # noqa: PLC0415  (ships with the htcondor2 bindings)
 

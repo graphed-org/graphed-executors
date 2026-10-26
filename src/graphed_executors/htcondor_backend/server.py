@@ -57,7 +57,7 @@ _HOSTPORT = re.compile(r".+:[0-9]+")
 class WorkerLostError(Exception):
     """A task's pilot was lost twice (``pilot`` names the last one).
 
-    A task's pilot was lost twice (``pilot`` names the last one), or no pilot is left to run it.
+    Also raised when no pilot is left to run it.
     """
 
     def __init__(self, key: str, pilot: str) -> None:
@@ -128,10 +128,9 @@ def _bind(port_range: tuple[int, int]) -> _Http:
 class TaskServer:
     """Binds the first free port of ``port_range`` (inclusive) on all interfaces.
 
-    Binds the first free port of ``port_range`` (inclusive) on all interfaces and advertises
-    ``http://{host}:{port}``. ``launcher`` is asked how many pilots can still come, and its
-    ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit) bounds a
-    lease.
+    It advertises ``http://{host}:{port}``. ``launcher`` is asked how many pilots can still come,
+    and its ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit)
+    bounds a lease.
     """
 
     def __init__(

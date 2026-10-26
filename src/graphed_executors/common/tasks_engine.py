@@ -194,8 +194,8 @@ class _JoinOut:
 def _dask_map_write(backend: Any, owned_blocks: Sequence[Any], parts: int, salt: int) -> _MapOut:
     """Route + coalesce one producer task's owned src blocks into <= P dest blocks.
 
-    Route + coalesce one producer task's owned src blocks into <= P dest blocks, then to_wire each
-    (worker-side). Reuses ``_coalesce_task`` (ascending-src merge, O(P·rg) writer buffer) verbatim.
+    Then to_wire each (worker-side). Reuses ``_coalesce_task`` (ascending-src merge, O(P·rg) writer
+    buffer) verbatim.
     """
     per_dest, peak = _coalesce_task(backend, owned_blocks, parts, salt)
     payload = {dest: bytes(backend.to_wire(block)) for dest, block in per_dest.items()}
@@ -214,8 +214,8 @@ def _dask_pick(map_out: _MapOut, dest: int) -> bytes | None:
 def _dask_gather(backend: Any, dest: int, *picks: bytes | None) -> _GatherOut | None:
     """Gather one dest across all producers in ascending-task order.
 
-    Gather one dest across all producers in ascending-task order (== ascending-src, the
-    deterministic merge), concat, and sha256 the wire bytes (worker-side).
+    That order is also ascending-src (the deterministic merge); then concat, and sha256 the wire
+    bytes (worker-side).
     """
     blocks = [backend.from_wire(w) for w in picks if w is not None]
     if not blocks:

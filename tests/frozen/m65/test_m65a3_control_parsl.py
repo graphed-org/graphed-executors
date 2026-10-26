@@ -1,7 +1,6 @@
 """m65 A3: ``ParslBackend.task_slots()`` never waits.
 
-m65 A3: ``ParslBackend.task_slots()`` never waits, so a controlled run survives an HTEX block that
-arrives late.
+A controlled run thus survives an HTEX block that arrives late.
 """
 
 from __future__ import annotations

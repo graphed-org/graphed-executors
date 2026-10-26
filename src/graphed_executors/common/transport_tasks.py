@@ -111,10 +111,10 @@ def pull_ordered(
 ) -> list[Any]:
     """Pull one side's fragments for a dest, COALESCED per holder.
 
-    Pull one side's fragments for a dest, COALESCED per holder (one request per holder — the T2
-    bound), then decode them back in the caller's ascending-task order (the deterministic merge).
-    Byte-identical fragments (same digest from >1 task) share one wire but are re-materialised per
-    manifest entry (parity with ``_stage2_gather``).
+    One request per holder (the T2 bound); the fragments are then decoded back in the caller's
+    ascending-task order (the deterministic merge). Byte-identical fragments (same digest from >1
+    task) share one wire but are re-materialised per manifest entry (parity with
+    ``_stage2_gather``).
     """
     by_holder: dict[str, list[str]] = {}
     for holder_addr, digest in pulls:

@@ -327,9 +327,8 @@ def endpoint_port(endpoint: str) -> int:
 class _RecordingPopen(subprocess.Popen[Any]):
     """``subprocess.Popen`` that remembers every process it started.
 
-    ``subprocess.Popen`` that remembers every process it started, so a child that writes no pid
-    report (``python -m http.server`` from ``recipes.http_server``) can still be stopped at
-    teardown.
+    A child that writes no pid report (``python -m http.server`` from ``recipes.http_server``) can
+    thus still be stopped at teardown.
     """
 
     started: ClassVar[list[subprocess.Popen[Any]]] = []

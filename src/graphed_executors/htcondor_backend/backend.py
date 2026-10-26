@@ -529,9 +529,8 @@ class HTCondorBackend:
     def _hold_queued(self) -> None:
         """Hold the runner's queued pilot jobs, once submitted.
 
-        Hold the runner's queued pilot jobs, once submitted, so none takes the room a service waits
-        for, until the plan's services have started or failed (:meth:`starting_services` releases
-        them); under ``_pilots_lock``.
+        No pilot then takes the room a service waits for until the plan's services have started or
+        failed (:meth:`starting_services` releases them); under ``_pilots_lock``.
         """
         if (
             isinstance(self.launcher, CondorPilots)
@@ -656,9 +655,8 @@ class HTCondorBackend:
     def _node(self, name: str, key: str) -> _Node | None:
         """DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd.
 
-        DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd, or ``None`` when
-        ``schedd_locate`` or the job ad's ``DAGManJobId`` is missing; :class:`_UnreadError` when
-        the bindings or the locate fail.
+        ``None`` when ``schedd_locate`` or the job ad's ``DAGManJobId`` is missing;
+        :class:`_UnreadError` when the bindings or the locate fail.
         """
         dag = machine_ad("DAGManJobId", env="_CONDOR_JOB_AD")
         if self._schedd_locate is None or dag is None:
@@ -690,9 +688,9 @@ class HTCondorBackend:
     def close(self) -> None:
         """Remove every service job this backend submitted, in the calling thread.
 
-        Remove every service job this backend submitted, in the calling thread (a wait for one, or
-        for pilots, then raises), stop serving (pilots see 410 and exit), stop the pilots, free the
-        port; each step runs even when an earlier one fails, and each failure is logged.
+        A wait for one, or for pilots, then raises. Also stop serving (pilots see 410 and exit),
+        stop the pilots, free the port; each step runs even when an earlier one fails, and each
+        failure is logged.
         """
         # a pilot submit in flight finishes first, so the stop removes it
         with self._pilots_lock, self._lock:
@@ -741,9 +739,8 @@ def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[st
 class HTCondorRunner(SubmitRunner):
     """A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import.
 
-    A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import, and whose backend waits
-    for ``min_pilots`` at its first need of a worker, so pilots that never start are an error
-    instead of a queue that never drains.
+    Its backend waits for ``min_pilots`` at its first need of a worker, so pilots that never start
+    are an error instead of a queue that never drains.
     """
 
     backend: HTCondorBackend
@@ -790,8 +787,8 @@ class HTCondorRunner(SubmitRunner):
     def close(self) -> None:
         """Finish every submitted plan, a service's wait for a slot included.
 
-        Finish every submitted plan, a service's wait for a slot included, then close the backend,
-        which removes every job the runner submitted, also when that wait is interrupted.
+        Then close the backend, which removes every job the runner submitted, also when that wait
+        is interrupted.
         """
         try:
             self._plans.close()

@@ -17,9 +17,9 @@ from graphed.core.execution import LocalResources
 class GraphedWorkerPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
     """Holds a per-worker :class:`LocalResources`.
 
-    Holds a per-worker :class:`LocalResources`, so ``open_once`` gives file-locality per dask
-    worker exactly as per local pool worker. ``idempotent`` makes re-registration a no-op and
-    ``setup`` runs on existing AND late-joining (elastic/jobqueue) workers.
+    ``open_once`` therefore gives file-locality per dask worker exactly as per local pool worker.
+    ``idempotent`` makes re-registration a no-op and ``setup`` runs on existing AND late-joining
+    (elastic/jobqueue) workers.
     """
 
     name = "graphed-worker"

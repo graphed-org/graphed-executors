@@ -22,8 +22,7 @@ GOLDEN = "Cert_Collisions2024_378981_386951_Golden.json.gz"
 def pairs() -> tuple[np.ndarray, np.ndarray]:
     """Each certified range's edges and their outside neighbours for three runs, an absent run.
 
-    Each certified range's edges and their outside neighbours for three runs, an absent run, and
-    the data fixture's own (run, lumi).
+    Also the data fixture's own (run, lumi).
     """
     golden = json.loads(h.payload(GOLDEN))
     runs = sorted(golden, key=int)

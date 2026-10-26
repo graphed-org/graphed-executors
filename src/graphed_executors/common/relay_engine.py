@@ -60,9 +60,8 @@ if TYPE_CHECKING:
 class RelayShuffleWitness(DaskShuffleWitness):
     """The :class:`DaskShuffleWitness` mechanism counters PLUS the head-node-routing witnesses.
 
-    The :class:`DaskShuffleWitness` mechanism counters PLUS the head-node-routing witnesses
-    (design-M2): ``head_node_routed`` is True on every relay result, and ``driver_relay_bytes`` is
-    the Σ of all map-payload wire sizes resolved at the driver barrier — an unlabeled relay or a
+    ``head_node_routed`` is True on every relay result, and ``driver_relay_bytes`` is the Σ of all
+    map-payload wire sizes resolved at the driver barrier (design-M2) — an unlabeled relay or a
     stubbed tally fails the frozen witness.
     """
 

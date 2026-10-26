@@ -1,7 +1,6 @@
 """A worker holding stolen leaves never grants one on.
 
-A worker holding stolen leaves never grants one on, so every stolen partial reaches its owner over
-the pinned pool's bounded overlay.
+Every stolen partial thus reaches its owner over the pinned pool's bounded overlay.
 """
 
 from __future__ import annotations

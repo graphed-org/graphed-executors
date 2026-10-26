@@ -147,9 +147,9 @@ class DaskBackend:
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
         """Recognize a ``KilledWorker``.
 
-        Recognize a ``KilledWorker`` and return ``(failing_task_key, last_worker_address)`` so the
-        engine can raise an attributed :class:`StageError` without importing distributed (§1.4).
-        Everything else returns ``None`` — the engine re-raises it intact.
+        Its ``(failing_task_key, last_worker_address)`` is returned so the engine can raise an
+        attributed :class:`StageError` without importing distributed (§1.4). Everything else
+        returns ``None`` — the engine re-raises it intact.
         """
         if isinstance(exc, self._distributed.KilledWorker):
             last_worker = exc.last_worker

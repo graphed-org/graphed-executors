@@ -150,8 +150,8 @@ def driver_job(
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """``plan`` submitted driverless (``pilots="local"``) under recorded bindings.
 
-    ``plan`` submitted driverless (``pilots="local"``) under recorded bindings, then its driver job
-    run here (``python -m …driver``) with a machine ad whose slot ``Memory`` is ``slot_mb``.
+    Then its driver job run here (``python -m …driver``) with a machine ad whose slot ``Memory`` is
+    ``slot_mb``.
     """
     log_dir = tmp_path / "submit"
     log_dir.mkdir()

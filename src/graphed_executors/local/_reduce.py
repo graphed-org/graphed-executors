@@ -137,8 +137,8 @@ class LazyReducer(Generic[R]):
     def feed(self, leaf: int, value: R, level: int = 0) -> None:
         """Deliver one partial (leaf index + value).
 
-        Deliver one partial (leaf index + value), or with ``level`` a whole node at ``(level,
-        leaf)``, bubbling it up as far as siblings allow.
+        With ``level``, a whole node at ``(level, leaf)`` instead. Either bubbles up as far as
+        siblings allow.
         """
         self.delivered += 1
         pos = leaf

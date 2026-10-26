@@ -64,8 +64,8 @@ def steps(
 class ServerTimes(logging.Formatter):
     """A record's line.
 
-    A record's line, and for a service status, when its server was submitted and when it was ready
-    (``time.time()`` stamps).
+    For a service status, also when its server was submitted and when it was ready (``time.time()``
+    stamps).
     """
 
     def format(self, record: logging.LogRecord) -> str:

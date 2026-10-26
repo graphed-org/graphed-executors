@@ -296,7 +296,11 @@ class EscalatingHttpTransport(HttpTransport):
         return self._dual.serve_pid
 
     def send(self, dest: str, message: object) -> bool:
-        """Send ``message`` to ``dest``, retrying; raise once the retries are spent."""
+        """Send ``message`` to ``dest``, retrying; raise once the retries are spent.
+
+        Return ``False`` without sending when ``dest`` is unknown or is this endpoint, and without
+        retrying when ``dest`` answers 503 (its inbox is full).
+        """
         if dest not in self._registry or dest == self.address:
             return False
         host, port = self._registry[dest]

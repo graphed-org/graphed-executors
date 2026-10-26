@@ -56,7 +56,7 @@ class _PidHandler(BaseHTTPRequestHandler):
 def child_main(argv: Sequence[str]) -> int:
     """Write ``{"pid"}`` to ``argv[1]``.
 
-    Write ``{"pid"}`` to ``argv[1]``, then answer every GET on ``("", argv[0])`` with this pid.
+    Then answer every GET on ``("", argv[0])`` with this pid.
     """
     port, report = int(argv[0]), argv[1]
     with open(f"{report}.tmp", "w") as f:
@@ -582,9 +582,8 @@ class RecordingBackend:
     def measure(self) -> tuple[int, int]:
         """Return the pickled sizes of the pick/gather data args and of the map-write results.
 
-        Return the pickled sizes of the pick/gather data args and of the map-write results (pickled
-        bytes of the data args of every pick and gather submit, a future counted as its result;
-        pickled bytes of every map-write result).
+        Pickled bytes of the data args of every pick and gather submit, a future counted as its
+        result; pickled bytes of every map-write result.
         """
         moved = 0
         for key in [k for k in self.submitted() if is_pick(k) or is_gather(k)]:

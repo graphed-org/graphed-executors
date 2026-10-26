@@ -101,8 +101,7 @@ def test_the_posix_branch_multiplies_pages(monkeypatch: pytest.MonkeyPatch) -> N
 class HostingBackend(ThreadBackend):
     """``ThreadBackend(1)`` holding ``driver_memory_mb`` beside the driver.
 
-    ``ThreadBackend(1)`` holding ``driver_memory_mb`` beside the driver and hosting the rest "on
-    the cluster" as listeners here, or refusing them with ``refuse``.
+    It hosts the rest "on the cluster" as listeners here, or refuses them with ``refuse``.
     """
 
     service_hosts = ("driver", "cluster")
@@ -393,8 +392,8 @@ def test_a_job_waiting_only_on_a_busy_node_s_disk_matches() -> None:
 class Pool:
     """``htcondor2`` over a schedd whose every job answers ``status``.
 
-    ``htcondor2`` over a schedd whose every job answers ``status`` (``None``: gone) and a collector
-    that lists no slot; ``log`` records submits (by batch name) and actions.
+    A ``None`` status means gone; the collector lists no slot; ``log`` records submits (by batch
+    name) and actions.
     """
 
     def __init__(self, status: int | None) -> None:

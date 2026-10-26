@@ -1,11 +1,11 @@
 """M38 P7: identity-pinned IPC workers with a BOUNDED (O(log N)) communication overlay.
 
-M38 P7: identity-pinned IPC workers with a BOUNDED (O(log N)) communication overlay, so the peer
-registry a worker inherits is O(log N) — not the O(N²) "every worker inherits every queue" that
-bites large single machines (>128 cores). Covers the shared overlay machinery (lifelines +
-reduction edges), the per-worker actor that resolves its inherited transport, the PinnedProcessPool
-executor, and that a persistent IPC executor reuses its pinned pool. (The dynamic-cluster runtime
-that recomputes this overlay on membership change is Phase 2; it reuses worker_outbox_addresses.)
+The peer registry a worker inherits is thus O(log N) — not the O(N²) "every worker inherits every
+queue" that bites large single machines (>128 cores). Covers the shared overlay machinery
+(lifelines + reduction edges), the per-worker actor that resolves its inherited transport, the
+PinnedProcessPool executor, and that a persistent IPC executor reuses its pinned pool. (The
+dynamic-cluster runtime that recomputes this overlay on membership change is Phase 2; it reuses
+worker_outbox_addresses.)
 """
 
 from __future__ import annotations
@@ -59,8 +59,7 @@ def _flat(n: int) -> str:
 def test_overlay_degree_is_logarithmic_not_linear(n: int, w: int) -> None:
     """Each worker's outbox set (what it inherits beyond its inbox) is O(log w), NOT O(w).
 
-    Each worker's outbox set (what it inherits beyond its inbox) is O(log w), NOT O(w), so a worker
-    inherits O(log N) queue handles and the whole registry is O(N log N).
+    A worker thus inherits O(log N) queue handles and the whole registry is O(N log N).
     """
     addrs = tuple(f"w{i}" for i in range(w))
     out = worker_outbox_addresses(n, make_bounds(n, w), addrs)

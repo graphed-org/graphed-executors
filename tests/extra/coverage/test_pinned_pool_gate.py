@@ -39,9 +39,8 @@ def _pp_sleep(seconds: float) -> None:
 class _FlakyResultQueue:
     """A result queue whose first `.put` raises.
 
-    A result queue whose first `.put` raises (simulating a pickling failure on an unpicklable
-    exception), so `_pinned_loop`'s fallback stand-in path is the only thing that reaches
-    `.received`.
+    That simulates a pickling failure on an unpicklable exception, so `_pinned_loop`'s fallback
+    stand-in path is the only thing that reaches `.received`.
     """
 
     def __init__(self) -> None:

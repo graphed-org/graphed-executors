@@ -307,8 +307,7 @@ def acts(events: list[Event], action: str) -> list[Event]:
 def order_plan(tag: str, *services: str, timeout_s: float = 30.0) -> Any:
     """Two tasks of ``SpyProcess(tag)`` (bound to ``web``) over ``services``, each with an image.
 
-    Two tasks of ``SpyProcess(tag)`` (bound to ``web``) over ``services``, each with an image, so
-    no backend runs one beside the driver.
+    No backend thus runs one beside the driver.
     """
     return spy_plan(
         SpyProcess(tag), 2, [hosted_spec(name, timeout_s=timeout_s) for name in services]

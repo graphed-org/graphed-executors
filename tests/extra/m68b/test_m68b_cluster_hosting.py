@@ -78,8 +78,7 @@ def listeners(ports: list[int]) -> Iterator[None]:
 def job_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Yield a job dir as the cwd on a machine named ``localhost``.
 
-    Yield a job dir as the cwd on a machine named ``localhost`` and ``CHILD`` restored (and any
-    child it names reaped) afterwards.
+    ``CHILD`` is restored (and any child it names reaped) afterwards.
     """
     monkeypatch.chdir(tmp_path)
     (tmp_path / "service").mkdir()

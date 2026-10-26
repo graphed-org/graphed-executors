@@ -129,7 +129,7 @@ def _exceeds_fd_budget(w: int) -> bool:
     if sys.platform == "win32":
         soft = 512
     else:
-        # POSIX only (sys.platform narrows this off Windows for mypy
+        # POSIX only (sys.platform narrows this off Windows for mypy)
         import resource  # noqa: PLC0415
 
         soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
@@ -348,8 +348,7 @@ def _run_with_emit(
 ) -> object:
     """Run one task, emitting STARTED before and FINISHED/ERRORED after (worker-side timing).
 
-    Run one task, emitting STARTED before and FINISHED/ERRORED after (worker-side timing), or in
-    ``lean`` mode only the terminal event, unlabelled. ``emit_event`` is cheap (a local buffer
+    In ``lean`` mode only the terminal event, unlabelled. ``emit_event`` is cheap (a local buffer
     append for processes, an in-process enqueue for threads); the (expensive) profiler serialize
     runs only when ``profile_due()`` says so (time-throttled, off the per-task path). SUBMITTED is
     emitted driver-side. Emission is best-effort.
@@ -460,11 +459,10 @@ def _thread_task(
 def _prime_shared(token: str, payload: bytes) -> int:
     """Cache the broadcast process under ``token`` and return this worker's pid.
 
-    Cache the broadcast process under ``token`` and return this worker's pid, so the driver can
-    confirm coverage. Bounded FIFO (cap ``_SHARED_CACHE_CAP``), evicting the oldest broadcast --
-    identical across workers because every worker sees the same broadcast order, so it stays in
-    lockstep with the driver's token set. The brief hold makes a worker keep this task long enough
-    for its siblings to each claim one (single-round coverage).
+    The pid lets the driver confirm coverage. Bounded FIFO (cap ``_SHARED_CACHE_CAP``), evicting
+    the oldest broadcast -- identical across workers because every worker sees the same broadcast
+    order, so it stays in lockstep with the driver's token set. The brief hold makes a worker keep
+    this task long enough for its siblings to each claim one (single-round coverage).
     """
     if token not in _shared_objects:  # idempotent: re-priming an existing token does not reorder
         _shared_objects[token] = pickle.loads(payload)
@@ -808,8 +806,7 @@ class _BaseExecutor:
     def _settled(self, pool: _PoolExecutor) -> Iterator[_PoolExecutor]:
         """On a normal or ``Exception`` exit of a complete_events run, wait for its leaf futures.
 
-        On a normal or ``Exception`` exit of a complete_events run, wait for its leaf futures, then
-        for their events; a ``KeyboardInterrupt`` leaves at once.
+        Then wait for their events; a ``KeyboardInterrupt`` leaves at once.
         """
         leaves = self._run_leaves
         if leaves is None:
@@ -939,9 +936,8 @@ class _BaseExecutor:
     def _peer_profiler_factory(self) -> Callable[[], WorkerProfiler] | None:
         """Return the picklable per-worker profiler factory (M37), or None.
 
-        Return the picklable per-worker profiler factory (M37), or None, so peer workers profile
-        exactly like the hub path and ``Dashboard(profile=True)`` works under peer (no silent
-        loss).
+        Peer workers then profile exactly like the hub path and ``Dashboard(profile=True)`` works
+        under peer (no silent loss).
         """
         return (
             self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
@@ -1850,11 +1846,10 @@ class _ProcessExecutorBase(_BaseExecutor):
 class ProcessPoolExecutor(_ProcessExecutorBase):
     """Process executor whose peer-reduction IPC uses a **full-registry** worker pool.
 
-    Process executor whose peer-reduction IPC uses a **full-registry** worker pool (the stdlib
-    :class:`concurrent.futures.ProcessPoolExecutor`): every worker inherits every peer's queue via
-    the pool initializer. Simple and fast — the right default up to roughly the per-process
-    file-descriptor limit. Because inheritance is O(N²) in fds, on large many-core machines (>~128
-    cores, or any low ``RLIMIT_NOFILE``) it warns and you should switch to
+    That pool is the stdlib :class:`concurrent.futures.ProcessPoolExecutor`: every worker inherits
+    every peer's queue via the pool initializer. Simple and fast — the right default up to roughly
+    the per-process file-descriptor limit. Because inheritance is O(N²) in fds, on large many-core
+    machines (>~128 cores, or any low ``RLIMIT_NOFILE``) it warns and you should switch to
     :class:`PinnedPoolExecutor` instead. This is the original M7 behaviour, now named explicitly so
     the pool choice is never hidden.
     """
@@ -1865,13 +1860,12 @@ class ProcessPoolExecutor(_ProcessExecutorBase):
 class PinnedPoolExecutor(_ProcessExecutorBase):
     """Process executor whose peer-reduction IPC uses an **identity-pinned** worker pool.
 
-    Process executor whose peer-reduction IPC uses an **identity-pinned** worker pool
-    (:class:`~graphed_executors.local._pinned_pool.PinnedProcessPool`): each worker is spawned once
-    and inherits ONLY its own inbox plus its O(log N) overlay peers (segment-tree reduction targets
-    + hypercube steal lifelines + the driver). The registry is therefore O(N log N), not O(N²), so
-    it stays under the per-process fd limit — the executor to pick for large many-core machines.
-    Identical results to :class:`ProcessPoolExecutor` (bit-for-bit), only the communication
-    footprint differs.
+    That pool is :class:`~graphed_executors.local._pinned_pool.PinnedProcessPool`: each worker is
+    spawned once and inherits ONLY its own inbox plus its O(log N) overlay peers (segment-tree
+    reduction targets + hypercube steal lifelines + the driver). The registry is therefore O(N log
+    N), not O(N²), so it stays under the per-process fd limit — the executor to pick for large
+    many-core machines. Identical results to :class:`ProcessPoolExecutor` (bit-for-bit), only the
+    communication footprint differs.
     """
 
     _peer_pool_is_pinned = True

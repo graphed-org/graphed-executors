@@ -77,9 +77,9 @@ def _worker_addrs(k: int) -> tuple[str, ...]:
 def _parsl_peer_main(spec: dict[str, Any]) -> dict[str, Any]:
     """One peer: mint the endpoint in-task, hello, barrier for the registry.
 
-    One peer: mint the endpoint in-task, hello, barrier for the registry, then the engine body
-    (reduce | shuffle) or the probe/release marker. Its RAW ``__name__`` is the SubmitBackend spy
-    seam — leaves/fragments ride the spec + the pull plane, never per-leaf futures.
+    Then the engine body (reduce | shuffle) or the probe/release marker. Its RAW ``__name__`` is
+    the SubmitBackend spy seam — leaves/fragments ride the spec + the pull plane, never per-leaf
+    futures.
     """
     addr = spec["addr"]
     recv_failures = spec.get("recv_failures") or None
@@ -134,10 +134,10 @@ def _peer_rendezvous(
 ) -> tuple[dict[str, tuple[str, int]] | None, list[tuple[str, Any]], bool]:
     """Announce ``hello`` to the driver.
 
-    Announce ``hello`` to the driver, then block (bounded) for the ``("registry", ...)`` reply,
-    buffering any node/pull traffic that races ahead. Returns ``(peer_registry, prebuffered,
-    released)``; ``released`` is True on an ``("abort"|"done")`` marker (the barrier expired — the
-    peer resolves without doing engine work).
+    Then block (bounded) for the ``("registry", ...)`` reply, buffering any node/pull traffic that
+    races ahead. Returns ``(peer_registry, prebuffered, released)``; ``released`` is True on an
+    ``("abort"|"done")`` marker (the barrier expired — the peer resolves without doing engine
+    work).
     """
     ep.set_registry({DRIVER: (spec["driver_host"], spec["driver_port"])})
     ep.send(DRIVER, ("hello", ep.address, ep.host, ep.port, spec["epoch"]))
@@ -279,10 +279,9 @@ def _barrier_and_registry(
 ) -> list[str]:
     """Collect exactly k hellos (the barrier), assemble the ``{addr: (host, port)}`` book.
 
-    Collect exactly k hellos (the barrier), assemble the ``{addr: (host, port)}`` book, and
-    broadcast it. The driver's OWN registry keeps the TRUE endpoints (so release/attribution reach
-    the peers even under a ``registry_rewrite`` poison); the peers get the possibly-rewritten book.
-    Raises ``_BarrierTimeoutError`` on expiry, naming ``hellos_seen/k``.
+    Then broadcast it. The driver's OWN registry keeps the TRUE endpoints (so release/attribution
+    reach the peers even under a ``registry_rewrite`` poison); the peers get the possibly-rewritten
+    book. Raises ``_BarrierTimeoutError`` on expiry, naming ``hellos_seen/k``.
     """
     hellos: dict[str, tuple[str, int]] = {}
     deadline = time.monotonic() + barrier_timeout_s

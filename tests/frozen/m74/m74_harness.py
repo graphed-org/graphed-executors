@@ -67,8 +67,8 @@ DRIVER_MODULE = "graphed_executors.htcondor_backend.driver"
 class Leaf:
     """Leaf ``i``: a marker file per execution in ``markers``.
 
-    Leaf ``i``: a marker file per execution in ``markers``, then ``[1e16 if i == 0 else 1.0, i]``,
-    so the fold's grouping shows in the bits of element 0.
+    It returns ``[1e16 if i == 0 else 1.0, i]``, so the fold's grouping shows in the bits of
+    element 0.
     """
 
     markers: str
@@ -240,8 +240,7 @@ def _kill(pids: list[int]) -> None:
 def kill_session(proc: Any) -> None:
     """SIGKILL every process in ``proc``'s session, ``wait()`` the driver.
 
-    SIGKILL every process in ``proc``'s session, ``wait()`` the driver, then kill again until no
-    member is left, within ``KILL_TIMEOUT_S``.
+    Then kill again until no member is left, within ``KILL_TIMEOUT_S``.
     """
     sid = proc.pid
     _kill(session_members(sid))

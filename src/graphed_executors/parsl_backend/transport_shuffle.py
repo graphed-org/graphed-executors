@@ -178,8 +178,8 @@ def _gather_repartition(
 ) -> tuple[dict[int, Any], dict[int, str], dict[str, int]]:
     """Coalesce ALL of this peer's cross-fragment pulls to ONE request per holder.
 
-    Coalesce ALL of this peer's cross-fragment pulls to ONE request per holder (the <= k*k incast
-    bound), then reassemble each owned dest in ascending-producer order — byte-identical to local.
+    That is the <= k*k incast bound. Each owned dest is then reassembled in ascending-producer
+    order — byte-identical to local.
     """
     by_holder: dict[str, list[str]] = {}
     for _dest, per_side in assign.items():

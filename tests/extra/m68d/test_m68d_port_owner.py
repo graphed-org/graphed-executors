@@ -97,8 +97,7 @@ def bound_during_the_dial(
 ) -> list[bool]:
     """``module``'s ``check`` passes.
 
-    ``module``'s ``check`` passes, and ``port`` gains a listener nobody's tree holds as the first
-    dial runs.
+    Also, ``port`` gains a listener nobody's tree holds as the first dial runs.
     """
     bound: list[bool] = []
 

@@ -320,9 +320,8 @@ def touch(path: Path) -> None:
 class GatedGet:
     """Task ``i`` marks ``t<i>.start``; from task 1 on it waits for ``killed``.
 
-    Task ``i`` marks ``t<i>.start``; from task 1 on it waits for ``killed``, then it GETs the bound
-    service, marking ``t<i>.done``, or ``t<i>.error`` holding the exception's repr before
-    re-raising.
+    Then it GETs the bound service, marking ``t<i>.done``, or ``t<i>.error`` holding the
+    exception's repr before re-raising.
     """
 
     endpoint: str | None = None
@@ -351,8 +350,7 @@ class GatedGet:
 class SlowToLoad(GatedGet):
     """:class:`GatedGet` whose first unpickling in a driver job sleeps ``delay_s``.
 
-    :class:`GatedGet` whose first unpickling in a driver job sleeps ``delay_s``, so the driver
-    binds its task server that much later.
+    The driver thus binds its task server that much later.
     """
 
     delay_s: float = 0.0
@@ -371,7 +369,7 @@ _LOADED: list[bool] = []
 class RaiseIn:
     """Raises the builtin ``error`` named (``PLAN_ERROR`` its message).
 
-    Raises the builtin ``error`` named (``PLAN_ERROR`` its message), or returns ``((i, "ok"),)``.
+    Otherwise returns ``((i, "ok"),)``.
     """
 
     error: str | None
@@ -846,8 +844,7 @@ def node_ad(status: int, memory_mb: int = 4000, **extra: Any) -> FakeAd:
 def machine_ads() -> list[FakeAd]:
     """One partitionable slot of 16000 MiB, 8 CPUs and 1 GPU, busy down to 2000 MiB free.
 
-    One partitionable slot of 16000 MiB, 8 CPUs and 1 GPU, busy down to 2000 MiB free, and its
-    dynamic slot (which the collector lists too).
+    Also its dynamic slot (which the collector lists too).
     """
     return [
         FakeAd(

@@ -119,8 +119,7 @@ class ServiceUnavailableError(Exception):
 class ServiceUnreachableError(Exception):
     """Service ``name`` at ``endpoint`` did not pass its check from a worker.
 
-    Service ``name`` at ``endpoint`` did not pass its check from a worker (``worker`` the answering
-    host's identity, empty when none answered); ``reason`` says why.
+    ``worker`` is the answering host's identity, empty when none answered; ``reason`` says why.
     """
 
     def __init__(self, name: str, endpoint: str, worker: str, reason: str) -> None:
@@ -182,9 +181,8 @@ class Endpoints(Mapping[str, str]):
 def machine_ad(attr: str, env: str = "_CONDOR_MACHINE_AD") -> str | None:
     """``attr`` of the ad file ``$<env>`` names.
 
-    ``attr`` of the ad file ``$<env>`` names (string quotes dropped; ``_CONDOR_JOB_AD`` for the
-    job's own ad), read without the bindings; ``None`` outside a job or when the ad has no such
-    line.
+    String quotes dropped; ``_CONDOR_JOB_AD`` names the job's own ad. Read without the bindings;
+    ``None`` outside a job or when the ad has no such line.
     """
     path = os.environ.get(env)
     if path and os.path.isfile(path):
@@ -437,8 +435,7 @@ def _stop_child(proc: subprocess.Popen[bytes], name: str) -> None:
 def _free_port(host: str, ports: tuple[int, int]) -> int:
     """Return the first port of the inclusive range that binds on ``host`` now.
 
-    Return the first port of the inclusive range that binds on ``host`` now and that nothing
-    answers a connect on; the last error when none does.
+    Nothing may answer a connect on it either; the last error when none does.
 
     On POSIX the scan sets ``SO_REUSEADDR`` so a port whose earlier connections sit in TIME_WAIT is
     not skipped (the managed child binds with it too, as ``http.server`` does; without it

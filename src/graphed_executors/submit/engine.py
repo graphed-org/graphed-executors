@@ -126,8 +126,8 @@ class WorkerEnv(Protocol):
 class _DefaultEnv:
     """The process-global fallback env for a task run outside any backend shim.
 
-    The process-global fallback env for a task run outside any backend shim (e.g. a bare
-    ``process`` call): a shared :class:`LocalResources` and a no-op emit.
+    Such a run is e.g. a bare ``process`` call; the env is a shared :class:`LocalResources` and a
+    no-op emit.
     """
 
     def __init__(self) -> None:
@@ -171,9 +171,9 @@ _PAYLOAD_CACHE_CAP = 32
 def _shared_payload(token: str, raw: bytes) -> object:
     """Deserialize the broadcast payload ONCE per worker process.
 
-    Deserialize the broadcast payload ONCE per worker process (bounded FIFO cache keyed by
-    ``token``) — even though the future's raw bytes are already cached by the backend per worker,
-    the ``pickle.loads`` (and any ``__setstate__`` cost) must not repeat per task (dask/dask#5503).
+    A bounded FIFO cache keyed by ``token`` — even though the future's raw bytes are already cached
+    by the backend per worker, the ``pickle.loads`` (and any ``__setstate__`` cost) must not repeat
+    per task (dask/dask#5503).
     """
     cached = _PAYLOAD_CACHE.get(token, _MISSING)
     if cached is _MISSING:
@@ -1002,8 +1002,8 @@ class SubmitRunner:
     def _result(self, fut: SubmitFuture, key_to_task: dict[str, Task]) -> object:
         """Resolve a future, translating a backend worker-death signal.
 
-        Resolve a future, translating a backend worker-death signal (``KilledWorker``) into an
-        attributed :class:`StageError` (plan §1.4). Ordinary exceptions re-raise intact.
+        The signal is a ``KilledWorker``; it becomes an attributed :class:`StageError` (plan §1.4).
+        Ordinary exceptions re-raise intact.
         """
         try:
             return fut.result()

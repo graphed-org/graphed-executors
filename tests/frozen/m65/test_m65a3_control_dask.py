@@ -1,7 +1,6 @@
 """m65 A3: ``dask_runner`` honours a ``RunControl`` per A-2.
 
-m65 A3: ``dask_runner`` honours a ``RunControl`` per A-2, and its window is the cluster's task
-slots.
+Its window is the cluster's task slots.
 """
 
 from __future__ import annotations

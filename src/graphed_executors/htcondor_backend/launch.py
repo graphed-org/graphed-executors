@@ -98,8 +98,8 @@ def located_schedd(htc: Any, locate: tuple[str, str]) -> Any:
 def ensure_credential(htc: Any, desc: Mapping[str, str]) -> None:
     """Store the submitter's Kerberos credential, as ``condor_submit`` does.
 
-    Store the submitter's Kerberos credential, as ``condor_submit`` does and ``schedd.submit`` does
-    not, when ``desc`` sends one and the credd holds none: such a job never starts.
+    ``schedd.submit`` does not store it. Only when ``desc`` sends one and the credd holds none:
+    such a job never starts.
     """
     if str(desc.get("MY.SendCredential", "")).lower() != "true":
         return
@@ -133,8 +133,7 @@ def write_secret(path: Path, secret: bytes) -> None:
 class PilotLauncher(Protocol):
     """Starts ``n`` pilots that call back to ``url`` with ``secret``, counts the live ones.
 
-    Starts ``n`` pilots that call back to ``url`` with ``secret``, counts the live ones, and
-    removes them.
+    Then removes them.
     """
 
     def start(self, url: str, secret: bytes, n: int) -> None:
@@ -356,10 +355,9 @@ class CondorPilots:
     ) -> Path:
         """Write the job script running ``python -m <module> "$@"``.
 
-        Write the job script running ``python -m <module> "$@"`` and, when the site ships it,
-        ``env.tgz``. ``placeholder`` (the driver's) is written as ``result.pkl``, and
-        ``driver.log`` created, before the interpreter starts: a job whose declared outputs are
-        missing at exit is held, whatever killed it.
+        Also ``env.tgz`` when the site ships it. ``placeholder`` (the driver's) is written as
+        ``result.pkl``, and ``driver.log`` created, before the interpreter starts: a job whose
+        declared outputs are missing at exit is held, whatever killed it.
         """
         pre = ""
         if placeholder is not None:
@@ -400,7 +398,7 @@ class CondorPilots:
     def _remove(self, htc: Any, schedd: Any, constraint: str) -> None:
         """Fetch a spooled cluster's finished logs into ``log_dir``.
 
-        Fetch a spooled cluster's finished logs into ``log_dir`` and remove what is still queued.
+        Then remove what is still queued.
         """
         left = schedd.query(constraint=constraint, projection=["JobStatus"])
         if left:
@@ -459,7 +457,7 @@ class CondorPilots:
     def hold_queued(self) -> None:
         """Hold the idle pilots, under graphed's own reason.
 
-        Hold the idle pilots, under graphed's own reason, so none takes a slot a service waits for.
+        No pilot then takes a slot a service waits for.
         """
         constraint = f"{self._constraint} && JobStatus == 1"
         self._schedd.act(_htcondor().JobAction.Hold, constraint, reason=CondorReason(HOLD_REASON))
@@ -486,7 +484,7 @@ class CondorPilots:
     def stop(self) -> None:
         """Wait for the pilots to exit, fetch the spooled logs into ``log_dir``.
 
-        Wait for the pilots to exit, fetch the spooled logs into ``log_dir``, and remove the jobs.
+        Then remove the jobs.
         """
         if self.cluster is not None:  # none submitted: nothing to wait for
             # removal still runs

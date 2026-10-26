@@ -64,9 +64,9 @@ def test_parsl_extra_is_the_dated_floor_with_no_marker() -> None:
 def test_main_coverage_omit_covers_common_and_parsl_backend() -> None:
     """The main matrix installs neither dask nor parsl.
 
-    The main matrix installs neither dask nor parsl, so the three optional packages would register
-    ~0% and sink fail_under=90 on every OS — the established omit-because-gated-elsewhere pattern
-    must now cover all three (plan §1.6 item 1; fail_under itself UNTOUCHED).
+    The three optional packages would thus register ~0% and sink fail_under=90 on every OS — the
+    established omit-because-gated-elsewhere pattern must now cover all three (plan §1.6 item 1;
+    fail_under itself UNTOUCHED).
     """
     data = _pyproject()
     omit = set(data["tool"]["coverage"]["run"]["omit"])

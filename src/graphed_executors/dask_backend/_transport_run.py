@@ -1,7 +1,7 @@
 """Dask-model-specific driver helpers for the m44 worker-transport entry points.
 
-Dask-model-specific driver helpers for the m44 worker-transport entry points (``transport_peer`` /
-``transport_shuffle``), plus a re-export shim over the moved shared types.
+The entry points are ``transport_peer`` and ``transport_shuffle``; the module is also a re-export
+shim over the moved shared types.
 
 The witness/result dataclasses + the failure classifier MOVED to
 :mod:`graphed_executors.common.transport_run` (plan §1.6 m47) so the parsl peer-exchange engine
@@ -70,9 +70,8 @@ def require_pin(dbackend: Any) -> None:
 def sorted_addresses(dbackend: Any) -> tuple[str, ...]:
     """Return the F8 deterministic worker-address order every ownership/pin decision keys on.
 
-    Return the F8 deterministic worker-address order every ownership/pin decision keys on (same as
-    the harness ``sorted(client.scheduler_info()['workers'])``). Same-package private ``_client``
-    access.
+    The same order as the harness ``sorted(client.scheduler_info()['workers'])``. Same-package
+    private ``_client`` access.
 
     An EMPTY read is treated as a stale snapshot, not a real state: ``Client.scheduler_info()``
     returns the client's ``_scheduler_identity`` cache, refreshed asynchronously, so on a slow

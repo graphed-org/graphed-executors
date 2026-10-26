@@ -140,8 +140,7 @@ def in_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def driver_job(tmp_path: Path, services: tuple[str, ...]) -> tuple[Path, Path]:
     """Return a DAG driver job's dir over pilots="condor", each of ``services`` a SERVICE node.
 
-    Return a DAG driver job's dir over pilots="condor", each of ``services`` a SERVICE node and its
-    DAG dir.
+    Also returns its DAG dir.
     """
     job, dag = tmp_path / "job", tmp_path / "dag"
     job.mkdir()

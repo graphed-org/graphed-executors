@@ -1,7 +1,6 @@
 """m65 B: the peer actors push task events and profiles to the worker monitor, in lean form.
 
-m65 B: the peer actors push task events and profiles to the worker monitor, in lean form, and ship
-neither stream to the driver. Actors run in threads by the m38 in-process patterns.
+They ship neither stream to the driver. Actors run in threads by the m38 in-process patterns.
 """
 
 from __future__ import annotations

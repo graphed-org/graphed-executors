@@ -111,8 +111,7 @@ class SleepyLeaf:
 def sleepy_plan(plan_id: int) -> Plan[float]:
     """Plan ``plan_id`` has ``9 + plan_id`` slow leaves.
 
-    Plan ``plan_id`` has ``9 + plan_id`` slow leaves, so concurrent plans differ in shape and
-    value.
+    Concurrent plans thus differ in shape and value.
     """
     tasks = tuple(
         Task(k, Partition(f"mem://m63/sleepy/{plan_id}", "t", k, k + 1))

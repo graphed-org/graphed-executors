@@ -738,8 +738,7 @@ class AnnounceRun:
     def wait(self, timeout_s: float) -> int:
         """Return the exit code.
 
-        Return the exit code or a failure naming the output when it does not exit within
-        ``timeout_s``.
+        Or a failure naming the output when it does not exit within ``timeout_s``.
         """
         try:
             code = self.proc.wait(timeout_s)
@@ -844,9 +843,8 @@ class TimedGet:
 class GatedGet:
     """A plan process that polls ``gate`` (an HTTP URL) until it answers ``open``.
 
-    A plan process that polls ``gate`` (an HTTP URL) until it answers ``open``, then GETs ``/`` on
-    its bound ``service`` and returns ``((time.time(), body),)``: the test decides when the task
-    finishes.
+    Then GETs ``/`` on its bound ``service`` and returns ``((time.time(), body),)``: the test
+    decides when the task finishes.
     """
 
     gate: str

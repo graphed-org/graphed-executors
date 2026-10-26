@@ -321,9 +321,8 @@ def _make_cluster(comms: str, k: int, store_root: str | None, advertise_host: st
 def _assign(n_src: int, n_tasks: int) -> list[list[int]]:
     """Split ``n_src`` src_pids into ``n_tasks`` CONTIGUOUS ascending ranges.
 
-    Split ``n_src`` src_pids into ``n_tasks`` CONTIGUOUS ascending ranges, so a producer-task
-    coalesces several src_pids (T ~ W, not T = N) and the gather's ascending-task order is exactly
-    the ascending-src_pid merge order (§4.0).
+    A producer-task thus coalesces several src_pids (T ~ W, not T = N) and the gather's
+    ascending-task order is exactly the ascending-src_pid merge order (§4.0).
     """
     base, rem = divmod(n_src, n_tasks)
     ranges: list[list[int]] = []
@@ -481,8 +480,7 @@ def _stage2_gather(
 ) -> tuple[dict[int, Any], dict[int, str]]:
     """Gather each dest in ascending-task (== ascending-src_pid) order — the deterministic merge.
 
-    Gather each dest in ascending-task (== ascending-src_pid) order — the deterministic merge, but
-    with two M41 reader-plane hardenings over the M39 per-dest concat:.
+    It has two M41 reader-plane hardenings over the M39 per-dest concat:
 
     - **T2 incast avoidance:** cross-node pulls are COALESCED to one bulk fetch per (gather,
       holder) node-pair (``bulk_fetch_count <= K*K``), instead of one ``cluster.get`` per (task,
@@ -776,8 +774,8 @@ def _run_shuffle_join(
 ) -> tuple[dict[int, Any], dict[int, str]]:
     """Shuffle both sides on ``__joinkey__`` (same ``parts`` + ``salt`` ⇒ co-partitioned).
 
-    Shuffle both sides on ``__joinkey__`` (same ``parts`` + ``salt`` ⇒ co-partitioned), then gather
-    the two sides per dest in ascending-task order and join them (spilling under ``mem_budget``).
+    Then gather the two sides per dest in ascending-task order and join them (spilling under
+    ``mem_budget``).
 
     F1: a dest that only got rows from ONE side is not dropped — how=left/outer keeps a BUILD-only
     dest, how=right/outer keeps a PROBE-only dest. The absent side's ORIGINAL other-side block
@@ -868,10 +866,9 @@ def _run_broadcast_join(
 ) -> tuple[dict[int, Any], dict[int, str]]:
     """Replicate the small build (left) side to every node.
 
-    Replicate the small build (left) side to every node and join each probe (right) partition
-    against the whole build — the large side is NEVER shuffled (``large_side_blocks == 0``).
-    ``value`` is keyed by probe-partition index; the join RESULT (union over blocks) equals the
-    shuffle join.
+    Then join each probe (right) partition against the whole build — the large side is NEVER
+    shuffled (``large_side_blocks == 0``). ``value`` is keyed by probe-partition index; the join
+    RESULT (union over blocks) equals the shuffle join.
 
     F2: joining each probe block independently against the WHOLE build side would re-emit an
     unmatched build row once per block (N-fold). So for how=left/outer, each block is joined with

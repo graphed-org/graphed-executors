@@ -1,7 +1,7 @@
 """m66 D5: a dead pilot's lease is re-queued once to another pilot.
 
-m66 D5: a dead pilot's lease is re-queued once to another pilot, then surfaces as a ``StageError``
-attributed to the partition. ``server.LEASE_S`` is 2 s here, so a pilot counts as lost after 2 s.
+Then it surfaces as a ``StageError`` attributed to the partition. ``server.LEASE_S`` is 2 s here,
+so a pilot counts as lost after 2 s.
 
 Discriminates requeue-forever (the poisoned uri kills a third pilot, or the run hangs),
 fail-on-first-loss (the die-once run errors), a second ``set_running_or_notify_cancel`` on requeue

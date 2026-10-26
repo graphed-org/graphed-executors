@@ -1,7 +1,6 @@
-"""A plan whose op is a closure.
+"""A plan whose op is a closure runs on the process pool (GW33).
 
-A plan whose op is a closure, or whose partials carry a backend behavior holding a lambda, runs on
-the process pool (GW33).
+So does one whose partials carry a backend behavior holding a lambda.
 """
 
 from __future__ import annotations

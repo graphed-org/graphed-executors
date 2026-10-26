@@ -98,8 +98,8 @@ def test_the_model_repository_holds_graphed_identity() -> None:
 def test_the_all_os_job_installs_the_health_checking_package() -> None:
     """§6: the all-OS ``test`` job installs ``grpcio-health-checking``.
 
-    §6: the all-OS ``test`` job installs ``grpcio-health-checking`` (the reference servicer the
-    gRPC cases of ``test_service_checks.py`` serve), so those cases run there instead of failing.
+    It is the reference servicer the gRPC cases of ``test_service_checks.py`` serve, so those cases
+    run there instead of failing.
     """
     assert "grpcio-health-checking" in job_text("test")
 

@@ -1,7 +1,6 @@
 """A driver's in-job rerun after a SERVICE node re-announces runs the plan ``resumable`` wrapped.
 
-A driver's in-job rerun after a SERVICE node re-announces runs the plan ``resumable`` wrapped, so
-with a store the tasks the first run finished are served, not run again.
+With a store, the tasks the first run finished are therefore served, not run again.
 """
 
 from __future__ import annotations

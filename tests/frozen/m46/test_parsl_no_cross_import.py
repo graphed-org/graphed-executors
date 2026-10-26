@@ -70,10 +70,10 @@ def _run_probe(probe: str) -> None:
 
 
 def test_parsl_backend_imports_without_parsl_dask_or_distributed() -> None:
-    """A fresh interpreter imports the package and both pinned public names while parsl, dask.
+    """A fresh interpreter imports the package and both pinned public names, no extra loaded.
 
-    A fresh interpreter imports the package and both pinned public names while parsl, dask, and
-    distributed all stay unimported (works whether or not the extras are installed).
+    Parsl, dask, and distributed all stay unimported (works whether or not the extras are
+    installed).
     """
     _run_probe(PARSL_BACKEND_PROBE)
 

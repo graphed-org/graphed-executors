@@ -56,9 +56,8 @@ def nothing() -> None:
 class FailFirst:
     """A task process that raises on its first ``failures`` attempts at each partition.
 
-    A task process that raises on its first ``failures`` attempts at each partition and returns 1
-    after; each attempt leaves a marker file under ``marks``, so the count crosses worker
-    processes.
+    It returns 1 after; each attempt leaves a marker file under ``marks``, so the count crosses
+    worker processes.
     """
 
     marks: str
