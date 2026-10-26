@@ -46,7 +46,8 @@ HOST = "127.0.0.1"  # single-machine HTEX: peers + driver share the host, so loo
 _ROOT_TIMEOUT_S = 30.0  # default bound on the driver's root wait (a peer error breaks it sooner)
 _IDLE_SLACK_S = 60.0  # reduce peer lost-done backstop margin ABOVE root_timeout_s (> the 25 s send
 #                       worst case + slack); the idle deadline is DERIVED, never double-hardcoded
-# 90.0 at the default (parsl_run_plan re-derives)
+
+# The idle deadline: 90.0 at the default (parsl_run_plan re-derives it).
 _IDLE_DEADLINE_S = _ROOT_TIMEOUT_S + _IDLE_SLACK_S
 _BARRIER_DEFAULT_S = 60.0  # production barrier bound (> the 25 s inline-send worst case)
 _PROBE_TIMEOUT_S = 5.0
