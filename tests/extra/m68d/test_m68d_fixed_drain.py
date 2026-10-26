@@ -34,7 +34,7 @@ from m68d_harness import (
 from graphed_executors.htcondor_backend import HTCondorBackend, HTCondorRunner, LocalPilots
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit.engine import _DRAIN_TIMEOUT_S
-from graphed_executors.submit.services import ServiceUnreachable
+from graphed_executors.submit.services import ServiceUnreachableError
 
 
 @pytest.mark.parametrize("kind", ["thread", "htcondor"])
@@ -91,5 +91,5 @@ def test_a_task_whose_service_is_gone_raises_within_the_drain_timeout_with_a_mon
         took = time.monotonic() - killed
     finally:
         run_bounded(runner.close, 120.0)
-    assert isinstance(err, ServiceUnreachable), repr(err)
+    assert isinstance(err, ServiceUnreachableError), repr(err)
     assert took < _DRAIN_TIMEOUT_S / 2, f"raised {took:.1f}s after the service died"

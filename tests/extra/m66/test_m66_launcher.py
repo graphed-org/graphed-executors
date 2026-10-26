@@ -77,12 +77,12 @@ def test_no_answering_collector_is_an_error_naming_each_node() -> None:
         CondorPilots(queried_site())._choose(fake_htcondor("down empty"))
 
 
-class BindingsReached(Exception):
+class BindingsReachedError(Exception):
     pass
 
 
 def stop_at_bindings() -> Any:
-    raise BindingsReached
+    raise BindingsReachedError
 
 
 def test_the_default_log_dir_is_fresh_under_the_sandbox_root(
@@ -101,7 +101,7 @@ def test_the_default_log_dir_is_fresh_under_the_sandbox_root(
     )
     pilots = [CondorPilots(site) for _ in range(2)]
     for p in pilots:
-        with pytest.raises(BindingsReached):
+        with pytest.raises(BindingsReachedError):
             p.start("http://127.0.0.1:1", b"secret", 1)
     dirs = [p.log_dir for p in pilots]
     assert dirs[0] != dirs[1]

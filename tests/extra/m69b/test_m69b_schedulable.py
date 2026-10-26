@@ -46,7 +46,7 @@ from graphed_executors.htcondor_backend.services import (
 from graphed_executors.submit import ThreadBackend
 from graphed_executors.submit.services import (
     ServiceSet,
-    ServiceUnavailable,
+    ServiceUnavailableError,
     host_identity,
     machine_ad,
     physical_memory_mb,
@@ -115,7 +115,7 @@ class HostingBackend(ThreadBackend):
 
     def host_service(self, spec: ServiceSpec, scope: str) -> tuple[str, str, str]:
         if self.refuse is not None:
-            raise ServiceUnavailable(spec.name, {"managed": self.refuse})
+            raise ServiceUnavailableError(spec.name, {"managed": self.refuse})
         sock = socket.create_server(("127.0.0.1", 0))
         key = f"{scope}-{len(self.hosted)}"
         self.hosted[key] = sock
@@ -166,7 +166,7 @@ def test_a_cluster_refusal_keeps_why_the_earlier_legs_failed(
     backends: list[HostingBackend],
 ) -> None:
     backend = hosting(backends, 137, refuse="no slot holds it")
-    with pytest.raises(ServiceUnavailable) as err:
+    with pytest.raises(ServiceUnavailableError) as err:
         ServiceSet([spec("big", 311)], backend).start()
     assert list(err.value.legs) == ["user", "site", "driver", "managed"]
     assert err.value.legs["managed"] == "no slot holds it"
@@ -245,7 +245,7 @@ def test_a_driver_job_refuses_a_service_too_big_for_its_slot_naming_the_sizes(
         NoPilots(), 1, host="127.0.0.1", in_job=SITES["generic"], announced={"gpu": "svc0"}
     )
     try:
-        with pytest.raises(ServiceUnavailable) as refused:
+        with pytest.raises(ServiceUnavailableError) as refused:
             ServiceSet([spec("small", 200)], backend, scope="p").start()
         managed = refused.value.legs["managed"]
         assert "200 MiB" in managed and "driver_memory_mb of 100 MiB" in managed, (
@@ -974,7 +974,7 @@ def test_a_later_plan_s_refusal_says_the_runner_s_pilots_keep_their_slots_until_
         backend._need()  # a first plan's need of a worker: the deferred pilots are submitted
         assert pilots.cluster is not None
         pool.running.add(pilots.cluster[1])
-        with pytest.raises(ServiceUnavailable) as refused:
+        with pytest.raises(ServiceUnavailableError) as refused:
             ServiceSet([spec("web", 600)], backend, scope="later").start()
         managed = refused.value.legs["managed"]
         label = f"pilots (cluster {pilots.cluster[1]}, whose slots stay taken until it closes)"
@@ -1008,7 +1008,7 @@ def test_a_first_plan_s_server_is_refused_where_only_its_set_s_earlier_server_ho
         assert other.cluster is not None
         pool.running.add(other.cluster)
         backend._services[other.key] = other
-        with pytest.raises(ServiceUnavailable) as refused:
+        with pytest.raises(ServiceUnavailableError) as refused:
             ServiceSet([spec("web1", 600), spec("web2", 600)], backend, scope="s").start()
         managed = refused.value.legs["managed"]
         web1, web2 = (

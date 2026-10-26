@@ -15,7 +15,7 @@ start (leg 3), beside the driver or, for a name in ``run.json["announce_only"]``
 of the run's DAG SERVICE node, to which the driver publishes its url and an announce secret in
 ``run.json["dag_dir"]``; the run then re-checks and probes them as leg-1 endpoints inside
 ``runner.run`` and resolves its value while they are still up. A run that raises
-``ServiceUnreachable`` for a SERVICE node's service is run again (``rerun: <error>`` in
+``ServiceUnreachableError`` for a SERVICE node's service is run again (``rerun: <error>`` in
 ``driver.log``) under a new set, which waits for that node's next announce; every rerun needs a
 fresh announce, so the loop is bounded by the node's restarts.
 
@@ -27,8 +27,8 @@ fresh announce, so the loop is bounded by the node's restarts.
   service set (its endpoints and placement are environment; *this plan's decision*, plan-services
   D6). Inside ``runner.run``: a run whose workers were lost (a ``KilledWorker`` ``StageError``,
   e.g. every pilot preempted; *owner ruling 2026-09-25*), a ``StoreUnavailable``, and the run's own
-  service phase or a failed task's re-check of its services (``ServiceUnavailable``,
-  ``ServiceUnreachable`` and a probe's raw ``WorkerLost``; *this plan's decision*).
+  service phase or a failed task's re-check of its services (``ServiceUnavailableError``,
+  ``ServiceUnreachableError`` and a probe's raw ``WorkerLostError``; *this plan's decision*).
 - 3: an ``EnvironmentChanged`` from making the plan resumable on ``run.json["store"]``, and every
   other exception from ``runner.run(plan)``: the plan's own error, deterministic, so the job's
   ``retry_until`` (a DAG's ``RETRY driver 2 UNLESS-EXIT 3``) stops retrying it. A ``StageError``
@@ -55,8 +55,8 @@ from graphed.debug import StageError
 from graphed_executors.local._portable import PICKLE_ERRORS, Portable
 from graphed_executors.submit.services import (
     ServiceSet,
-    ServiceUnavailable,
-    ServiceUnreachable,
+    ServiceUnavailableError,
+    ServiceUnreachableError,
     host_identity,
     release_quietly,
 )
@@ -73,7 +73,7 @@ from .launch import (
     LocalPilots,
     publish,
 )
-from .server import WorkerLost
+from .server import WorkerLostError
 from .sites import SITES
 
 EXIT_DONE, EXIT_FAILED, EXIT_PLAN_ERROR = 0, 1, 3
@@ -173,7 +173,7 @@ def _exit_code(exc: Exception) -> int:
     """
     lost = isinstance(exc, StageError) and exc.cause_type == "KilledWorker"
     environment = isinstance(
-        exc, ServiceUnavailable | ServiceUnreachable | WorkerLost | StoreUnavailable
+        exc, ServiceUnavailableError | ServiceUnreachableError | WorkerLostError | StoreUnavailable
     )
     return EXIT_FAILED if lost or environment else EXIT_PLAN_ERROR
 
@@ -245,7 +245,9 @@ def main(argv: list[str] | None = None) -> int:
                         plan, runner, run.get("endpoints") or {}, log, start
                     )
                     # a run binds its endpoints once: a SERVICE node's new one takes a new run
-                    if not (isinstance(error, ServiceUnreachable) and error.name in announced):
+                    if not (
+                        isinstance(error, ServiceUnreachableError) and error.name in announced
+                    ):
                         break
                     print(f"rerun: {error}", file=log, flush=True)
                     plan = wrapped()

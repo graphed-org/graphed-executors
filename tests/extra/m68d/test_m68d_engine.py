@@ -18,7 +18,7 @@ from m68d_extra_parts import failing_combine, gated_leaf, no_leaves
 from graphed_executors.htcondor_backend import HTCondorBackend, HTCondorRunner, LocalPilots
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit.engine import _service_checked
-from graphed_executors.submit.services import ServiceUnreachable, host_identity
+from graphed_executors.submit.services import ServiceUnreachableError, host_identity
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68d"))
 from m68d_harness import (
@@ -69,7 +69,7 @@ def test_the_first_service_whose_check_fails_is_named() -> None:
             ("gone", gone.endpoint, "tcp"),
             ("also", gone.endpoint, "tcp"),
         )
-        with pytest.raises(ServiceUnreachable) as info:
+        with pytest.raises(ServiceUnreachableError) as info:
             _service_checked(checks, _raises)
         assert live.gets() == 1, "the live service was not re-checked first"
     err = info.value
@@ -94,7 +94,7 @@ def test_a_windowed_run_whose_service_is_gone_raises_service_unreachable(tmp_pat
         web.close()
         (mark / "killed").touch()
         err = run.error()
-    assert isinstance(err, ServiceUnreachable) and (err.name, err.endpoint) == (
+    assert isinstance(err, ServiceUnreachableError) and (err.name, err.endpoint) == (
         SERVICE,
         web.endpoint,
     ), repr(err)

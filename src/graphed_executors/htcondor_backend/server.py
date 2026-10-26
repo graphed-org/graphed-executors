@@ -12,9 +12,9 @@ here.
 
 A task waits in PENDING until its future arguments are done, then queues. Its first lease moves it
 to RUNNING. A pilot silent for ``LEASE_S`` is lost: each task it held is re-queued once, and a
-second loss fails it with :class:`WorkerLost`. A task leased longer than ``task_timeout_s`` fails
-with :class:`TaskTimedOut` and its pilot is lost. When no pilot is left and none can come, queued
-tasks fail too.
+second loss fails it with :class:`WorkerLostError`. A task leased longer than ``task_timeout_s``
+fails with :class:`TaskTimedOutError` and its pilot is lost. When no pilot is left and none can
+come, queued tasks fail too.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ TASK_HEADER = "X-Graphed-Task"
 _HOSTPORT = re.compile(r".+:[0-9]+")
 
 
-class WorkerLost(Exception):
+class WorkerLostError(Exception):
     """A task's pilot was lost twice (``pilot`` names the last one).
 
     A task's pilot was lost twice (``pilot`` names the last one), or no pilot is left to run it.
@@ -81,7 +81,7 @@ def settle(fut: Future[Any], value: object = None, exc: BaseException | None = N
             fut.set_result(value)
 
 
-class TaskTimedOut(TimeoutError):
+class TaskTimedOutError(TimeoutError):
     """Task ``key`` ran on ``pilot`` longer than ``seconds``, the backend's ``task_timeout_s``."""
 
     def __init__(self, key: str, pilot: str, seconds: float) -> None:
@@ -359,7 +359,7 @@ class TaskServer:
                     del self._tasks[tid]  # its pilot's late result is dropped
                     # a pilot runs one task: it stops at its next beat
                     self._lost.add(task.leased_to)
-                    failed.append((task.fut, TaskTimedOut(task.key, task.leased_to, limit)))
+                    failed.append((task.fut, TaskTimedOutError(task.key, task.leased_to, limit)))
             for pilot, beat in self._beats.items():
                 if pilot in self._lost or now - beat <= LEASE_S:
                     continue
@@ -369,7 +369,7 @@ class TaskServer:
                         continue
                     if task.requeued:
                         del self._tasks[tid]
-                        failed.append((task.fut, WorkerLost(task.key, pilot)))
+                        failed.append((task.fut, WorkerLostError(task.key, pilot)))
                     else:
                         task.requeued, task.leased_to = True, None
                         self._queue.appendleft(tid)
@@ -384,7 +384,7 @@ class TaskServer:
             with self._cond:
                 for tid in self._queue:
                     task = self._tasks.pop(tid)
-                    failed.append((task.fut, WorkerLost(task.key, where)))
+                    failed.append((task.fut, WorkerLostError(task.key, where)))
                 self._queue.clear()
         for fut, exc in failed:
             settle(fut, exc=exc)

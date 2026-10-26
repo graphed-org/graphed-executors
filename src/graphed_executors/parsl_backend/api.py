@@ -38,7 +38,7 @@ from graphed_executors.common.facade import (
 from .transport_peer import (
     _BARRIER_DEFAULT_S,
     _ROOT_TIMEOUT_S,
-    ProbeUnreachable,
+    ProbeUnreachableError,
     _barrier_and_registry,
     _collect_probes,
     _open_driver_endpoint,
@@ -123,7 +123,7 @@ def run_repartition(
                 else epoch_restarts_allowed,
                 registry_rewrite=registry_rewrite,
             )
-        except ProbeUnreachable as pu:
+        except ProbeUnreachableError as pu:
             return _on_probe_failure(
                 pu,
                 on_unreachable,
@@ -188,7 +188,7 @@ def run_join(
                 if epoch_restarts_allowed is None
                 else epoch_restarts_allowed,
             )
-        except ProbeUnreachable as pu:
+        except ProbeUnreachableError as pu:
             return _on_probe_failure(
                 pu,
                 on_unreachable,
@@ -282,7 +282,9 @@ def _require_peer_transport(pbackend: Any) -> None:
         )
 
 
-def _on_probe_failure(pu: ProbeUnreachable, on_unreachable: str | None, run_relay: Any) -> Any:
+def _on_probe_failure(
+    pu: ProbeUnreachableError, on_unreachable: str | None, run_relay: Any
+) -> Any:
     """Route a rendezvous-time probe failure.
 
     ``"fallback"`` -> the relay engine (labeled), else an attributed ``StageError`` naming the
@@ -299,7 +301,7 @@ def _on_probe_failure(pu: ProbeUnreachable, on_unreachable: str | None, run_rela
         frames=(SourceFrame(filename="reachability-probe", lineno=0),),
         input_forms=(),
         partition="reachability-probe",
-        cause_type="ProbeUnreachable",
+        cause_type="ProbeUnreachableError",
         cause_message="peer overlay unreachable before any data plane traffic: "
         f"{list(pu.failed_pairs)}",
         opt_level=0,

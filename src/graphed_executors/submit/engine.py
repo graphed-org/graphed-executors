@@ -68,7 +68,13 @@ from graphed_executors.local._reduce import plan_tree, running_fold
 from graphed_executors.local.executors import _PAUSED_WAKE_S, _wait_until, _Window
 
 from .protocol import SubmitBackend, SubmitFuture
-from .services import PROBE_CHECK_S, ServiceSet, ServiceUnreachable, check_ready, host_identity
+from .services import (
+    PROBE_CHECK_S,
+    ServiceSet,
+    ServiceUnreachableError,
+    check_ready,
+    host_identity,
+)
 
 if TYPE_CHECKING:
     from graphed.core import Partition
@@ -341,8 +347,9 @@ def _service_checked(
     """``fn(*args)``.
 
     When it raises, each ``(name, endpoint, check)`` is re-checked here, on the worker that ran it,
-    and the first that fails raises :class:`ServiceUnreachable` from the task's exception, which is
-    otherwise re-raised unchanged: a plan's own error beside a live service stays a plan error.
+    and the first that fails raises :class:`ServiceUnreachableError` from the task's exception,
+    which is otherwise re-raised unchanged: a plan's own error beside a live service stays a plan
+    error.
     """
     try:
         return fn(*args)
@@ -350,7 +357,7 @@ def _service_checked(
         for name, endpoint, check in checks:
             why = check_ready(endpoint, check, PROBE_CHECK_S)
             if why is not None:
-                raise ServiceUnreachable(
+                raise ServiceUnreachableError(
                     name, endpoint, host_identity(), f"{why}; the task raised {exc!r}"
                 ) from exc
         raise

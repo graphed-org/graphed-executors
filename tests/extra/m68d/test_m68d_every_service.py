@@ -26,7 +26,7 @@ from m68d_harness import (
 )
 
 from graphed_executors.submit import SubmitRunner, ThreadBackend
-from graphed_executors.submit.services import ServiceUnreachable
+from graphed_executors.submit.services import ServiceUnreachableError
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ def test_a_failed_task_names_the_plan_s_second_service_when_only_it_is_gone(
             err = run.error()
     finally:
         first.close()
-    assert isinstance(err, ServiceUnreachable) and (err.name, err.endpoint) == (
+    assert isinstance(err, ServiceUnreachableError) and (err.name, err.endpoint) == (
         "web2",
         second.endpoint,
     ), repr(err)

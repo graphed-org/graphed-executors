@@ -33,15 +33,15 @@ class Events:
         return self.data[part.entry_start : part.entry_stop]
 
 
-class Unpicklable:
+class UnpicklableError:
     """A partial that refuses to pickle, as one carrying a lambda-holding behavior dict does."""
 
     def __reduce__(self) -> Any:
         raise pickle.PicklingError("this partial does not pickle")
 
 
-def unpicklable_reduce(_values: Any) -> Unpicklable:
-    return Unpicklable()
+def unpicklable_reduce(_values: Any) -> UnpicklableError:
+    return UnpicklableError()
 
 
 def keep_first(a: Any, _b: Any) -> Any:

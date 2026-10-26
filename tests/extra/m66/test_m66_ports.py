@@ -38,7 +38,7 @@ def test_the_lxplus_profile_drives_the_driver_port() -> None:
         backend.close()
 
 
-class BindingsReached(Exception):
+class BindingsReachedError(Exception):
     pass
 
 
@@ -54,10 +54,10 @@ def test_htcondor_runner_binds_the_site_ports_unless_overridden(
 
     def prepare(self: Any, url: str, secret: bytes) -> None:
         seen.append(url)
-        raise BindingsReached
+        raise BindingsReachedError
 
     monkeypatch.setattr(CondorPilots, "prepare", prepare)
-    with pytest.raises(BindingsReached):
+    with pytest.raises(BindingsReachedError):
         htcondor_runner(
             n_pilots=1, site="lxplus", image="img", host="127.0.0.1", port_range=port_range
         )

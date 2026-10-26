@@ -13,9 +13,9 @@ no image and no GPUs, the backend offers ``"driver"`` in ``service_hosts``, and 
 (the ``resources["memory_mb"]`` of the set's services beside the driver, this one included, sum to
 no more than the backend's ``driver_memory_mb``, else the host's physical memory), else on the
 cluster through the backend's ``host_service``/``release_service`` pair (D10: the capability IS the
-pair of methods). Nothing left raises :class:`ServiceUnavailable` naming each leg and why it did
-not apply. The resolving runs inside the backend's ``starting_services()`` context when it has one,
-a backend that holds its workers back while a plan's services start, and the resolving and the
+pair of methods). Nothing left raises :class:`ServiceUnavailableError` naming each leg and why it
+did not apply. The resolving runs inside the backend's ``starting_services()`` context when it has
+one, a backend that holds its workers back while a plan's services start, and the resolving and the
 probe inside its ``starting_service_set()`` context, a backend that starts one set at a time.
 
 Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from
@@ -99,7 +99,7 @@ class ServiceStatus:
     detail: str = ""
 
 
-class ServiceUnavailable(Exception):
+class ServiceUnavailableError(Exception):
     """No leg satisfied service ``name``; ``legs`` maps each leg tried to why it did not apply."""
 
     def __init__(self, name: str, legs: Mapping[str, str]) -> None:
@@ -116,7 +116,7 @@ class ServiceUnavailable(Exception):
         return f"service {self.name!r} is unavailable: {why}"
 
 
-class ServiceUnreachable(Exception):
+class ServiceUnreachableError(Exception):
     """Service ``name`` at ``endpoint`` did not pass its check from a worker.
 
     Service ``name`` at ``endpoint`` did not pass its check from a worker (``worker`` the answering
@@ -563,7 +563,7 @@ class ServiceSet:
         if given is not None:
             reason = check_ready(given, spec.check, spec.timeout_s)
             if reason is not None:
-                raise ServiceUnavailable(
+                raise ServiceUnavailableError(
                     spec.name, {"user": f"the given endpoint {given} failed: {reason}"}
                 )
             return self._record(spec, "user", None, given, None, None)
@@ -585,7 +585,7 @@ class ServiceSet:
         launch = spec.launch
         detail = "; ".join(f"{leg}: {why}" for leg, why in legs.items())
         if launch is None:
-            raise ServiceUnavailable(
+            raise ServiceUnavailableError(
                 spec.name, {**legs, "managed": "the spec has no launch recipe"}
             )
         hosts = tuple(getattr(self.backend, "service_hosts", ("driver",)))
@@ -599,12 +599,12 @@ class ServiceSet:
                 return resolved
             # only a cluster host takes what the driver cannot hold
             if not callable(host_service) or "cluster" not in hosts:
-                raise ServiceUnavailable(spec.name, {**legs, "managed": too_big})
+                raise ServiceUnavailableError(spec.name, {**legs, "managed": too_big})
             legs["driver"] = too_big
             detail = "; ".join(f"{leg}: {why}" for leg, why in legs.items())
         elif not callable(host_service):
             where = "an image or GPUs" if "driver" in hosts else f"service_hosts={hosts!r}"
-            raise ServiceUnavailable(
+            raise ServiceUnavailableError(
                 spec.name,
                 {
                     **legs,
@@ -616,8 +616,8 @@ class ServiceSet:
         try:
             endpoint, identity, key = host_service(spec, self.scope)
         # the backend's refusal, beside why the earlier legs failed
-        except ServiceUnavailable as exc:
-            raise ServiceUnavailable(spec.name, {**legs, **exc.legs}) from exc
+        except ServiceUnavailableError as exc:
+            raise ServiceUnavailableError(spec.name, {**legs, **exc.legs}) from exc
         stack.callback(
             release_quietly, f"service {spec.name!r} ({key})", self.backend.release_service, key
         )
@@ -668,7 +668,7 @@ class ServiceSet:
                     reason = (
                         f"{proc.args!r} exited with returncode {code} before {spec.check!r} passed"
                     )
-                    raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
+                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
                 left = deadline - time.monotonic()
                 reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
                 # read after the dial, which passes on any listener, so the one it reached is
@@ -676,19 +676,19 @@ class ServiceSet:
                 inodes = listeners(port)
                 if inodes and not held_by(proc.pid, inodes):
                     reason = f"port {port} on {host} is held by another process"
-                    raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
+                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
                 if reason_now is None:
                     code = proc.poll()
                     if code is None:
                         break
                     reason = f"{spec.check!r} passed but the service exited with returncode {code}"
-                    raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
+                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
                 if time.monotonic() >= deadline:
                     reason = (
                         f"{spec.check!r} never passed on {endpoint} within "
                         f"{spec.timeout_s}s: {reason_now}"
                     )
-                    raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
+                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
                 time.sleep(_POLL_S)
         return self._record(spec, "managed", "driver", endpoint, identity, started, detail)
 
@@ -741,7 +741,7 @@ class ServiceSet:
                 worker, answers = fut.result(timeout)
             except TimeoutError:
                 first = resolved[pending[0]]
-                raise ServiceUnreachable(
+                raise ServiceUnreachableError(
                     first.spec.name,
                     first.status.endpoint,
                     "",
@@ -750,14 +750,14 @@ class ServiceSet:
             for j in pending:
                 if answers[j] is not None:
                     r = resolved[j]
-                    raise ServiceUnreachable(
+                    raise ServiceUnreachableError(
                         r.spec.name, r.status.endpoint, worker, str(answers[j])
                     )
             pending = [j for j in pending if not self._passes(resolved[j].status.identity, worker)]
             if not pending:
                 return
         first = resolved[pending[0]]
-        raise ServiceUnreachable(
+        raise ServiceUnreachableError(
             first.spec.name, first.status.endpoint, worker, "only same-host workers answered"
         )
 
@@ -784,8 +784,8 @@ __all__ = [
     "Endpoints",
     "ServiceSet",
     "ServiceStatus",
-    "ServiceUnavailable",
-    "ServiceUnreachable",
+    "ServiceUnavailableError",
+    "ServiceUnreachableError",
     "check_ready",
     "held_by",
     "host_identity",

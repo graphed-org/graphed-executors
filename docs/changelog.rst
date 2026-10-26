@@ -1,6 +1,14 @@
 What changed
 ============
 
+Unreleased
+----------
+
+* The exception classes end in ``Error`` (PEP 8): ``WorkerLost``, ``TaskTimedOut``,
+  ``ServiceUnavailable``, ``ServiceUnreachable`` and ``ProbeUnreachable`` are now
+  ``WorkerLostError``, ``TaskTimedOutError``, ``ServiceUnavailableError``,
+  ``ServiceUnreachableError`` and ``ProbeUnreachableError``.
+
 0.0.6
 -----
 

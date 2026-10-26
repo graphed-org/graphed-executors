@@ -204,7 +204,7 @@ def test_a_failing_given_endpoint_is_never_replaced() -> None:
     with (
         serving(503) as endpoint,
         SubmitRunner(ThreadBackend(2), services={"web": endpoint}) as runner,
-        pytest.raises(svc.ServiceUnavailable) as excinfo,
+        pytest.raises(svc.ServiceUnavailableError) as excinfo,
     ):
         runner.run(plan_of(GetProcess(), [spec]))
     assert list(excinfo.value.legs) == ["user"] and endpoint in str(excinfo.value)
@@ -232,14 +232,14 @@ def test_the_site_leg_passes_or_falls_through(caplog: pytest.LogCaptureFixture) 
 def test_no_leg_and_a_recipe_that_needs_the_cluster_are_refused() -> None:
     backend = ThreadBackend(1)
     try:
-        with pytest.raises(svc.ServiceUnavailable) as excinfo:
+        with pytest.raises(svc.ServiceUnavailableError) as excinfo:
             svc.ServiceSet([bare()], backend).start()
         assert set(excinfo.value.legs) == {"user", "site", "managed"}
         gpu = child((sys.executable, "-c", "pass"), resources={"gpus": 1})
-        with pytest.raises(svc.ServiceUnavailable, match="host_service"):
+        with pytest.raises(svc.ServiceUnavailableError, match="host_service"):
             svc.ServiceSet([gpu], backend).start()
         cluster_only = Duck(service_hosts=("cluster",))
-        with pytest.raises(svc.ServiceUnavailable, match=r"service_hosts=\('cluster',\)"):
+        with pytest.raises(svc.ServiceUnavailableError, match=r"service_hosts=\('cluster',\)"):
             svc.ServiceSet([child((sys.executable, "-c", "pass"))], cluster_only).start()
         cluster_only.close()
     finally:
@@ -252,7 +252,7 @@ def test_no_leg_and_a_recipe_that_needs_the_cluster_are_refused() -> None:
 def test_a_child_that_exits_before_its_check_passes() -> None:
     backend = ThreadBackend(1)
     try:
-        with pytest.raises(svc.ServiceUnavailable, match="returncode 3"):
+        with pytest.raises(svc.ServiceUnavailableError, match="returncode 3"):
             svc.ServiceSet([child(("{python}", "-c", "raise SystemExit(3)"))], backend).start()
     finally:
         backend.close()
@@ -265,7 +265,7 @@ def test_a_child_that_exits_after_its_check_passed(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(svc, "check_ready", late_pass)
     backend = ThreadBackend(1)
     try:
-        with pytest.raises(svc.ServiceUnavailable, match="passed but the service exited"):
+        with pytest.raises(svc.ServiceUnavailableError, match="passed but the service exited"):
             svc.ServiceSet([child(("{python}", "-c", "pass"))], backend).start()
     finally:
         backend.close()
@@ -275,7 +275,7 @@ def test_a_check_that_never_passes_names_its_last_reason() -> None:
     backend = ThreadBackend(1)
     spec = child(("{python}", "-c", "import time; time.sleep(60)"), timeout_s=0.5)
     try:
-        with pytest.raises(svc.ServiceUnavailable, match="never passed") as excinfo:
+        with pytest.raises(svc.ServiceUnavailableError, match="never passed") as excinfo:
             svc.ServiceSet([spec], backend).start()
         assert "tcp connect" in excinfo.value.legs["managed"]
     finally:
@@ -351,7 +351,7 @@ def test_a_hosted_service_only_its_own_host_reaches_is_refused(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     backend = Hosting(svc.host_identity(), "driver.example", release_raises=True)
-    with caplog.at_level(logging.INFO), pytest.raises(svc.ServiceUnreachable) as excinfo:
+    with caplog.at_level(logging.INFO), pytest.raises(svc.ServiceUnreachableError) as excinfo:
         svc.ServiceSet([hosted()], backend, scope="s2").start()
     assert excinfo.value.reason == "only same-host workers answered"
     assert backend.released == ["s2-0"]
@@ -363,14 +363,14 @@ def test_a_probe_reason_and_an_unanswered_probe() -> None:
     backend = Duck()
     with (
         serving(ok_first=1) as once,
-        pytest.raises(svc.ServiceUnreachable, match="503") as excinfo,
+        pytest.raises(svc.ServiceUnreachableError, match="503") as excinfo,
     ):
         # the leg check, then 503
         svc.ServiceSet([bare()], backend, endpoints={"web": once}).start()
     assert excinfo.value.worker == svc.host_identity()
     backend.close()
     silent = Silent()
-    with serving() as ok, pytest.raises(svc.ServiceUnreachable, match="no worker answered"):
+    with serving() as ok, pytest.raises(svc.ServiceUnreachableError, match="no worker answered"):
         svc.ServiceSet([replace(bare(), timeout_s=0.2)], silent, endpoints={"web": ok}).start()
     assert len(silent.cancelled) == 1 and silent.cancelled[0].cancelled()
     silent.close()

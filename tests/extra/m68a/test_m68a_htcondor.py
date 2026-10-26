@@ -30,7 +30,11 @@ from graphed_executors.htcondor_backend import (
     launch,
     submit_driverless,
 )
-from graphed_executors.submit.services import ServiceStatus, ServiceUnavailable, release_quietly
+from graphed_executors.submit.services import (
+    ServiceStatus,
+    ServiceUnavailableError,
+    release_quietly,
+)
 
 
 class Schedd:
@@ -196,7 +200,7 @@ def test_site_rows_pickle_copy_and_replace(name: str) -> None:
 
 def test_a_refusal_with_read_only_legs_still_reaches_the_result_blob() -> None:
     legs = MappingProxyType({"user": "no endpoint given", "managed": "no launch recipe"})
-    ok, exc = pickle.loads(driver._result_blob(False, ServiceUnavailable("web", legs)))
-    assert ok is False and type(exc) is ServiceUnavailable and exc.legs == dict(legs)
+    ok, exc = pickle.loads(driver._result_blob(False, ServiceUnavailableError("web", legs)))
+    assert ok is False and type(exc) is ServiceUnavailableError and exc.legs == dict(legs)
     status = ServiceStatus("web", "user", None, "http://h:1", None, None, 1.0)
     assert pickle.loads(pickle.dumps(status)) == status and copy.deepcopy(status) == status

@@ -17,7 +17,7 @@ from graphed.services import Launch, ServiceSpec
 
 from graphed_executors.htcondor_backend import SITES, CondorPilots, HTCondorBackend, launch
 from graphed_executors.htcondor_backend import backend as backend_mod
-from graphed_executors.submit.services import ServiceSet, ServiceUnavailable
+from graphed_executors.submit.services import ServiceSet, ServiceUnavailableError
 
 
 def bindings() -> Any:
@@ -105,7 +105,7 @@ def test_the_managed_leg_reads_the_narrowed_hosts() -> None:
     )
     backend = HTCondorBackend(NoPilots(), 1, host="127.0.0.1", service_hosts=("cluster",))
     try:
-        with pytest.raises(ServiceUnavailable) as err:
+        with pytest.raises(ServiceUnavailableError) as err:
             ServiceSet([spec], backend).start()
     finally:
         backend.close()

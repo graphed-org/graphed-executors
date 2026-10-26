@@ -1060,7 +1060,7 @@ its ``driver`` node beside one ``SERVICE`` node per such service, each announcin
 the driver is running. DAGMan never retries a SERVICE node, so the node's own wrapper restarts a
 service that dies, on a port no earlier instance served, so that no worker's client cached by
 endpoint reaches the dead one; a run binds its endpoints once, so the driver answers a task's
-``ServiceUnreachable`` for such a service by running the plan again in the same job. While it waits,
+``ServiceUnreachableError`` for such a service by running the plan again in the same job. While it waits,
 the driver reads the node's queue ad on the DAG's schedd, so a node that ended, is held, or that no
 slot could ever run fails the try at once instead of after ``timeout_s``. The run's outcome is the
 driver node's last try, never DAGMan's own exit, which depends on how strictly the site's DAGMan treats

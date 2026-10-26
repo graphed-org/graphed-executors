@@ -36,10 +36,10 @@ from graphed_executors.local.shuffle import ShuffleWitness, _assign, _sha256_hex
 
 from .transport_peer import (
     DRIVER,
-    ProbeUnreachable,
+    ProbeUnreachableError,
     _barrier_and_registry,
     _barrier_stage_error,
-    _BarrierTimeout,
+    _BarrierTimeoutError,
     _bump_driver,
     _cleanup_after_barrier,
     _collect_probes,
@@ -393,12 +393,12 @@ def _run_shuffle(
                 driver_counts=driver_counts,
                 per_worker=per_worker,
             )
-        except _BarrierTimeout as bt:
+        except _BarrierTimeoutError as bt:
             _cleanup_after_barrier(driver_ep, pbackend, futures, sorted_addrs_seen(driver_ep))
             _merge_peer(per_worker, DRIVER, driver_counts)
             driver_ep.close()
             raise _barrier_stage_error(bt) from bt
-        except ProbeUnreachable:
+        except ProbeUnreachableError:
             _merge_peer(per_worker, DRIVER, driver_counts)
             driver_ep.close()
             raise
@@ -479,7 +479,7 @@ def _drive_shuffle_attempt(
     if failed:
         _release(driver_ep, seated, ("abort",))
         _harvest(futures, per_worker)
-        raise ProbeUnreachable(failed)
+        raise ProbeUnreachableError(failed)
     _release(driver_ep, seated, ("proceed",))
 
     manifests, errored = _collect_tagged(
@@ -532,8 +532,8 @@ def transport_run_repartition(
     """Hash-repartition ``src_blocks`` into ``parts`` dests over the k-peer transport.
 
     Byte-identical to the local ``run_repartition``. ``fetch_budget_bytes`` bounds the reader
-    plane (driver-side replay); a probe failure raises ``ProbeUnreachable`` (the facade decides
-    error vs fallback).
+    plane (driver-side replay); a probe failure raises ``ProbeUnreachableError`` (the facade
+    decides error vs fallback).
     """
     n_src = len(src_blocks)
 

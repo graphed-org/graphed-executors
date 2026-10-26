@@ -1,6 +1,6 @@
-"""The rerun trigger is ServiceUnreachable only (addendum "B2, the rerun trigger").
+"""The rerun trigger is ServiceUnreachableError only (addendum "B2, the rerun trigger").
 
-A run raising ServiceUnavailable for a SERVICE node's service ends the try with exit 1 and no
+A run raising ServiceUnavailableError for a SERVICE node's service ends the try with exit 1 and no
 rerun.
 """
 
@@ -31,7 +31,7 @@ from m68d_harness import (
 )
 
 from graphed_executors.htcondor_backend import HTCondorRunner
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 
 def test_an_announced_service_s_unavailable_run_exits_1_without_a_rerun(
@@ -48,7 +48,7 @@ def test_an_announced_service_s_unavailable_run_exits_1_without_a_rerun(
     )
 
     def unavailable(self: Any, plan: Any) -> Any:
-        raise ServiceUnavailable(SERVICE, {"user": "m-the-node-died-after-the-driver-set"})
+        raise ServiceUnavailableError(SERVICE, {"user": "m-the-node-died-after-the-driver-set"})
 
     monkeypatch.setattr(HTCondorRunner, "run", unavailable)
     with Web() as web:
@@ -56,5 +56,8 @@ def test_an_announced_service_s_unavailable_run_exits_1_without_a_rerun(
         assert announce_node(dag, web.port) == 200
         code = driver.result()
     ok, payload = pickle.loads((job / "result.pkl").read_bytes())
-    assert (code, ok) == (1, False) and isinstance(payload, ServiceUnavailable), (code, payload)
+    assert (code, ok) == (1, False) and isinstance(payload, ServiceUnavailableError), (
+        code,
+        payload,
+    )
     assert log_lines(job, "rerun:") == [], log_lines(job, "rerun:")

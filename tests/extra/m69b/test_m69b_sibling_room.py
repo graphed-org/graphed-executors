@@ -22,7 +22,7 @@ from graphed.services import ServiceSpec
 
 from graphed_executors.htcondor_backend import htcondor_runner
 from graphed_executors.submit import recipes
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m69b"))
 order = importlib.import_module("m69b_order")
@@ -75,7 +75,7 @@ def run_two(tmp_path: Path, share: float, tag: str) -> tuple[Any, int, Any]:
     with order.closing(runner, PLAN_S):
         try:
             outcome = harness.run_bounded(lambda: runner.run(plan).value, PLAN_S)
-        except ServiceUnavailable as exc:
+        except ServiceUnavailableError as exc:
             outcome = exc
     return htc.Schedd(), t0, outcome
 
@@ -102,7 +102,7 @@ def test_a_server_that_fits_only_where_its_set_s_earlier_one_runs_is_refused_nam
     tmp_path: Path,
 ) -> None:
     schedd, t0, refused = run_two(tmp_path, 9 / 16, "m69b-sibling-over")
-    assert isinstance(refused, ServiceUnavailable) and refused.name == "web2", refused
+    assert isinstance(refused, ServiceUnavailableError) and refused.name == "web2", refused
     assert harness.wait_for(
         lambda: not order.queued(schedd, f"{RUN_JOBS} && QDate >= {t0}"), GONE_S
     )

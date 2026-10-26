@@ -49,16 +49,16 @@ def test_the_driver_host_falls_back_to_this_host(
     assert services.host_identity() == "node7.example"
 
 
-class Unpicklable(Exception):
+class UnpicklableError(Exception):
     def __reduce__(self) -> Any:
         raise TypeError("no pickling")
 
 
 def test_an_unpicklable_outcome_comes_back_as_text() -> None:
-    ok, err = pickle.loads(driver._result_blob(False, Unpicklable("lost handle")))
+    ok, err = pickle.loads(driver._result_blob(False, UnpicklableError("lost handle")))
     assert ok is False and type(err) is RuntimeError
     assert (
-        "Unpicklable did not round-trip through pickle (TypeError: no pickling): lost handle"
+        "UnpicklableError did not round-trip through pickle (TypeError: no pickling): lost handle"
         in str(err)
     )
 

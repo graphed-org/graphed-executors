@@ -52,7 +52,7 @@ _BARRIER_DEFAULT_S = 60.0  # production barrier bound (> the 25 s inline-send wo
 _PROBE_TIMEOUT_S = 5.0
 
 
-class ProbeUnreachable(Exception):
+class ProbeUnreachableError(Exception):
     """The reachability probe found an unreachable overlay pair BEFORE any data-plane traffic.
 
     Carries ``failed_pairs`` so the facade can name them (``on_unreachable="error"``) or fall
@@ -65,7 +65,7 @@ class ProbeUnreachable(Exception):
         super().__init__(f"peer overlay unreachable: {failed_pairs}")
 
 
-class _BarrierTimeout(Exception):
+class _BarrierTimeoutError(Exception):
     """The rendezvous barrier expired before k hellos arrived (an over-ask or a dead peer)."""
 
 
@@ -282,7 +282,7 @@ def _barrier_and_registry(
     Collect exactly k hellos (the barrier), assemble the ``{addr: (host, port)}`` book, and
     broadcast it. The driver's OWN registry keeps the TRUE endpoints (so release/attribution reach
     the peers even under a ``registry_rewrite`` poison); the peers get the possibly-rewritten book.
-    Raises ``_BarrierTimeout`` on expiry, naming ``hellos_seen/k``.
+    Raises ``_BarrierTimeoutError`` on expiry, naming ``hellos_seen/k``.
     """
     hellos: dict[str, tuple[str, int]] = {}
     deadline = time.monotonic() + barrier_timeout_s
@@ -297,7 +297,7 @@ def _barrier_and_registry(
             _bump_driver(driver_counts, "recv_class_hello")
     driver_ep.set_registry(dict(hellos))  # the driver's TRUE control legs
     if len(hellos) < k:
-        raise _BarrierTimeout(f"rendezvous barrier expired: {len(hellos)}/{k} hellos seen")
+        raise _BarrierTimeoutError(f"rendezvous barrier expired: {len(hellos)}/{k} hellos seen")
     peer_registry = dict(hellos)
     if registry_rewrite is not None:
         peer_registry = registry_rewrite(dict(hellos))
@@ -359,7 +359,7 @@ def _cleanup_after_barrier(
             fut.result(timeout=_ROOT_TIMEOUT_S)
 
 
-def _barrier_stage_error(exc: _BarrierTimeout) -> StageError:
+def _barrier_stage_error(exc: _BarrierTimeoutError) -> StageError:
     return StageError(
         op="run",
         frames=(SourceFrame(filename="rendezvous-barrier", lineno=0),),
@@ -508,7 +508,7 @@ def _drive_reduce(
             registry_rewrite=None,
             driver_counts=driver_counts,
         )
-    except _BarrierTimeout as bt:
+    except _BarrierTimeoutError as bt:
         _cleanup_after_barrier(driver_ep, pbackend, futures, sorted_addrs_seen(driver_ep))
         raise _barrier_stage_error(bt) from bt
 

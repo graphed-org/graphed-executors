@@ -19,7 +19,7 @@ import pytest
 from graphed.core.execution import Partition, Plan, Task
 from graphed.services import Launch, ServiceSpec, split_endpoint
 
-from graphed_executors.submit.services import ServiceUnavailable, physical_memory_mb
+from graphed_executors.submit.services import ServiceUnavailableError, physical_memory_mb
 
 # touches its marker, then listens: the marker is the witness that the service started
 LISTEN = (
@@ -106,7 +106,7 @@ def test_a_service_above_driver_memory_is_refused_before_it_starts(
 ) -> None:
     runner.backend.driver_memory_mb = 64
     marker = tmp_path / "started"
-    with pytest.raises(ServiceUnavailable) as err:
+    with pytest.raises(ServiceUnavailableError) as err:
         runner.run(plan(1024, marker))
     managed = err.value.legs["managed"]
     assert "1024 MiB" in managed and "driver_memory_mb of 64 MiB" in managed, managed
@@ -118,7 +118,7 @@ def test_without_a_limit_the_host_s_physical_memory_is_the_limit(
 ) -> None:
     host = physical_memory_mb()
     marker = tmp_path / "started"
-    with pytest.raises(ServiceUnavailable) as err:
+    with pytest.raises(ServiceUnavailableError) as err:
         runner.run(plan(host + 1, marker))
     managed = err.value.legs["managed"]
     assert f"{host + 1} MiB" in managed and f"physical memory of {host} MiB" in managed, managed

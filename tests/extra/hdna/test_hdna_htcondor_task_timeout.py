@@ -1,8 +1,8 @@
 """``task_timeout_s``: a task leased past the limit fails.
 
 A task leased past the limit fails with a ``StageError`` naming its partition, caused by
-``TaskTimedOut`` naming its key, pilot and limit; its pilot stops, its late result is dropped, and
-a resumable rerun runs only that task (GW21).
+``TaskTimedOutError`` naming its key, pilot and limit; its pilot stops, its late result is dropped,
+and a resumable rerun runs only that task (GW21).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from graphed_executors.htcondor_backend import (
     HTCondorBackend,
     HTCondorRunner,
     LocalPilots,
-    TaskTimedOut,
+    TaskTimedOutError,
     driver,
     server,
 )
@@ -94,10 +94,10 @@ def test_a_task_past_the_timeout_fails_and_its_pilot_stops(tmp_path: Path) -> No
         _run(_plan(tmp_path, hangs=1, hang_s=120.0), task_timeout_s=3.0, exits=exits)
     (hung,) = tmp_path.iterdir()
     stage = excinfo.value
-    assert stage.partition.startswith(HUNG + "::") and stage.cause_type == "TaskTimedOut"
+    assert stage.partition.startswith(HUNG + "::") and stage.cause_type == "TaskTimedOutError"
     assert "task_timeout_s=3.0" in stage.cause_message
     err = stage.__cause__
-    assert isinstance(err, TaskTimedOut)
+    assert isinstance(err, TaskTimedOutError)
     assert err.key.endswith("-leaf-1") and err.seconds == 3.0
     assert f":{hung.name}:" in err.pilot  # the pilot is named hostname:pid:nonce
     assert str(err) == f"task {err.key} ran on pilot {err.pilot} longer than task_timeout_s=3.0"
@@ -114,7 +114,7 @@ def test_a_timed_out_task_s_late_result_is_dropped(monkeypatch: pytest.MonkeyPat
         time.sleep(0.1)
         ts.reap_once()
         exc = fut.exception(0)
-        assert isinstance(exc, TaskTimedOut)
+        assert isinstance(exc, TaskTimedOutError)
         assert (exc.key, exc.pilot, exc.seconds) == ("k1", "pilot-a", 0.05)
         assert pickle.loads(pickle.dumps(exc)).args == exc.args
         ts.result("pilot-a", leased[0], True, pickle.dumps(-1))

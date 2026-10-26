@@ -47,7 +47,7 @@ from graphed_executors.parsl_backend.backend import _ParslFuture
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
 from graphed_executors.submit.services import (
-    ServiceUnavailable,
+    ServiceUnavailableError,
     host_identity,
     machine_ad,
     minted_endpoint,
@@ -57,7 +57,7 @@ from graphed_executors.submit.services import (
 from . import launch as _launch
 from . import server as _server
 from .launch import CLAIM_ATTRS, CondorPilots, PilotLauncher, located_schedd
-from .server import TaskServer, TaskTimedOut, WorkerLost
+from .server import TaskServer, TaskTimedOutError, WorkerLostError
 from .services import AD_ATTRS, ServiceJob, machine_ads, queued_refusal
 from .sites import SITES, SiteProfile, counts_as_alive
 
@@ -96,7 +96,7 @@ class _Announcer(Protocol):
     def ad(self) -> Any: ...
 
 
-class _Unread(Exception):
+class _UnreadError(Exception):
     """A DAG SERVICE node's queue ad could not be read.
 
     The bindings, the locate or a query failed.
@@ -109,7 +109,7 @@ class _Node:
     :meth:`ad` is its queue ad within DAGMan job ``dag`` on ``schedd``, else, once it left the
     queue, its history row naming why. Its first idle ad is matched once against the pool's
     slots less what the DAG's running jobs and ``claims()`` hold, and no slot raises
-    :class:`ServiceUnavailable` for service ``name``; DAGMan owns the node, so nothing acts on
+    :class:`ServiceUnavailableError` for service ``name``; DAGMan owns the node, so nothing acts on
     it.
     """
 
@@ -142,9 +142,9 @@ class _Node:
                 self._matched = True
                 refusal = self._refusal(node)
         except Exception as exc:
-            raise _Unread(exc) from exc
+            raise _UnreadError(exc) from exc
         if refusal is not None:
-            raise ServiceUnavailable(self._name, {"managed": refusal})
+            raise ServiceUnavailableError(self._name, {"managed": refusal})
         return ad if ads else self._departed(node)
 
     def _departed(self, node: str) -> dict[str, Any]:
@@ -204,8 +204,8 @@ class HTCondorBackend:
     ``service_hosts`` narrows where a managed service may run to a subset of the hosts the row
     offers (``None``: all of them); a host it does not offer is refused before the task server
     starts. ``task_timeout_s`` bounds how long one task may run on a pilot (``None``, the default:
-    no limit); past it the task fails with :class:`TaskTimedOut` and the pilot stops, freeing its
-    slot.
+    no limit); past it the task fails with :class:`TaskTimedOutError` and the pilot stops, freeing
+    its slot.
     """
 
     def __init__(
@@ -457,7 +457,9 @@ class HTCondorBackend:
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
         """Return ``(key, pilot)`` for a lost or timed-out task, else ``None``."""
-        return (exc.key, exc.pilot) if isinstance(exc, WorkerLost | TaskTimedOut) else None
+        return (
+            (exc.key, exc.pilot) if isinstance(exc, WorkerLostError | TaskTimedOutError) else None
+        )
 
     def host_identity(self) -> str:
         """Return the driver's host as condor writes ``Machine`` for its slots.
@@ -473,7 +475,7 @@ class HTCondorBackend:
         """Run ``spec`` as a :class:`ServiceJob` and wait for its announce.
 
         ``(endpoint, identity, key)`` once it is ready where it runs. A job no slot of the
-        pool could ever run raises :class:`ServiceUnavailable` (a pool whose collector
+        pool could ever run raises :class:`ServiceUnavailableError` (a pool whose collector
         lists no slot is not asked); one that ends, is held, or has not announced within
         ``spec.timeout_s`` of its start raises. Each is removed, and every failure forgets
         the call's announce secret. Once the pilots are submitted (a later plan), the first
@@ -518,7 +520,7 @@ class HTCondorBackend:
             job.submit()
             refusal = job.match_refusal(machines, claims)
             if refusal is not None:
-                raise ServiceUnavailable(spec.name, {"managed": refusal})
+                raise ServiceUnavailableError(spec.name, {"managed": refusal})
             hostport, identity = self._await_announce(job, spec)
             stack.pop_all()
         host, _, port = hostport.rpartition(":")
@@ -616,7 +618,7 @@ class HTCondorBackend:
         meanwhile. Where the DAG's schedd is at hand (``schedd_locate``, and
         ``$_CONDOR_JOB_AD`` naming the DAGMan job), the wait is :meth:`_await_announce`'s
         over the node's queue ad: a node that left the queue or is held raises at once, an
-        idle one no slot could ever run raises :class:`ServiceUnavailable`, and
+        idle one no slot could ever run raises :class:`ServiceUnavailableError`, and
         ``timeout_s`` counts from its first running answer. Otherwise, and from a failing
         import, locate or query on (logged once), the wait is ``timeout_s`` long.
         """
@@ -633,7 +635,7 @@ class HTCondorBackend:
             handle = self._node(spec.name, node)
             if handle is not None:
                 got = self._await_announce(handle, spec)
-        except _Unread as exc:
+        except _UnreadError as exc:
             logger.warning(
                 "SERVICE node %s (service %r): its queue ad is unreadable (%r); waiting for its "
                 "announce alone",
@@ -655,8 +657,8 @@ class HTCondorBackend:
         """DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd.
 
         DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd, or ``None`` when
-        ``schedd_locate`` or the job ad's ``DAGManJobId`` is missing; :class:`_Unread` when the
-        bindings or the locate fail.
+        ``schedd_locate`` or the job ad's ``DAGManJobId`` is missing; :class:`_UnreadError` when
+        the bindings or the locate fail.
         """
         dag = machine_ad("DAGManJobId", env="_CONDOR_JOB_AD")
         if self._schedd_locate is None or dag is None:
@@ -668,7 +670,7 @@ class HTCondorBackend:
                 name, key, where, schedd, int(dag), self._schedd_locate, self._pilot_claims
             )
         except Exception as exc:
-            raise _Unread(exc) from exc
+            raise _UnreadError(exc) from exc
 
     def _release_announced(self, key: str) -> None:
         """Nothing.

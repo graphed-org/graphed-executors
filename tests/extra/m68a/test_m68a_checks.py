@@ -181,15 +181,15 @@ def test_the_endpoints_map() -> None:
 
 
 def test_refusals_carry_their_fields_through_pickle() -> None:
-    unavailable = svc.ServiceUnavailable(
+    unavailable = svc.ServiceUnavailableError(
         "s", {"user": "no endpoint given", "managed": "no recipe"}
     )
     back = pickle.loads(pickle.dumps(unavailable))
     assert (back.name, back.legs) == ("s", unavailable.legs)
     assert "user: no endpoint given; managed: no recipe" in str(back)
-    unreachable = svc.ServiceUnreachable("s", "tcp://h:1", "", "no worker answered")
+    unreachable = svc.ServiceUnreachableError("s", "tcp://h:1", "", "no worker answered")
     assert str(unreachable) == "service 's' at tcp://h:1 is unreachable: no worker answered"
-    assert "from worker w" in str(svc.ServiceUnreachable("s", "tcp://h:1", "w", "refused"))
+    assert "from worker w" in str(svc.ServiceUnreachableError("s", "tcp://h:1", "w", "refused"))
 
 
 def test_the_recipes_are_data() -> None:
