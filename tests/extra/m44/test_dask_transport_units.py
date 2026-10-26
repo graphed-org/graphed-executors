@@ -25,6 +25,7 @@ pytest.importorskip("distributed")
 
 from graphed_executors.dask_backend import transport
 from graphed_executors.dask_backend._transport_run import DRIVER, PLUGIN_NAME
+from graphed_executors.dask_backend.transport_shuffle import _broadcast_join_attempt
 
 _ADDR = "tcp://127.0.0.1:9001"
 _PEER = "tcp://127.0.0.1:9002"
@@ -405,8 +406,6 @@ def test_an_inbox_full_recv_answers_the_drop_signal(tmp_path: Path) -> None:
 
 
 def test_a_broadcast_join_with_an_empty_build_side_returns_nothing_and_never_broadcasts() -> None:
-    from graphed_executors.dask_backend.transport_shuffle import _broadcast_join_attempt
-
     # None backends: an empty build side must return before touching either
     value, hashes, witness = _broadcast_join_attempt(
         None, None, None, [], [object()], ("k",), "inner", None, [_ADDR], 1
