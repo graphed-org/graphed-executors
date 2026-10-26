@@ -8,6 +8,9 @@ Unreleased
   ``ServiceUnavailable``, ``ServiceUnreachable`` and ``ProbeUnreachable`` are now
   ``WorkerLostError``, ``TaskTimedOutError``, ``ServiceUnavailableError``,
   ``ServiceUnreachableError`` and ``ProbeUnreachableError``.
+* ``StageError.cause_type`` follows the renames: a pilot task past ``task_timeout_s`` reports
+  ``TaskTimedOutError`` (was ``TaskTimedOut``), and an unreachable parsl peer overlay reports
+  ``ProbeUnreachableError`` (was ``ProbeUnreachable``).
 
 0.0.6
 -----
