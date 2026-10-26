@@ -402,3 +402,18 @@ def test_an_inbox_full_recv_answers_the_drop_signal(tmp_path: Path) -> None:
     assert run.inbox.get_nowait() == (_PEER, "a")
     with pytest.raises(queue.Empty):
         run.inbox.get_nowait()
+
+
+def test_a_broadcast_join_with_an_empty_build_side_returns_nothing_and_never_broadcasts() -> None:
+    from graphed_executors.dask_backend.transport_shuffle import _broadcast_join_attempt
+
+    # None backends: an empty build side must return before touching either
+    value, hashes, witness = _broadcast_join_attempt(
+        None, None, None, [], [object()], ("k",), "inner", None, [_ADDR], 1
+    )
+    assert (value, hashes) == ({}, {})
+    assert (witness.broadcast_chosen, witness.n_producer_tasks, witness.large_side_blocks) == (
+        True,
+        1,
+        0,
+    )
