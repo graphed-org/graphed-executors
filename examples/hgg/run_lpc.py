@@ -69,6 +69,7 @@ class ServerTimes(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
+        """Format ``record``, adding a service status's submit and ready times."""
         line = super().format(record)
         status = getattr(record, "status", None)
         if status is None:
@@ -87,6 +88,7 @@ def driverless_memory_mb(ctx: histserv.Context, pilots: int, pilot_mb: int) -> i
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run the translation at the LPC over the given manifests."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

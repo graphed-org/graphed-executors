@@ -45,6 +45,7 @@ class DaskBackend:
     )
 
     def __init__(self, client: Any, *, replicate_broadcast: bool = False) -> None:
+        """Run tasks on ``client``'s workers; ``replicate_broadcast`` copies broadcasts to all."""
         self._distributed = _distributed()  # raises the hinted ImportError if the extra is absent
         self._client = client
         self._replicate_broadcast = replicate_broadcast
@@ -54,6 +55,7 @@ class DaskBackend:
         self._shim = _dask_task_shim
 
     def n_workers(self) -> int:
+        """Return the number of workers the scheduler knows now."""
         return len(self._client.scheduler_info()["workers"])
 
     def task_slots(self) -> int:
@@ -110,12 +112,14 @@ class DaskBackend:
         # over client.scatter (hardcoded worker-discovery timeout breaks scale-to-zero) and over
         # closure-per-task (serializes the payload per task, ~20x slowdown). token already carries
         # the run nonce, so the key is unique per run.
+        """Place ``payload`` on the cluster once and return its future."""
         future = self._client.submit(_identity, payload, key=f"graphed-bcast-{token}", pure=False)
         if self._replicate_broadcast:  # coffea#1490 escape hatch (§1.2.2 mitigation 2)
             self._client.replicate(future)
         return future
 
     def subscribe_events(self, topic: str, handler: Any) -> Any:
+        """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
         client = self._client
 
         def _wrapped(event: Any) -> None:
@@ -131,11 +135,13 @@ class DaskBackend:
         return _unsub
 
     def cancel(self, futures: Sequence[Any]) -> None:
+        """Cancel ``futures``."""
         futures = list(futures)
         if futures:  # client.cancel([]) is fine, but skip the round-trip
             self._client.cancel(futures)
 
     def close(self) -> None:
+        """Do nothing: the caller owns the client."""
         return None  # the caller owns the client; closing it here would break a shared cluster
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:

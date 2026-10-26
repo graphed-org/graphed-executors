@@ -42,10 +42,21 @@ class SubmitFuture(Protocol):
     is; both satisfy this shape, as does the stdlib future ``ThreadBackend`` returns.
     """
 
-    def result(self, timeout: float | None = None) -> object: ...
-    def done(self) -> bool: ...
-    def exception(self, timeout: float | None = None) -> BaseException | None: ...
-    def add_done_callback(self, fn: Callable[[Any], None]) -> None: ...
+    def result(self, timeout: float | None = None) -> object:
+        """Return the task's value, waiting at most ``timeout``."""
+        ...
+
+    def done(self) -> bool:
+        """Return whether the task has finished."""
+        ...
+
+    def exception(self, timeout: float | None = None) -> BaseException | None:
+        """Return the task's exception, or ``None``, waiting at most ``timeout``."""
+        ...
+
+    def add_done_callback(self, fn: Callable[[Any], None]) -> None:
+        """Call ``fn`` with the future once it is done."""
+        ...
 
 
 @runtime_checkable
@@ -58,7 +69,9 @@ class SubmitBackend(Protocol):
 
     capabilities: SubmitCapabilities
 
-    def n_workers(self) -> int: ...
+    def n_workers(self) -> int:
+        """Return the number of workers."""
+        ...
 
     def submit(
         self,
@@ -103,4 +116,6 @@ class SubmitBackend(Protocol):
         """Best-effort; a ``cancel_running=False`` backend only prevents not-yet-started work."""
         ...
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Release what the backend holds."""
+        ...

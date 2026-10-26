@@ -66,9 +66,11 @@ class CondorReason(tuple[str, None]):
     """
 
     def __new__(cls, text: str) -> CondorReason:
+        """Make the reason ``text`` as a ``(text, None)`` tuple."""
         return super().__new__(cls, (text, None))
 
     def __str__(self) -> str:
+        """Return the reason's text."""
         return self[0]
 
 
@@ -123,6 +125,7 @@ def publish(path: Path, text: str) -> None:
 
 
 def write_secret(path: Path, secret: bytes) -> None:
+    """Write ``secret`` as hex to ``path``."""
     publish(path, secret.hex())
 
 
@@ -134,11 +137,17 @@ class PilotLauncher(Protocol):
     removes them.
     """
 
-    def start(self, url: str, secret: bytes, n: int) -> None: ...
+    def start(self, url: str, secret: bytes, n: int) -> None:
+        """Start ``n`` pilots that call back to ``url`` with ``secret``."""
+        ...
 
-    def alive(self) -> int: ...
+    def alive(self) -> int:
+        """Return the number of pilots still running."""
+        ...
 
-    def stop(self) -> None: ...
+    def stop(self) -> None:
+        """Stop every pilot."""
+        ...
 
 
 class LocalPilots:
@@ -150,6 +159,7 @@ class LocalPilots:
     def __init__(
         self, *, python: str = sys.executable, pythonpath: Sequence[str | Path] = ()
     ) -> None:
+        """Run pilots under ``python`` with ``pythonpath`` prepended to their ``PYTHONPATH``."""
         self.python = python
         self.pythonpath = [str(p) for p in pythonpath]
         self.log_dir = Path(tempfile.mkdtemp(prefix="graphed-local-pilots-"))
@@ -159,6 +169,7 @@ class LocalPilots:
         self._stop_by = 0.0
 
     def start(self, url: str, secret: bytes, n: int) -> None:
+        """Start ``n`` pilot subprocesses that call back to ``url`` with ``secret``."""
         secret_path = self.log_dir / SECRET_FILE
         write_secret(secret_path, secret)
         env = dict(os.environ)
@@ -181,9 +192,11 @@ class LocalPilots:
         proc.wait()
 
     def alive(self) -> int:
+        """Return the number of pilot subprocesses still running."""
         return sum(p.poll() is None for p in self._procs)
 
     def stop(self) -> None:
+        """Stop the pilot subprocesses and remove their log directory."""
         self._stop_by = time.monotonic() + CLOSE_WAIT_S
         self._stack.close()
         shutil.rmtree(self.log_dir, ignore_errors=True)
@@ -213,6 +226,7 @@ class CondorPilots:
         extra_submit: Mapping[str, str] | None = None,
         schedd_locate: tuple[str, str] | None = None,
     ) -> None:
+        """Describe the pilot jobs for ``site``; nothing is submitted until :meth:`start`."""
         self.profile = SITES[site] if isinstance(site, str) else site
         self.image = image
         self.request_cpus = request_cpus
@@ -322,6 +336,7 @@ class CondorPilots:
         self._schedd_name, self._schedd = self._choose(_htcondor())
 
     def start(self, url: str, secret: bytes, n: int) -> None:
+        """Submit ``n`` pilot jobs that call back to ``url`` with ``secret``."""
         self.prepare(url, secret)
         # a relative executable resolves against our cwd, not initialdir
         desc = self.submit_description(url, n, {"executable": str(self._script)})

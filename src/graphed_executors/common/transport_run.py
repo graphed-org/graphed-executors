@@ -64,6 +64,7 @@ class TransportExecResult:
 def merge_counters(
     per_worker: dict[str, dict[str, int]], counters: Mapping[str, Mapping[str, int]]
 ) -> None:
+    """Add each worker's ``counters`` into ``per_worker``."""
     for addr, c in counters.items():
         acc = per_worker.setdefault(addr, {})
         for key, val in c.items():

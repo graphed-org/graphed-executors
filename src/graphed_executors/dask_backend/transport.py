@@ -208,6 +208,7 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
     idempotent = True
 
     async def setup(self, worker: Any) -> None:
+        """Install the transport handlers on ``worker`` and check the handler seam."""
         self._worker = worker
         self._runs: dict[str, _RunState] = {}
         self.inject_recv_failures: dict[str, int] = {}
@@ -340,6 +341,7 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
 
     # -- lifecycle used by endpoints + engine (task thread) --
     def ensure_run(self, spec: _TransportSpec) -> _RunState:
+        """Return the state of run ``spec.epoch`` on this worker, creating it on first use."""
         run = self._runs.get(spec.epoch)
         if run is None:
             spill = os.path.join(self._worker.local_directory, f"graphed-{spec.epoch}")
@@ -349,6 +351,7 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
         return run
 
     def store_block(self, epoch: str, digest: str, wire: bytes, *, to_disk: bool) -> None:
+        """Hold ``wire`` under ``digest`` for ``epoch``, in memory or spilled to disk."""
         run = self._runs[epoch]
         with run.lock:
             if to_disk:
@@ -359,6 +362,7 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
                 run.blocks[digest] = wire
 
     def record(self, epoch: str, **counters: int) -> None:
+        """Add ``counters`` to ``epoch``'s counters."""
         run = self._runs[epoch]
         for key, val in counters.items():
             if key == "peak_holder_bytes":
@@ -384,13 +388,16 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
         return True
 
     def active_epochs(self) -> tuple[str, ...]:
+        """Return the epochs this worker holds state for."""
         return tuple(self._runs)
 
     def counters(self, epoch: str) -> Mapping[str, int]:
+        """Return a copy of ``epoch``'s counters, empty when it has none."""
         run = self._runs.get(epoch)
         return dict(run.counters) if run is not None else {}
 
     def purge(self, epoch: str) -> None:
+        """Drop ``epoch``'s state: its blocks, spill files and spill directory."""
         run = self._runs.pop(epoch, None)
         if run is not None:
             with run.lock:
@@ -464,6 +471,7 @@ class DaskWorkerTransport:
     """
 
     def __init__(self, plugin: GraphedTransportPlugin, spec: _TransportSpec) -> None:
+        """Attach to this worker's state for the run ``spec`` describes."""
         self._plugin = plugin
         self._spec = spec
         self._worker = plugin._worker
@@ -482,9 +490,11 @@ class DaskWorkerTransport:
         return self.root_sent is not _NO_ROOT
 
     def peers(self) -> tuple[str, ...]:
+        """Return the addresses this worker may send to."""
         return self._spec.peers_of(self.address)
 
     def send(self, dest: str, message: object) -> bool:
+        """Send ``message`` to ``dest``; the driver gets it as a worker event."""
         if dest == DRIVER:
             if isinstance(message, tuple) and message and message[0] == "root":
                 self.root_sent = message[1]
@@ -523,11 +533,13 @@ class DaskWorkerTransport:
         return False  # unreachable (the loop returns or raises), but keeps mypy total
 
     def broadcast(self, message: object) -> None:
+        """Send ``message`` to every peer but the driver."""
         for dest in self.peers():
             if dest != DRIVER:
                 self.send(dest, message)
 
     def poll(self) -> list[tuple[str, object]]:
+        """Return every message waiting in the inbox, without blocking."""
         out: list[tuple[str, object]] = []
         while True:
             try:
@@ -536,6 +548,7 @@ class DaskWorkerTransport:
                 return out
 
     def recv(self, timeout: float | None = None) -> tuple[str, object] | None:
+        """Return the next message, waiting at most ``timeout``, or ``None``."""
         try:
             return (
                 self._run.inbox.get(timeout=timeout)
@@ -546,6 +559,7 @@ class DaskWorkerTransport:
             return None
 
     def close(self) -> None:
+        """Do nothing: the driver's purge tears the run's state down."""
         return None  # per-epoch state is torn down by the driver purge (§1.2)
 
 
@@ -589,6 +603,7 @@ class DriverTransport:
     address = DRIVER
 
     def __init__(self, backend: Any, spec: _TransportSpec) -> None:
+        """Subscribe to the workers' events for the run ``spec`` describes."""
         self._client = backend._client
         self._spec = spec
         self._inbox: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -600,19 +615,23 @@ class DriverTransport:
         self._inbox.put((str(src), pickle.loads(bytes(data))))
 
     def peers(self) -> tuple[str, ...]:
+        """Return every worker address of the run."""
         return self._spec.addresses
 
     def _put(self, targets: Sequence[str], message: object) -> None:
         self._client.run(_broadcast_put, self._spec.epoch, message, workers=list(targets))
 
     def send(self, dest: str, message: object) -> bool:
+        """Put ``message`` in ``dest``'s inbox."""
         self._put([dest], message)  # rare driver->worker unicast (public client.run put_nowait)
         return True
 
     def broadcast(self, message: object) -> None:
+        """Put ``message`` in every worker's inbox."""
         self._put(self._spec.addresses, message)
 
     def poll(self) -> list[tuple[str, object]]:
+        """Return every message waiting in the driver's inbox, without blocking."""
         out: list[tuple[str, object]] = []
         while True:
             try:
@@ -621,12 +640,14 @@ class DriverTransport:
                 return out
 
     def recv(self, timeout: float | None = None) -> tuple[str, object] | None:
+        """Return the next message, waiting at most ``timeout``, or ``None``."""
         try:
             return self._inbox.get(timeout=timeout) if timeout is not None else self._inbox.get()
         except queue.Empty:
             return None
 
     def close(self) -> None:
+        """Stop receiving the workers' events."""
         self._unsub()
 
 

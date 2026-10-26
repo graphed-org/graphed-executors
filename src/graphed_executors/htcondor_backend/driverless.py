@@ -187,6 +187,7 @@ class RunHandle:
         return cast("ExecResult[Any]", payload)
 
     def remove(self) -> None:
+        """Remove the job from its schedd."""
         htc, schedd = self._located()
         schedd.act(
             htc.JobAction.Remove,
@@ -203,10 +204,12 @@ class RunHandle:
         return {name: (root / name).read_text() for name in LOG_NAMES if (root / name).is_file()}
 
     def save(self, path: str | Path) -> None:
+        """Write this handle to ``path`` as JSON."""
         Path(path).write_text(json.dumps({**asdict(self), "log_dir": str(self.log_dir)}))
 
     @classmethod
     def load(cls, path: str | Path) -> RunHandle:
+        """Read a handle :meth:`save` wrote."""
         return cls(**json.loads(Path(path).read_text()))
 
 

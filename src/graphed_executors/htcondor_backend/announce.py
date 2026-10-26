@@ -60,6 +60,7 @@ STARTING = [False, False]  # a start is in flight; a SIGTERM arrived during it
 
 
 def log(msg: str) -> None:
+    """Print ``msg`` with a timestamp."""
     print(f"[announce {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
@@ -218,6 +219,7 @@ def hard_reap(pid: int | None) -> None:
 
 def on_sigterm(signum: int, frame: object) -> None:
     # never waits: the interrupted main thread may hold Popen's waitpid lock
+    """Stop on SIGTERM, or mark it for later while the child is starting."""
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if STARTING[0]:
         STARTING[1] = True
@@ -306,6 +308,7 @@ def _watched(watch: str) -> tuple[str, bytes] | None:
 
 
 def serve() -> int:
+    """Start the service, announce it, and watch it until it exits; return its exit status."""
     with open(sys.argv[1]) as f:
         cfg: dict[str, Any] = json.load(f)
     ident = host_identity()
@@ -370,6 +373,7 @@ def serve() -> int:
 
 
 def main() -> int:
+    """Serve, reaping the child on SIGTERM; return the exit status."""
     signal.signal(signal.SIGTERM, on_sigterm)
     try:
         return serve()

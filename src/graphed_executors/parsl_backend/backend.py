@@ -105,6 +105,7 @@ class ParslBackend:
     """A :class:`SubmitBackend` over a direct parsl executor submit (plan §1.2)."""
 
     def __init__(self, executor: Any) -> None:
+        """Run tasks on a started parsl HighThroughputExecutor or ThreadPoolExecutor."""
         htex_cls, tpe_cls = _parsl_executor_types()
         if isinstance(executor, htex_cls):
             self.capabilities = _HTEX_CAPS
@@ -135,6 +136,7 @@ class ParslBackend:
         return self._is_htex
 
     def n_workers(self) -> int:
+        """Return the number of workers, waiting a bounded time for HTEX managers to register."""
         if not self._is_htex:
             return int(self._executor.max_threads)
         # stdlib; the bounded manager-registration wait, not an assertion
@@ -207,11 +209,13 @@ class ParslBackend:
     def broadcast(self, payload: bytes, *, token: str) -> object:
         # degenerate on scatter_broadcast=False (the ThreadBackend form): the task fn receives the
         # raw bytes directly; each consuming task ships its own copy through the submit host.
+        """Return ``payload``: each task carries its own copy."""
         return payload
 
     def subscribe_events(
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
+        """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
         self._handlers[topic] = handler
 
         def unsub() -> None:
@@ -237,6 +241,7 @@ class ParslBackend:
                 cancel()
 
     def close(self) -> None:
+        """Do nothing: the caller owns the executor."""
         return None  # the caller owns the executor; the launch helper documents teardown
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:

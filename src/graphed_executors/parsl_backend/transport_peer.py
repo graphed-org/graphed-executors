@@ -60,6 +60,7 @@ class ProbeUnreachable(Exception):
     """
 
     def __init__(self, failed_pairs: list[tuple[str, str]]) -> None:
+        """Record the peer pairs that could not reach each other."""
         self.failed_pairs = failed_pairs
         super().__init__(f"peer overlay unreachable: {failed_pairs}")
 
@@ -560,6 +561,7 @@ def _reduce_failure(errs: dict[str, BaseException], pbackend: Any) -> BaseExcept
 
 
 def sorted_addrs_seen(driver_ep: EscalatingHttpTransport) -> list[str]:
+    """Return the addresses the driver endpoint has registered, sorted."""
     return sorted(a for a in driver_ep._registry)
 
 

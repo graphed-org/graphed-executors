@@ -39,6 +39,7 @@ DATA = (
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the validation and return the process exit status."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

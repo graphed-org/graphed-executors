@@ -95,6 +95,7 @@ def _beat(driver: _Driver, me: str, beat_s: float) -> None:
 
 
 def main(argv: list[str]) -> int:
+    """Serve tasks from the driver at ``argv[0]`` until it says stop; return the exit status."""
     url, secret_path = argv
     driver = _Driver(url, bytes.fromhex(Path(secret_path).read_text().strip()))
     # hostname:pid alone collides when containers number their own pids

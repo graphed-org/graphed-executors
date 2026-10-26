@@ -222,6 +222,7 @@ class HTCondorBackend:
         dag_dir: str | Path | None = None,
         task_timeout_s: float | None = None,
     ) -> None:
+        """Run tasks on the pilots ``launcher`` starts, through a driver-side task server."""
         self.capabilities = _FLOOR
         self.launcher = launcher
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
@@ -435,11 +436,13 @@ class HTCondorBackend:
         return _ParslFuture(raw, self._handlers)
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
+        """Return ``payload``: each task carries its own copy."""
         return payload  # each task carries its own copy through the driver
 
     def subscribe_events(
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
+        """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
         self._handlers[topic] = handler
 
         def unsub() -> None:
@@ -448,10 +451,12 @@ class HTCondorBackend:
         return unsub
 
     def cancel(self, futures: Sequence[Any]) -> None:
+        """Cancel ``futures`` not yet leased; a leased task runs to completion."""
         for fut in futures:  # pre-run only: a leased task runs to completion
             fut.cancel()
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
+        """Return ``(key, pilot)`` for a lost or timed-out task, else ``None``."""
         return (exc.key, exc.pilot) if isinstance(exc, WorkerLost | TaskTimedOut) else None
 
     def host_identity(self) -> str:
@@ -751,6 +756,7 @@ class HTCondorRunner(SubmitRunner):
         max_in_flight: int = 2,
         services: Mapping[str, str] | None = None,
     ) -> None:
+        """Run plans on ``backend``, waiting for ``min_pilots`` at its first need of a worker."""
         super().__init__(
             backend,
             monitor=monitor,
@@ -769,10 +775,12 @@ class HTCondorRunner(SubmitRunner):
     @overload
     def run(self, plan: DurablePlanV2) -> ExecResult[Any]: ...
     def run(self, plan: Plan[R] | DurablePlanV2) -> ExecResult[R] | ExecResult[Any]:
+        """Run ``plan``, refusing one the pilots cannot import."""
         _require_plan_importable(plan, ("process", "combine"))
         return super().run(plan)
 
     def __exit__(self, *exc: object) -> None:
+        """Close the runner; on an exception, stop waiting for slots first."""
         if exc[0] is not None:  # the plans still running are not waited for on a slot
             self.backend.stop_waiting()
         self.close()

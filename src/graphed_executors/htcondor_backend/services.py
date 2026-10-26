@@ -61,6 +61,7 @@ class ServiceJob:
         secret: bytes | None = None,
         watch: str | None = None,
     ) -> None:
+        """Describe the job that runs ``spec`` through ``launcher``; nothing is submitted yet."""
         if spec.launch is None:
             raise ValueError(f"service {spec.name!r} has no launch recipe to run on the cluster")
         if (watch is None) != (url is not None and secret is not None):

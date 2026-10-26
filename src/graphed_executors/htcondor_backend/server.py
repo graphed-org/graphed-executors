@@ -61,12 +61,14 @@ class WorkerLost(Exception):
     """
 
     def __init__(self, key: str, pilot: str) -> None:
+        """Record the task ``key`` and the ``pilot`` that lost it."""
         super().__init__(key, pilot)
         self.key = key
         self.pilot = pilot
 
 
 def sign(secret: bytes, body: bytes) -> str:
+    """Return the hex HMAC-SHA256 of ``body`` under ``secret``."""
     return hmac.new(secret, body, hashlib.sha256).hexdigest()
 
 
@@ -83,12 +85,14 @@ class TaskTimedOut(TimeoutError):
     """Task ``key`` ran on ``pilot`` longer than ``seconds``, the backend's ``task_timeout_s``."""
 
     def __init__(self, key: str, pilot: str, seconds: float) -> None:
+        """Record the task ``key``, its ``pilot`` and the limit it passed."""
         super().__init__(key, pilot, seconds)
         self.key = key
         self.pilot = pilot
         self.seconds = seconds
 
     def __str__(self) -> str:
+        """Name the task, its pilot and the limit."""
         return (
             f"task {self.key} ran on pilot {self.pilot} longer than task_timeout_s={self.seconds}"
         )
@@ -137,6 +141,7 @@ class TaskServer:
         launcher: Any,
         task_timeout_s: float | None = None,
     ) -> None:
+        """Serve tasks on the first free port of ``port_range``."""
         self._task_timeout_s = task_timeout_s
         self.secret = secrets.token_bytes(32)
         self._launcher = launcher
@@ -209,6 +214,7 @@ class TaskServer:
             dep.add_done_callback(dep_done)
 
     def live_pilots(self) -> int:
+        """Return the number of pilots that beat within the lease."""
         now = time.monotonic()
         with self._cond:
             return sum(p not in self._lost and now - t <= LEASE_S for p, t in self._beats.items())
@@ -228,6 +234,7 @@ class TaskServer:
             )
 
     def shutdown(self) -> None:
+        """Stop serving and close the socket."""
         self._http.shutdown()
         self._http.server_close()
 
@@ -277,6 +284,7 @@ class TaskServer:
     # ---- pilot side, called from the request handlers ----
 
     def hello(self, pilot: str) -> dict[str, float]:
+        """Register ``pilot`` and return its beat and lease intervals."""
         self.beat(pilot)
         return {"beat_s": LEASE_S / 6, "lease_s": LEASE_S}
 
@@ -337,6 +345,7 @@ class TaskServer:
             self.reap_once()
 
     def reap_once(self) -> None:
+        """Fail tasks past the timeout and requeue the tasks of lost pilots, once."""
         failed: list[tuple[Future[Any], BaseException]] = []
         now = time.monotonic()
         limit = self._task_timeout_s

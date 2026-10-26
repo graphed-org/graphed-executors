@@ -62,6 +62,7 @@ class SiteProfile:
     services: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
+        """Check each site endpoint and freeze ``services``."""
         for kind, endpoint in self.services.items():
             try:
                 split_endpoint(endpoint)
@@ -72,6 +73,7 @@ class SiteProfile:
     def __reduce__(self) -> tuple[Any, ...]:
         # a mappingproxy neither pickles nor deep-copies; the constructor re-wraps the plain dict
         # (as graphed's Launch does)
+        """Pickle the profile with its frozen mappings as plain dicts."""
         values = [getattr(self, f.name) for f in fields(self)]
         return (
             type(self),
@@ -159,6 +161,7 @@ def schedd_weight(ad: Mapping[str, Any]) -> float:
 
 
 def choose_schedd(ads: list[Mapping[str, Any]]) -> str:
+    """Return the name of the least loaded schedd among ``ads``."""
     return str(min(ads, key=schedd_weight)["Name"])
 
 

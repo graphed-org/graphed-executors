@@ -241,6 +241,7 @@ class EscalatingHttpTransport(HttpTransport):
         idle_deadline_s: float | None = None,
         recv_failures: dict[str, str] | None = None,
     ) -> None:
+        """Bind the dual-route server on ``host`` and serve it for run epoch ``epoch``."""
         self.address = address
         self._epoch = epoch
         # a distinct attribute (not the base's ``_server: _InboxServer``): the dual-route server is
@@ -266,29 +267,36 @@ class EscalatingHttpTransport(HttpTransport):
     # receiver + block counters live on the server; surface them on the transport for the witnesses
     @property
     def recv_rejects(self) -> int:
+        """The number of messages the inbox refused because it was full."""
         return self._dual.recv_rejects
 
     @property
     def stale_epoch_rejects(self) -> int:
+        """The number of messages refused for carrying a stale epoch."""
         return self._dual.stale_epoch_rejects
 
     @property
     def recv_duplicate_deliveries(self) -> int:
+        """The number of messages delivered more than once."""
         return self._dual.recv_duplicate_deliveries
 
     @property
     def bytes_served(self) -> int:
+        """The block bytes this endpoint served over ``/pull``."""
         return self._dual.bytes_served
 
     @property
     def pull_requests_served(self) -> int:
+        """The number of ``/pull`` requests this endpoint served."""
         return self._dual.pull_requests_served
 
     @property
     def serve_pid(self) -> int:
+        """The pid of the process serving this endpoint."""
         return self._dual.serve_pid
 
     def send(self, dest: str, message: object) -> bool:
+        """Send ``message`` to ``dest``, retrying; raise once the retries are spent."""
         if dest not in self._registry or dest == self.address:
             return False
         host, port = self._registry[dest]
@@ -334,12 +342,14 @@ class EscalatingHttpTransport(HttpTransport):
             raise TransportDeliveryError(f"broadcast exhausted for {names}")
 
     def poll(self) -> list[tuple[str, object]]:
+        """Return every message waiting in the inbox, without blocking."""
         return self._dual.drain()
 
     def recv(self, timeout: float | None = None) -> tuple[str, Any] | None:
         # ``Any`` message (not ``object``): callers immediately destructure the pinned message
         # tuples (("hello", …)/("node", …)/…); ``Any`` is LSP-compatible with the base's ``object``
         # return.
+        """Return the next message, waiting at most ``timeout``; raise past the idle deadline."""
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             item = self._dual.pop_one()
@@ -360,12 +370,15 @@ class EscalatingHttpTransport(HttpTransport):
 
     # ---- block plane (holder + puller) ----
     def put_block(self, digest: str, wire: bytes) -> None:
+        """Hold ``wire`` under ``digest`` for peers to pull."""
         self._dual.put_block(digest, wire)
 
     def take_local(self, digest: str) -> bytes | None:
+        """Remove and return the block held under ``digest``, or ``None``."""
         return self._dual.take_local(digest)
 
     def store_blocks_count(self) -> int:
+        """Return the number of blocks this endpoint holds."""
         return self._dual.store_blocks_count()
 
     def pull(self, holder_addr: str, digests: list[str], *, timeout_s: float) -> dict[str, bytes]:
@@ -392,6 +405,7 @@ class EscalatingHttpTransport(HttpTransport):
         return got
 
     def close(self) -> None:
+        """Stop serving and close the server."""
         self._stop.set()
         with contextlib.suppress(Exception):
             self._dual.shutdown()

@@ -62,12 +62,14 @@ class ThreadBackend:
     advertise_host = "127.0.0.1"
 
     def __init__(self, max_workers: int = 2) -> None:
+        """Run tasks on ``max_workers`` threads."""
         self._max_workers = max_workers
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
         self._local = threading.local()
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
 
     def n_workers(self) -> int:
+        """Return the number of threads."""
         return self._max_workers
 
     def submit(
@@ -83,6 +85,7 @@ class ThreadBackend:
     ) -> SubmitFuture:
         # `key`/`retries`/`priority`/`resources`/`workers` are best-effort hints this backend has
         # no capability for -- silently ignored (correctness never depends on them).
+        """Run ``fn(*args)`` on a thread and return its future."""
         return self._pool.submit(self._invoke, fn, args)
 
     def _invoke(self, fn: Callable[..., object], args: tuple[object, ...]) -> object:
@@ -102,11 +105,13 @@ class ThreadBackend:
         return env
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
+        """Return ``payload``: threads share memory."""
         return payload  # degenerate (shared memory): the task fn receives the raw bytes directly
 
     def subscribe_events(
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
+        """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
         self._handlers[topic] = handler
 
         def unsub() -> None:
@@ -116,8 +121,10 @@ class ThreadBackend:
 
     def cancel(self, futures: Sequence[Any]) -> None:
         # best-effort: only not-yet-started work is prevented (cancel_running=False)
+        """Cancel ``futures``."""
         for fut in futures:
             fut.cancel()
 
     def close(self) -> None:
+        """Wait for the running tasks and shut the threads down."""
         self._pool.shutdown(wait=True)

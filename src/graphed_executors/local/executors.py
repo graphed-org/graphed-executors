@@ -1886,6 +1886,7 @@ class ProcessExecutor(ProcessPoolExecutor):
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Warn that this alias is deprecated, then build a :class:`ProcessPoolExecutor`."""
         warnings.warn(
             "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same "
             "behaviour) "

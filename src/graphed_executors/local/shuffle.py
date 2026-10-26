@@ -151,6 +151,8 @@ class ShuffleWitness:
 @dataclass
 class ShuffleResult:
     # dest_pid -> sha256(gathered block wire bytes) (the §7.1 key)
+    """The outcome of a shuffle: dest block hashes, values, partitions and the witness."""
+
     dest_block_hashes: dict[int, str]
     value: dict[int, Any]  # dest_pid -> gathered backend block (content correctness)
     partitions: list[Any]  # coalesced/split blocks (run_repartition_by_size)
@@ -1220,6 +1222,7 @@ class RoutableClusterSim:
         witness: ShuffleWitness,
         stores: dict[int, _RoutableNodeStore],
     ) -> None:
+        """Hold the launched nodes' address table, pids and Stores."""
         self.driver_pid = os.getpid()
         self.address_table = address_table
         self.node_ids = node_ids
@@ -1242,6 +1245,7 @@ class RoutableClusterSim:
         return self._stores[node_id].fetch(digest)
 
     def close(self) -> None:
+        """Terminate and join the node processes."""
         for p in self._procs:
             p.terminate()
         for p in self._procs:

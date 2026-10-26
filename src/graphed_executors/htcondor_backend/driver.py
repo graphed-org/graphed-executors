@@ -197,6 +197,7 @@ def _attempt(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the job's plan and write its result; return the exit status."""
     args = sys.argv[1:] if argv is None else argv
     job = Path(args[0] if args else ".").resolve()
     if str(job) not in sys.path:

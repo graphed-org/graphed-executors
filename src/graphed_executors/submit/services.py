@@ -103,6 +103,7 @@ class ServiceUnavailable(Exception):
     """No leg satisfied service ``name``; ``legs`` maps each leg tried to why it did not apply."""
 
     def __init__(self, name: str, legs: Mapping[str, str]) -> None:
+        """Record service ``name`` and why each leg did not apply."""
         legs = dict(legs)
         # exactly the constructor's arguments: stdlib pickling rebuilds it
         super().__init__(name, legs)
@@ -110,6 +111,7 @@ class ServiceUnavailable(Exception):
         self.legs = legs
 
     def __str__(self) -> str:
+        """Name the service and each leg's reason."""
         why = "; ".join(f"{leg}: {reason}" for leg, reason in self.legs.items())
         return f"service {self.name!r} is unavailable: {why}"
 
@@ -122,6 +124,7 @@ class ServiceUnreachable(Exception):
     """
 
     def __init__(self, name: str, endpoint: str, worker: str, reason: str) -> None:
+        """Record the service, its endpoint, the answering worker and the reason."""
         super().__init__(name, endpoint, worker, reason)
         self.name = name
         self.endpoint = endpoint
@@ -129,6 +132,7 @@ class ServiceUnreachable(Exception):
         self.reason = reason
 
     def __str__(self) -> str:
+        """Name the service, its endpoint, the worker and the reason."""
         where = f" from worker {self.worker}" if self.worker else ""
         return f"service {self.name!r} at {self.endpoint} is unreachable{where}: {self.reason}"
 
@@ -143,25 +147,32 @@ class Endpoints(Mapping[str, str]):
     def __init__(
         self, endpoints: Mapping[str, str], register: Callable[[Callable[[], object]], None]
     ) -> None:
+        """Hold ``endpoints``; ``register`` records a close callback."""
         self._endpoints = dict(endpoints)
         self._register = register
 
     def __getitem__(self, name: str) -> str:
+        """Return the endpoint of service ``name``."""
         return self._endpoints[name]
 
     def __iter__(self) -> Iterator[str]:
+        """Iterate over the service names."""
         return iter(self._endpoints)
 
     def __len__(self) -> int:
+        """Return the number of services."""
         return len(self._endpoints)
 
     def __repr__(self) -> str:
+        """Show the endpoints."""
         return f"Endpoints({self._endpoints!r})"
 
     def __reduce__(self) -> tuple[Any, ...]:
+        """Pickle as the plain endpoint map."""
         return (dict, (self._endpoints,))  # shipped anywhere, it is only the map
 
     def on_close(self, callback: Callable[[], object]) -> None:
+        """Run ``callback`` when the set closes, before it releases any service."""
         self._register(callback)
 
 
@@ -495,6 +506,7 @@ class ServiceSet:
         endpoints: Mapping[str, str] | None = None,
         scope: str | None = None,
     ) -> None:
+        """Describe the set for ``specs`` on ``backend``; nothing starts until :meth:`start`."""
         given = dict(endpoints or {})
         for endpoint in given.values():
             split_endpoint(endpoint)
@@ -508,12 +520,15 @@ class ServiceSet:
         self._driver_mb = 0  # what this set's services beside the driver hold
 
     def __enter__(self) -> Endpoints:
+        """Start the set and return its endpoints."""
         return self.start()
 
     def __exit__(self, *exc: object) -> None:
+        """Close the set."""
         self.close()
 
     def statuses(self) -> list[ServiceStatus]:
+        """Return how each service was satisfied."""
         return list(self._statuses)
 
     def start(self) -> Endpoints:

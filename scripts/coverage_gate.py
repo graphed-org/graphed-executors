@@ -11,6 +11,7 @@ import sys
 
 
 def main() -> int:
+    """Fail when any file in the coverage report is under the threshold."""
     path = sys.argv[1] if len(sys.argv) > 1 else "coverage.json"
     threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 90.0
 

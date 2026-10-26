@@ -67,6 +67,7 @@ def report(value: Mapping[str, Any], histograms: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run the translation over the given files and print or save what it produced."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

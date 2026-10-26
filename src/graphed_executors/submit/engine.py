@@ -112,7 +112,9 @@ class WorkerEnv(Protocol):
     resources: WorkerResources
     worker: str
 
-    def emit(self, topic: str, events: list[dict[str, object]]) -> None: ...
+    def emit(self, topic: str, events: list[dict[str, object]]) -> None:
+        """Deliver ``events`` under ``topic`` to the driver."""
+        ...
 
 
 class _DefaultEnv:
@@ -415,6 +417,7 @@ class SubmitRunner:
         control: RunControl | None = None,
         services: Mapping[str, str] | None = None,
     ) -> None:
+        """Run plans on ``backend``, passing ``retries`` to each task's submit."""
         self._plans = PlanQueue(self.run, max_in_flight)
         self.backend = backend
         self.monitor = monitor  # read once at each run's start (Dashboard.attach assigns it)
@@ -423,13 +426,16 @@ class SubmitRunner:
         self._retries = retries
 
     def __enter__(self) -> SubmitRunner:
+        """Return the runner."""
         return self
 
     def __exit__(self, *exc: object) -> None:
+        """Close the runner."""
         self.close()
 
     @property
     def max_in_flight(self) -> int:
+        """The most submitted plans that may be unfinished at once."""
         return self._plans.max_in_flight
 
     def submit(self, plan: Plan[R]) -> Future[ExecResult[R]]:

@@ -26,9 +26,11 @@ class GraphedWorkerPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
     idempotent = True
 
     def setup(self, worker: Any) -> None:
+        """Give the worker its own :class:`LocalResources`."""
         self.resources = LocalResources()
 
     def teardown(self, worker: Any) -> None:
+        """Close the worker's resources."""
         resources = getattr(self, "resources", None)
         if resources is not None:
             resources.close()

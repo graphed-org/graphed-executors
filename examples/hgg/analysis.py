@@ -342,6 +342,7 @@ class HggInclusiveProcessor:
         fiducialCuts: str = "classical",
         nano_version: int | None = None,
     ) -> None:
+        """Hold the metaconditions and the analysis choices the original's constructor takes."""
         self.meta = metaconditions
         self.apply_trigger = apply_trigger
         self.trigger_group = trigger_group
@@ -905,6 +906,7 @@ class Counters:
     names: tuple[str, ...]
 
     def __call__(self, values: list[Any]) -> dict[str, Any]:
+        """Return the counters named by ``names`` from the plan's values, with ``nEff``."""
         v = dict(zip(self.names, values, strict=False))
         n = int(v["nTot"])
         nPos, nNeg = int(v.get("nPos", n)), int(v.get("nNeg", 0))
@@ -984,6 +986,7 @@ class HggReduce:
     histograms: Any
 
     def __call__(self, values: list[Any]) -> dict[str, Any]:
+        """Return a chunk's counters and its diagnostics from the plan's values."""
         return {**self.counters(values), "diagnostics": self.histograms(values)}
 
     def resolve_services(self, value: dict[str, Any]) -> dict[str, Any]:
@@ -1001,6 +1004,7 @@ class HggCombine:
     histograms: Any
 
     def __call__(self, a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+        """Combine two values: counters by :func:`accumulate`, diagnostics by ``histograms``."""
         both = self.histograms(a["diagnostics"], b["diagnostics"])
         return {**accumulate(_counters(a), _counters(b)), "diagnostics": both}
 
@@ -1012,6 +1016,7 @@ class HggEmpty:
     histograms: Any
 
     def __call__(self) -> dict[str, Any]:
+        """Return the empty value: no counters and empty diagnostics."""
         return {"diagnostics": self.histograms()}
 
 
