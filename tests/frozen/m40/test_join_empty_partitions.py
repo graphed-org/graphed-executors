@@ -14,7 +14,7 @@ sides, so two realistic HEP shapes are UNCOVERED and slip through the green gate
     length 0) with array([0])"; numpy: "index 0 is out of bounds for axis 0 with size 0"). The bug
     is SPECIFICALLY the LEADING block: with the empty block in a MIDDLE/TRAILING slot the result is
     already correct (measured), so each test below asserts position-invariance — the empty block is
-    swept across leading/middle/ trailing and the whole relation must equal the oracle for every
+    swept across leading/middle/trailing and the whole relation must equal the oracle for every
     position; the LEADING iteration is the one that fails on HEAD.
   * an **entirely partitionless absent side** (``right_blocks == []`` for how=left, or
     ``left_blocks == []`` for how=right): the join silently returns ZERO rows, dropping every

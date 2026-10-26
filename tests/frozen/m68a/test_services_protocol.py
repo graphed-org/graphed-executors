@@ -185,7 +185,7 @@ def test_a_dead_given_endpoint_refuses_naming_user_with_zero_plan_submits(
     backend = RecordingBackend(thread_backend())
     plan = spy_plan(SpyProcess("dead-user"), 2, [child_spec("web", report, ports=free_range())])
     with closing_bounded(runner_over(backend, services={"web": dead})) as runner:
-        with pytest.raises(services.ServiceUnavailable) as excinfo:
+        with pytest.raises(services.ServiceUnavailableError) as excinfo:
             run_bounded(lambda: runner.run(plan), BOUND_S)
         assert backend.log.plan_keys() == []
     assert excinfo.value.name == "web"
@@ -213,7 +213,7 @@ def test_no_launch_and_no_endpoint_names_all_three_legs() -> None:
     plan = spy_plan(SpyProcess("nothing"), 2, [bare_spec("web")])
     with (
         closing_bounded(runner_over(thread_backend())) as runner,
-        pytest.raises(services.ServiceUnavailable) as excinfo,
+        pytest.raises(services.ServiceUnavailableError) as excinfo,
     ):
         run_bounded(lambda: runner.run(plan), BOUND_S)
     assert set(excinfo.value.legs) == {"user", "site", "managed"}
@@ -228,7 +228,7 @@ def test_a_gpu_recipe_without_host_service_is_refused_naming_the_attribute() -> 
     plan = spy_plan(SpyProcess("gpu"), 2, [gpu_spec("web")])
     with (
         closing_bounded(runner_over(thread_backend())) as runner,
-        pytest.raises(services.ServiceUnavailable) as excinfo,
+        pytest.raises(services.ServiceUnavailableError) as excinfo,
     ):
         run_bounded(lambda: runner.run(plan), BOUND_S)
     assert "host_service" in excinfo.value.legs["managed"], excinfo.value.legs
@@ -290,7 +290,7 @@ class FaultCase:
             held = child_spec("b-held", children.report("b-held"), ports=(self.held, self.held))
             self.specs = [ready, held]
         elif fault == "probe-submit-worker-lost":
-            self.injected = faults.probe_raises = server_api().WorkerLost(
+            self.injected = faults.probe_raises = server_api().WorkerLostError(
                 "svc-probe", "pilot-lost"
             )
             self.specs = [ready]
@@ -318,25 +318,25 @@ class FaultCase:
         if self.injected is not None:
             assert exc is self.injected, repr(exc)
         elif self.fault == "check-never-passes":
-            assert isinstance(exc, services.ServiceUnavailable), repr(exc)
+            assert isinstance(exc, services.ServiceUnavailableError), repr(exc)
             assert exc.name == "a-never" and "http:/" in exc.legs["managed"], exc.legs
         elif self.fault in ("ready-child-then-refusal", "hosted-then-refusal"):
-            assert isinstance(exc, services.ServiceUnavailable) and exc.name == "b-missing", repr(
-                exc
+            assert isinstance(exc, services.ServiceUnavailableError) and exc.name == "b-missing", (
+                repr(exc)
             )
         elif self.fault == "release-raises-then-refusal":
-            assert isinstance(exc, services.ServiceUnavailable) and exc.name == "c-missing", repr(
-                exc
+            assert isinstance(exc, services.ServiceUnavailableError) and exc.name == "c-missing", (
+                repr(exc)
             )
         elif self.fault == "probe-refuses":
-            assert isinstance(exc, services.ServiceUnreachable) and exc.name == "b-hosted", repr(
-                exc
+            assert isinstance(exc, services.ServiceUnreachableError) and exc.name == "b-hosted", (
+                repr(exc)
             )
             assert exc.reason, repr(exc)
         elif self.fault == "port-range-held":
             assert isinstance(exc, OSError), repr(exc)
         elif self.fault == "probe-unanswered":
-            assert isinstance(exc, services.ServiceUnreachable), repr(exc)
+            assert isinstance(exc, services.ServiceUnreachableError), repr(exc)
             assert "no worker answered" in exc.reason, exc.reason
         else:  # pragma: no cover
             raise AssertionError(self.fault)
@@ -458,7 +458,7 @@ def test_overlapping_submissions_keep_their_own_scope(tmp_path: Path) -> None:
     try:
         fut_b = runner.submit(plan_b)
         assert wait_for(lambda: any(c[1] == "svc-b" for c in fake.host_service_calls()), 30.0)
-        with pytest.raises(services.ServiceUnreachable) as excinfo:
+        with pytest.raises(services.ServiceUnreachableError) as excinfo:
             run_bounded(lambda: runner.run(plan_a), BOUND_S)
         assert "no worker answered" in excinfo.value.reason
         scope = {name: s for _, name, s in fake.host_service_calls()}
@@ -782,7 +782,7 @@ def test_the_two_host_probe_passes_only_off_the_service_host(
         if passes:
             run_bounded(lambda: runner.run(plan), BOUND_S)
         else:
-            with pytest.raises(services.ServiceUnreachable) as excinfo:
+            with pytest.raises(services.ServiceUnreachableError) as excinfo:
                 run_bounded(lambda: runner.run(plan), BOUND_S)
             assert "only same-host workers answered" in excinfo.value.reason
     probes = fake.inner.log.probe_keys()

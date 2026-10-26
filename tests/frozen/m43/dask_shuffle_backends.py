@@ -297,7 +297,7 @@ def repartition_blocks(adapter: ShuffleJoinAdapter, copies: int = 1) -> list[obj
 
     6 source blocks with overlapping key populations, so a P-way hash coalesces several dests
     per producer task and several src blocks feed each dest. ``copies`` repeats each key list
-    in place — MORE ROWS, SAME BLOCK COUNT (the row-count- independence knob for the structure
+    in place — MORE ROWS, SAME BLOCK COUNT (the row-count-independence knob for the structure
     gates).
     """
     key_lists = [
@@ -500,7 +500,7 @@ def read_nullable_column(c: object) -> list[int | None]:
 def nullable_join_multiset(value: dict[int, object]) -> Counter[NJRow]:
     """Return the whole relational result as one null-aware multiset over ALL blocks.
 
-    Partitioning- independent — the join RESULT does not depend on how it is partitioned.
+    Partitioning-independent — the join RESULT does not depend on how it is partitioned.
     """
     total: Counter[NJRow] = Counter()
     for block in value.values():

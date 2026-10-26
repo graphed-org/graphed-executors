@@ -65,7 +65,7 @@ def _col(c: object) -> list[int | None]:
 def observed_nullable(value: dict[int, object]) -> Counter[NRow]:
     """Return the whole relational result as one null-aware multiset over ALL blocks.
 
-    Partitioning- independent — the join RESULT does not depend on how it is partitioned.
+    Partitioning-independent — the join RESULT does not depend on how it is partitioned.
     """
     total: Counter[NRow] = Counter()
     for block in value.values():

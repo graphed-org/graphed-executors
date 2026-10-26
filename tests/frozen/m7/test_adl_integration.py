@@ -30,13 +30,15 @@ def _plan(qname: str, n_chunks: int) -> Plan:
     )
 
 
-@pytest.mark.parametrize("Ex", [ThreadExecutor, ProcessExecutor])
+@pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
 @pytest.mark.parametrize("qname", adl.ADL_NAMES)
-def test_adl_query_via_executor_matches_single_pass(Ex: type, qname: str) -> None:
+def test_adl_query_via_executor_matches_single_pass(executor_cls: type, qname: str) -> None:
     bins, start, stop = adl.adl_axis(qname)
     full = adl.adl_full_counts(qname, bins, start, stop)
-    r = Ex(max_workers=4).run(_plan(qname, n_chunks=6))
-    assert np.array_equal(r.value, full), f"{qname} via {Ex.__name__}: chunked != single pass"
+    r = executor_cls(max_workers=4).run(_plan(qname, n_chunks=6))
+    assert np.array_equal(r.value, full), (
+        f"{qname} via {executor_cls.__name__}: chunked != single pass"
+    )
     assert r.n_combines == 5  # 6 chunks -> 5 tree combines
 
 

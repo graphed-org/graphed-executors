@@ -43,7 +43,7 @@ from m68c_harness import (
 
 from graphed_executors.local import ProcessPoolExecutor, ThreadExecutor
 from graphed_executors.submit import SubmitRunner, ThreadBackend
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 PARTS = 8  # steps_per_file: map tasks per side, and dests
 N_MAPS = 2 * PARTS
@@ -86,7 +86,7 @@ def test_a_managed_child_lives_exactly_as_long_as_the_join_run(tmp_path: Path) -
 
 def test_an_unbound_service_without_a_launch_is_refused_before_any_stage_task() -> None:
     backend = RecordingBackend(ThreadBackend(2))
-    with closing(SubmitRunner(backend)) as runner, pytest.raises(ServiceUnavailable):
+    with closing(SubmitRunner(backend)) as runner, pytest.raises(ServiceUnavailableError):
         run_bounded(lambda: runner.run(join_v2("unbound", spec=given_spec())))
     assert backend.plan_keys() == [], backend.plan_keys()
 

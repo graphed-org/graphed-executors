@@ -211,12 +211,12 @@ def test_transfer_input_files_carry_the_secret_env_and_user_modules(tmp_path: Pa
         assert any(e.endswith("my_analysis.py") for e in entries), (site, entries)
 
 
-class BindingsReached(Exception):
+class BindingsReachedError(Exception):
     """Raised by the patched ``_htcondor()``: the launcher got past every pre-bindings step."""
 
 
 def stop_at_bindings() -> Any:
-    raise BindingsReached
+    raise BindingsReachedError
 
 
 def lpc_sandbox_dir() -> str:
@@ -298,7 +298,7 @@ def test_start_ships_a_non_editable_env_and_a_private_secret(
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
     pilots = htcondor_api().CondorPilots(ship_site(), log_dir=log_dir, env=env)
-    with pytest.raises(BindingsReached):
+    with pytest.raises(BindingsReachedError):
         pilots.start(URL, b"s" * 32, 1)
     with tarfile.open(log_dir / "env.tgz") as tar:
         names = tar.getnames()

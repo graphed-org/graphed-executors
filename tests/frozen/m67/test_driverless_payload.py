@@ -52,7 +52,8 @@ import pickle, sys
 from graphed.core.execution import SequentialRunner
 with open("plan.pkl", "rb") as f:
     plan = pickle.load(f)
-sys.stdout.buffer.write(pickle.dumps((SequentialRunner().run(plan).value, sys.modules[plan.process.__module__].__file__)))
+origin = sys.modules[plan.process.__module__].__file__
+sys.stdout.buffer.write(pickle.dumps((SequentialRunner().run(plan).value, origin)))
 """
 
 

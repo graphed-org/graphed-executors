@@ -809,7 +809,7 @@ def read_nullable_column(c: Any) -> list[int | None]:
 def nullable_join_multiset(value: dict[int, Any]) -> Counter[NJRow]:
     """Return the whole relational result as one null-aware multiset over ALL blocks.
 
-    Partitioning- independent — the join RESULT does not depend on how it is partitioned.
+    Partitioning-independent — the join RESULT does not depend on how it is partitioned.
     """
     total: Counter[NJRow] = Counter()
     for block in value.values():

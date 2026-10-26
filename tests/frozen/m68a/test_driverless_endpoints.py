@@ -253,7 +253,7 @@ def test_a_dead_given_endpoint_exits_1_with_service_unavailable(
     code, _pid, err = run_driver(job)
     assert code == 1, (code, err, driver_log(job))
     ok, exc = read_result(job)
-    assert ok is False and isinstance(exc, services_api().ServiceUnavailable), exc
+    assert ok is False and isinstance(exc, services_api().ServiceUnavailableError), exc
     assert exc.name == "web" and "user" in exc.legs
 
 
@@ -278,8 +278,8 @@ def test_a_refusal_of_the_in_run_recheck_exits_1(
 ) -> None:
     """The given endpoint answers the driver's leg-1 check and the one probe answer, then refuses.
 
-    The re-check inside ``runner.run`` raises ``ServiceUnavailable``, which ``_exit_code`` maps
-    to 1.
+    The re-check inside ``runner.run`` raises ``ServiceUnavailableError``, which ``_exit_code``
+    maps to 1.
     """
     with CountingHTTPServer(ok_first=2) as srv:
         plan = get_plan(2, "m68a-dl-recheck", [web_spec(children.report())])
@@ -288,23 +288,25 @@ def test_a_refusal_of_the_in_run_recheck_exits_1(
         assert srv.gets >= 3, "the run's own set never re-checked the given endpoint"
     assert code == 1, (code, err, driver_log(job))
     ok, exc = read_result(job)
-    assert ok is False and isinstance(exc, services_api().ServiceUnavailable), exc
+    assert ok is False and isinstance(exc, services_api().ServiceUnavailableError), exc
 
 
 def _service_unavailable() -> BaseException:
-    exc: BaseException = services_api().ServiceUnavailable(
+    exc: BaseException = services_api().ServiceUnavailableError(
         "web", {"user": "refused", "site": "none", "managed": "no"}
     )
     return exc
 
 
 def _service_unreachable() -> BaseException:
-    exc: BaseException = services_api().ServiceUnreachable("web", "grpc://h:1", "wn1", "refused")
+    exc: BaseException = services_api().ServiceUnreachableError(
+        "web", "grpc://h:1", "wn1", "refused"
+    )
     return exc
 
 
 def _worker_lost() -> BaseException:
-    exc: BaseException = server_api().WorkerLost("svc-abc-probe-0", "pilot-1")
+    exc: BaseException = server_api().WorkerLostError("svc-abc-probe-0", "pilot-1")
     return exc
 
 
@@ -346,11 +348,11 @@ def test_a_plan_error_with_a_live_service_exits_3_intact(
 
 def test_a_service_unreachable_round_trips_through_the_result_blob() -> None:
     services = services_api()
-    unreachable = services.ServiceUnreachable("t", "grpc://h:1", "w", "refused")
+    unreachable = services.ServiceUnreachableError("t", "grpc://h:1", "w", "refused")
     ok, exc = pickle.loads(
         run_bounded(lambda: driver_api()._result_blob(False, unreachable), RUN_TIMEOUT_S)
     )
-    assert ok is False and type(exc) is services.ServiceUnreachable, repr(exc)
+    assert ok is False and type(exc) is services.ServiceUnreachableError, repr(exc)
     assert (exc.name, exc.endpoint, exc.worker, exc.reason) == ("t", "grpc://h:1", "w", "refused")
     assert "refused" in str(exc) and "t" in str(exc)
 
@@ -358,11 +360,11 @@ def test_a_service_unreachable_round_trips_through_the_result_blob() -> None:
 def test_a_service_unavailable_round_trips_through_the_result_blob() -> None:
     services = services_api()
     legs = {"user": "none given", "site": "no site row", "managed": "no launch"}
-    unavailable = services.ServiceUnavailable("t", legs)
+    unavailable = services.ServiceUnavailableError("t", legs)
     ok, exc = pickle.loads(
         run_bounded(lambda: driver_api()._result_blob(False, unavailable), RUN_TIMEOUT_S)
     )
-    assert ok is False and type(exc) is services.ServiceUnavailable, repr(exc)
+    assert ok is False and type(exc) is services.ServiceUnavailableError, repr(exc)
     assert exc.name == "t" and dict(exc.legs) == legs
     assert all(reason in str(exc) for reason in legs.values()), str(exc)
 

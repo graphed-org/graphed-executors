@@ -127,7 +127,7 @@ def test_a_fixed_run_with_a_monitor_raises_well_within_the_drain_timeout(
     assert len(started(mark)) < 8, f"leaves started by close: {started(mark)}"
 
 
-# ---- C2: a task whose service is gone raises ServiceUnreachable ---------------------------------
+# ---- C2: a task whose service is gone raises ServiceUnreachableError ----------------------------
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
@@ -150,7 +150,7 @@ def test_a_task_whose_service_is_gone_raises_service_unreachable(
     run = Background(lambda: runner.run(gated_plan(mark, given_spec())))
     kill_after_task_zero(mark, web)
     err = run.error()
-    assert isinstance(err, services_api().ServiceUnreachable), repr(err)
+    assert isinstance(err, services_api().ServiceUnreachableError), repr(err)
     task_error = (mark / "t1.error").read_text()
     assert (err.name, err.endpoint, err.worker) == (SERVICE, web.endpoint, WORKER_ID), err.args
     assert task_error in err.reason, f"the task's {task_error} is not in {err.reason!r}"
@@ -247,7 +247,7 @@ def test_a_driverless_run_whose_given_service_dies_exits_1(tmp_path: Path) -> No
             driver.wait()
     ok, payload = pickle.loads((job / "result.pkl").read_bytes())
     assert (code, ok) == (1, False), f"exit {code}: {payload!r}"
-    assert isinstance(payload, services_api().ServiceUnreachable), repr(payload)
+    assert isinstance(payload, services_api().ServiceUnreachableError), repr(payload)
     assert (payload.name, payload.endpoint) == (SERVICE, web.endpoint), payload.args
     assert log_lines(job, "rerun:") == [], "a service no SERVICE node hosts was rerun"
 
@@ -262,6 +262,6 @@ def test_a_stage_task_whose_service_is_gone_raises_service_unreachable(tmp_path:
         run = Background(lambda: runner.run(stage_plan(mark, given_spec())))
         kill_after_task_zero(mark, web)
         err = run.error()
-    assert isinstance(err, services_api().ServiceUnreachable), repr(err)
+    assert isinstance(err, services_api().ServiceUnreachableError), repr(err)
     assert (err.name, err.endpoint) == (SERVICE, web.endpoint), err.args
     assert (mark / "t1.error").read_text() in err.reason, err.reason

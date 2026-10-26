@@ -37,7 +37,7 @@ sys.meta_path.insert(0, Block())
 import graphed_executors.htcondor_backend as pkg
 from graphed_executors.htcondor_backend import (
     CondorPilots, HTCondorBackend, HTCondorRunner, LocalPilots, PilotLauncher, SITES, SiteProfile,
-    WorkerLost, htcondor_runner,
+    WorkerLostError, htcondor_runner,
 )
 assert attempts == [], f"module load attempted {attempts}"
 loaded = sorted(m for m in sys.modules if m.split(".")[0] in BLOCKED)

@@ -57,7 +57,7 @@ from services_harness import (
 )
 
 from graphed_executors.submit import SubmitRunner, ThreadBackend
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 SERVICES_LOGGER = "graphed_executors.services"
 WORKERS = 2
@@ -226,14 +226,14 @@ def named(number: int, text: str, *cut: str) -> bool:
 def refused(runner: Any, size_mb: int) -> tuple[str, list[Any]]:
     """Return ``legs["managed"]`` of the refusal and every process started meanwhile.
 
-    ``legs["managed"]`` of the ``ServiceUnavailable`` a one-server plan of ``size_mb``, bound to no
-    endpoint, raises on ``runner``, and every process ``subprocess.Popen`` started meanwhile.
+    ``legs["managed"]`` of the ``ServiceUnavailableError`` a one-server plan of ``size_mb``, bound
+    to no endpoint, raises on ``runner``, and every process ``subprocess.Popen`` started meanwhile.
     """
     require_histserv()
     ctx = histserv_api().Context(memory_mb=size_mb, workers=WORKERS, name=unique("m69b-refused"))
     plan = served_plan(SMALL, ctx)
     assert [s[1] for s in ctx.servers()] == [size_mb], ctx.servers()
-    with popen_backstop() as started, pytest.raises(ServiceUnavailable) as err:
+    with popen_backstop() as started, pytest.raises(ServiceUnavailableError) as err:
         run_bounded(lambda: runner.run(plan))
     return str(err.value.legs["managed"]), list(started)
 
@@ -268,7 +268,7 @@ def test_the_driver_check_sums_the_servers_beside_the_driver(size_mb: int) -> No
     backend.driver_memory_mb = limit
     runner = SubmitRunner(backend)
     try:
-        with popen_backstop() as started, pytest.raises(ServiceUnavailable) as err:
+        with popen_backstop() as started, pytest.raises(ServiceUnavailableError) as err:
             run_bounded(lambda: runner.run(plan))
     finally:
         runner.close()

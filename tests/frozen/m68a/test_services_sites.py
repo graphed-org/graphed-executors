@@ -163,7 +163,7 @@ def test_an_attached_backend_without_a_driver_host_refuses_a_managed_start(
         assert backend.service_hosts == profile.service_hosts
         assert dict(backend.site_services) == {}
         assert not callable(getattr(backend, "host_service", None))
-        with pytest.raises(services.ServiceUnavailable) as excinfo:
+        with pytest.raises(services.ServiceUnavailableError) as excinfo:
             run_bounded(
                 services.ServiceSet(
                     [child_spec("web", report, ports=free_range())], backend

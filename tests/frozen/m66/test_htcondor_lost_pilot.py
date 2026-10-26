@@ -4,9 +4,10 @@ m66 D5: a dead pilot's lease is re-queued once to another pilot, then surfaces a
 attributed to the partition. ``server.LEASE_S`` is 2 s here, so a pilot counts as lost after 2 s.
 
 Discriminates requeue-forever (the poisoned uri kills a third pilot, or the run hangs),
-fail-on-first- loss (the die-once run errors), a second ``set_running_or_notify_cancel`` on requeue
-(the die-once run errors), a raw ``WorkerLost`` escaping from a blocking dependency resolution in
-``submit``, attribution to the task key instead of the partition, and a hang when no pilot is left.
+fail-on-first-loss (the die-once run errors), a second ``set_running_or_notify_cancel`` on requeue
+(the die-once run errors), a raw ``WorkerLostError`` escaping from a blocking dependency resolution
+in ``submit``, attribution to the task key instead of the partition, and a hang when no pilot is
+left.
 """
 
 from __future__ import annotations
@@ -102,7 +103,7 @@ def test_describe_failure_maps_worker_lost_only() -> None:
     api = htcondor_api()
     backend = api.HTCondorBackend(RecordingLauncher(), 1, host="127.0.0.1")
     try:
-        lost = api.WorkerLost("graphed-abc-leaf-3", "host.example:4242")
+        lost = api.WorkerLostError("graphed-abc-leaf-3", "host.example:4242")
         assert (lost.key, lost.pilot) == ("graphed-abc-leaf-3", "host.example:4242")
         assert backend.describe_failure(lost) == ("graphed-abc-leaf-3", "host.example:4242")
         assert backend.describe_failure(ValueError("negative pt")) is None

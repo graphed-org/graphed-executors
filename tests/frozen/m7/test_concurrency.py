@@ -5,15 +5,15 @@ Including under the free-threaded interpreter via the experimental CI job (plan 
 
 from __future__ import annotations
 
-import analyses as A
+import analyses
 from graphed.core import Partition, Plan, Task
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
 
-def _plan(n: int, process=A.sleep_then_one) -> Plan[int]:
+def _plan(n: int, process=analyses.sleep_then_one) -> Plan[int]:
     tasks = [Task(i, Partition("f", "E", i, i + 1)) for i in range(n)]
-    return Plan(process=process, combine=A.add_int, empty=A.zero_int, tasks=tasks)
+    return Plan(process=process, combine=analyses.add_int, empty=analyses.zero_int, tasks=tasks)
 
 
 def test_thousands_of_tiny_tasks_complete_without_deadlock_thread() -> None:
@@ -35,5 +35,5 @@ def test_repeated_runs_are_race_free_thread() -> None:
 
 
 def test_many_tasks_process_pool() -> None:
-    r = ProcessExecutor(max_workers=4).run(_plan(200, A.one))
+    r = ProcessExecutor(max_workers=4).run(_plan(200, analyses.one))
     assert r.value == 200 and r.n_combines == 199

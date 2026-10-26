@@ -85,8 +85,8 @@ THIRD_HOST = "host-c.m68a.example"
 def services_api() -> Any:
     """``graphed_executors.submit.services``.
 
-    ServiceSet, ServiceStatus, ServiceUnavailable, ServiceUnreachable, Endpoints, check_ready,
-    host_identity, _probe_services.
+    ServiceSet, ServiceStatus, ServiceUnavailableError, ServiceUnreachableError, Endpoints,
+    check_ready, host_identity, _probe_services.
     """
     return importlib.import_module("graphed_executors.submit.services")
 
@@ -133,7 +133,7 @@ def driver_api() -> Any:
 
 
 def server_api() -> Any:
-    """``graphed_executors.htcondor_backend.server``: WorkerLost."""
+    """``graphed_executors.htcondor_backend.server``: WorkerLostError."""
     return importlib.import_module("graphed_executors.htcondor_backend.server")
 
 

@@ -27,7 +27,9 @@ import graphed_executors.parsl_backend
 from graphed_executors.parsl_backend import ParslBackend, parsl_runner
 assert "parsl" not in sys.modules, "importing parsl_backend pulled in parsl (lazy-import broken)"
 assert "dask" not in sys.modules, "importing parsl_backend pulled in dask (G9 violation)"
-assert "distributed" not in sys.modules, "importing parsl_backend pulled in distributed (G9 violation)"
+assert "distributed" not in sys.modules, (
+    "importing parsl_backend pulled in distributed (G9 violation)"
+)
 print("CLEAN")
 """
 

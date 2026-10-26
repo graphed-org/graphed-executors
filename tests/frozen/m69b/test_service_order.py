@@ -57,7 +57,7 @@ from services_harness import (
     wait_for,
 )
 
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 BOUND_S = 120.0
 LIVE_S = 600.0
@@ -80,7 +80,7 @@ CHILD = str(Path(HARNESS_DIR) / "m69b_order_child.py")
 posix = pytest.mark.skipif(sys.platform == "win32", reason="SIGINT to a child is POSIX only")
 
 
-class LeftTheBlock(Exception):
+class LeftTheBlockError(Exception):
     pass
 
 
@@ -347,10 +347,10 @@ def test_close_waits_for_a_waiting_server_and_an_error_in_the_block_ends_the_wai
                     "the plan submitted no service job"
                 )
                 raised_at.append(time.monotonic())
-                raise LeftTheBlock
+                raise LeftTheBlockError
 
         try:
-            with pytest.raises(LeftTheBlock):
+            with pytest.raises(LeftTheBlockError):
                 run_bounded(leave_with_an_error, LEAVE_S)
             took = time.monotonic() - raised_at[0]
         finally:
@@ -456,7 +456,7 @@ def test_a_later_server_is_refused_where_only_its_runner_s_pilots_hold_room(
             schedd, f"ClusterId == {pilots}"
         )
         t1 = int(time.time())
-        with pytest.raises(ServiceUnavailable) as err:
+        with pytest.raises(ServiceUnavailableError) as err:
             run_bounded(lambda: runner.run(plan_of("m69b-order-second")), PLAN_S)
         second = since(t1, SERVICE_JOBS)
         assert wait_for(lambda: not queued(schedd, second), GONE_S), (

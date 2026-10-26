@@ -6,7 +6,7 @@ pointing at the user's analysis line — never an opaque worker traceback (plan 
 
 from __future__ import annotations
 
-import analyses as A
+import analyses
 import graphed.debug as gd
 import pytest
 from graphed.core import Partition, Plan, Task
@@ -16,9 +16,9 @@ from graphed_exec_local import ProcessExecutor
 
 def test_remote_stage_error_round_trips_and_renders_user_source() -> None:
     plan = Plan(
-        process=A.raise_stage_error,
-        combine=A.add_int,
-        empty=A.zero_int,
+        process=analyses.raise_stage_error,
+        combine=analyses.add_int,
+        empty=analyses.zero_int,
         tasks=[Task(0, Partition("f", "E", 0, 4))],
     )
     with pytest.raises(gd.StageError) as info:

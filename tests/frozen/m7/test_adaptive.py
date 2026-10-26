@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import analyses as A
+import analyses
 from graphed.core import ExecContext, Partition, Plan, StopCondition, StopReason, Task
 
 from graphed_exec_local import ThreadExecutor
@@ -27,7 +27,10 @@ def test_probe_driven_reshaping_processes_all_events_correctly() -> None:
         return tasks
 
     plan = Plan(
-        process=A.count_entries, combine=A.add_int, empty=A.zero_int, next_tasks=next_tasks
+        process=analyses.count_entries,
+        combine=analyses.add_int,
+        empty=analyses.zero_int,
+        next_tasks=next_tasks,
     )
     r = ThreadExecutor(max_workers=4).run(plan)
     assert r.value == total  # every event folded in correctly despite the resized partitions
@@ -43,9 +46,9 @@ def test_stops_at_target_events() -> None:
         return [Task(base + k, Partition("f", "E", 0, 100)) for k in range(4)]
 
     plan = Plan(
-        process=A.count_entries,
-        combine=A.add_int,
-        empty=A.zero_int,
+        process=analyses.count_entries,
+        combine=analyses.add_int,
+        empty=analyses.zero_int,
         next_tasks=next_tasks,
         stop=StopCondition(target_events=500),
     )

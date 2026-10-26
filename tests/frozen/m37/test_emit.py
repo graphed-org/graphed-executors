@@ -54,15 +54,15 @@ def _plan(n: int = 8) -> tuple[list[Task], Plan[int]]:
     return tasks, Plan(process=count_entries, combine=add, empty=lambda: 0, tasks=tasks)
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_emit_full_phase_sequence(name: str, Executor: type) -> None:
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_emit_full_phase_sequence(name: str, executor_cls: type) -> None:
     """Worker-side counts are lower bounds.
 
     The process drain is best-effort and shutdown must not stall to make it exhaustive.
     """
     _, plan = _plan(8)
     rec = Recorder()
-    with Executor(max_workers=3, monitor=rec, comms=None) as ex:
+    with executor_cls(max_workers=3, monitor=rec, comms=None) as ex:
         result = ex.run(plan)
     phases = collections.Counter(e.phase for e in rec.events)
     # Threads emit in-process (synchronously, inside the future's callable) so their counts are
@@ -82,12 +82,12 @@ def test_emit_full_phase_sequence(name: str, Executor: type) -> None:
     assert "driver" in workers and len(workers) >= 2
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_attaching_a_monitor_is_passive(name: str, Executor: type) -> None:
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_attaching_a_monitor_is_passive(name: str, executor_cls: type) -> None:
     _, plan = _plan(8)
-    bare = Executor(max_workers=3, comms=None).run(plan)
+    bare = executor_cls(max_workers=3, comms=None).run(plan)
     rec = Recorder()
-    with Executor(max_workers=3, monitor=rec, comms=None) as ex:
+    with executor_cls(max_workers=3, monitor=rec, comms=None) as ex:
         observed = ex.run(plan)
     assert observed.value == bare.value
     assert observed.n_combines == bare.n_combines
@@ -95,14 +95,14 @@ def test_attaching_a_monitor_is_passive(name: str, Executor: type) -> None:
     assert rec.combines == bare.n_combines  # on_combine fired once per tree-reduce combine
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_errored_task_emits_errored_and_propagates(name: str, Executor: type) -> None:
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_errored_task_emits_errored_and_propagates(name: str, executor_cls: type) -> None:
     tasks = [Task(0, Partition("bad.root", "Events", 0, 10))]
     plan = Plan(process=boom, combine=add, empty=lambda: 0, tasks=tasks)
     rec = Recorder()
     with (
         pytest.raises(ValueError, match="boom"),
-        Executor(max_workers=2, monitor=rec, comms=None) as ex,
+        executor_cls(max_workers=2, monitor=rec, comms=None) as ex,
     ):
         ex.run(plan)
     errored = [e for e in rec.events if e.phase is TaskPhase.ERRORED]
@@ -110,8 +110,8 @@ def test_errored_task_emits_errored_and_propagates(name: str, Executor: type) ->
     assert "boom" in (errored[0].error or "")
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_raising_monitor_never_breaks_the_run(name: str, Executor: type) -> None:
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_raising_monitor_never_breaks_the_run(name: str, executor_cls: type) -> None:
     class Bad:
         def on_task(self, event: TaskEvent) -> None:
             raise RuntimeError("monitor exploded")
@@ -126,6 +126,6 @@ def test_raising_monitor_never_breaks_the_run(name: str, Executor: type) -> None
             return None
 
     _, plan = _plan(6)
-    with Executor(max_workers=3, monitor=Bad(), comms=None) as ex:
+    with executor_cls(max_workers=3, monitor=Bad(), comms=None) as ex:
         result = ex.run(plan)
     assert result.value == sum((k + 1) * 5 for k in range(6))

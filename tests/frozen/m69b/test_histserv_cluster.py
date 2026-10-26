@@ -33,7 +33,7 @@ from m69b_harness import (
 )
 from services_harness import backend_api, htcondor_api, launch_api, status_records, wait_for
 
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 POOL_PROBE_S = 30.0
 LIVE_S = 600.0
@@ -276,7 +276,7 @@ def test_a_server_no_slot_can_hold_is_removed_unrun_and_refused(tmp_path: Path) 
     t0 = int(time.time())
     jobs = services_since(t0)
     try:
-        with pytest.raises(ServiceUnavailable) as err:
+        with pytest.raises(ServiceUnavailableError) as err:
             run_bounded(lambda: runner.run(plan), LIVE_S)
         assert wait_for(lambda: not queued(schedd, jobs), GONE_S), (
             "the refused job is still queued"
@@ -310,7 +310,7 @@ def test_a_requirement_no_slot_meets_is_removed_unrun_and_refused(tmp_path: Path
         }
         t0 = int(time.time())
         jobs = services_since(t0)
-        with pytest.raises(ServiceUnavailable):
+        with pytest.raises(ServiceUnavailableError):
             run_bounded(lambda: runner.backend.host_service(spec, "unmatched"), LIVE_S)
         assert wait_for(lambda: not queued(schedd, jobs), GONE_S), (
             "the refused job is still queued"

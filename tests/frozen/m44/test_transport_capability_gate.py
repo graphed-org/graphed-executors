@@ -38,7 +38,9 @@ import graphed_executors.dask_backend.transport_peer as tp
 import graphed_executors.dask_backend.transport_shuffle as ts
 assert callable(tp.transport_run_plan)
 assert callable(ts.transport_run_repartition) and callable(ts.transport_run_join)
-assert "distributed" not in sys.modules, "importing the m44 entry-point modules pulled in distributed"
+assert "distributed" not in sys.modules, (
+    "importing the m44 entry-point modules pulled in distributed"
+)
 assert "dask" not in sys.modules, "importing the m44 entry-point modules pulled in dask"
 print("CLEAN")
 """

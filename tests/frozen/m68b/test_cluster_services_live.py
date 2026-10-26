@@ -303,7 +303,7 @@ def test_a_late_or_dead_service_job_is_removed_and_its_key_forgotten(
             base, launch=dataclasses.replace(base.launch, resources={"gpus": 2}), timeout_s=20.0
         )
         t0 = int(time.time())
-        with pytest.raises(services_api().ServiceUnavailable) as late:
+        with pytest.raises(services_api().ServiceUnavailableError) as late:
             run_bounded(lambda: backend.host_service(gpus, "late"), LIVE_S)
         text = str(late.value)
         largest = largest_slot_mb(htc)

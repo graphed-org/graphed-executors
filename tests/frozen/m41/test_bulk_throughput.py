@@ -5,7 +5,7 @@ Plan §8 M41; decomposition §3(e).
 A large blob (2 MB) is moved through the bulk ``fetch()`` endpoint of the cross-process cluster
 sim; we record ``bytes_transferred`` + elapsed and derive a throughput. This proves the bulk data
 plane actually MOVES the whole blob (the counter is tied to the real bytes in the consumer Store)
-and does not double- count an idempotent re-fetch.
+and does not double-count an idempotent re-fetch.
 
 SCOPE HONESTY (required, decomposition §3(e)): throughput is measured on the SINGLE-MACHINE
 cross-process sim — a sane, complete number — NOT a cluster wall-clock SLA and NOT gated on any

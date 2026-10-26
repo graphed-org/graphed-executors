@@ -51,7 +51,7 @@ def htcondor_api() -> Any:
     """``graphed_executors.htcondor_backend``.
 
     HTCondorBackend, HTCondorRunner, htcondor_runner, CondorPilots, LocalPilots, PilotLauncher,
-    SiteProfile, SITES, WorkerLost.
+    SiteProfile, SITES, WorkerLostError.
     """
     # deferred: module under test
     import graphed_executors.htcondor_backend as mod  # noqa: PLC0415

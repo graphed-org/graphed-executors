@@ -193,7 +193,7 @@ def test_a_driver_hosted_service_refuses_a_port_held_by_another_process(tmp_path
         run_bounded(service_set.close, 60.0)
         backend.close()
     assert foreign and foreign[0].port == low, "the foreign listener never bound the scanned port"
-    assert isinstance(err, services_api().ServiceUnavailable), repr(err)
+    assert isinstance(err, services_api().ServiceUnavailableError), repr(err)
     managed = err.legs.get("managed", "")
     assert f"port {low} " in managed and "held by another process" in managed, err.legs
 

@@ -83,7 +83,7 @@ def in_job_backend(
 
 
 def text_of(err: BaseException, *paths: Path) -> str:
-    """Return an exception's text and ``legs`` (a ``ServiceUnavailable``'s), tmp paths cut."""
+    """Return an exception's text and ``legs`` (a ``ServiceUnavailableError``'s), tmp paths cut."""
     legs = getattr(err, "legs", None) or {}
     return cut(" ".join([str(err), *map(str, legs.values())]), *paths)
 

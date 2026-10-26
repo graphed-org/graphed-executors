@@ -90,7 +90,7 @@ def engine_api() -> Any:
 def services_api() -> Any:
     """``graphed_executors.submit.services``.
 
-    ServiceSet, ServiceUnreachable, listeners, held_by.
+    ServiceSet, ServiceUnreachableError, listeners, held_by.
     """
     return importlib.import_module("graphed_executors.submit.services")
 

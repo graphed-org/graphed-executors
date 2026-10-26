@@ -19,7 +19,7 @@ from functools import cache
 import graphed
 import graphed.debug as gd
 import graphed_histogram as gh
-import m49_variation_analyses as A
+import m49_variation_analyses as analyses
 import pytest
 from graphed.checkpoint import dead_letter_descriptor
 
@@ -34,7 +34,7 @@ PLACEMENTS = tuple(where for where, _rendering in RENDERINGS)
 @cache
 def _crossing_failure(where: str) -> gd.StageError:
     with pytest.raises(gd.StageError) as info:
-        ProcessPoolExecutor(max_workers=2).run(A.poisoned_plan(where))
+        ProcessPoolExecutor(max_workers=2).run(analyses.poisoned_plan(where))
     return info.value
 
 
@@ -48,12 +48,12 @@ def test_the_poison_sits_where_the_rendering_anchor_claims(where: str, reaching:
     Which universes' record cones reach the failing node. If `shared` ever degenerated to a
     single universe the multi-label anchor would silently become a second single-label one.
     """
-    varied, poison = A.poisoned_program(where)
+    varied, poison = analyses.poisoned_program(where)
     labels = graphed.labels(varied)
     assert {
         label
         for label in labels
-        if poison.node_id in A.record_cone(graphed.universe(varied, label))
+        if poison.node_id in analyses.record_cone(graphed.universe(varied, label))
     } == reaching
 
 
@@ -63,7 +63,7 @@ def test_the_unpoisoned_program_runs_across_the_boundary() -> None:
     The varied program's own lowering crosses the process boundary cleanly, so the errors those
     tests catch come from the poison and nothing else.
     """
-    result = ProcessPoolExecutor(max_workers=2).run(A.healthy_plan())
+    result = ProcessPoolExecutor(max_workers=2).run(analyses.healthy_plan())
     assert sorted(gh.unpack(result.value)["ht"]) == ["jes_down", "jes_up", "nominal"]
 
 
@@ -115,7 +115,7 @@ def test_the_label_reaches_the_dead_letter_descriptor() -> None:
     positive control is the `error_message` assertion on the same descriptor.
     """
     err = _crossing_failure("jes_up")
-    partition = A.poisoned_plan("jes_up").tasks[0].partition
+    partition = analyses.poisoned_plan("jes_up").tasks[0].partition
     descriptor = dead_letter_descriptor("m49-jes-up", partition, err)
     assert "jes_up" in descriptor["error_message"]
     assert descriptor["error_type"] == "StageError"
