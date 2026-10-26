@@ -1,5 +1,6 @@
 """A failed task re-checks every service of the plan (plan §2 C2: checks built from the endpoints bound for
-``plan.services``), not only the first."""
+``plan.services``), not only the first.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +13,15 @@ from graphed.core.execution import Partition, Plan, Task
 from graphed.services import ServiceSpec
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68d"))
-from m68d_harness import Background, Web, empty_tuple, given_spec, pair_concat, partitions, wait_for
+from m68d_harness import (
+    Background,
+    Web,
+    empty_tuple,
+    given_spec,
+    pair_concat,
+    partitions,
+    wait_for,
+)
 
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit.services import ServiceUnreachable
@@ -31,9 +40,13 @@ class FailsAtTheGate:
         raise LookupError("m-the-task-failed")
 
 
-def test_a_failed_task_names_the_plan_s_second_service_when_only_it_is_gone(tmp_path: Path) -> None:
+def test_a_failed_task_names_the_plan_s_second_service_when_only_it_is_gone(
+    tmp_path: Path,
+) -> None:
     first, second = Web(), Web()
-    spec2 = ServiceSpec("web2", "http", check="http:/", ports=(40000, 40010), launch=None, timeout_s=30.0)
+    spec2 = ServiceSpec(
+        "web2", "http", check="http:/", ports=(40000, 40010), launch=None, timeout_s=30.0
+    )
     gate = tmp_path / "gate"
     plan = Plan(
         FailsAtTheGate(str(gate)),
@@ -53,6 +66,7 @@ def test_a_failed_task_names_the_plan_s_second_service_when_only_it_is_gone(tmp_
             err = run.error()
     finally:
         first.close()
-    assert isinstance(err, ServiceUnreachable) and (err.name, err.endpoint) == ("web2", second.endpoint), (
-        repr(err)
-    )
+    assert isinstance(err, ServiceUnreachable) and (err.name, err.endpoint) == (
+        "web2",
+        second.endpoint,
+    ), repr(err)

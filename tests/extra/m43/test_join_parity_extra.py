@@ -35,14 +35,16 @@ pytest.importorskip("distributed")
 
 
 def _numpy_backend() -> Any:
-    from graphed.numpy import NumpyBackend  # noqa: PLC0415  (hard dep, kept local per the frozen-suite idiom)
+    # hard dep, kept local per the frozen-suite idiom
+    from graphed.numpy import NumpyBackend  # noqa: PLC0415
 
     return NumpyBackend()
 
 
 def _awkward_backend() -> Any:
     pytest.importorskip("awkward")
-    from graphed.awkward import AwkwardBackend  # noqa: PLC0415  (optional backend: importorskip'd above)
+    # optional backend: importorskip'd above
+    from graphed.awkward import AwkwardBackend  # noqa: PLC0415
 
     return AwkwardBackend()
 
@@ -62,7 +64,8 @@ def _make_side(
     backend: JoinBackend[Any, Any], keys: Sequence[int], field: str, values: Sequence[int]
 ) -> object:
     """A 2-column (``__joinkey__`` + ``field``) block for whichever backend, via awkward's dict ctor
-    or a numpy structured array (mirrors the frozen harness ``make_side``, kept self-contained)."""
+    or a numpy structured array (mirrors the frozen harness ``make_side``, kept self-contained).
+    """
     if type(backend).__name__ == "AwkwardBackend":
         import awkward as ak  # noqa: PLC0415  (optional backend only)
 
@@ -111,10 +114,13 @@ PARTS = 4
 
 
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
-def test_broadcast_noninner_matches_local(backend: JoinBackend[Any, Any], how: str, runner: Any) -> None:
+def test_broadcast_noninner_matches_local(
+    backend: JoinBackend[Any, Any], how: str, runner: Any
+) -> None:
     """Tiny build + multi-block probe with a left-only key (13 -> an unmatched build row -> the
     once-only tail) and a right-only key (17). Forced broadcast so the large side is never shuffled;
-    dask must equal local ``run_join(broadcast=True)`` content-addressed blocks."""
+    dask must equal local ``run_join(broadcast=True)`` content-addressed blocks.
+    """
     left = [_make_side(backend, [1, 2, 3, 13], "lval", [10, 20, 30, 99])]
     right = [
         _make_side(backend, [1, 1, 2, 17], "rval", [100, 101, 200, 170]),
@@ -138,13 +144,15 @@ def test_broadcast_empty_probe_matches_local_no_crash(
     """G3 regression: forced broadcast with a NONEMPTY build and an EMPTY probe under left/outer. The
     local engine guards its never-matched-build tail with ``if unmatched and right_blocks:`` and
     degrades gracefully; the dask port must match, not ``IndexError`` on ``right_blocks[0]``.
-    NON-VACUOUS: without the guard this raises before returning; with it, it returns local's result."""
+    NON-VACUOUS: without the guard this raises before returning; with it, it returns local's result.
+    """
     left = [_make_side(backend, [1, 2, 3], "lval", [10, 20, 30])]
     right: list[object] = []
     dask_res = dask_run_join(backend, left, right, PARTS, how=how, runner=runner, broadcast=True)
     local = run_join(backend, left, right, PARTS, how=how, broadcast=True)
 
-    assert dask_res.dest_block_hashes == local.dest_block_hashes  # both {} — no probe schema carrier
+    # both {} — no probe schema carrier
+    assert dask_res.dest_block_hashes == local.dest_block_hashes
     assert dask_res.value == local.value
 
 
@@ -155,7 +163,8 @@ def test_shuffle_pure_one_sided_dests_match_local(
     """Keys chosen (verified via the backend's own ``partition``) so left routes to dests {0,3} and
     right to dest {1} — DISJOINT, so dest 0/3 are pure build-only and dest 1 pure probe-only,
     exercising the ``_dask_gather_join`` schema-carrier null-fill (F1). Cross-engine content-addressed
-    equality vs local ``run_join(broadcast=False)``."""
+    equality vs local ``run_join(broadcast=False)``.
+    """
     left = [_make_side(backend, [3, 7, 4, 3], "lval", [1, 2, 3, 4])]  # -> dests {0, 3}
     right = [_make_side(backend, [2, 13, 2, 13], "rval", [5, 6, 7, 8])]  # -> dest {1}
     dask_res = dask_run_join(backend, left, right, PARTS, how=how, runner=runner, broadcast=False)
@@ -176,7 +185,8 @@ def test_shuffle_partitionless_side_matches_local(
 ) -> None:
     """An entirely empty side (carrier ``None``): the present rows survive. ``how=right`` keeps the
     probe with an empty build; ``how=left`` keeps the build with an empty probe. Forced shuffle so
-    the (auto-broadcast-on-empty-build) cost choice does not intervene."""
+    the (auto-broadcast-on-empty-build) cost choice does not intervene.
+    """
     rows = [_make_side(backend, [1, 2, 3, 1], "rval" if how == "right" else "lval", [9, 8, 7, 6])]
     left = [] if how == "right" else rows
     right = rows if how == "right" else []

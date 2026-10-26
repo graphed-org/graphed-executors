@@ -24,7 +24,8 @@ def test_an_interrupted_thread_run_returns_promptly_and_leaves_no_actor(comms: s
     assert time.monotonic() - start < 15.0
     deadline = time.monotonic() + 5.0
     while (
-        any(t.name.startswith("graphed-peer-") for t in threading.enumerate()) and time.monotonic() < deadline
+        any(t.name.startswith("graphed-peer-") for t in threading.enumerate())
+        and time.monotonic() < deadline
     ):
         time.sleep(0.05)
     assert not [t.name for t in threading.enumerate() if t.name.startswith("graphed-peer-")]

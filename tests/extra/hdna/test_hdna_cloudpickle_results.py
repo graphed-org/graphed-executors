@@ -12,7 +12,16 @@ from typing import Any
 import awkward as ak
 import cloudpickle
 import pytest
-from _hdna_payloads import EVENTS, Events, add, concat, empty_array, lambda_behavior_reduce, sum_all, zero
+from _hdna_payloads import (
+    EVENTS,
+    Events,
+    add,
+    concat,
+    empty_array,
+    lambda_behavior_reduce,
+    sum_all,
+    zero,
+)
 from graphed import Session
 from graphed.aggregate import aggregate_plan
 from graphed.awkward import AwkwardBackend, AwkwardForm, gak
@@ -20,7 +29,13 @@ from graphed.core.execution import SequentialRunner
 
 import graphed_executors.local._portable as portable
 import graphed_executors.local.executors as local_executors
-from graphed_executors.htcondor_backend import HTCondorBackend, HTCondorRunner, LocalPilots, driver, pilot
+from graphed_executors.htcondor_backend import (
+    HTCondorBackend,
+    HTCondorRunner,
+    LocalPilots,
+    driver,
+    pilot,
+)
 from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor
 from graphed_executors.local._portable import Portable
 from graphed_executors.local._transport import PipeInbox, build_transports
@@ -115,11 +130,15 @@ def test_the_process_pool_entries_return_portable_values(monkeypatch: pytest.Mon
     monkeypatch.setattr(local_executors, "_proc_task_shared", lambda _token, _task: lam)
     leaf = local_executors._proc_task_portable("token", None)  # type: ignore[arg-type]
     merged = local_executors._proc_combine_task(concat, lam, lam)
-    assert isinstance(leaf, Portable) and leaf.cloud and isinstance(merged, Portable) and merged.cloud
+    assert (
+        isinstance(leaf, Portable) and leaf.cloud and isinstance(merged, Portable) and merged.cloud
+    )
     assert ak.to_list(pickle.loads(pickle.dumps(merged))) == [1.0, 1.0]
 
 
-def test_an_ipc_inbox_wraps_only_what_stdlib_pickle_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_ipc_inbox_wraps_only_what_stdlib_pickle_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen = _loads_seen(monkeypatch)
     inbox = PipeInbox(multiprocessing.get_context("spawn"))
     try:
@@ -132,7 +151,9 @@ def test_an_ipc_inbox_wraps_only_what_stdlib_pickle_refuses(monkeypatch: pytest.
     assert seen == {"from_value": 0, "from_cloudpickle": 1}
 
 
-def test_an_http_send_wraps_only_what_stdlib_pickle_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_http_send_wraps_only_what_stdlib_pickle_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen = _loads_seen(monkeypatch)
     transports = build_transports("http", ("a", "b"))
     try:
@@ -160,4 +181,5 @@ def test_an_htcondor_pilot_and_driver_wrap_only_what_stdlib_pickle_refuses(
     loaded = [pickle.loads(blob) for _ok, blob in got]
     assert all(ok for ok, _blob in got) and loaded[0] == 1.0 and loaded[2] == (True, 1.0)
     assert loaded[1].behavior["f"](3) == 3 and loaded[3][1].behavior["f"](3) == 3
-    assert seen == {"from_value": 0, "from_cloudpickle": 3}  # the driver blob also loads once to check itself
+    # the driver blob also loads once to check itself
+    assert seen == {"from_value": 0, "from_cloudpickle": 3}

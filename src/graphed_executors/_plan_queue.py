@@ -1,5 +1,6 @@
 """``submit(plan)``: run plans one at a time, in submit order, on a driver thread, so the caller can
-record and compile the next plan while this one runs."""
+record and compile the next plan while this one runs.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +16,8 @@ R = TypeVar("R")
 
 class PlanQueue:
     """A one-thread driver in front of a host's ``run``, bounded to ``max_in_flight`` submitted and
-    unfinished plans (the running one included); ``submit`` blocks at the bound."""
+    unfinished plans (the running one included); ``submit`` blocks at the bound.
+    """
 
     def __init__(self, run: Callable[[Plan[Any]], ExecResult[Any]], max_in_flight: int) -> None:
         if max_in_flight < 1:

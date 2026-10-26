@@ -77,7 +77,9 @@ def test_pull_timeout_is_restart_worthy() -> None:
 
 
 # ---- R2 integration: root_timeout_s reaches collect_peer_root (recording seam, no clock) --------
-def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from transport_harness import (  # noqa: PLC0415  (frozen harness, imported by path above)
         build_dask_backend,
         install_transport_plugin,
@@ -92,7 +94,9 @@ def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(monkeypatch: pytes
     # re-exported implicitly from local._peer; the monkeypatch below needs THIS module's binding
     real = tp.collect_peer_root  # type: ignore[attr-defined]
 
-    def _recording(driver_ep: object, empty: Callable[[], Any], n: int, *, timeout_s: float) -> object:
+    def _recording(
+        driver_ep: object, empty: Callable[[], Any], n: int, *, timeout_s: float
+    ) -> object:
         seen["timeout_s"] = timeout_s  # record the forwarded ceiling, then run the real collector
         return real(driver_ep, empty, n, timeout_s=timeout_s)
 
@@ -103,7 +107,9 @@ def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(monkeypatch: pytes
         install_transport_plugin(client)
         res = transport_plan_run(plan, build_dask_backend(client), root_timeout_s=7.5)
 
-    assert res.value == SequentialRunner().run(make_peer_plan(6, "m44tmo")).value, "the run diverged"
+    assert res.value == SequentialRunner().run(make_peer_plan(6, "m44tmo")).value, (
+        "the run diverged"
+    )
     assert seen.get("timeout_s") == 7.5, (
         f"root_timeout_s was not forwarded to collect_peer_root (saw {seen.get('timeout_s')!r}); a "
         "hardcoded _ROOT_TIMEOUT_S=30.0 fails this"
@@ -113,7 +119,8 @@ def test_root_timeout_kwarg_is_forwarded_to_collect_peer_root(monkeypatch: pytes
 # ---- REMEDIATION-2: a transient-empty scheduler_info must not crash the pin math ----------------
 class _FakeClient:
     """A client whose ``scheduler_info`` returns an EMPTY worker set until ``wait_for_workers`` is
-    called (the stale-``_scheduler_identity``-cache-until-refresh race), then the real set."""
+    called (the stale-``_scheduler_identity``-cache-until-refresh race), then the real set.
+    """
 
     def __init__(self, real_workers: dict[str, object]) -> None:
         self._real = real_workers
@@ -152,7 +159,9 @@ def test_populated_scheduler_info_is_not_needlessly_re_read() -> None:
     client = _FakeClient({"tcp://127.0.0.1:9": {}})
     client.refreshed = True
     assert sorted_addresses(_FakeBackend(client)) == ("tcp://127.0.0.1:9",)
-    assert client.waited == 0, "re-read a healthy scheduler_info — the guard is not scoped to empty"
+    assert client.waited == 0, (
+        "re-read a healthy scheduler_info — the guard is not scoped to empty"
+    )
 
 
 def test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join(
@@ -188,7 +197,8 @@ def test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join(
             return info if state["refreshed"] else {**info, "workers": {}}
 
         def flaky_wait(n_workers: int, timeout: float | None = None) -> None:
-            state["refreshed"] = True  # the stale cache refreshes only once the client waits on workers
+            # the stale cache refreshes only once the client waits on workers
+            state["refreshed"] = True
             real_wait(n_workers, timeout)
 
         monkeypatch.setattr(client, "scheduler_info", flaky_info)
@@ -209,5 +219,7 @@ def test_transient_empty_scheduler_info_does_not_crash_the_zero_partition_join(
     assert "error" not in outcome, (
         f"a transient-empty scheduler_info crashed the zero-partition join: {outcome.get('error')!r}"
     )
-    assert total_result_rows(outcome["result"].value) == 0, "left/left-empty should pass through 0 rows"
+    assert total_result_rows(outcome["result"].value) == 0, (
+        "left/left-empty should pass through 0 rows"
+    )
     assert state["refreshed"], "the fix never re-read past the stale-empty scheduler_info snapshot"

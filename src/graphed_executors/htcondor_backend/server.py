@@ -83,7 +83,9 @@ class TaskTimedOut(TimeoutError):
         self.seconds = seconds
 
     def __str__(self) -> str:
-        return f"task {self.key} ran on pilot {self.pilot} longer than task_timeout_s={self.seconds}"
+        return (
+            f"task {self.key} ran on pilot {self.pilot} longer than task_timeout_s={self.seconds}"
+        )
 
 
 @dataclass
@@ -116,10 +118,15 @@ def _bind(port_range: tuple[int, int]) -> _Http:
 class TaskServer:
     """Binds the first free port of ``port_range`` (inclusive) on all interfaces and advertises
     ``http://{host}:{port}``. ``launcher`` is asked how many pilots can still come, and its
-    ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit) bounds a lease."""
+    ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit) bounds a lease.
+    """
 
     def __init__(
-        self, host: str, port_range: tuple[int, int], launcher: Any, task_timeout_s: float | None = None
+        self,
+        host: str,
+        port_range: tuple[int, int],
+        launcher: Any,
+        task_timeout_s: float | None = None,
     ) -> None:
         self._task_timeout_s = task_timeout_s
         self.secret = secrets.token_bytes(32)
@@ -138,14 +145,19 @@ class TaskServer:
         self._http = _bind(port_range)
         self._http.tasks = self
         self.url = f"http://{host}:{self._http.server_address[1]}"
-        threading.Thread(target=self._http.serve_forever, daemon=True, name="graphed-task-server").start()
+        threading.Thread(
+            target=self._http.serve_forever, daemon=True, name="graphed-task-server"
+        ).start()
         threading.Thread(target=self._reap, daemon=True, name="graphed-task-reaper").start()
 
     # ---- driver side ----
 
-    def add(self, key: str, fn: Callable[..., object], args: tuple[object, ...], fut: Future[Any]) -> None:
+    def add(
+        self, key: str, fn: Callable[..., object], args: tuple[object, ...], fut: Future[Any]
+    ) -> None:
         """Queue ``fn(*args)`` once every future argument is done; a failed one fails ``fut`` with its
-        exception, so a lost pilot reaches the dependents of any arity unchanged."""
+        exception, so a lost pilot reaches the dependents of any arity unchanged.
+        """
         deps = [a for a in args if isinstance(a, _ParslFuture)]
         remaining = [len(deps)]
         count_lock = threading.Lock()
@@ -162,7 +174,8 @@ class TaskServer:
                     payload = pickle.dumps((_parsl_task_shim, fn, resolved))
                 except PICKLE_ERRORS:  # an upstream result only cloudpickle carries
                     payload = pickle.dumps((_parsl_task_shim, fn, Portable(resolved)))
-            except Exception as exc:  # raised in a done-callback it would be logged and the task would hang
+            # raised in a done-callback it would be logged and the task would hang
+            except Exception as exc:
                 settle(fut, exc=exc)
                 return
             with self._cond:
@@ -197,7 +210,10 @@ class TaskServer:
             self._queue.clear()
             self._cond.notify_all()
         for task in held:
-            settle(task.fut, exc=RuntimeError(f"task {task.key} unfinished when the HTCondor backend closed"))
+            settle(
+                task.fut,
+                exc=RuntimeError(f"task {task.key} unfinished when the HTCondor backend closed"),
+            )
 
     def shutdown(self) -> None:
         self._http.shutdown()
@@ -286,7 +302,10 @@ class TaskServer:
         try:
             value = pickle.loads(blob)
         except Exception as exc:  # a hang otherwise: the future would never settle
-            ok, value = False, RuntimeError(f"task {task.key}: its result does not unpickle here: {exc!r}")
+            ok, value = (
+                False,
+                RuntimeError(f"task {task.key}: its result does not unpickle here: {exc!r}"),
+            )
         if ok:
             settle(task.fut, value)
         else:
@@ -305,9 +324,14 @@ class TaskServer:
         limit = self._task_timeout_s
         with self._cond:
             for tid, task in list(self._tasks.items()):
-                if limit is not None and task.leased_to is not None and now - task.leased_at > limit:
+                if (
+                    limit is not None
+                    and task.leased_to is not None
+                    and now - task.leased_at > limit
+                ):
                     del self._tasks[tid]  # its pilot's late result is dropped
-                    self._lost.add(task.leased_to)  # a pilot runs one task: it stops at its next beat
+                    # a pilot runs one task: it stops at its next beat
+                    self._lost.add(task.leased_to)
                     failed.append((task.fut, TaskTimedOut(task.key, task.leased_to, limit)))
             for pilot, beat in self._beats.items():
                 if pilot in self._lost or now - beat <= LEASE_S:
@@ -342,7 +366,9 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return None  # one line per long poll would drown the driver's stderr
 
-    def _reply(self, status: HTTPStatus, body: bytes = b"", headers: dict[str, str] | None = None) -> None:
+    def _reply(
+        self, status: HTTPStatus, body: bytes = b"", headers: dict[str, str] | None = None
+    ) -> None:
         self.send_response(status)
         for name, value in (headers or {}).items():
             self.send_header(name, value)

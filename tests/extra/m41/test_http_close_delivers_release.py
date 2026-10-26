@@ -49,7 +49,11 @@ def test_a_destination_that_never_answers_does_not_starve_the_live_one() -> None
     driver, live = HttpTransport("driver"), HttpTransport("w1")
     try:
         driver.set_registry(
-            {"driver": (driver.host, driver.port), "w0": hole.getsockname(), "w1": (live.host, live.port)}
+            {
+                "driver": (driver.host, driver.port),
+                "w0": hole.getsockname(),
+                "w1": (live.host, live.port),
+            }
         )
         release_workers(driver)  # w0 (the hole) is queued first
         t0 = time.monotonic()

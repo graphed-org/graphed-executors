@@ -20,7 +20,8 @@ _VALID_METHODS = ("auto", "transport", "tasks")
 def resolve_shuffle_method(method: str, caps: SubmitCapabilities) -> str:
     """Pure, deterministic engine choice (no cluster, no size heuristics). Explicit ``"transport"`` /
     ``"tasks"`` resolve to themselves — the engines' own gates then apply. ``"auto"`` picks transport
-    iff ``caps.pin_to_worker AND caps.peer_data_movement``, else tasks. Anything else raises."""
+    iff ``caps.pin_to_worker AND caps.peer_data_movement``, else tasks. Anything else raises.
+    """
     if method in ("transport", "tasks"):
         return method
     if method == "auto":
@@ -30,9 +31,12 @@ def resolve_shuffle_method(method: str, caps: SubmitCapabilities) -> str:
 
 def _reject_transport_only_knobs(resolved: str, knob_values: dict[str, Any]) -> None:
     """When resolution landed on ``"tasks"``, a transport-only knob that was explicitly set (not None)
-    is a caller error — raise naming it, in declared order, BEFORE any dispatch. No-op for transport."""
+    is a caller error — raise naming it, in declared order, BEFORE any dispatch. No-op for transport.
+    """
     if resolved != "tasks":
         return
     for name, value in knob_values.items():
         if value is not None:
-            raise ValueError(f"{name} applies only to shuffle_method='transport' (resolved: 'tasks')")
+            raise ValueError(
+                f"{name} applies only to shuffle_method='transport' (resolved: 'tasks')"
+            )

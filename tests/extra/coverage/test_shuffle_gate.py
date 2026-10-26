@@ -1,6 +1,7 @@
 """Coverage-policy rollout (ci/per-file-coverage-policy): closes `local/shuffle.py` toward the
 per-file >=90% gate (the node-local block/object HTTP handlers + the routable store-child launcher).
-Not frozen; may be extended or replaced by later coverage work."""
+Not frozen; may be extended or replaced by later coverage work.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +18,11 @@ import pytest
 
 import graphed_executors.local.shuffle as shuffle_mod
 from graphed_executors.local._transport import LookupFreeHTTPServer
-from graphed_executors.local.shuffle import _make_block_handler, _make_cluster, _store_server_handler
+from graphed_executors.local.shuffle import (
+    _make_block_handler,
+    _make_cluster,
+    _store_server_handler,
+)
 
 
 def test_make_cluster_rejects_an_unknown_comms_kind() -> None:

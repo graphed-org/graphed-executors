@@ -51,7 +51,9 @@ def _run(
     return result
 
 
-def _assert_sane(value: np.ndarray, witness: list[dict[str, int]], weights: tuple[int, ...]) -> None:
+def _assert_sane(
+    value: np.ndarray, witness: list[dict[str, int]], weights: tuple[int, ...]
+) -> None:
     assert sum(w["processed"] for w in witness) == len(weights)  # every leaf ran exactly once
     assert sum(w["peer_sends"] for w in witness) > 0  # partials really crossed the wire
     assert np.array_equal(value, np.full(value.size, float(len(weights))))

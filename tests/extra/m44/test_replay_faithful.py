@@ -58,7 +58,8 @@ def _driver_manifests(
     backend: object, src: list[object], parts: int, k: int, n_tasks: int
 ) -> tuple[dict[int, dict[int, tuple[str, int]]], dict[str, int]]:
     """Reproduce exactly what the transport map tasks register: per producer task, coalesce its owned
-    src blocks, ``to_wire`` each dest, and record ``(sha256, len)`` keyed to holder ``t % k``."""
+    src blocks, ``to_wire`` each dest, and record ``(sha256, len)`` keyed to holder ``t % k``.
+    """
     manifests: dict[int, dict[int, tuple[str, int]]] = {}
     size_of: dict[str, int] = {}
     for t, owned in enumerate(_assign(len(src), n_tasks)):
@@ -92,7 +93,9 @@ def _reader_counters(w: ShuffleWitness) -> dict[str, object]:
     ("fetch_budget", "disk_budget"),
     [(None, None), (400, None), (200, None), (1, 4000)],
 )
-def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budget: int | None) -> None:
+def test_replay_matches_local_stage2_gather(
+    fetch_budget: int | None, disk_budget: int | None
+) -> None:
     be = NumpyBackend()
     src = _blocks()
     n_tasks = min(K, len(src))
@@ -103,7 +106,14 @@ def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budge
     manifests, size_of = _driver_manifests(be, src, PARTS, K, n_tasks)
     addrs = tuple(f"tcp://w{i}" for i in range(K))
     replay = replay_reader_plane(
-        manifests, PARTS, n_tasks, K, addrs, size_of, fetch_budget=fetch_budget, disk_budget=disk_budget
+        manifests,
+        PARTS,
+        n_tasks,
+        K,
+        addrs,
+        size_of,
+        fetch_budget=fetch_budget,
+        disk_budget=disk_budget,
     )
     assert _reader_counters(replay) == _reader_counters(local.witness), (
         f"replay diverged from the real _stage2_gather at fetch={fetch_budget}, disk={disk_budget}"
@@ -114,7 +124,8 @@ def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budge
 
 def test_replay_detects_wrong_sizes() -> None:
     """Discrimination guard: halving every fetched block's size MUST change the reader counters — a
-    size-blind replay (the failure mode) would not, and would silently pass the parity test above."""
+    size-blind replay (the failure mode) would not, and would silently pass the parity test above.
+    """
     be = NumpyBackend()
     src = _blocks()
     n_tasks = min(K, len(src))

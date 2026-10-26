@@ -43,7 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--entry-stop", type=int, default=None, help="default: the whole file")
     parser.add_argument("--out", default=None, help="default: a temporary directory")
     parser.add_argument("--mc", default=MC, help="the MC file (default: the manifest's first)")
-    parser.add_argument("--data", default=DATA, help="the data file (default: the manifest's first)")
+    parser.add_argument(
+        "--data", default=DATA, help="the data file (default: the manifest's first)"
+    )
     args = parser.parse_args(argv)
 
     h.place_higgs_dna_data()
@@ -58,11 +60,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FILE {dataset} {uri} num_entries={n} ranges={ranges}", flush=True)
         oracle[dataset] = h.oracle_parts(uri, dataset, h.YEAR, ranges, out / "oracle" / dataset)
         fileset[dataset] = {uri: {"object_path": "Events", "steps": [list(r) for r in ranges]}}
-    value = SequentialRunner().run(analysis.plan(fileset, year=h.YEAR, out=str(out / "graphed"))).value
+    value = (
+        SequentialRunner().run(analysis.plan(fileset, year=h.YEAR, out=str(out / "graphed"))).value
+    )
     differences = 0
     for dataset, uri in files.items():
         for (start, stop_), (counters, table) in oracle[dataset].items():
-            path = out / "graphed" / dataset / "nominal" / f"{Path(uri).stem}_Events_{start}-{stop_}.parquet"
+            path = (
+                out
+                / "graphed"
+                / dataset
+                / "nominal"
+                / f"{Path(uri).stem}_Events_{start}-{stop_}.parquet"
+            )
             # the counters leg is the dataset totals below; each part is judged on its table
             diffs = h.compare_part((counters, table), (counters, pq.read_table(path)))
             differences += len(diffs)
@@ -71,7 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         expected = accumulate(counters for counters, _ in oracle[dataset].values())
         differences += expected != {dataset: value[dataset]}
         print(
-            f"TOTALS {dataset}\n  original {expected}\n  graphed  { ({dataset: value[dataset]}) }", flush=True
+            f"TOTALS {dataset}\n  original {expected}\n  graphed  { ({dataset: value[dataset]}) }",
+            flush=True,
         )
     print(f"DIFFERENCES {differences}")
     return 1 if differences else 0

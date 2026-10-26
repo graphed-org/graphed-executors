@@ -47,19 +47,25 @@ def _child(n_floats: int, weights: tuple[int, ...], comms: str, out_path: str) -
     Path(out_path).write_text(outcome)  # written last: its absence means teardown never returned
 
 
-def _run(scenario: str, n_floats: int, weights: tuple[int, ...], comms: str, tmp_path: Path) -> str:
+def _run(
+    scenario: str, n_floats: int, weights: tuple[int, ...], comms: str, tmp_path: Path
+) -> str:
     out = tmp_path / f"{scenario}-{comms}-{n_floats}.txt"
     run_in_child(f"{scenario} ({comms})", _child, (n_floats, weights, comms, str(out)))
     return out.read_text()
 
 
 @pytest.mark.parametrize("comms", ["ipc", "http"])
-def test_worker_error_tears_down_with_a_partial_larger_than_the_pipe(comms: str, tmp_path: Path) -> None:
+def test_worker_error_tears_down_with_a_partial_larger_than_the_pipe(
+    comms: str, tmp_path: Path
+) -> None:
     assert _run("crash-first control", SMALL, CRASH_FIRST, comms, tmp_path) == "kaboom"
     assert _run("crash-first", BIG, CRASH_FIRST, comms, tmp_path) == "kaboom"
 
 
 @pytest.mark.parametrize("comms", ["ipc", "http"])
-def test_worker_error_behind_an_already_parked_partial_tears_down(comms: str, tmp_path: Path) -> None:
+def test_worker_error_behind_an_already_parked_partial_tears_down(
+    comms: str, tmp_path: Path
+) -> None:
     assert _run("crash-last control", SMALL, CRASH_LAST, comms, tmp_path) == "kaboom"
     assert _run("crash-last", BIG, CRASH_LAST, comms, tmp_path) == "kaboom"

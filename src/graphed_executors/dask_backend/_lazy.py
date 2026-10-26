@@ -14,7 +14,9 @@ from typing import Any
 def _distributed() -> Any:
     try:
         import distributed  # noqa: PLC0415  (lazy: dask is the optional extra)
-    except ImportError as exc:  # pragma: no cover - exercised via the no-dask frozen test (subprocess)
+    except (
+        ImportError
+    ) as exc:  # pragma: no cover - exercised via the no-dask frozen test (subprocess)
         raise ImportError(
             "the dask backend needs dask.distributed — install the optional extra: "
             "pip install 'graphed-executors[dask]'"

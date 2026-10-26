@@ -59,7 +59,8 @@ PLACEHOLDER = pickle.dumps(
 class RunHandle:
     """A submitted driverless job: ``cluster`` on the schedd named ``schedd`` of ``site``, its outputs
     returning to ``log_dir``. Every call locates that schedd by name, never the local default. With
-    ``dag``, ``cluster`` is the run's DAGMan job, and the outcome is its ``driver`` node's."""
+    ``dag``, ``cluster`` is the run's DAGMan job, and the outcome is its ``driver`` node's.
+    """
 
     site: str
     schedd: str
@@ -75,7 +76,9 @@ class RunHandle:
         errors = []
         for pool in pools:
             try:
-                return htc, htc.Schedd(htc.Collector(pool).locate(htc.DaemonType.Schedd, self.schedd))
+                return htc, htc.Schedd(
+                    htc.Collector(pool).locate(htc.DaemonType.Schedd, self.schedd)
+                )
             except Exception as exc:  # the next collector in the list may know it
                 errors.append(f"{pool}: {exc}")
         raise RuntimeError(f"schedd {self.schedd} not found: {'; '.join(errors)}")
@@ -104,12 +107,17 @@ class RunHandle:
 
     def _dag_status(self, schedd: Any, status: Any) -> str:
         """DAGMan's own ``JobStatus`` for removed and held; the driver node's state while DAGMan runs,
-        and its latest try's exit once DAGMan ended (a try is a new cluster; ``RETRY driver 2``: three)."""
+        and its latest try's exit once DAGMan ended (a try is a new cluster; ``RETRY driver 2``: three).
+        """
         if status in (3, 5):
             return "removed" if status == 3 else "held"
         node = f'DAGManJobId == {self.cluster} && DAGNodeName == "driver"'
         if status in (1, 2):
-            ads = list(schedd.query(constraint=node, projection=["ClusterId", "JobStatus", "HoldReasonCode"]))
+            ads = list(
+                schedd.query(
+                    constraint=node, projection=["ClusterId", "JobStatus", "HoldReasonCode"]
+                )
+            )
             if any(ad.get("JobStatus") == 5 and not counts_as_alive(ad) for ad in ads):
                 return "held"
             return "running" if any(ad.get("JobStatus") == 2 for ad in ads) else "queued"
@@ -131,7 +139,9 @@ class RunHandle:
         while (status := self._poll(schedd)[0]) not in TERMINAL:
             if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError(f"cluster {self.cluster} is still {status} after {timeout}s")
-            time.sleep(poll_s if deadline is None else min(poll_s, max(0.0, deadline - time.monotonic())))
+            time.sleep(
+                poll_s if deadline is None else min(poll_s, max(0.0, deadline - time.monotonic()))
+            )
         return status
 
     def result(self) -> ExecResult[Any]:
@@ -188,7 +198,8 @@ def _service_nodes(
 ) -> dict[str, str]:
     """``{name: node id}`` for each spec only a SERVICE node can host: launched, given no endpoint, of a
     kind the site does not serve, and needing an image or GPUs (a driver job hosts the rest beside
-    itself). Ids, not names, reach DAGMan and the three-field announce: a name is a free string."""
+    itself). Ids, not names, reach DAGMan and the three-field announce: a name is a free string.
+    """
     names = sorted(
         spec.name
         for spec in specs
@@ -202,7 +213,8 @@ def _service_nodes(
 
 def _require_under(profile: SiteProfile, what: str, path: str | Path) -> None:
     """Refuse ``path`` outside the site's ``job_root``; lexical (``abspath``), so a symlink under the root
-    passes whatever it names."""
+    passes whatever it names.
+    """
     root = profile.job_root
     if root is None:
         raise ValueError(
@@ -255,7 +267,8 @@ def submit_driverless(
     ``storage_options``), the driver runs ``graphed.checkpoint.resumable(plan, store,
     storage_options=..., salt=..., accept_environment=...)`` on every try, so a retried driver
     recomputes only the tasks the store does not hold. ``task_timeout_s`` is
-    :class:`HTCondorBackend`'s. Everything is refused before the bindings are touched."""
+    :class:`HTCondorBackend`'s. Everything is refused before the bindings are touched.
+    """
     options = dict(storage_options or {}) if store is not None else {}  # unused without a store
     if store is not None:
         # the driver's cwd is the job sandbox HTCondor deletes, so a local store must be absolute here
@@ -263,10 +276,14 @@ def submit_driverless(
         if not local:
             raise ValueError("store='' names no directory")
         store = local if "://" in local else os.path.abspath(local)
-        check_resumable(plan)  # before any pickling: pickling a refused plan's process can start services
-        json.dumps(options)  # run.json carries them: refuse what JSON cannot hold before the bindings
+        # before any pickling: pickling a refused plan's process can start services
+        check_resumable(plan)
+        # run.json carries them: refuse what JSON cannot hold before the bindings
+        json.dumps(options)
     if pilots not in ("local", "condor"):
-        raise ValueError(f"pilots={pilots!r}: 'local' (in the driver's slot) or 'condor' (jobs it submits)")
+        raise ValueError(
+            f"pilots={pilots!r}: 'local' (in the driver's slot) or 'condor' (jobs it submits)"
+        )
     endpoints = dict(services or {})
     for name, endpoint in endpoints.items():
         try:
@@ -292,7 +309,9 @@ def submit_driverless(
     launcher._refuse()
     for module in launcher.user_modules:
         if "," in module:
-            raise ValueError(f"user_modules: {module} holds ',', which splits the job's input list")
+            raise ValueError(
+                f"user_modules: {module} holds ',', which splits the job's input list"
+            )
     announce_only = _service_nodes(plan.services, endpoints, profile)
     if profile.worker_ports is None and (pilots == "condor" or announce_only):
         who = (
@@ -304,7 +323,9 @@ def submit_driverless(
             f"site {site!r} has no worker_ports: {who} cannot reach the driver job's task server"
         )
     out = Path(
-        os.path.abspath(log_dir or tempfile.mkdtemp(prefix="graphed-driverless-", dir=launcher._sandbox()))
+        os.path.abspath(
+            log_dir or tempfile.mkdtemp(prefix="graphed-driverless-", dir=launcher._sandbox())
+        )
     )
     with ExitStack() as refused:  # a refusal leaves no temporary log_dir behind
         if not log_dir:
@@ -331,7 +352,12 @@ def submit_driverless(
     launcher.log_dir = run_dir
     (run_dir / PLAN_FILE).write_bytes(pickle.dumps(plan))
     script = launcher._stage(run_dir, "driver.sh", DRIVER_MODULE, PLACEHOLDER)
-    inputs = [PLAN_FILE, RUN_FILE, *([ENV_FILE] if profile.ship_env else []), *launcher.user_modules]
+    inputs = [
+        PLAN_FILE,
+        RUN_FILE,
+        *([ENV_FILE] if profile.ship_env else []),
+        *launcher.user_modules,
+    ]
     base = {
         "executable": str(script),
         "arguments": ".",

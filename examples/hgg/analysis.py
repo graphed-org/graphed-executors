@@ -186,7 +186,9 @@ def add_jetId(jets: Any, nano_version: int, year: str, flattenUnflatten: bool = 
 
     def evaluate(name: str) -> Any:
         inputs = [eval_dict[i.name] for i in cset[name].inputs]
-        return gak.apply_correction(payload, name, inputs, None, args=[f"${i}" for i in range(len(inputs))])
+        return gak.apply_correction(
+            payload, name, inputs, None, args=[f"${i}" for i in range(len(inputs))]
+        )
 
     idTight_value = evaluate("AK4PUPPI_Tight") * 2
     idTightLepVeto_value = evaluate("AK4PUPPI_TightLeptonVeto") * 4
@@ -340,7 +342,9 @@ class HggInclusiveProcessor:
         if self.nano_version is None:
             self.nano_version = infer_nano_version(events)
             if self.nano_version is None:
-                raise ValueError("Unable to infer NanoAOD version; pass it explicitly via --nano-version.")
+                raise ValueError(
+                    "Unable to infer NanoAOD version; pass it explicitly via --nano-version."
+                )
             logger.info(f"[ inclusive ] Detected NanoAOD version: {self.nano_version}")
         return self.nano_version
 
@@ -481,9 +485,15 @@ class HggInclusiveProcessor:
         # tracker isolation: branch name changed across NanoAOD versions
         fields = photons.fields
         iso = (
-            photons.trkSumPtHollowConeDR03 if "trkSumPtHollowConeDR03" in fields else photons.pfChargedIsoPFPV
+            photons.trkSumPtHollowConeDR03
+            if "trkSumPtHollowConeDR03" in fields
+            else photons.pfChargedIsoPFPV
         )
-        rel_iso = photons.pfRelIso03_chg if "pfRelIso03_chg" in fields else photons.pfRelIso03_chg_quadratic
+        rel_iso = (
+            photons.pfRelIso03_chg
+            if "pfRelIso03_chg" in fields
+            else photons.pfRelIso03_chg_quadratic
+        )
 
         isEB_high_r9 = photons.isScEtaEB & (photons.r9 > self.min_full5x5_r9_EB_high_r9)
         isEE_high_r9 = photons.isScEtaEE & (photons.r9 > self.min_full5x5_r9_EE_high_r9)
@@ -541,10 +551,11 @@ class HggInclusiveProcessor:
         return pt_cut & eta_cut & id_cut & iso_cut & global_cut & dr_lead & dr_sublead
 
     def select_jets(self, jets: Any, diphotons: Any, muons: Any, electrons: Any) -> Any:
-        """tightLepVeto jets passing pT/eta and cleaned against photons/leptons.
+        """TightLepVeto jets passing pT/eta and cleaned against photons/leptons.
 
         The original guards each cleaning on a non-empty chunk; the deferred ops are total on an
-        empty one, so the guards are gone and an empty chunk gives the same empty masks."""
+        empty one, so the guards are gone and an empty chunk gives the same empty masks.
+        """
         jetId_cut = jets.jetId == 6  # tightLepVeto
         pt_cut = jets.pt > self.jet_pt_threshold
         eta_cut = abs(jets.eta) < self.jet_max_eta
@@ -563,8 +574,14 @@ class HggInclusiveProcessor:
             dr_pho_lead = jets.pt > -1
             dr_pho_sublead = jets.pt > -1
 
-        dr_ele = delta_r_mask(jets, electrons, self.jet_ele_min_dr) if self.clean_jet_ele else jets.pt > -1
-        dr_muo = delta_r_mask(jets, muons, self.jet_muo_min_dr) if self.clean_jet_muo else jets.pt > -1
+        dr_ele = (
+            delta_r_mask(jets, electrons, self.jet_ele_min_dr)
+            if self.clean_jet_ele
+            else jets.pt > -1
+        )
+        dr_muo = (
+            delta_r_mask(jets, muons, self.jet_muo_min_dr) if self.clean_jet_muo else jets.pt > -1
+        )
 
         return jetId_cut & pt_cut & eta_cut & dr_pho_lead & dr_pho_sublead & dr_ele & dr_muo
 
@@ -581,7 +598,12 @@ class HggInclusiveProcessor:
                 "charge": gak.zeros_like(raw.pt),
                 "jetId": add_jetId(raw, nano_version, year, flattenUnflatten=True),
                 **(
-                    {"neHEF": raw.neHEF, "neEmEF": raw.neEmEF, "chEmEF": raw.chEmEF, "muEF": raw.muEF}
+                    {
+                        "neHEF": raw.neHEF,
+                        "neEmEF": raw.neEmEF,
+                        "chEmEF": raw.chEmEF,
+                        "muEF": raw.muEF,
+                    }
                     if nano_version == 12
                     else {}
                 ),
@@ -649,9 +671,12 @@ class HggInclusiveProcessor:
         first_jet_eta = choose_jet(jets.eta, 0, -999.0)
         first_jet_pz = first_jet_pt * numpy.sinh(first_jet_eta)
         first_jet_energy = numpy.sqrt(
-            (first_jet_pt**2 * numpy.cosh(first_jet_eta) ** 2) + choose_jet(jets.mass, 0, -999.0) ** 2
+            (first_jet_pt**2 * numpy.cosh(first_jet_eta) ** 2)
+            + choose_jet(jets.mass, 0, -999.0) ** 2
         )
-        first_jet_y = 0.5 * numpy.log((first_jet_energy + first_jet_pz) / (first_jet_energy - first_jet_pz))
+        first_jet_y = 0.5 * numpy.log(
+            (first_jet_energy + first_jet_pz) / (first_jet_energy - first_jet_pz)
+        )
         first_jet_y = gak.fill_none(first_jet_y, -999)
         first_jet_y = gak.where(numpy.isnan(first_jet_y), -999, first_jet_y)
 
@@ -689,7 +714,9 @@ class HggInclusiveProcessor:
             "mass": diphoton_4mom.mass,
             "charge": diphoton_4mom.charge,
             "rapidity": 0.5
-            * numpy.log((diphoton_4mom.energy + diphoton_4mom.z) / (diphoton_4mom.energy - diphoton_4mom.z)),
+            * numpy.log(
+                (diphoton_4mom.energy + diphoton_4mom.z) / (diphoton_4mom.energy - diphoton_4mom.z)
+            ),
         }
         for name, column in columns.items():
             diphotons = gak.with_field(diphotons, column, name)
@@ -728,12 +755,15 @@ class HggInclusiveProcessor:
         lead, sublead = diphotons.pho_lead, diphotons.pho_sublead
         lead_e = lead.pt * numpy.cosh(lead.eta)
         sublead_e = sublead.pt * numpy.cosh(sublead.eta)
-        value = 0.5 * numpy.sqrt((lead.energyErr / lead_e) ** 2 + (sublead.energyErr / sublead_e) ** 2)
+        value = 0.5 * numpy.sqrt(
+            (lead.energyErr / lead_e) ** 2 + (sublead.energyErr / sublead_e) ** 2
+        )
         return gak.with_field(diphotons, value, "sigma_m_over_m")
 
     def diphoton_to_ak_array(self, diphotons: Any) -> Any:
         """The flat output columns: photon legs prefixed ``lead_``/``sublead_``, the rest as-is,
-        without the per-photon copy of the event-level rho, in the sorted order the original writes."""
+        without the per-photon copy of the event-level rho, in the sorted order the original writes.
+        """
         output = {}
         for field in gak.fields(diphotons):
             prefix = self.prefixes.get(field, "")
@@ -747,7 +777,8 @@ class HggInclusiveProcessor:
 
     def process(self, events: Any) -> dict[str, Any]:
         """The flat diphoton record, the counters, and the part's key-value metadata (its arrays
-        are this chunk's sums)."""
+        are this chunk's sums).
+        """
         self.resolve_nano_version(events)
         dataset_name = events.metadata["dataset"]
         self.data_kind = "mc" if "GenPart" in events.fields else "data"
@@ -821,7 +852,11 @@ class HggInclusiveProcessor:
             diphotons = gak.with_field(diphotons, column, name)
 
         diphotons = self.compute_sigma_m_over_m(diphotons)
-        return {"record": self.diphoton_to_ak_array(diphotons), "counters": counters, "metadata": metadata}
+        return {
+            "record": self.diphoton_to_ak_array(diphotons),
+            "counters": counters,
+            "metadata": metadata,
+        }
 
 
 # ---------------------------------------------------------------------- #
@@ -861,7 +896,9 @@ def part_name(partition: Partition) -> str:
             '"steps" in the fileset (the counters depend on the chunking too)'
         )
     tree = partition.tree.strip("/").split(";")[0]
-    return f"{Path(partition.uri).stem}_{tree}_{partition.entry_start}-{partition.entry_stop}.parquet"
+    return (
+        f"{Path(partition.uri).stem}_{tree}_{partition.entry_start}-{partition.entry_stop}.parquet"
+    )
 
 
 #: name -> (the selected diphotons' column it fills, ``Regular(bins, low, high)``); Weight storage,
@@ -879,7 +916,8 @@ DIAGNOSTICS: dict[str, tuple[str, tuple[int, float, float]]] = {
 
 def diagnostics(record: Any, context: histserv.Context | None = None) -> dict[str, ghb.Histogram]:
     """The ``DIAGNOSTICS`` of the flat diphoton ``record``: local boost histograms, or histserv
-    histograms on ``context``'s servers."""
+    histograms on ``context``'s servers.
+    """
     out: dict[str, ghb.Histogram] = {}
     for name, (column, (bins, low, high)) in DIAGNOSTICS.items():
         axis, storage = bh.axis.Regular(bins, low, high), bh.storage.Weight()
@@ -899,7 +937,8 @@ def _counters(value: Mapping[str, Any]) -> dict[str, Any]:
 @dataclass(frozen=True)
 class HggReduce:
     """A chunk's counters beside its ``"diagnostics"``: ``counters`` reads the plan's first values,
-    ``histograms`` (the diagnostics' ``pieces.reduce``) each fill at its compiled position."""
+    ``histograms`` (the diagnostics' ``pieces.reduce``) each fill at its compiled position.
+    """
 
     counters: Counters
     histograms: Any
@@ -934,10 +973,16 @@ class HggEmpty:
 
 
 def dataset_plan(
-    dataset: str, files: Mapping[str, Any], *, year: str, out: str, context: histserv.Context | None = None
+    dataset: str,
+    files: Mapping[str, Any],
+    *,
+    year: str,
+    out: str,
+    context: histserv.Context | None = None,
 ) -> Plan[dict[str, Any]]:
     """One dataset's plan over coffea's ``files`` mapping, whose files each give explicit "steps";
-    its diagnostics fill on ``context``'s servers when one is given."""
+    its diagnostics fill on ``context``'s servers when one is given.
+    """
     events = NanoEventsFactory.from_root(
         dict(files), schemaclass=NanoAODSchema, mode="graphed", metadata={"dataset": dataset}
     ).events()
@@ -967,14 +1012,22 @@ def dataset_plan(
 
 
 def plan(
-    fileset: Mapping[str, Mapping[str, Any]], *, year: str, out: str, context: histserv.Context | None = None
+    fileset: Mapping[str, Mapping[str, Any]],
+    *,
+    year: str,
+    out: str,
+    context: histserv.Context | None = None,
 ) -> Plan[dict[str, Any]]:
     """One plan over coffea's ``{dataset: files}``: ``run(plan).value`` is ``{dataset: {**counters,
     "diagnostics": {name: histogram}}}``, and each chunk's part lands at
     ``out/<dataset>/nominal/<file stem>_Events_<start>-<stop>.parquet``. Every dataset's diagnostics
-    fill on ``context``'s servers when one is given."""
+    fill on ``context``'s servers when one is given.
+    """
     return collate(
-        {ds: dataset_plan(ds, files, year=year, out=out, context=context) for ds, files in fileset.items()}
+        {
+            ds: dataset_plan(ds, files, year=year, out=out, context=context)
+            for ds, files in fileset.items()
+        }
     )
 
 

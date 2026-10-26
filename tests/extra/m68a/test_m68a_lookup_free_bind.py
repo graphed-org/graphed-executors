@@ -1,5 +1,6 @@
 """Every product HTTP server binds and answers without ``socket.getfqdn``, whose reverse lookup stalls on
-macOS CI runners and leaves a bound server not listening."""
+macOS CI runners and leaves a bound server not listening.
+"""
 
 from __future__ import annotations
 
@@ -61,7 +62,10 @@ def test_the_patched_lookup_is_live(no_fqdn: None) -> None:
 def test_the_base_binds_and_answers_without_a_lookup(no_fqdn: None) -> None:
     server = LookupFreeHTTPServer(("127.0.0.1", 0), _Ok)
     assert server.server_name == "127.0.0.1"
-    with serving(server) as port, urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as resp:
+    with (
+        serving(server) as port,
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as resp,
+    ):
         assert resp.status == 200
 
 
@@ -85,7 +89,9 @@ BUILDERS: dict[str, Callable[[Path], tuple[ThreadingHTTPServer, Callable[[], Non
 
 
 @pytest.mark.parametrize("name", sorted(BUILDERS))
-def test_each_product_server_binds_without_a_lookup(name: str, no_fqdn: None, tmp_path: Path) -> None:
+def test_each_product_server_binds_without_a_lookup(
+    name: str, no_fqdn: None, tmp_path: Path
+) -> None:
     server, close = BUILDERS[name](tmp_path)
     try:
         assert isinstance(server, LookupFreeHTTPServer)

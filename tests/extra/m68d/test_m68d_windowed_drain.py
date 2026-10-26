@@ -1,5 +1,6 @@
 """A fixed run with a monitor raises well within the drain timeout, with a control attached (the windowed path)
-or without."""
+or without.
+"""
 
 from __future__ import annotations
 
@@ -48,7 +49,10 @@ def test_a_fixed_run_that_raises_with_a_monitor_does_not_wait_out_the_drain(
     mark = tmp_path / "mark"
     mark.mkdir()
     plan = Plan(
-        stop_leaf, pair_concat, empty_tuple, tuple(Task(i, p) for i, p in enumerate(partitions(mark, 2)))
+        stop_leaf,
+        pair_concat,
+        empty_tuple,
+        tuple(Task(i, p) for i, p in enumerate(partitions(mark, 2))),
     )
     try:
         begun = time.monotonic()

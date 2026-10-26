@@ -23,7 +23,8 @@ class DaskBackend:
     """A dask.distributed :class:`SubmitBackend`. Every submit is ``pure=False`` with an explicit
     namespaced+nonced key (graphed's leaves are distinct-byte-range I/O reads and opaque
     evaluations — exactly the class dask must NOT dedup by content tokenization). Payloads ship
-    once via an identity future (the coffea idiom, over ``scatter`` which breaks on scale-to-zero)."""
+    once via an identity future (the coffea idiom, over ``scatter`` which breaks on scale-to-zero).
+    """
 
     # The flags describe what the underlying dask LIBRARY supports, not what this MVP adapter wires:
     # per_task_resources/pin_to_worker are real dask features (resources=/workers=), but `submit`
@@ -43,7 +44,8 @@ class DaskBackend:
         self._distributed = _distributed()  # raises the hinted ImportError if the extra is absent
         self._client = client
         self._replicate_broadcast = replicate_broadcast
-        from ._shim import _dask_task_shim  # noqa: PLC0415  (lazy: keeps distributed out of __init__)
+        # lazy: keeps distributed out of __init__
+        from ._shim import _dask_task_shim  # noqa: PLC0415
 
         self._shim = _dask_task_shim
 
@@ -75,7 +77,8 @@ class DaskBackend:
         ``workers`` (m44 §1.2) is a STRICT worker pin honoured only when ``pin_to_worker`` is true —
         forwarded as ``workers=[…], allow_other_workers=False`` so the task ERRORS on worker loss
         rather than migrating (the loud signal the epoch restart needs). Advisory-dropped otherwise,
-        mirroring the ``resources`` treatment."""
+        mirroring the ``resources`` treatment.
+        """
         # Wrap in the worker shim so the neutral engine task fn runs under a WorkerEnv (§1.1). dask
         # resolves future args before invoking the shim, so wrapping is transparent to dependency
         # resolution; pure=False + the explicit key ARE the task identity (§1.2.3).
@@ -85,7 +88,14 @@ class DaskBackend:
         return cast(
             "SubmitFuture",
             self._client.submit(
-                self._shim, fn, *args, key=key, pure=False, retries=retries, priority=priority, **pin
+                self._shim,
+                fn,
+                *args,
+                key=key,
+                pure=False,
+                retries=retries,
+                priority=priority,
+                **pin,
             ),
         )
 
@@ -103,7 +113,8 @@ class DaskBackend:
         client = self._client
 
         def _wrapped(event: Any) -> None:
-            _timestamp, msg = event  # dask delivers (timestamp, msg); msg is the worker's list[dict]
+            # dask delivers (timestamp, msg); msg is the worker's list[dict]
+            _timestamp, msg = event
             handler(msg)
 
         client.subscribe_topic(topic, _wrapped)
@@ -124,7 +135,8 @@ class DaskBackend:
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
         """Recognize a ``KilledWorker`` and return ``(failing_task_key, last_worker_address)`` so the
         engine can raise an attributed :class:`StageError` without importing distributed (§1.4).
-        Everything else returns ``None`` — the engine re-raises it intact."""
+        Everything else returns ``None`` — the engine re-raises it intact.
+        """
         if isinstance(exc, self._distributed.KilledWorker):
             last_worker = exc.last_worker
             address = getattr(last_worker, "address", None) or str(last_worker)
@@ -145,8 +157,10 @@ def dask_runner(
     :class:`SubmitRunner` over a :class:`DaskBackend`. ``close()`` does NOT close the caller's client.
     ``retries`` is forwarded to dask (per-task); a Plan's per-task ``resources`` hints, if any, are
     advisory only — this adapter does not enforce them yet (see :meth:`DaskBackend.submit`).
-    ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``)."""
-    from .plugin import GraphedWorkerPlugin  # noqa: PLC0415  (lazy: distributed is the optional extra)
+    ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``).
+    """
+    # lazy: distributed is the optional extra
+    from .plugin import GraphedWorkerPlugin  # noqa: PLC0415
 
     client.register_plugin(GraphedWorkerPlugin())
     backend = DaskBackend(client, replicate_broadcast=replicate_broadcast)

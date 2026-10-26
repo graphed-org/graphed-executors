@@ -2,7 +2,8 @@
 (``pilots="condor"``) takes its service ports from its row's ``worker_ports``; ``CondorPilots.stop``
 still removes its cluster when counting the live pilots fails, and fetches a finished spooled job's
 logs first; a driverless submit whose spool fails removes the job it queued; a failed release is
-logged, not raised. No bindings: every schedd here is a recorder."""
+logged, not raised. No bindings: every schedd here is a recorder.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +34,9 @@ from graphed_executors.submit.services import ServiceStatus, ServiceUnavailable,
 class Schedd:
     """A recording schedd: ``query`` answers ``queue``; ``spool_raises`` makes ``spool`` raise it."""
 
-    def __init__(self, queue: list[dict[str, Any]], spool_raises: BaseException | None = None) -> None:
+    def __init__(
+        self, queue: list[dict[str, Any]], spool_raises: BaseException | None = None
+    ) -> None:
         self.queue = queue
         self.spool_raises = spool_raises
         self.log: list[tuple[Any, ...]] = []
@@ -63,7 +66,9 @@ def bindings(schedd: Schedd) -> Any:
         param={"SCHEDD_HOST": "s1", "COLLECTOR_HOST": "cm"},
         Submit=dict,
         Schedd=lambda ad=None: schedd,
-        Collector=lambda pool=None: SimpleNamespace(locate=lambda kind, name=None: {"Name": name or "s1"}),
+        Collector=lambda pool=None: SimpleNamespace(
+            locate=lambda kind, name=None: {"Name": name or "s1"}
+        ),
         DaemonType=SimpleNamespace(Schedd="schedd"),
         JobAction=SimpleNamespace(Remove="Remove"),
     )
@@ -105,7 +110,9 @@ def test_stop_removes_the_cluster_when_counting_pilots_fails(
         pilots.stop()
     assert ("retrieve", "ClusterId == 77 && JobStatus == 4") in schedd.log
     assert ("act", "Remove", "ClusterId == 77") in schedd.log
-    assert any("schedd went away (extra)" in str(r.exc_info[1]) for r in caplog.records if r.exc_info)
+    assert any(
+        "schedd went away (extra)" in str(r.exc_info[1]) for r in caplog.records if r.exc_info
+    )
 
 
 def test_a_failed_release_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
@@ -124,7 +131,9 @@ def test_a_driverless_submit_whose_spool_fails_leaves_no_job(
     schedd = Schedd([{"JobStatus": 1}], spool_raises=RuntimeError("spool reset (extra)"))
     monkeypatch.setattr(launch, "_htcondor", lambda: bindings(schedd))
     monkeypatch.setitem(
-        SITES, "m68a-spooled", dataclasses.replace(SITES["generic"], name="m68a-spooled", spool=True)
+        SITES,
+        "m68a-spooled",
+        dataclasses.replace(SITES["generic"], name="m68a-spooled", spool=True),
     )
     plan = Plan(process=unused_leaf, combine=max, empty=int)
     with pytest.raises(RuntimeError, match="spool reset"):
@@ -132,7 +141,9 @@ def test_a_driverless_submit_whose_spool_fails_leaves_no_job(
     assert ("act", "Remove", "ClusterId == 77") in schedd.log
 
 
-def test_a_missing_result_is_not_a_load_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_missing_result_is_not_a_load_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     schedd = Schedd([{"JobStatus": 4, "ExitCode": 0}])
     monkeypatch.setattr(launch, "_htcondor", lambda: bindings(schedd))
     handle = RunHandle(site="generic", schedd="s1", cluster=77, log_dir=tmp_path, submitted_at=0.0)
@@ -151,7 +162,8 @@ def test_the_driver_restores_the_package_logger(tmp_path: Path) -> None:
 @pytest.mark.parametrize("name", [*sorted(SITES), "synthetic"])
 def test_site_rows_pickle_copy_and_replace(name: str) -> None:
     """``services`` is a mappingproxy (the frozen-mapping defaults rule); the row still pickles,
-    deep-copies and replaces, as graphed's ``Launch`` does, and comes back read-only."""
+    deep-copies and replaces, as graphed's ``Launch`` does, and comes back read-only.
+    """
     row = SITES.get(name) or SiteProfile(
         name="m68a-synthetic",
         submit={"k": "v"},
@@ -161,13 +173,18 @@ def test_site_rows_pickle_copy_and_replace(name: str) -> None:
         schedd_query=None,
         service_ports=(20001, 20010),
         worker_ports=(20000, 20010),
-        services={"triton": "grpcs://triton.m68a.example:443", "http": "http://web.m68a.example:80"},
+        services={
+            "triton": "grpcs://triton.m68a.example:443",
+            "http": "http://web.m68a.example:80",
+        },
     )
     for copied in (pickle.loads(pickle.dumps(row)), copy.deepcopy(row), dataclasses.replace(row)):
         assert copied == row and dict(copied.services) == dict(row.services)
         assert isinstance(copied.services, MappingProxyType)
     moved = dataclasses.replace(row, services={"http": "http://other.m68a.example:81"})
-    assert dict(pickle.loads(pickle.dumps(moved)).services) == {"http": "http://other.m68a.example:81"}
+    assert dict(pickle.loads(pickle.dumps(moved)).services) == {
+        "http": "http://other.m68a.example:81"
+    }
 
 
 def test_a_refusal_with_read_only_legs_still_reaches_the_result_blob() -> None:

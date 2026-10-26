@@ -32,15 +32,15 @@ _ROWS = 4
 def _identical_block() -> np.ndarray:
     b: np.ndarray = np.zeros(_ROWS, dtype=_DTYPE)
     b["__joinkey__"] = np.full(_ROWS, _HOT, dtype=np.uint64)
-    b["v"] = np.ones(
-        _ROWS, dtype=np.int64
-    )  # SAME values -> byte-identical wire -> one shared content-address
+    # SAME values -> byte-identical wire -> one shared content-address
+    b["v"] = np.ones(_ROWS, dtype=np.int64)
     return b
 
 
 def test_steal_colocated_byte_identical_blocks_do_not_crash_evict(tmp_path: Path) -> None:
     be = NumpyBackend()
-    src = [_identical_block() for _ in range(_N)]  # all rows -> one hot dest, all blocks byte-identical
+    # all rows -> one hot dest, all blocks byte-identical
+    src = [_identical_block() for _ in range(_N)]
 
     res = run_repartition(
         be,
@@ -50,16 +50,25 @@ def test_steal_colocated_byte_identical_blocks_do_not_crash_evict(tmp_path: Path
         comms="ipc",
         store_root=str(tmp_path),
         steal=True,
-        faults=ShuffleFaults(force_steal=True),  # co-locate stolen (identical) blocks on a thief holder
+        # co-locate stolen (identical) blocks on a thief holder
+        faults=ShuffleFaults(force_steal=True),
     )
 
     w = res.witness
-    assert w.steals > 0, "force_steal did not steal — the co-location that triggers the evict bug never ran"
+    assert w.steals > 0, (
+        "force_steal did not steal — the co-location that triggers the evict bug never ran"
+    )
 
     rows = [
-        (int(k), int(v)) for b in res.value.values() for k, v in zip(b["__joinkey__"], b["v"], strict=True)
+        (int(k), int(v))
+        for b in res.value.values()
+        for k, v in zip(b["__joinkey__"], b["v"], strict=True)
     ]
-    assert len(rows) == _N * _ROWS, f"rows dropped under steal + co-located identical blocks: {len(rows)}"
+    assert len(rows) == _N * _ROWS, (
+        f"rows dropped under steal + co-located identical blocks: {len(rows)}"
+    )
     assert rows == [(_HOT, 1)] * (_N * _ROWS), "the gather corrupted or reordered the hot-key rows"
 
-    assert w.bytes_transferred > 0, "nothing transferred — the gather never pulled the co-located blocks"
+    assert w.bytes_transferred > 0, (
+        "nothing transferred — the gather never pulled the co-located blocks"
+    )

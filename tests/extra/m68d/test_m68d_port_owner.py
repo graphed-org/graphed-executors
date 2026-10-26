@@ -1,6 +1,7 @@
 """m68d port-race decisions the frozen suite reaches only on Linux: a driver-hosted start and ``announce.py``'s
 start refuse a port whose listener the child's process tree does not hold. The ``/proc`` probe answers here
-are stand-ins (the probe itself is the frozen suite's), so these run on every OS."""
+are stand-ins (the probe itself is the frozen suite's), so these run on every OS.
+"""
 
 from __future__ import annotations
 
@@ -19,9 +20,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68d"))
 from m68d_harness import free_range
 
 posix = pytest.mark.skipif(
-    sys.platform == "win32", reason="announce.py is POSIX-only: Windows delivers SIGTERM as TerminateProcess"
+    sys.platform == "win32",
+    reason="announce.py is POSIX-only: Windows delivers SIGTERM as TerminateProcess",
 )
-LISTEN = "import socket, sys, time; s = socket.create_server(('', int(sys.argv[1]))); time.sleep(60)"
+LISTEN = (
+    "import socket, sys, time; s = socket.create_server(('', int(sys.argv[1]))); time.sleep(60)"
+)
 
 
 def owner(held: bool, asked: list[tuple[int, set[str]]]) -> Any:
@@ -50,7 +54,9 @@ def test_a_driver_hosted_start_takes_its_port_only_when_its_child_holds_the_list
         else:
             with pytest.raises(svc.ServiceUnavailable) as info:
                 services.start()
-            assert info.value.legs["managed"] == f"port {low} on 127.0.0.1 is held by another process"
+            assert (
+                info.value.legs["managed"] == f"port {low} on 127.0.0.1 is held by another process"
+            )
     finally:
         services.close()
         backend.close()
@@ -65,9 +71,16 @@ def test_announce_moves_past_a_port_whose_listener_its_child_does_not_hold(
     (tmp_path / "service").mkdir()
     low, high = free_range(3)
     asked: list[tuple[int, set[str]]] = []
-    monkeypatch.setattr(ann, "listeners", lambda port, proc="/proc": {"4242"} if port == low else set())
+    monkeypatch.setattr(
+        ann, "listeners", lambda port, proc="/proc": {"4242"} if port == low else set()
+    )
     monkeypatch.setattr(ann, "held_by", owner(False, asked))
-    cfg = {"argv": ["{python}", "-c", LISTEN, "{port}"], "env": {}, "check": "tcp", "ports": [low, high]}
+    cfg = {
+        "argv": ["{python}", "-c", LISTEN, "{port}"],
+        "env": {},
+        "check": "tcp",
+        "ports": [low, high],
+    }
     started = ann.start({**cfg, "python": sys.executable, "timeout_s": 20.0}, "127.0.0.1")
     assert not isinstance(started, str), started
     child, port = started
@@ -77,7 +90,9 @@ def test_announce_moves_past_a_port_whose_listener_its_child_does_not_hold(
     assert f"port {low} is held by another process, next" in capsys.readouterr().out
 
 
-def bound_during_the_dial(module: Any, check: str, monkeypatch: pytest.MonkeyPatch, port: int) -> list[bool]:
+def bound_during_the_dial(
+    module: Any, check: str, monkeypatch: pytest.MonkeyPatch, port: int
+) -> list[bool]:
     """``module``'s ``check`` passes, and ``port`` gains a listener nobody's tree holds as the first dial runs."""
     bound: list[bool] = []
 
@@ -92,7 +107,9 @@ def bound_during_the_dial(module: Any, check: str, monkeypatch: pytest.MonkeyPat
     return bound
 
 
-def test_a_driver_hosted_start_judges_the_listener_its_dial_reached(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_driver_hosted_start_judges_the_listener_its_dial_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     low, high = free_range(3)
     bound = bound_during_the_dial(svc, "check_ready", monkeypatch, low)
     launch = Launch(argv=("{python}", "-c", LISTEN, "{port}"))
@@ -105,7 +122,10 @@ def test_a_driver_hosted_start_judges_the_listener_its_dial_reached(monkeypatch:
     finally:
         services.close()
         backend.close()
-    assert bound and info.value.legs["managed"] == f"port {low} on 127.0.0.1 is held by another process"
+    assert (
+        bound
+        and info.value.legs["managed"] == f"port {low} on 127.0.0.1 is held by another process"
+    )
 
 
 @posix
@@ -116,7 +136,12 @@ def test_announce_judges_the_listener_its_dial_reached(
     (tmp_path / "service").mkdir()
     low, high = free_range(3)
     bound = bound_during_the_dial(ann, "self_check", monkeypatch, low)
-    cfg = {"argv": ["{python}", "-c", LISTEN, "{port}"], "env": {}, "check": "tcp", "ports": [low, high]}
+    cfg = {
+        "argv": ["{python}", "-c", LISTEN, "{port}"],
+        "env": {},
+        "check": "tcp",
+        "ports": [low, high],
+    }
     started = ann.start({**cfg, "python": sys.executable, "timeout_s": 20.0}, "127.0.0.1")
     assert not isinstance(started, str), started
     child, port = started

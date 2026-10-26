@@ -1,5 +1,6 @@
 """``task_timeout_s``: a task leased past the limit fails with a ``StageError`` naming its partition, caused
-by ``TaskTimedOut`` naming its key, pilot and limit; its pilot stops, its late result is dropped, and a resumable rerun runs only that task (GW21)."""
+by ``TaskTimedOut`` naming its key, pilot and limit; its pilot stops, its late result is dropped, and a resumable rerun runs only that task (GW21).
+"""
 
 from __future__ import annotations
 
@@ -49,7 +50,9 @@ def _run(plan: Plan[int], task_timeout_s: float | None, exits: list[int] | None 
             except BaseException as exc:
                 out["error"] = exc
             deadline = time.monotonic() + 3.0  # a lost pilot hears 410 at its next beat
-            while time.monotonic() < deadline and not any(p.poll() is not None for p in pilots._procs):
+            while time.monotonic() < deadline and not any(
+                p.poll() is not None for p in pilots._procs
+            ):
                 time.sleep(0.05)
             out["exits"] = [p.pid for p in pilots._procs if p.poll() is not None]
 
@@ -67,7 +70,10 @@ def _run(plan: Plan[int], task_timeout_s: float | None, exits: list[int] | None 
 def _plan(attempts: Path, hangs: int, hang_s: float) -> Plan[int]:
     tasks = tuple(Task(i, Partition.blind(f"mem://gw21-p{i}", "", 0, 1)) for i in range(N_TASKS))
     return Plan(
-        process=HangAt(HUNG, str(attempts), hangs, hang_s), combine=operator.add, empty=int, tasks=tasks
+        process=HangAt(HUNG, str(attempts), hangs, hang_s),
+        combine=operator.add,
+        empty=int,
+        tasks=tasks,
     )
 
 
@@ -138,7 +144,13 @@ def test_a_driverless_run_carries_the_timeout_to_its_backend(
 ) -> None:
     markers, _ = work_dirs(tmp_path / "work")
     job = prepared_job(
-        tmp_path, monkeypatch, leaf_plan(markers), "job", n_pilots=2, pilots="local", task_timeout_s=7.5
+        tmp_path,
+        monkeypatch,
+        leaf_plan(markers),
+        "job",
+        n_pilots=2,
+        pilots="local",
+        task_timeout_s=7.5,
     )
     run = json.loads((job / "run.json").read_text())
     assert run["task_timeout_s"] == 7.5

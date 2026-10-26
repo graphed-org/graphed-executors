@@ -17,7 +17,9 @@ from graphed.core import StopReason
 from graphed_executors.local import executors
 
 
-def _second_boots_late(marker: str, late_s: float, init: Callable[..., None] | None, *initargs: Any) -> None:
+def _second_boots_late(
+    marker: str, late_s: float, init: Callable[..., None] | None, *initargs: Any
+) -> None:
     try:
         os.close(os.open(marker, os.O_CREAT | os.O_EXCL))
     except FileExistsError:

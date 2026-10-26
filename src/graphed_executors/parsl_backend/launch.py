@@ -45,7 +45,8 @@ def start_htex(
     harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here would
     break worker-side imports of caller-defined task fns.
     """
-    from parsl.executors import HighThroughputExecutor  # noqa: PLC0415  (lazy: parsl is the optional extra)
+    # lazy: parsl is the optional extra
+    from parsl.executors import HighThroughputExecutor  # noqa: PLC0415
     from parsl.providers import LocalProvider  # noqa: PLC0415
 
     kwargs: dict[str, Any] = {
@@ -62,7 +63,8 @@ def start_htex(
 
     executor.run_dir = run_dir  # move 1
     os.makedirs(run_dir, exist_ok=True)
-    executor.provider.script_dir = os.path.join(run_dir, "submit_scripts")  # move 2 (dflow.py:1107-1109)
+    # move 2 (dflow.py:1107-1109)
+    executor.provider.script_dir = os.path.join(run_dir, "submit_scripts")
     os.makedirs(executor.provider.script_dir, exist_ok=True)
 
     executor.start()
@@ -72,5 +74,6 @@ def start_htex(
 
 def stop_htex(executor: Any) -> None:
     """Shut the executor down, reaping the interchange, manager, and worker processes (a shutdown
-    that signals without joining leaks processes/ports across the fixture bill)."""
+    that signals without joining leaks processes/ports across the fixture bill).
+    """
     executor.shutdown()

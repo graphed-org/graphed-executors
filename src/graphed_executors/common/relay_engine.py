@@ -61,7 +61,8 @@ class RelayShuffleWitness(DaskShuffleWitness):
     """The :class:`DaskShuffleWitness` mechanism counters PLUS the head-node-routing witnesses
     (design-M2): ``head_node_routed`` is True on every relay result, and ``driver_relay_bytes`` is
     the Σ of all map-payload wire sizes resolved at the driver barrier — an unlabeled relay or a
-    stubbed tally fails the frozen witness."""
+    stubbed tally fails the frozen witness.
+    """
 
     head_node_routed: bool = True
     driver_relay_bytes: int = 0
@@ -78,7 +79,8 @@ def relay_run_repartition(
     """Hash-repartition ``src_blocks`` into ``parts`` dests as the relay workflow (T producers ->
     driver barrier + local regroup -> P gathers, ZERO pick submits). ``dest_block_hashes`` are
     byte-identical across runs and equal to the local ``run_repartition`` on identical inputs;
-    ``salt`` folds into the pinned route."""
+    ``salt`` folds into the pinned route.
+    """
     submit = runner.backend.submit
     n_src = len(src_blocks)
     t = min(runner.backend.n_workers(), n_src) if n_src else 1
@@ -160,12 +162,19 @@ def relay_run_join(
     """Distributed relational hash JOIN as the relay workflow. ``broadcast=None`` lets the pinned
     cost rule choose, keyed on ``parts`` (F6 — never the live worker count, so 1-vs-2-worker runs
     agree); ``True``/``False`` honour a plan-recorded choice. ``mem_budget_bytes`` bounds the
-    gather-join working set via the reused ``_join_with_budget`` spill."""
+    gather-join working set via the reused ``_join_with_budget`` spill.
+    """
     build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
     probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
-    chosen = broadcast_join_choice(build_bytes, probe_bytes, parts) if broadcast is None else bool(broadcast)
+    chosen = (
+        broadcast_join_choice(build_bytes, probe_bytes, parts)
+        if broadcast is None
+        else bool(broadcast)
+    )
     if chosen:
-        return _relay_broadcast_join(backend, left_blocks, right_blocks, on, how, mem_budget_bytes, runner)
+        return _relay_broadcast_join(
+            backend, left_blocks, right_blocks, on, how, mem_budget_bytes, runner
+        )
     return _relay_shuffle_join(
         backend, left_blocks, right_blocks, parts, on, how, salt, mem_budget_bytes, runner
     )
@@ -224,7 +233,9 @@ def _relay_shuffle_join(
     )
     left_outs = [cast("_MapOut", f.result()) for f in left_futs]
     right_outs = [cast("_MapOut", f.result()) for f in right_futs]
-    driver_relay_bytes = sum(len(w) for mo in (*left_outs, *right_outs) for w in mo.payload.values())
+    driver_relay_bytes = sum(
+        len(w) for mo in (*left_outs, *right_outs) for w in mo.payload.values()
+    )
 
     # F1 schema carriers for one-sided dests (None when a whole side is partitionless)
     left_carrier = left_blocks[0] if left_blocks else None
@@ -251,7 +262,8 @@ def _relay_shuffle_join(
     dest_block_hashes: dict[int, str] = {}
     gather_sites: dict[int, tuple[int, str]] = {}
     peak_join = spilled_total = rows_total = 0
-    next_key = parts  # spilled sub-partitions get fresh keys beyond the dest range (mirrors m43/local)
+    # spilled sub-partitions get fresh keys beyond the dest range (mirrors m43/local)
+    next_key = parts
     for dest in range(parts):
         out = cast("_JoinOut | None", gather_futs[dest].result())
         if out is None:
@@ -304,7 +316,9 @@ def _relay_broadcast_join(
     build_wire = bytes(backend.to_wire(build_concat))
     # the build side crosses the driver once (broadcast returns the payload on a scatter_broadcast=False
     # backend) — head-node routing, tallied like the map barrier so the witness is honest on this arm too.
-    handle = runner.backend.broadcast(build_wire, token=f"bjoin-{nonce}-{_sha256_hex(build_wire)[:12]}")
+    handle = runner.backend.broadcast(
+        build_wire, token=f"bjoin-{nonce}-{_sha256_hex(build_wire)[:12]}"
+    )
     per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
     track_unmatched = how in ("left", "outer")
 
@@ -343,9 +357,11 @@ def _relay_broadcast_join(
                 value[next_key], dest_block_hashes[next_key] = ch, h
                 next_key += 1
 
-    if track_unmatched:  # emit the never-matched build rows exactly once (F2 of _run_broadcast_join)
+    # emit the never-matched build rows exactly once (F2 of _run_broadcast_join)
+    if track_unmatched:
         unmatched = tuple(sorted(set(range(len(build_concat))) - matched))
-        if unmatched and right_blocks:  # empty probe -> no schema carrier: the tail is dropped (no crash)
+        # empty probe -> no schema carrier: the tail is dropped (no crash)
+        if unmatched and right_blocks:
             tail = cast(
                 "_JoinOut",
                 submit(

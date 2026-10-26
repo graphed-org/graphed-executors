@@ -74,7 +74,8 @@ def host_identity() -> str:
 
 def self_check(check: str, host: str, port: int, timeout: float) -> str | None:
     """``None`` when ready: ``http:<path>`` wants a 2xx whose content-type is not ``application/grpc*``;
-    ``tcp`` and ``grpc:`` a connect."""
+    ``tcp`` and ``grpc:`` a connect.
+    """
     try:
         if check.startswith("http:"):
             with _DIRECT.open(f"http://{host}:{port}{check[5:] or '/'}", timeout=timeout) as resp:
@@ -90,7 +91,8 @@ def self_check(check: str, host: str, port: int, timeout: float) -> str | None:
 
 def listeners(port: int, proc: str = "/proc") -> set[str]:
     """The inodes of the sockets listening on ``port`` (the engine's rule, copied): read from
-    ``{proc}/net/tcp`` and ``{proc}/net/tcp6``; a file that cannot be read contributes none."""
+    ``{proc}/net/tcp`` and ``{proc}/net/tcp6``; a file that cannot be read contributes none.
+    """
     found: set[str] = set()
     for name in ("tcp", "tcp6"):
         try:
@@ -107,13 +109,15 @@ def listeners(port: int, proc: str = "/proc") -> set[str]:
 
 def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
     """Whether ``pid`` and its descendants hold every one of ``inodes`` among their fds (the engine's rule,
-    copied); a process whose ``stat`` or ``fd`` cannot be read holds none."""
+    copied); a process whose ``stat`` or ``fd`` cannot be read holds none.
+    """
     kids: dict[int, list[int]] = {}
     for entry in os.listdir(proc):
         if entry.isdigit():
             try:
                 with open(os.path.join(proc, entry, "stat")) as f:
-                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])  # comm, in parentheses, may hold spaces
+                    # comm, in parentheses, may hold spaces
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
             except (OSError, IndexError, ValueError):
                 continue
             kids.setdefault(ppid, []).append(int(entry))
@@ -125,7 +129,8 @@ def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
         fds = os.path.join(proc, str(p), "fd")
         with contextlib.suppress(OSError):
             for fd in os.listdir(fds):
-                with contextlib.suppress(OSError):  # an fd closed meanwhile, or a host without symlinks
+                # an fd closed meanwhile, or a host without symlinks
+                with contextlib.suppress(OSError):
                     links.add(os.readlink(os.path.join(fds, fd)))
     return {f"socket:[{inode}]" for inode in inodes} <= links
 
@@ -170,8 +175,10 @@ def reap(child: subprocess.Popen[bytes]) -> None:
 
 def hard_reap(pid: int | None) -> None:
     """The reap after a SIGTERM, on the pid: ``Popen``'s waitpid lock may be held by the wait it
-    interrupted. SIGTERM, ``waitpid(WNOHANG)`` for at most ``REAP_S``, then SIGKILL and a blocking wait."""
-    if pid is None or sys.platform == "win32":  # after the None return: the reaped path runs everywhere
+    interrupted. SIGTERM, ``waitpid(WNOHANG)`` for at most ``REAP_S``, then SIGKILL and a blocking wait.
+    """
+    # after the None return: the reaped path runs everywhere
+    if pid is None or sys.platform == "win32":
         return
     try:
         os.kill(pid, signal.SIGTERM)
@@ -197,7 +204,8 @@ def on_sigterm(signum: int, frame: object) -> None:
 
 def interpreter(name: str) -> str:
     """``{python}`` as the job dir names it: a path made absolute here (the child starts in
-    ``service/``), a bare name looked up on ``PATH`` or ``os.defpath``, else left bare."""
+    ``service/``), a bare name looked up on ``PATH`` or ``os.defpath``, else left bare.
+    """
     if os.sep in name:
         return os.path.abspath(name)
     return shutil.which(name, path=os.environ.get("PATH", os.defpath)) or name
@@ -238,9 +246,13 @@ def start(
             if child.poll() is not None:
                 if free(port):
                     return f"the child exited with returncode {child.returncode} on port {port}"
-                log(f"port {port} taken after the scan (the child exited {child.returncode}), next")
+                log(
+                    f"port {port} taken after the scan (the child exited {child.returncode}), next"
+                )
                 break
-            why = self_check(cfg["check"], ident, port, max(0.1, min(CHECK_S, deadline - time.monotonic())))
+            why = self_check(
+                cfg["check"], ident, port, max(0.1, min(CHECK_S, deadline - time.monotonic()))
+            )
             # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
             if inodes and not held_by(child.pid, inodes):
@@ -322,7 +334,9 @@ def serve() -> int:
                 log(f"announced to {cfg['url']}")
             announced, last_ok = True, time.monotonic()
         elif status == 403 or time.monotonic() - last_ok > cfg["lease_s"]:
-            log(f"orphaned ({status}, last 200 {time.monotonic() - last_ok:.1f}s ago): stopping the service")
+            log(
+                f"orphaned ({status}, last 200 {time.monotonic() - last_ok:.1f}s ago): stopping the service"
+            )
             reap(child)
             return 0
         time.sleep(cfg["beat_s"] if announced else 1.0)

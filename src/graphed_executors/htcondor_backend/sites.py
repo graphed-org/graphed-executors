@@ -17,9 +17,16 @@ from typing import Any
 from graphed.services import split_endpoint
 
 # The attributes schedd_weight reads, projected in the collector query.
-WEIGHT_ATTRS = ("Name", "RecentDaemonCoreDutyCycle", "ShadowsRunning", "MaxJobsRunning", "TotalIdleJobs")
+WEIGHT_ATTRS = (
+    "Name",
+    "RecentDaemonCoreDutyCycle",
+    "ShadowsRunning",
+    "MaxJobsRunning",
+    "TotalIdleJobs",
+)
 
-_SPOOLING_INPUT = 16  # HoldReasonCode of a spooled job while its input sandbox uploads: not a real hold
+# HoldReasonCode of a spooled job while its input sandbox uploads: not a real hold
+_SPOOLING_INPUT = 16
 
 
 @dataclass(frozen=True)
@@ -34,7 +41,8 @@ class SiteProfile:
     cluster's ``initialdir`` and a DAG's directory and inputs must lie under it (``"/"``: every path;
     ``None``: no such tree).
     ``services`` maps a service ``kind`` to the endpoint (``scheme://host:port``) the site hosts it
-    at; a value that is not one fails construction naming the row."""
+    at; a value that is not one fails construction naming the row.
+    """
 
     name: str
     submit: Mapping[str, str]
@@ -61,12 +69,18 @@ class SiteProfile:
         # a mappingproxy neither pickles nor deep-copies; the constructor re-wraps the plain dict (as
         # graphed's Launch does)
         values = [getattr(self, f.name) for f in fields(self)]
-        return (type(self), tuple(dict(v) if isinstance(v, MappingProxyType) else v for v in values))
+        return (
+            type(self),
+            tuple(dict(v) if isinstance(v, MappingProxyType) else v for v in values),
+        )
 
     @property
     def service_hosts(self) -> tuple[str, ...]:
         """Where a managed service may run: beside the driver, on a cluster node, in that order."""
-        return (*(("driver",) if self.service_ports else ()), *(("cluster",) if self.worker_ports else ()))
+        return (
+            *(("driver",) if self.service_ports else ()),
+            *(("cluster",) if self.worker_ports else ()),
+        )
 
 
 SITES: Mapping[str, SiteProfile] = {

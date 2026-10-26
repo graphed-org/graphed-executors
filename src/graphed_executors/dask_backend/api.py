@@ -66,7 +66,8 @@ def run_repartition(
     """Hash-repartition ``src_blocks`` into ``parts`` dests via the ``shuffle_method``-selected engine.
     ``n_tasks`` / ``fetch_budget_bytes`` / ``disk_budget_bytes`` / ``holder_budget_bytes`` /
     ``pull_timeout_s`` / ``epoch_restarts_allowed`` are transport-only (setting one while resolution lands
-    on ``"tasks"`` raises); ``salt`` is common. ``epoch_restarts_allowed=None`` maps to the engine default (1)."""
+    on ``"tasks"`` raises); ``salt`` is common. ``epoch_restarts_allowed=None`` maps to the engine default (1).
+    """
     resolved = resolve_shuffle_method(shuffle_method, dbackend.capabilities)
     _reject_transport_only_knobs(
         resolved,
@@ -95,11 +96,14 @@ def run_repartition(
             pull_timeout_s=pull_timeout_s,
             epoch_restarts_allowed=1 if epoch_restarts_allowed is None else epoch_restarts_allowed,
         )
-    from graphed_executors.submit import SubmitRunner  # noqa: PLC0415  (dask-free, but keep the top clean)
+    # dask-free, but keep the top clean
+    from graphed_executors.submit import SubmitRunner  # noqa: PLC0415
 
     from .shuffle import dask_run_repartition  # noqa: PLC0415  (F13: deferred)
 
-    return dask_run_repartition(backend, src_blocks, parts, runner=SubmitRunner(dbackend), salt=salt)
+    return dask_run_repartition(
+        backend, src_blocks, parts, runner=SubmitRunner(dbackend), salt=salt
+    )
 
 
 def run_join(
@@ -122,7 +126,8 @@ def run_join(
     """Distributed relational hash JOIN via the ``shuffle_method``-selected engine. ``on`` / ``how`` /
     ``broadcast`` / ``salt`` / ``mem_budget_bytes`` are COMMON (both engines bound their working set with
     ``mem_budget_bytes``); ``holder_budget_bytes`` / ``pull_timeout_s`` / ``epoch_restarts_allowed`` are
-    transport-only (setting one while resolution lands on ``"tasks"`` raises)."""
+    transport-only (setting one while resolution lands on ``"tasks"`` raises).
+    """
     resolved = resolve_shuffle_method(shuffle_method, dbackend.capabilities)
     _reject_transport_only_knobs(
         resolved,

@@ -40,7 +40,9 @@ class _Driver:
         body = pickle.dumps(obj)
         headers = {server.SIG_HEADER: server.sign(self.key, body)}
         while True:
-            request = urllib.request.Request(self.url + route, data=body, method="POST", headers=headers)
+            request = urllib.request.Request(
+                self.url + route, data=body, method="POST", headers=headers
+            )
             try:
                 with urllib.request.urlopen(request, timeout=3 * server.POLL_S) as response:
                     status, data, tid = (
@@ -77,7 +79,9 @@ def _run(data: bytes) -> tuple[bool, bytes]:
         try:
             return False, pickle.dumps(exc)
         except Exception:
-            return False, pickle.dumps(RuntimeError(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"))
+            return False, pickle.dumps(
+                RuntimeError(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+            )
 
 
 def _beat(driver: _Driver, me: str, beat_s: float) -> None:

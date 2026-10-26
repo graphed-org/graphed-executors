@@ -83,7 +83,8 @@ _FLOOR = SubmitCapabilities(
 class _Announcer(Protocol):
     """What :meth:`HTCondorBackend._await_announce` reads of a job that announces: its announce ``key``, its
     queue ``ad()`` (once it is gone, its history row, else ``{}``) and the ``dir`` its ``service.out``/``.err``
-    land in."""
+    land in.
+    """
 
     key: str
     dir: Path | None
@@ -100,7 +101,8 @@ class _Node:
     its queue ad within DAGMan job ``dag`` on ``schedd``, else, once it left the queue, its history row naming
     why. Its first idle ad is matched once against the pool's slots less what the DAG's running jobs and
     ``claims()`` hold, and no slot raises :class:`ServiceUnavailable` for service ``name``; DAGMan owns the
-    node, so nothing acts on it."""
+    node, so nothing acts on it.
+    """
 
     def __init__(
         self,
@@ -138,12 +140,17 @@ class _Node:
 
     def _departed(self, node: str) -> dict[str, Any]:
         """The departed node's ``JobStatus`` and ``ExitCode`` with its ``LastHoldReason``, else its
-        ``RemoveReason``, from its history row; ``{}``, logged, when that row is missing or unreadable."""
+        ``RemoveReason``, from its history row; ``{}``, logged, when that row is missing or unreadable.
+        """
         try:
             # match=1: a larger match scans a big schedd's whole history
-            rows = list(self._schedd.history(node, projection=["JobStatus", "ExitCode", *_GONE], match=1))
+            rows = list(
+                self._schedd.history(node, projection=["JobStatus", "ExitCode", *_GONE], match=1)
+            )
         except Exception as exc:
-            logger.warning("SERVICE node %s left the queue; its history is unreadable (%r)", self.key, exc)
+            logger.warning(
+                "SERVICE node %s left the queue; its history is unreadable (%r)", self.key, exc
+            )
             return {}
         if not rows:
             logger.warning("SERVICE node %s left the queue with no history row", self.key)
@@ -160,7 +167,10 @@ class _Node:
             return None
         dag = f"the DAG's running jobs (DAGMan job {self._dag})"
         running = f"DAGManJobId == {self._dag} && JobStatus == {_RUNNING}"
-        claims = {dag: list(self._schedd.query(constraint=running, projection=CLAIM_ATTRS)), **self._claims()}
+        claims = {
+            dag: list(self._schedd.query(constraint=running, projection=CLAIM_ATTRS)),
+            **self._claims(),
+        }
         return queued_refusal(f"SERVICE node {self.key}", whole[0], machines, claims)
 
 
@@ -222,7 +232,9 @@ class HTCondorBackend:
             self.service_ports = profile.service_ports
         else:  # self-submitted pilots reach the driver on worker_ports
             self.site_services = in_job.services
-            self.service_ports = in_job.worker_ports if isinstance(launcher, CondorPilots) else None
+            self.service_ports = (
+                in_job.worker_ports if isinstance(launcher, CondorPilots) else None
+            )
             slot = machine_ad("Memory")  # the job's slot, not the node it shares
             self.driver_memory_mb = None if slot is None else int(slot)
         low, high = port_range if port_range is not None else profile.driver_ports
@@ -232,9 +244,12 @@ class HTCondorBackend:
             raise OSError(
                 f"no free port for the task server: site={profile.name} ports={low}-{high}"
             ) from exc
-        self._services: dict[str, ServiceJob] = {}  # every service job submitted and not yet released
-        self._lock = threading.Lock()  # a service job is recorded before close() reads the record, or refused
-        self._closing = threading.Event()  # set: a service job still waiting for a slot ends its wait
+        # every service job submitted and not yet released
+        self._services: dict[str, ServiceJob] = {}
+        # a service job is recorded before close() reads the record, or refused
+        self._lock = threading.Lock()
+        # set: a service job still waiting for a slot ends its wait
+        self._closing = threading.Event()
         self._announced = dict(announced or {})
         self._schedd_locate = schedd_locate
         self._dag_dir = None if dag_dir is None else Path(dag_dir)
@@ -242,7 +257,11 @@ class HTCondorBackend:
         if self._announced:
             self.host_service = self._host_announced
             self.release_service = self._release_announced
-        elif in_job is None and isinstance(launcher, CondorPilots) and "cluster" in self.service_hosts:
+        elif (
+            in_job is None
+            and isinstance(launcher, CondorPilots)
+            and "cluster" in self.service_hosts
+        ):
             self.host_service = self._host_service
             self.release_service = self._release_service
         # pilot jobs submitted with the services' jobs would hold the room those need: they wait
@@ -254,7 +273,8 @@ class HTCondorBackend:
         self._held = False  # the queued pilots are held while a later plan's services start
         self._waited = False
         self._starting = 0  # plans whose services are starting (ServiceSet resolve phases)
-        self._set_start = threading.Lock()  # held by the one service set starting, through its probe
+        # held by the one service set starting, through its probe
+        self._set_start = threading.Lock()
         self._wanted = False  # a need of a worker arrived during one
         self._closed = False
         with ExitStack() as stack:  # a refused start must not leave the server holding its port
@@ -294,7 +314,8 @@ class HTCondorBackend:
         """A plan's service set starting, through its probe (:meth:`ServiceSet.start`): one at a time, so no
         set waits for room or a pilot that another starting set holds while that set waits for its own. A set
         waiting its turn raises once the runner closes (:meth:`stop_waiting`, :meth:`close`), within one
-        ``POLL_S``, whatever the starting set is waiting for."""
+        ``POLL_S``, whatever the starting set is waiting for.
+        """
         while not self._set_start.acquire(timeout=_server.POLL_S):
             if self._closing.is_set():
                 raise RuntimeError(
@@ -309,7 +330,8 @@ class HTCondorBackend:
     def starting_services(self) -> Iterator[None]:
         """A plan's services starting (:class:`ServiceSet`'s resolve phase): a need of a worker meanwhile
         is recorded, and the last phase to end moves the pilots a need asked for or a server held, its
-        services started or failed (a failure is logged; the next need retries it)."""
+        services started or failed (a failure is logged; the next need retries it).
+        """
         with self._pilots_lock:
             self._starting += 1
         try:
@@ -329,14 +351,16 @@ class HTCondorBackend:
 
     def n_workers(self) -> int:
         """Pilots registered and live right now. The first call, or the first :meth:`submit`, waits
-        once for ``min_pilots``, submitting deferred pilots first."""
+        once for ``min_pilots``, submitting deferred pilots first.
+        """
         self._need_worker()
         return self._server.live_pilots()
 
     def wait_for_pilots(self, n: int, timeout: float = N_WORKERS_WAIT_S) -> int:
         """Wait for ``n`` live pilots, a need of a worker at each poll; ``timeout`` counts from the call,
         or from the pilots' submit when a plan's service start defers it. A wait for ``min_pilots`` or
-        more is the first need's wait; once the run ends, a wait no pilot can end raises."""
+        more is the first need's wait; once the run ends, a wait no pilot can end raises.
+        """
         called = time.monotonic()
         while True:
             self._need()
@@ -369,7 +393,8 @@ class HTCondorBackend:
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
         """Never blocks on a future argument: the task queues once its arguments are done. The hints
-        are ignored. The first call, or the first :meth:`n_workers`, waits once for ``min_pilots``."""
+        are ignored. The first call, or the first :meth:`n_workers`, waits once for ``min_pilots``.
+        """
         self._need_worker()
         raw: Future[Any] = Future()
         self._server.add(key, fn, args, raw)
@@ -397,7 +422,8 @@ class HTCondorBackend:
 
     def host_identity(self) -> str:
         """The driver's host as condor writes ``Machine`` for its slots: ``FULL_HOSTNAME`` attached (the
-        only bindings use here), the job's own machine ad in a driver job."""
+        only bindings use here), the job's own machine ad in a driver job.
+        """
         if self._in_job is not None:
             return host_identity()
         return str(_launch._htcondor().param["FULL_HOSTNAME"])
@@ -410,7 +436,8 @@ class HTCondorBackend:
         and every failure forgets the call's announce secret. Once the pilots are submitted (a later
         plan), the first call holds their queued jobs until the plan's services have started or failed.
         The match counts each slot less what the running pilots (kept until the runner closes) and the
-        set's earlier servers (keys of ``scope``, kept until the run ends) hold."""
+        set's earlier servers (keys of ``scope``, kept until the run ends) hold.
+        """
         assert isinstance(self.launcher, CondorPilots)
         machines = machine_ads(self.launcher.schedd_locate)
         claims: dict[str, list[Any]] = {}
@@ -420,11 +447,15 @@ class HTCondorBackend:
                 claims.update(self._pilot_claims())
         if machines:
             with self._lock:
-                siblings = [job for key, job in self._services.items() if key.startswith(f"{scope}-")]
+                siblings = [
+                    job for key, job in self._services.items() if key.startswith(f"{scope}-")
+                ]
             for sibling in siblings:
                 if sibling.cluster is not None:
                     server = f"its server {sibling.spec.name!r} (cluster {sibling.cluster}, whose slot stays taken until the run ends)"
-                    claims[server] = self.launcher.running_claims(f"ClusterId == {sibling.cluster}")
+                    claims[server] = self.launcher.running_claims(
+                        f"ClusterId == {sibling.cluster}"
+                    )
         key = f"{scope}-{secrets.token_hex(8)}"
         secret = self._server.announce_secret([key])
         with ExitStack() as stack:
@@ -432,7 +463,9 @@ class HTCondorBackend:
             job = ServiceJob(spec, self.launcher, key=key, url=self._server.url, secret=secret)
             with self._lock:
                 if self._closing.is_set():
-                    raise RuntimeError(f"service {spec.name!r} ({key}) not submitted: the runner is closing")
+                    raise RuntimeError(
+                        f"service {spec.name!r} ({key}) not submitted: the runner is closing"
+                    )
                 self._services[key] = job
             stack.callback(self._services.pop, key, None)
             stack.callback(release_quietly, f"service job {key}", job.stop)
@@ -448,8 +481,13 @@ class HTCondorBackend:
     def _hold_queued(self) -> None:
         """Hold the runner's queued pilot jobs, once submitted, so none takes the room a service waits for,
         until the plan's services have started or failed (:meth:`starting_services` releases them); under
-        ``_pilots_lock``."""
-        if isinstance(self.launcher, CondorPilots) and self._submitted_at is not None and not self._held:
+        ``_pilots_lock``.
+        """
+        if (
+            isinstance(self.launcher, CondorPilots)
+            and self._submitted_at is not None
+            and not self._held
+        ):
             self.launcher.hold_queued()
             self._held = True
 
@@ -464,7 +502,8 @@ class HTCondorBackend:
     def _await_announce(self, job: _Announcer, spec: ServiceSpec) -> tuple[str, str]:
         """The job's announce. No deadline runs while it waits for a slot (idle, or held while its input
         spools), which is logged at the first such answer and every ``IDLE_LOG_S`` and ends when the
-        backend closes; ``timeout_s`` counts from the first answer that it runs."""
+        backend closes; ``timeout_s`` counts from the first answer that it runs.
+        """
         deadline: float | None = None
         logged = -IDLE_LOG_S
         while True:
@@ -478,12 +517,14 @@ class HTCondorBackend:
                 return got
             ad = job.ad()
             state = (
-                ", ".join(f"{name}={ad[name]!r}" for name in (*AD_ATTRS, *_GONE) if name in ad) or "no job ad"
+                ", ".join(f"{name}={ad[name]!r}" for name in (*AD_ATTRS, *_GONE) if name in ad)
+                or "no job ad"
             )
             now = time.monotonic()
             if deadline is None and ad.get("JobStatus") == _RUNNING:
                 deadline = now + spec.timeout_s
-            if deadline is None and self._closing.is_set():  # before the ad check: close() removes the job
+            # before the ad check: close() removes the job
+            if deadline is None and self._closing.is_set():
                 raise RuntimeError(
                     f"service {spec.name!r} ({job.key}) still waited for a slot when the runner closed: {state}"
                 )
@@ -513,7 +554,8 @@ class HTCondorBackend:
         naming the DAGMan job), the wait is :meth:`_await_announce`'s over the node's queue ad: a node that
         left the queue or is held raises at once, an idle one no slot could ever run raises
         :class:`ServiceUnavailable`, and ``timeout_s`` counts from its first running answer. Otherwise, and
-        from a failing import, locate or query on (logged once), the wait is ``timeout_s`` long."""
+        from a failing import, locate or query on (logged once), the wait is ``timeout_s`` long.
+        """
         node = self._announced.get(spec.name)
         if node is None:
             raise ValueError(
@@ -546,32 +588,39 @@ class HTCondorBackend:
 
     def _node(self, name: str, key: str) -> _Node | None:
         """DAG SERVICE node ``key`` of service ``name`` on the DAG's schedd, or ``None`` when ``schedd_locate``
-        or the job ad's ``DAGManJobId`` is missing; :class:`_Unread` when the bindings or the locate fail."""
+        or the job ad's ``DAGManJobId`` is missing; :class:`_Unread` when the bindings or the locate fail.
+        """
         dag = machine_ad("DAGManJobId", env="_CONDOR_JOB_AD")
         if self._schedd_locate is None or dag is None:
             return None
         where = None if self._dag_dir is None else self._dag_dir / f"service-{key}"
         try:
             schedd = located_schedd(_launch._htcondor(), self._schedd_locate)
-            return _Node(name, key, where, schedd, int(dag), self._schedd_locate, self._pilot_claims)
+            return _Node(
+                name, key, where, schedd, int(dag), self._schedd_locate, self._pilot_claims
+            )
         except Exception as exc:
             raise _Unread(exc) from exc
 
     def _release_announced(self, key: str) -> None:
         """Nothing: a pending announce of node ``key`` is its restart's, which the next set resolves, and
-        DAGMan removes the node when the DAG ends."""
+        DAGMan removes the node when the DAG ends.
+        """
 
     def stop_waiting(self) -> None:
         """End every wait for a service job that has no slot yet, within one ``POLL_S``: the job is
         removed and its run raises. A job that has started keeps its ``timeout_s``; no service job is
-        submitted after this."""
+        submitted after this.
+        """
         self._closing.set()
 
     def close(self) -> None:
         """Remove every service job this backend submitted, in the calling thread (a wait for one, or
         for pilots, then raises), stop serving (pilots see 410 and exit), stop the pilots, free the
-        port; each step runs even when an earlier one fails, and each failure is logged."""
-        with self._pilots_lock, self._lock:  # a pilot submit in flight finishes first, so the stop removes it
+        port; each step runs even when an earlier one fails, and each failure is logged.
+        """
+        # a pilot submit in flight finishes first, so the stop removes it
+        with self._pilots_lock, self._lock:
             self._closing.set()
             self._closed = True
             jobs = list(self._services.items())
@@ -589,7 +638,8 @@ class _MainProbe(pickle.Unpickler):
 
 def _require_importable(obj: object, role: str) -> None:
     """Refuse ``obj`` when a pilot could not unpickle it: a lambda or local function does not pickle,
-    and a ``__main__`` global pickles here but names a module the pilot does not have."""
+    and a ``__main__`` global pickles here but names a module the pilot does not have.
+    """
     try:
         _MainProbe(io.BytesIO(pickle.dumps(obj))).load()
     except (pickle.PicklingError, pickle.UnpicklingError, AttributeError, TypeError) as exc:
@@ -601,7 +651,8 @@ def _require_importable(obj: object, role: str) -> None:
 
 def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[str]) -> None:
     """Refuse ``plan`` when a pilot could not import one of the V1 ``roles`` the caller ships; a
-    ``DurablePlanV2``'s stage processes travel by value, so pilots need not import them."""
+    ``DurablePlanV2``'s stage processes travel by value, so pilots need not import them.
+    """
     if isinstance(plan, DurablePlanV2):
         return
     for role in roles:
@@ -612,7 +663,8 @@ def _require_plan_importable(plan: Plan[Any] | DurablePlanV2, roles: Sequence[st
 class HTCondorRunner(SubmitRunner):
     """A :class:`SubmitRunner` that refuses a ``Plan`` pilots cannot import, and whose backend waits for
     ``min_pilots`` at its first need of a worker, so pilots that never start are an error instead of a
-    queue that never drains."""
+    queue that never drains.
+    """
 
     backend: HTCondorBackend
 
@@ -627,7 +679,11 @@ class HTCondorRunner(SubmitRunner):
         services: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__(
-            backend, monitor=monitor, retries=retries, max_in_flight=max_in_flight, services=services
+            backend,
+            monitor=monitor,
+            retries=retries,
+            max_in_flight=max_in_flight,
+            services=services,
         )
         self._min_pilots = backend.min_pilots = min_pilots
 
@@ -650,7 +706,8 @@ class HTCondorRunner(SubmitRunner):
 
     def close(self) -> None:
         """Finish every submitted plan, a service's wait for a slot included, then close the backend,
-        which removes every job the runner submitted, also when that wait is interrupted."""
+        which removes every job the runner submitted, also when that wait is interrupted.
+        """
         try:
             self._plans.close()
         finally:
@@ -683,7 +740,8 @@ def htcondor_runner(
     site profile. ``services`` are the runner's given service endpoints. ``service_hosts`` narrows
     where a managed service runs to a subset of the site's, such as ``("cluster",)``; a host the site
     does not offer is refused before any pilot is submitted. ``task_timeout_s`` is
-    :class:`HTCondorBackend`'s."""
+    :class:`HTCondorBackend`'s.
+    """
     pilots = CondorPilots(
         site,
         image=image,

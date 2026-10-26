@@ -23,7 +23,9 @@ def _backend(*, htex: bool) -> ParslBackend:
     return backend
 
 
-@pytest.mark.parametrize(("htex", "cancelled"), [(True, False), (False, True)], ids=["htex", "tpe"])
+@pytest.mark.parametrize(
+    ("htex", "cancelled"), [(True, False), (False, True)], ids=["htex", "tpe"]
+)
 def test_cancel_leaves_htex_futures_and_cancels_tpe_ones(htex: bool, cancelled: bool) -> None:
     raw: Future[Any] = Future()
     _backend(htex=htex).cancel([_ParslFuture(raw, {})])

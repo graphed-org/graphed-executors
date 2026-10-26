@@ -45,7 +45,8 @@ def _worker_resources() -> LocalResources:
 def _worker_identity() -> str:
     """``f"{PARSL_WORKER_POOL_ID}:{PARSL_WORKER_RANK}"`` recomputed IN-TASK from parsl's own env vars
     (HTEX), falling back to ``hostname:pid`` on the ThreadPoolExecutor (whose task threads live in the
-    driver process and carry no parsl worker env vars)."""
+    driver process and carry no parsl worker env vars).
+    """
     pool = os.environ.get("PARSL_WORKER_POOL_ID")
     rank = os.environ.get("PARSL_WORKER_RANK")
     if pool is not None and rank is not None:
@@ -56,7 +57,8 @@ def _worker_identity() -> str:
 class _ParslWorkerEnv:
     """A per-task :class:`WorkerEnv`: the process-global ``open_once`` resources, the in-task worker
     identity, and a BUFFERING ``emit`` (parsl has no worker->driver event transport, so events ride
-    back with the task result and are dispatched driver-side — the completion-granularity piggyback)."""
+    back with the task result and are dispatched driver-side — the completion-granularity piggyback).
+    """
 
     def __init__(self) -> None:
         self.resources: WorkerResources = _worker_resources()
@@ -67,11 +69,14 @@ class _ParslWorkerEnv:
         self.events.append((topic, list(events)))
 
 
-def _parsl_task_shim(fn: Callable[..., object], /, *args: object) -> tuple[object, list[EventBatch]]:
+def _parsl_task_shim(
+    fn: Callable[..., object], /, *args: object
+) -> tuple[object, list[EventBatch]]:
     """Run ``fn(*args)`` under a :class:`_ParslWorkerEnv` on the worker, returning
     ``(result, buffered_events)``. Future args were already resolved DRIVER-side by
     ``ParslBackend.submit`` (parsl workers cannot resolve a driver-process future — §1.1); a raising
-    ``fn`` propagates through parsl's serialized exception path (no envelope on the error arc)."""
+    ``fn`` propagates through parsl's serialized exception path (no envelope on the error arc).
+    """
     env = _ParslWorkerEnv()
     token = set_worker_env(env)
     try:
@@ -85,7 +90,8 @@ def dispatch_events(
     events: list[EventBatch], handlers: dict[str, Callable[[list[dict[str, object]]], None]]
 ) -> None:
     """Deliver a task's buffered event batches to the driver-side topic handlers (idempotent per
-    :class:`_ParslFuture` — called once on the first successful result unwrap)."""
+    :class:`_ParslFuture` — called once on the first successful result unwrap).
+    """
     for topic, batch in events:
         handler = handlers.get(topic)
         if handler is not None:

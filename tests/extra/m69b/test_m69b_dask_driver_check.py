@@ -2,7 +2,8 @@
 ``driver_memory_mb`` starts beside the driver and serves tasks the dask workers run; one that does not, or one
 above the host's physical memory when the backend sets no limit, is refused before it starts, naming both
 sizes. Runs in the ``test-dask`` job (``importorskip("distributed")`` in the fixture, so the file collects
-anywhere)."""
+anywhere).
+"""
 
 from __future__ import annotations
 
@@ -99,7 +100,9 @@ def test_a_service_that_fits_driver_memory_starts_beside_the_driver(
     assert [(s.leg, s.host) for s in statuses] == [("managed", "driver")]
 
 
-def test_a_service_above_driver_memory_is_refused_before_it_starts(runner: Any, tmp_path: Path) -> None:
+def test_a_service_above_driver_memory_is_refused_before_it_starts(
+    runner: Any, tmp_path: Path
+) -> None:
     runner.backend.driver_memory_mb = 64
     marker = tmp_path / "started"
     with pytest.raises(ServiceUnavailable) as err:
@@ -109,7 +112,9 @@ def test_a_service_above_driver_memory_is_refused_before_it_starts(runner: Any, 
     assert not marker.exists()
 
 
-def test_without_a_limit_the_host_s_physical_memory_is_the_limit(runner: Any, tmp_path: Path) -> None:
+def test_without_a_limit_the_host_s_physical_memory_is_the_limit(
+    runner: Any, tmp_path: Path
+) -> None:
     host = physical_memory_mb()
     marker = tmp_path / "started"
     with pytest.raises(ServiceUnavailable) as err:

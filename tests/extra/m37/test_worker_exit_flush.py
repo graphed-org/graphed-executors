@@ -69,7 +69,10 @@ def _run(delay: float) -> tuple[_Rec, float]:
         tasks=[Task(0, Partition("bad.root", "Events", 0, 10))],
     )
     t0 = time.monotonic()
-    with pytest.raises(ValueError, match="boom"), ProcessPoolExecutor(1, monitor=rec, comms=None) as ex:
+    with (
+        pytest.raises(ValueError, match="boom"),
+        ProcessPoolExecutor(1, monitor=rec, comms=None) as ex,
+    ):
         ex.run(plan)
     return rec, time.monotonic() - t0
 

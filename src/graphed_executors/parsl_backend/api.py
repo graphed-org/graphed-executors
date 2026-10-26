@@ -15,7 +15,8 @@ could drift the m45-frozen truth table), then dispatch honestly per instance:
 A transport-only knob explicitly set while resolution lands on ``"tasks"`` is a loud ``ValueError``
 BEFORE any submit. Imports only ``common.facade`` (the shared resolver) + the parsl-free probe
 primitives at load; the relay + transport engines are deferred (G9: never couple to ``dask_backend``,
-never import the heavy engine bodies until dispatch)."""
+never import the heavy engine bodies until dispatch).
+"""
 
 from __future__ import annotations
 
@@ -60,7 +61,8 @@ __all__ = [
 @dataclass
 class ProbeReport:
     """The standalone ``probe_peer_reachability`` verdict: ``ok`` is True iff every overlay pair
-    dialed; ``failed_pairs`` are the ``(src_addr, dst_addr)`` that could not connect (empty iff ok)."""
+    dialed; ``failed_pairs`` are the ``(src_addr, dst_addr)`` that could not connect (empty iff ok).
+    """
 
     ok: bool
     failed_pairs: tuple[tuple[str, str], ...]
@@ -84,7 +86,8 @@ def run_repartition(
     """Hash-repartition via the ``shuffle_method``-selected engine. ``fetch_budget_bytes`` /
     ``pull_timeout_s`` / ``epoch_restarts_allowed`` / ``workers`` / ``on_unreachable`` /
     ``registry_rewrite`` are transport-only (set one while resolution lands on ``"tasks"`` and it
-    raises); ``salt`` is common. ``on_unreachable=None`` means ``"error"``."""
+    raises); ``salt`` is common. ``on_unreachable=None`` means ``"error"``.
+    """
     resolved = resolve_shuffle_method(shuffle_method, pbackend.capabilities)
     _reject_transport_only_knobs(
         resolved,
@@ -111,7 +114,9 @@ def run_repartition(
                 workers=workers,
                 fetch_budget_bytes=fetch_budget_bytes,
                 pull_timeout_s=pull_timeout_s,
-                epoch_restarts_allowed=1 if epoch_restarts_allowed is None else epoch_restarts_allowed,
+                epoch_restarts_allowed=1
+                if epoch_restarts_allowed is None
+                else epoch_restarts_allowed,
                 registry_rewrite=registry_rewrite,
             )
         except ProbeUnreachable as pu:
@@ -143,7 +148,8 @@ def run_join(
 ) -> Any:
     """Distributed relational JOIN via the ``shuffle_method``-selected engine. ``on`` / ``how`` /
     ``broadcast`` / ``salt`` / ``mem_budget_bytes`` are common; ``pull_timeout_s`` /
-    ``epoch_restarts_allowed`` / ``workers`` / ``on_unreachable`` are transport-only."""
+    ``epoch_restarts_allowed`` / ``workers`` / ``on_unreachable`` are transport-only.
+    """
     resolved = resolve_shuffle_method(shuffle_method, pbackend.capabilities)
     _reject_transport_only_knobs(
         resolved,
@@ -172,7 +178,9 @@ def run_join(
                 mem_budget_bytes=mem_budget_bytes,
                 workers=workers,
                 pull_timeout_s=pull_timeout_s,
-                epoch_restarts_allowed=1 if epoch_restarts_allowed is None else epoch_restarts_allowed,
+                epoch_restarts_allowed=1
+                if epoch_restarts_allowed is None
+                else epoch_restarts_allowed,
             )
         except ProbeUnreachable as pu:
             return _on_probe_failure(
@@ -210,7 +218,8 @@ def probe_peer_reachability(
 ) -> ProbeReport:
     """User-facing pre-flight (directive #2): seat k peers, run the overlay probe at rendezvous time,
     RELEASE the peers (the pool is usable afterwards), and report. ``registry_rewrite`` is the test
-    poisoner seam (production never passes it)."""
+    poisoner seam (production never passes it).
+    """
     nonce = uuid.uuid4().hex
     worker_addrs = _worker_addrs(k)
     driver_ep = _open_driver_endpoint(nonce)
@@ -240,11 +249,14 @@ def probe_peer_reachability(
             registry_rewrite=registry_rewrite,
             driver_counts=driver_counts,
         )
-        failed = _collect_probes(driver_ep, k, driver_counts=driver_counts, timeout_s=timeout_s + 10.0)
+        failed = _collect_probes(
+            driver_ep, k, driver_counts=driver_counts, timeout_s=timeout_s + 10.0
+        )
         _release(driver_ep, seated, ("abort",))  # release the probe peers — no shuffle follows
     finally:
         for fut in futures.values():
-            with contextlib.suppress(BaseException):  # drain the released markers; a probe never raises
+            # drain the released markers; a probe never raises
+            with contextlib.suppress(BaseException):
                 fut.result(timeout=_ROOT_TIMEOUT_S)
         driver_ep.close()
     return ProbeReport(ok=(not failed), failed_pairs=tuple(failed))
@@ -262,7 +274,8 @@ def _require_peer_transport(pbackend: Any) -> None:
 
 def _on_probe_failure(pu: ProbeUnreachable, on_unreachable: str | None, run_relay: Any) -> Any:
     """Route a rendezvous-time probe failure: ``"fallback"`` -> the relay engine (labeled), else an
-    attributed ``StageError`` naming the unreachable pair (the default ``"error"`` posture)."""
+    attributed ``StageError`` naming the unreachable pair (the default ``"error"`` posture).
+    """
     if on_unreachable == "fallback":
         result = run_relay()
         result.witness.fallback_reason = (
@@ -287,7 +300,8 @@ def _runner(pbackend: Any) -> Any:
 
 
 def _relay_repartition(backend: Any, src_blocks: Any, parts: int, runner: Any, salt: int) -> Any:
-    from graphed_executors.common.relay_engine import relay_run_repartition  # noqa: PLC0415  (G9: deferred)
+    # G9: deferred
+    from graphed_executors.common.relay_engine import relay_run_repartition  # noqa: PLC0415
 
     return relay_run_repartition(backend, src_blocks, parts, runner=runner, salt=salt)
 
@@ -304,7 +318,8 @@ def _relay_join(
     salt: int,
     mem_budget_bytes: int | None,
 ) -> Any:
-    from graphed_executors.common.relay_engine import relay_run_join  # noqa: PLC0415  (G9: deferred)
+    # G9: deferred
+    from graphed_executors.common.relay_engine import relay_run_join  # noqa: PLC0415
 
     return relay_run_join(
         backend,

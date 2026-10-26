@@ -15,7 +15,8 @@ def triton(name: str, image: str, model_repository: str, *, gpus: int = 1) -> Se
     """A Triton inference server (kind ``"triton"``) in ``image`` serving ``model_repository`` (a path
     relative to where the job lands its inputs) on gRPC only: one bound port, checked with the standard
     gRPC health Check (``ServerIsReady``-backed), because a site's Triton that must satisfy the same
-    requirement serves only gRPC."""
+    requirement serves only gRPC.
+    """
     launch = Launch(
         argv=(
             "tritonserver",
@@ -35,7 +36,8 @@ def http_server(name: str, *, root: str = ".") -> ServiceSpec:
     """The generic recipe: stdlib ``http.server`` (kind ``"http"``, checked by a GET of ``/``) serving
     ``root``, the directory it starts in by default. Any other ``root`` is appended as
     ``--directory <root>`` and is the recipe's staged input, for a host that ships inputs to where the
-    service starts. Every hosting path runs it without a service client."""
+    service starts. Every hosting path runs it without a service client.
+    """
     argv = ("{python}", "-m", "http.server", "{port}")
     if root == ".":
         return ServiceSpec(name, "http", check="http:/", launch=Launch(argv=argv))

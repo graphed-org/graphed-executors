@@ -52,7 +52,8 @@ def require_pin(dbackend: Any) -> None:
     """Every entry point checks this FIRST, before any submit/broadcast: the worker-transport engine
     needs STRICT worker pinning (``pin_to_worker``) + peer data movement, so it refuses loudly on a
     backend that lacks either (``ThreadBackend``: ``pin_to_worker=False``) and names the Phase-2
-    store-plane alternative."""
+    store-plane alternative.
+    """
     caps = dbackend.capabilities
     if not (caps.pin_to_worker and caps.peer_data_movement):
         raise NotImplementedError(
@@ -72,7 +73,8 @@ def sorted_addresses(dbackend: Any) -> tuple[str, ...]:
     ``k = max(1, len(addresses))`` then ``addresses[i % k]`` — indexing an EMPTY tuple → ``IndexError:
     tuple index out of range`` (the m44 zero-partition CI-only failure). A live cluster always has
     workers, so on empty we force the client to observe >= 1 (clock-free: distributed's own bounded
-    wait, no sleep here) and re-read."""
+    wait, no sleep here) and re-read.
+    """
     client = dbackend._client
     workers = client.scheduler_info()["workers"]
     if not workers:
@@ -98,7 +100,8 @@ def _purge_probe(epoch: str, dask_worker: Any = None) -> bool:
 def collect_and_purge(client: Any, epoch: str, per_worker: dict[str, dict[str, int]]) -> None:
     """Aggregate every worker's per-epoch plugin counters into ``per_worker``, THEN purge the epoch's
     per-worker state (inboxes, block stores, spill dirs) — the §1.2 teardown witness. Counter
-    collection failures are swallowed (witnesses, not correctness); the purge always runs."""
+    collection failures are swallowed (witnesses, not correctness); the purge always runs.
+    """
     with contextlib.suppress(Exception):
         merge_counters(per_worker, client.run(_counters_probe, epoch))
     with contextlib.suppress(Exception):

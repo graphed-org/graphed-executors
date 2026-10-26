@@ -2,7 +2,8 @@
 in the row's order and gates the cluster capability with them, a driver job's hosts narrow the same way, a
 refusal comes before the task server binds, and the engine's managed leg reads the narrowed tuple. No
 bindings and no pool: the schedd is a stand-in that accepts a submit and lists no job, the launcher one that
-starts nothing."""
+starts nothing.
+"""
 
 from __future__ import annotations
 
@@ -51,7 +52,10 @@ class NoPilots:
     ],
 )
 def test_service_hosts_narrows_the_hosts_and_the_cluster_capability(
-    narrowed: tuple[str, ...] | None, hosts: tuple[str, ...], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    narrowed: tuple[str, ...] | None,
+    hosts: tuple[str, ...],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(launch, "_htcondor", bindings)
     backend = HTCondorBackend(
@@ -74,11 +78,15 @@ def test_a_host_the_row_does_not_offer_is_refused_before_the_task_server_binds(
     with pytest.raises(ValueError, match=r"'gpu-node'.*site 'generic'.*\('driver', 'cluster'\)"):
         HTCondorBackend(NoPilots(), 1, host="127.0.0.1", service_hosts=("gpu-node",))
     with pytest.raises(ValueError, match=r"'cluster'.*a driver job.*\('driver',\)"):
-        HTCondorBackend(NoPilots(), 1, host="127.0.0.1", in_job=SITES["generic"], service_hosts=("cluster",))
+        HTCondorBackend(
+            NoPilots(), 1, host="127.0.0.1", in_job=SITES["generic"], service_hosts=("cluster",)
+        )
 
 
 def test_a_driver_job_narrowed_to_no_host_keeps_its_own_row_otherwise() -> None:
-    backend = HTCondorBackend(NoPilots(), 1, host="127.0.0.1", in_job=SITES["lpc"], service_hosts=())
+    backend = HTCondorBackend(
+        NoPilots(), 1, host="127.0.0.1", in_job=SITES["lpc"], service_hosts=()
+    )
     try:
         assert backend.service_hosts == ()
         assert backend.site_services == SITES["lpc"].services
@@ -88,7 +96,9 @@ def test_a_driver_job_narrowed_to_no_host_keeps_its_own_row_otherwise() -> None:
 
 
 def test_the_managed_leg_reads_the_narrowed_hosts() -> None:
-    spec = ServiceSpec("narrowed", kind="m69b", check="tcp", launch=Launch(("{python}", "-c", "pass")))
+    spec = ServiceSpec(
+        "narrowed", kind="m69b", check="tcp", launch=Launch(("{python}", "-c", "pass"))
+    )
     backend = HTCondorBackend(NoPilots(), 1, host="127.0.0.1", service_hosts=("cluster",))
     try:
         with pytest.raises(ServiceUnavailable) as err:

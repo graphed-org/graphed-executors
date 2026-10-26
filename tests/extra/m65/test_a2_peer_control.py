@@ -35,7 +35,9 @@ def test_paused_time_does_not_count_toward_the_root_deadline(
 
 
 @pytest.mark.parametrize("route", ["thread-ipc", "proc-ipc"])
-def test_the_root_timeout_message_follows_the_constant(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_root_timeout_message_follows_the_constant(
+    route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", 0.5)
     ex = mp.ROUTES[route].make()
     run = mp.Background(lambda: ex.run(mp.make_plan(mp.Probe(sleep_s=1.0))))
@@ -91,17 +93,27 @@ class _Peers:
 def test_the_driver_fold_of_hand_ins_is_the_tree_root() -> None:
     # The sibling pairs (0,26)/(0,27), (0,30)/(0,31) and (2,8)/(2,9) were never settled by a worker;
     # w0's message and the item (0, 27) arrive twice.
-    w0 = ("cancelled", "w0", 20, [(level, pos, _node(level, pos)) for level, pos in ((4, 0), (3, 2))])
-    items = [(level, pos, _node(level, pos)) for level, pos in ((1, 12), (0, 26), (0, 27), (0, 27))]
+    w0 = (
+        "cancelled",
+        "w0",
+        20,
+        [(level, pos, _node(level, pos)) for level, pos in ((4, 0), (3, 2))],
+    )
+    items = [
+        (level, pos, _node(level, pos)) for level, pos in ((1, 12), (0, 26), (0, 27), (0, 27))
+    ]
     w1_nodes = ((1, 14), (0, 30), (0, 31), (2, 8), (2, 9))
     w1 = ("cancelled", "w1", 20, [(level, pos, _node(level, pos)) for level, pos in w1_nodes])
     ctl: _peer.PeerControl[float] = _peer.PeerControl(RunControl(), _Peers(), mp.N, mp.add, float)
     got = [ctl.take(m) for m in (w0, w0, *[("item", *i) for i in items], w1)]
-    root, _ = lazy_tree_reduce(mp.N, ((k, mp.partial("float", mp.N, k)) for k in range(mp.N)), mp.add, float)
+    root, _ = lazy_tree_reduce(
+        mp.N, ((k, mp.partial("float", mp.N, k)) for k in range(mp.N)), mp.add, float
+    )
     assert got[:-1] == [None] * (len(got) - 1)
     assert got[-1] == (root, mp.N)
     pieces = sorted((pos << level, v) for level, pos, v in {*w0[3], *items, *w1[3]})
-    assert running_fold(iter(pieces), mp.add, float)[0] != root  # a first-leaf fold alone misses it
+    # a first-leaf fold alone misses it
+    assert running_fold(iter(pieces), mp.add, float)[0] != root
 
 
 class _Script:

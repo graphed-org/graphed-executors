@@ -1,7 +1,8 @@
 """m67 driver-entry and launcher paths the frozen suite does not reach: the host fallback, an outcome
 that does not pickle, the default schedd's name, ``service_hosts`` with worker ports alone, the exit
 code of a run whose workers were lost, a failing close, the entry run under ``-W error``, and the
-pilot cluster in ``driver.log``."""
+pilot cluster in ``driver.log``.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +34,9 @@ from graphed_executors.htcondor_backend.sites import SITES
 from graphed_executors.submit import services
 
 
-def test_the_driver_host_falls_back_to_this_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_driver_host_falls_back_to_this_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(socket, "getfqdn", lambda: "fallback.example")
     monkeypatch.delenv("_CONDOR_MACHINE_AD", raising=False)
     assert services.host_identity() == "fallback.example"
@@ -53,7 +56,10 @@ class Unpicklable(Exception):
 def test_an_unpicklable_outcome_comes_back_as_text() -> None:
     ok, err = pickle.loads(driver._result_blob(False, Unpicklable("lost handle")))
     assert ok is False and type(err) is RuntimeError
-    assert "Unpicklable did not round-trip through pickle (TypeError: no pickling): lost handle" in str(err)
+    assert (
+        "Unpicklable did not round-trip through pickle (TypeError: no pickling): lost handle"
+        in str(err)
+    )
 
 
 def test_the_default_schedd_is_named_by_its_own_ad() -> None:
@@ -68,7 +74,9 @@ def test_the_default_schedd_is_named_by_its_own_ad() -> None:
             return {"Name": "local-schedd"}
 
     kinds = SimpleNamespace(Schedd="schedd")
-    fake = SimpleNamespace(param={}, Collector=Collector, DaemonType=kinds, Schedd=lambda: "default")
+    fake = SimpleNamespace(
+        param={}, Collector=Collector, DaemonType=kinds, Schedd=lambda: "default"
+    )
     assert CondorPilots(SITES["generic"])._choose(fake) == ("local-schedd", "default")
     assert located == [(None, "schedd", None)]
 
@@ -140,12 +148,16 @@ def test_lost_workers_exit_1_and_a_plan_error_exits_3(
     assert ok is False and getattr(err, "cause_type", type(err).__name__) == cause, err
 
 
-def test_pilots_lost_after_the_driver_waits_exit_1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pilots_lost_after_the_driver_waits_exit_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     write_job(tmp_path, monkeypatch, "ok")
     wait = HTCondorBackend.wait_for_pilots
     waits: list[int] = []
 
-    def wait_then_lose_all(self: HTCondorBackend, n: int, timeout: float = backend.N_WORKERS_WAIT_S) -> int:
+    def wait_then_lose_all(
+        self: HTCondorBackend, n: int, timeout: float = backend.N_WORKERS_WAIT_S
+    ) -> int:
         waits.append(n)
         if len(waits) > 1:  # a second wait sees no pilot; cut its timeout so it fails fast
             return wait(self, n, timeout=3.0)
@@ -195,7 +207,9 @@ def test_a_failing_close_keeps_the_run_outcome(
     outcome: object, code: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "run.json").write_text(json.dumps({"min_pilots": 1}))
-    (tmp_path / "plan.pkl").write_bytes(pickle.dumps(Plan(process=_unused_leaf, combine=max, empty=int)))
+    (tmp_path / "plan.pkl").write_bytes(
+        pickle.dumps(Plan(process=_unused_leaf, combine=max, empty=int))
+    )
     monkeypatch.setattr(driver, "_runner", lambda run, job, log: ClosingRunner(outcome))
     assert driver.main([str(tmp_path)]) == code
     ok, payload = pickle.loads((tmp_path / "result.pkl").read_bytes())
@@ -222,7 +236,9 @@ class PilotSchedd:
         return []
 
 
-def test_the_driver_log_names_the_pilot_cluster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_driver_log_names_the_pilot_cluster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake = SimpleNamespace(
         param={},
         Submit=dict,

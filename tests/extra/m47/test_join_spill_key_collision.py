@@ -90,11 +90,19 @@ def test_two_peer_spilled_join_is_row_exact() -> None:
 
     with p2p_tpe_pool(max_threads=2) as tpe:
         from graphed_executors.parsl_backend import ParslBackend  # noqa: PLC0415
-        from graphed_executors.parsl_backend.transport_shuffle import transport_run_join  # noqa: PLC0415
+
+        # 5
+        from graphed_executors.parsl_backend.transport_shuffle import transport_run_join  # noqa: PLC041
 
         r = run_bounded(
             lambda: transport_run_join(
-                be, left, right, PARTS, pbackend=ParslBackend(tpe), broadcast=False, mem_budget_bytes=budget
+                be,
+                left,
+                right,
+                PARTS,
+                pbackend=ParslBackend(tpe),
+                broadcast=False,
+                mem_budget_bytes=budget,
             )
         )
 

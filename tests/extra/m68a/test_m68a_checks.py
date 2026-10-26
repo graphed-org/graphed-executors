@@ -2,7 +2,8 @@
 reaches only through the whole path: every readiness form against in-process servers (the gRPC ones when
 grpcio and its reference health servicer are installed), the endpoint form, the minted scheme, the
 request encoding, a missing grpcio, and the ``Endpoints`` map. These run in the ``test-dask`` job too,
-which gates ``submit/`` on its own suite."""
+which gates ``submit/`` on its own suite.
+"""
 
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ TIMEOUT_S = 5.0
 @contextlib.contextmanager
 def http_server(status: int = 200, ctype: str = "text/plain") -> Iterator[str]:
     """An HTTP server on loopback answering every GET with ``status`` and ``ctype``; yields its
-    ``http://`` endpoint."""
+    ``http://`` endpoint.
+    """
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -42,7 +44,9 @@ def http_server(status: int = 200, ctype: str = "text/plain") -> Iterator[str]:
             return None
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -76,7 +80,9 @@ def test_a_closed_port_and_forms_that_are_refused_undialled() -> None:
     assert "failed" in str(svc.check_ready(closed_endpoint("http"), "http:/", TIMEOUT_S))
     assert "not dialled" in str(svc.check_ready("grpc://127.0.0.1:1", "http:/", TIMEOUT_S))
     assert "not dialled" in str(svc.check_ready("http://127.0.0.1:1", "grpc:", TIMEOUT_S))
-    assert "unknown check" in str(svc.check_ready("http://127.0.0.1:1", "http:no-slash", TIMEOUT_S))
+    assert "unknown check" in str(
+        svc.check_ready("http://127.0.0.1:1", "http:no-slash", TIMEOUT_S)
+    )
     assert "grpcs" in str(svc.check_ready("127.0.0.1:1", "tcp", TIMEOUT_S))  # not an endpoint
 
 
@@ -122,13 +128,16 @@ def test_grpc_health_checks() -> None:
     with health_server() as port:
         endpoint = f"grpc://127.0.0.1:{port}"
         assert svc.check_ready(endpoint, "grpc:", TIMEOUT_S) is None
-        assert svc.check_ready(endpoint, "grpc:" + "x" * 200, TIMEOUT_S) is None  # a two-byte length
+        # a two-byte length
+        assert svc.check_ready(endpoint, "grpc:" + "x" * 200, TIMEOUT_S) is None
         assert "not SERVING" in str(svc.check_ready(endpoint, "grpc:down", TIMEOUT_S))
         assert "failed" in str(svc.check_ready(endpoint, "grpc:unknown", TIMEOUT_S))
         assert "failed" in str(svc.check_ready(f"grpcs://127.0.0.1:{port}", "grpc:", TIMEOUT_S))
 
 
-def test_host_identity_reads_machine_from_the_ad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_host_identity_reads_machine_from_the_ad(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ad = tmp_path / "machine.ad"
     ad.write_text('Name = "slot1@x"\nCpus = 1\n')
     monkeypatch.setenv("_CONDOR_MACHINE_AD", str(ad))
@@ -170,7 +179,9 @@ def test_the_endpoints_map() -> None:
 
 
 def test_refusals_carry_their_fields_through_pickle() -> None:
-    unavailable = svc.ServiceUnavailable("s", {"user": "no endpoint given", "managed": "no recipe"})
+    unavailable = svc.ServiceUnavailable(
+        "s", {"user": "no endpoint given", "managed": "no recipe"}
+    )
     back = pickle.loads(pickle.dumps(unavailable))
     assert (back.name, back.legs) == ("s", unavailable.legs)
     assert "user: no endpoint given; managed: no recipe" in str(back)

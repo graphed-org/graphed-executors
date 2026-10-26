@@ -12,7 +12,8 @@ exhausted send / a lost peer restarts the WHOLE run under a fresh epoch up to
 This module owns the shared driver primitives (barrier, registry broadcast, probe collection,
 restart classification) that ``transport_shuffle`` and ``api`` reuse. It imports NOTHING from parsl
 or ``dask_backend`` at load; the peer body's shuffle leg is a deferred import of
-``parsl_backend.transport_shuffle`` (F13 / G9)."""
+``parsl_backend.transport_shuffle`` (F13 / G9).
+"""
 
 from __future__ import annotations
 
@@ -43,14 +44,16 @@ HOST = "127.0.0.1"  # single-machine HTEX: peers + driver share the host, so loo
 _ROOT_TIMEOUT_S = 30.0  # default bound on the driver's root wait (a peer error breaks it sooner)
 _IDLE_SLACK_S = 60.0  # reduce peer lost-done backstop margin ABOVE root_timeout_s (> the 25 s send
 #                       worst case + slack); the idle deadline is DERIVED, never double-hardcoded
-_IDLE_DEADLINE_S = _ROOT_TIMEOUT_S + _IDLE_SLACK_S  # 90.0 at the default (parsl_run_plan re-derives)
+# 90.0 at the default (parsl_run_plan re-derives)
+_IDLE_DEADLINE_S = _ROOT_TIMEOUT_S + _IDLE_SLACK_S
 _BARRIER_DEFAULT_S = 60.0  # production barrier bound (> the 25 s inline-send worst case)
 _PROBE_TIMEOUT_S = 5.0
 
 
 class ProbeUnreachable(Exception):
     """The reachability probe found an unreachable overlay pair BEFORE any data-plane traffic. Carries
-    ``failed_pairs`` so the facade can name them (``on_unreachable="error"``) or fall back to relay."""
+    ``failed_pairs`` so the facade can name them (``on_unreachable="error"``) or fall back to relay.
+    """
 
     def __init__(self, failed_pairs: list[tuple[str, str]]) -> None:
         self.failed_pairs = failed_pairs
@@ -69,7 +72,8 @@ def _worker_addrs(k: int) -> tuple[str, ...]:
 def _parsl_peer_main(spec: dict[str, Any]) -> dict[str, Any]:
     """One peer: mint the endpoint in-task, hello, barrier for the registry, then the engine body
     (reduce | shuffle) or the probe/release marker. Its RAW ``__name__`` is the SubmitBackend spy
-    seam — leaves/fragments ride the spec + the pull plane, never per-leaf futures."""
+    seam — leaves/fragments ride the spec + the pull plane, never per-leaf futures.
+    """
     addr = spec["addr"]
     recv_failures = spec.get("recv_failures") or None
     ep = EscalatingHttpTransport(
@@ -102,7 +106,8 @@ def _parsl_peer_main(spec: dict[str, Any]) -> dict[str, Any]:
                 "root": None,
                 "counters": {**base, **_sender_counters(ep)},
             }
-        from .transport_shuffle import _peer_shuffle_body  # noqa: PLC0415  (deferred; avoids a cycle)
+        # deferred; avoids a cycle
+        from .transport_shuffle import _peer_shuffle_body  # noqa: PLC0415
 
         return _peer_shuffle_body(ep, spec, registry, prebuffered, base)
     except BaseException as exc:
@@ -122,7 +127,8 @@ def _peer_rendezvous(
     """Announce ``hello`` to the driver, then block (bounded) for the ``("registry", ...)`` reply,
     buffering any node/pull traffic that races ahead. Returns ``(peer_registry, prebuffered,
     released)``; ``released`` is True on an ``("abort"|"done")`` marker (the barrier expired — the
-    peer resolves without doing engine work)."""
+    peer resolves without doing engine work).
+    """
     ep.set_registry({DRIVER: (spec["driver_host"], spec["driver_port"])})
     ep.send(DRIVER, ("hello", ep.address, ep.host, ep.port, spec["epoch"]))
     prebuffered: list[tuple[str, Any]] = []
@@ -140,7 +146,8 @@ def _peer_rendezvous(
         if tag in ("abort", "done"):
             return None, prebuffered, True
         prebuffered.append((sender, msg))
-    return None, prebuffered, True  # a lost registry: resolve as released (never a dangling future)
+    # a lost registry: resolve as released (never a dangling future)
+    return None, prebuffered, True
 
 
 def _peer_reduce(
@@ -153,7 +160,8 @@ def _peer_reduce(
     """Run the UNCHANGED ``process_and_reduce`` over this endpoint + this peer's leaf slice (N1). The
     reducer ships boundary nodes peer→peer and the root to the driver; it drains until ``("done",)``.
     Steal is OFF (deterministic — only the boundary hand-offs cross w1→w0, which the inject seam
-    targets)."""
+    targets).
+    """
     from graphed.core.execution import LocalResources  # noqa: PLC0415
 
     counters = process_and_reduce(
@@ -183,7 +191,8 @@ def _peer_probe_leg(
 ) -> tuple[str, list[tuple[str, Any]]]:
     """Dial each overlay peer (a bounded connection probe), report ``("probe", addr, {peer: ok})`` to
     the driver, then block for the driver's ``("proceed"|"abort")`` verdict — buffering data traffic
-    that races ahead so the engine body sees it."""
+    that races ahead so the engine body sees it.
+    """
     import socket  # noqa: PLC0415
 
     probe_timeout = spec.get("probe_timeout_s", _PROBE_TIMEOUT_S)
@@ -222,9 +231,12 @@ def _sender_counters(ep: EscalatingHttpTransport) -> dict[str, int]:
 
 
 # ---- driver-side primitives (shared by parsl_run_plan / transport_shuffle / api.probe) -----------
-def _merge_peer(per_worker: dict[str, dict[str, int]], addr: str, counters: dict[str, Any]) -> None:
+def _merge_peer(
+    per_worker: dict[str, dict[str, int]], addr: str, counters: dict[str, Any]
+) -> None:
     """Accumulate a peer's returned counters across epochs into ``per_worker[addr]`` — sums, ``peak_*``
-    keeps the max, provenance identities keep the last non-zero."""
+    keeps the max, provenance identities keep the last non-zero.
+    """
     acc = per_worker.setdefault(addr, {})
     for key, val in counters.items():
         if not isinstance(val, int):
@@ -254,7 +266,8 @@ def _barrier_and_registry(
     """Collect exactly k hellos (the barrier), assemble the ``{addr: (host, port)}`` book, and
     broadcast it. The driver's OWN registry keeps the TRUE endpoints (so release/attribution reach the
     peers even under a ``registry_rewrite`` poison); the peers get the possibly-rewritten book.
-    Raises ``_BarrierTimeout`` on expiry, naming ``hellos_seen/k``."""
+    Raises ``_BarrierTimeout`` on expiry, naming ``hellos_seen/k``.
+    """
     hellos: dict[str, tuple[str, int]] = {}
     deadline = time.monotonic() + barrier_timeout_s
     while len(hellos) < k and time.monotonic() < deadline:
@@ -303,7 +316,8 @@ def _collect_probes(
 def _release(driver_ep: EscalatingHttpTransport, addrs: list[str], token: tuple[Any, ...]) -> None:
     """Attempt-all release to the seated peers (one dead peer cannot strand the live ones)."""
     for addr in addrs:
-        with contextlib.suppress(Exception):  # best-effort teardown; the futures resolve regardless
+        # best-effort teardown; the futures resolve regardless
+        with contextlib.suppress(Exception):
             driver_ep.send(addr, token)
 
 
@@ -314,10 +328,12 @@ def _cleanup_after_barrier(
     so it resolves (the §1.4 cleanup). A still-QUEUED peer is NOT cancelled — parsl's HTEX races
     cancel against dispatch (a dispatched task returning to a cancelled future raises InvalidStateError
     in parsl's result thread, which pytest escalates); instead it self-terminates via its own bounded
-    rendezvous wait once a freed slot dispatches it, and the freed seated slots suffice for the caller."""
+    rendezvous wait once a freed slot dispatches it, and the freed seated slots suffice for the caller.
+    """
     _release(driver_ep, seated, ("abort",))
     for fut in futures.values():
-        with contextlib.suppress(Exception):  # drain the seated markers (a queued peer self-terminates)
+        # drain the seated markers (a queued peer self-terminates)
+        with contextlib.suppress(Exception):
             fut.result(timeout=_ROOT_TIMEOUT_S)
 
 
@@ -341,7 +357,8 @@ def _resolve_k(pbackend: Any, workers: int | None, *, restart: bool = False) -> 
     """Peer count for an epoch. ``workers=None`` reads a FRESH ``n_workers()`` every attempt; an
     explicit ``workers`` is honored as-given on the first attempt but on a ``restart`` degrades to
     ``min(workers, fresh n_workers())`` (plan §1.4) — re-asking for slots a shrunken cluster can no
-    longer seat would burn the restart budget on a doomed barrier."""
+    longer seat would burn the restart budget on a doomed barrier.
+    """
     if workers is None:
         return int(pbackend.n_workers())
     if restart:
@@ -368,7 +385,8 @@ def parsl_run_plan(
     fresh epoch up to ``epoch_restarts_allowed``, else an attributed ``StageError`` (§1.5).
     ``root_timeout_s`` bounds the driver's wait for the reduction root — raise it for a legitimately
     long reduction (m44 parity); the peer lost-done ``idle_deadline_s`` is DERIVED as
-    ``root_timeout_s + slack`` so it always stays ≥ the root wait (§1.4)."""
+    ``root_timeout_s + slack`` so it always stays ≥ the root wait (§1.4).
+    """
     refuse_staged(plan, "parsl_run_plan", "ParslBackend(executor)")
     require_bound(plan)  # resolves no services: an unbound plan is refused before any task
     tasks = sorted(plan.tasks, key=lambda t: t.key)
@@ -413,7 +431,8 @@ def parsl_run_plan(
                     "recv_failures": _peer_budget_files(budget_dir, addr, inject_recv_failures),
                 },
                 key=f"graphed-parsl-peer-{nonce}-{i}",
-            )  # ponytail: k persistent tasks gang-schedule by slot saturation (pin_to_worker=False)
+                # ponytail: k persistent tasks gang-schedule by slot saturation (pin_to_worker=False)
+            )
             for i, addr in enumerate(worker_addrs)
         }
         errs, root, has_captured = _drive_reduce(
@@ -433,7 +452,11 @@ def parsl_run_plan(
             raise build_stage_error(last_exc, pbackend) from last_exc
 
     witness.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise build_stage_error(last_exc, pbackend) if last_exc is not None else RuntimeError("no epochs run")
+    raise (
+        build_stage_error(last_exc, pbackend)
+        if last_exc is not None
+        else RuntimeError("no epochs run")
+    )
 
 
 def _drive_reduce(
@@ -447,7 +470,8 @@ def _drive_reduce(
     root_timeout_s: float = _ROOT_TIMEOUT_S,
 ) -> tuple[dict[str, BaseException], Any, bool]:
     """Barrier + registry, then collect the root while watching for a fast peer error; release the
-    peers and harvest their futures. Returns ``(errs, root, has_captured_root)``."""
+    peers and harvest their futures. Returns ``(errs, root, has_captured_root)``.
+    """
     try:
         seated = _barrier_and_registry(
             driver_ep,

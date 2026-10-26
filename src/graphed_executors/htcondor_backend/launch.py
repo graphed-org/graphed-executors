@@ -43,7 +43,8 @@ ENV_FILE = "env.tgz"
 PLAN_FILE, RUN_FILE, RESULT_FILE, LOG_FILE = "plan.pkl", "run.json", "result.pkl", "driver.log"
 PILOT_MODULE = "graphed_executors.htcondor_backend.pilot"
 HOLD_REASON = "graphed: a service of this run waits for a slot"
-SLOT_RESOURCES = ("Memory", "Cpus", "GPUs", "Disk")  # a running job holds <r>Provisioned, else Request<r>
+# a running job holds <r>Provisioned, else Request<r>
+SLOT_RESOURCES = ("Memory", "Cpus", "GPUs", "Disk")
 # a running job's slot and what it was given there
 CLAIM_ATTRS = [
     "RemoteHost",
@@ -54,7 +55,8 @@ CLAIM_ATTRS = [
 
 class CondorReason(tuple[str, None]):
     """A ``Schedd.act`` reason: htcondor2 (25.13, 25.14) applies a ``(text, code)`` tuple and drops a
-    ``str``, and the schedd appends `` (by user <name>)`` to the text. ``str()`` is the text."""
+    ``str``, and the schedd appends `` (by user <name>)`` to the text. ``str()`` is the text.
+    """
 
     def __new__(cls, text: str) -> CondorReason:
         return super().__new__(cls, (text, None))
@@ -86,7 +88,8 @@ def located_schedd(htc: Any, locate: tuple[str, str]) -> Any:
 
 def ensure_credential(htc: Any, desc: Mapping[str, str]) -> None:
     """Store the submitter's Kerberos credential, as ``condor_submit`` does and ``schedd.submit`` does not,
-    when ``desc`` sends one and the credd holds none: such a job never starts."""
+    when ``desc`` sends one and the credd holds none: such a job never starts.
+    """
     if str(desc.get("MY.SendCredential", "")).lower() != "true":
         return
     # asked first: issue_credentials fails where the producer is missing (an image), stored or not
@@ -127,19 +130,24 @@ class PilotLauncher(Protocol):
 class LocalPilots:
     """Pilots as local subprocesses of ``python``, with ``pythonpath`` prepended to their ``PYTHONPATH``."""
 
-    def __init__(self, *, python: str = sys.executable, pythonpath: Sequence[str | Path] = ()) -> None:
+    def __init__(
+        self, *, python: str = sys.executable, pythonpath: Sequence[str | Path] = ()
+    ) -> None:
         self.python = python
         self.pythonpath = [str(p) for p in pythonpath]
         self.log_dir = Path(tempfile.mkdtemp(prefix="graphed-local-pilots-"))
         self._procs: list[subprocess.Popen[bytes]] = []
         self._stack = ExitStack()
-        self._stop_by = 0.0  # until then a stopping pilot may exit on its own; a failed start: at once
+        # until then a stopping pilot may exit on its own; a failed start: at once
+        self._stop_by = 0.0
 
     def start(self, url: str, secret: bytes, n: int) -> None:
         secret_path = self.log_dir / SECRET_FILE
         write_secret(secret_path, secret)
         env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join([*self.pythonpath, env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+        env["PYTHONPATH"] = os.pathsep.join([*self.pythonpath, env.get("PYTHONPATH", "")]).rstrip(
+            os.pathsep
+        )
         cmd = [self.python, "-m", PILOT_MODULE, url, str(secret_path)]
         self._procs = []
         with ExitStack() as stack:
@@ -197,7 +205,8 @@ class CondorPilots:
         self.env = Path(env) if env is not None else Path(sys.prefix)
         self.extra_submit = dict(extra_submit or {})
         self.schedd_locate = schedd_locate
-        self.cluster: tuple[str, int] | None = None  # (schedd name, ClusterId): the choice varies per run
+        # (schedd name, ClusterId): the choice varies per run
+        self.cluster: tuple[str, int] | None = None
         self._schedd: Any = None
         self._schedd_name = ""
         self._script = Path("pilot.sh")
@@ -214,9 +223,12 @@ class CondorPilots:
             "home": os.path.expanduser("~"),
         }
 
-    def submit_description(self, url: str, n: int, base: Mapping[str, str] | None = None) -> dict[str, str]:
+    def submit_description(
+        self, url: str, n: int, base: Mapping[str, str] | None = None
+    ) -> dict[str, str]:
         """The submit keys for ``n`` pilots calling back to ``url``: the base keys updated by ``base``,
-        then the site's, then ``extra_submit``. Pure: it reads no file and needs no bindings."""
+        then the site's, then ``extra_submit``. Pure: it reads no file and needs no bindings.
+        """
         inputs = [SECRET_FILE, *([ENV_FILE] if self.profile.ship_env else []), *self.user_modules]
         desc = {
             "universe": "vanilla",
@@ -250,7 +262,9 @@ class CondorPilots:
     def _refuse(self) -> None:
         profile = self.profile
         if self.image is None and any("{image}" in v for v in profile.submit.values()):
-            raise ValueError(f"site {profile.name!r} runs pilots in a container: pass image=<path or URL>")
+            raise ValueError(
+                f"site {profile.name!r} runs pilots in a container: pass image=<path or URL>"
+            )
         root = self._sandbox()
         log_dir = self.log_dir
         if (
@@ -266,13 +280,16 @@ class CondorPilots:
 
     def prepare(self, url: str, secret: bytes) -> None:
         """Everything :meth:`start` does but the pilots' submit (the refusals, ``log_dir``, the secret,
-        ``pilot.sh`` and ``env.tgz``, the schedd choice), once: a service job needs only these."""
+        ``pilot.sh`` and ``env.tgz``, the schedd choice), once: a service job needs only these.
+        """
         if self._schedd is not None:
             return
         self._refuse()
         # absolute in the cwd the files are written from: stop() and a service job may read it from another
         self.log_dir = Path(
-            os.path.abspath(self.log_dir or tempfile.mkdtemp(prefix="graphed-pilots-", dir=self._sandbox()))
+            os.path.abspath(
+                self.log_dir or tempfile.mkdtemp(prefix="graphed-pilots-", dir=self._sandbox())
+            )
         )
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._secret = self.log_dir / SECRET_FILE
@@ -295,10 +312,13 @@ class CondorPilots:
         """The interpreter this launcher's jobs run: the shipped venv's, else this process's."""
         return "./env/bin/python" if self.profile.ship_env else sys.executable
 
-    def _stage(self, log_dir: Path, script_name: str, module: str, placeholder: bytes | None = None) -> Path:
+    def _stage(
+        self, log_dir: Path, script_name: str, module: str, placeholder: bytes | None = None
+    ) -> Path:
         """Write the job script running ``python -m <module> "$@"`` and, when the site ships it, ``env.tgz``.
         ``placeholder`` (the driver's) is written as ``result.pkl``, and ``driver.log`` created, before the
-        interpreter starts: a job whose declared outputs are missing at exit is held, whatever killed it."""
+        interpreter starts: a job whose declared outputs are missing at exit is held, whatever killed it.
+        """
         pre = ""
         if placeholder is not None:
             octal = "".join(f"\\{byte:03o}" for byte in placeholder)
@@ -314,15 +334,20 @@ class CondorPilots:
                 tar.add(self.env, arcname="env")
         return script
 
-    def _submit(self, htc: Any, schedd: Any, desc: Mapping[str, str], n: int, stack: ExitStack) -> Any:
+    def _submit(
+        self, htc: Any, schedd: Any, desc: Mapping[str, str], n: int, stack: ExitStack
+    ) -> Any:
         """Submit ``n`` jobs of ``desc``, spooling their sandbox where the site needs it. The cluster's
-        removal goes on ``stack`` as soon as ``schedd.submit`` returns, so a failed spool leaves none."""
+        removal goes on ``stack`` as soon as ``schedd.submit`` returns, so a failed spool leaves none.
+        """
         # schedd_locate is a job's case: no local credd to ask, and the running job keeps one stored
         if self.schedd_locate is None:
             ensure_credential(htc, desc)
         result = schedd.submit(htc.Submit(dict(desc)), count=n, spool=self.profile.spool)
         constraint = f"ClusterId == {int(result.cluster())}"
-        stack.callback(release_quietly, f"cluster {constraint}", self._remove, htc, schedd, constraint)
+        stack.callback(
+            release_quietly, f"cluster {constraint}", self._remove, htc, schedd, constraint
+        )
         if self.profile.spool:
             schedd.spool(result)
         return result
@@ -334,16 +359,22 @@ class CondorPilots:
             if self.profile.spool and any(ad.get("JobStatus") == 4 for ad in left):
                 schedd.retrieve(f"{constraint} && JobStatus == 4")
             # a spooled job stays in the queue after it completes until it is removed
-            schedd.act(htc.JobAction.Remove, constraint, reason=CondorReason("graphed: run closed"))
+            schedd.act(
+                htc.JobAction.Remove, constraint, reason=CondorReason("graphed: run closed")
+            )
 
     def _choose(self, htc: Any) -> tuple[str, Any]:
         """The site's schedd: lowest :func:`schedd_weight` among the query's ads, asking each collector
-        in the param's list in turn, else the user's own schedd; ``schedd_locate`` overrides both."""
+        in the param's list in turn, else the user's own schedd; ``schedd_locate`` overrides both.
+        """
         if self.schedd_locate is not None:
             return self.schedd_locate[1], located_schedd(htc, self.schedd_locate)
         if self.profile.schedd_query is None:
             # the name a later session locates this schedd by: its own ad's, not this host's
-            name = htc.param.get("SCHEDD_HOST") or htc.Collector().locate(htc.DaemonType.Schedd)["Name"]
+            name = (
+                htc.param.get("SCHEDD_HOST")
+                or htc.Collector().locate(htc.DaemonType.Schedd)["Name"]
+            )
             return str(name), htc.Schedd()
         param, constraint = self.profile.schedd_query
         errors = []
@@ -366,7 +397,10 @@ class CondorPilots:
         ads = self._schedd.query(
             constraint=self._constraint, projection=["JobStatus", "HoldReasonCode", "HoldReason"]
         )
-        return sum(counts_as_alive(ad) or str(ad.get("HoldReason", "")).startswith(HOLD_REASON) for ad in ads)
+        return sum(
+            counts_as_alive(ad) or str(ad.get("HoldReason", "")).startswith(HOLD_REASON)
+            for ad in ads
+        )
 
     def hold_queued(self) -> None:
         """Hold the idle pilots, under graphed's own reason, so none takes a slot a service waits for."""
@@ -381,7 +415,8 @@ class CondorPilots:
 
     def running_claims(self, jobs: str | None = None) -> list[Any]:
         """The running ads of ``jobs`` (a constraint; the pilots by default): the slot each runs in and
-        what it was given there."""
+        what it was given there.
+        """
         constraint = f"{jobs or self._constraint} && JobStatus == 2"
         return list(self._schedd.query(constraint=constraint, projection=CLAIM_ATTRS))
 
@@ -393,9 +428,8 @@ class CondorPilots:
     def stop(self) -> None:
         """Wait for the pilots to exit, fetch the spooled logs into ``log_dir``, and remove the jobs."""
         if self.cluster is not None:  # none submitted: nothing to wait for
-            release_quietly(
-                f"the wait for the pilots of {self.cluster} to exit", self._drain
-            )  # removal still runs
+            # removal still runs
+            release_quietly(f"the wait for the pilots of {self.cluster} to exit", self._drain)
         self._stack.close()
         self._secret.unlink(missing_ok=True)
 
@@ -407,7 +441,9 @@ def collectors(htc: Any, param: str) -> list[str]:
 
 def _check_shippable(env: Path) -> None:
     """Refuse an ``env`` pilots cannot run from an unpacked copy: not a venv, or with editable installs."""
-    recipe = "build it with `python -m venv --system-site-packages` and `pip install <path>` (not -e)"
+    recipe = (
+        "build it with `python -m venv --system-site-packages` and `pip install <path>` (not -e)"
+    )
     if not (env / "pyvenv.cfg").is_file():
         raise ValueError(f"env={env} is not a venv (no pyvenv.cfg); {recipe}")
     purelib = Path(

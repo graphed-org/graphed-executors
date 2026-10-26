@@ -14,7 +14,8 @@ from typing import Any
 
 def _parsl_executor_types() -> tuple[Any, Any]:
     """Return ``(HighThroughputExecutor, ThreadPoolExecutor)`` — the two verified executor classes
-    the capability vector is derived from (plan §1.1). Deferred so the module imports parsl-free."""
+    the capability vector is derived from (plan §1.1). Deferred so the module imports parsl-free.
+    """
     try:
         from parsl.executors import (  # noqa: PLC0415  (lazy: parsl is the optional extra)
             HighThroughputExecutor,

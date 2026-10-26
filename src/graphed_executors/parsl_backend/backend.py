@@ -51,19 +51,24 @@ _TPE_CAPS = SubmitCapabilities(
     worker_file_cache=False,
 )
 
-_N_WORKERS_WAIT_S = 30.0  # bounded wait for >=1 HTEX manager (the exec-local wait_for_workers bound)
-_WORKER_DEATH_NAMES = ("WorkerLost", "ManagerLost")  # parsl death classes, matched by chain name-string
+# bounded wait for >=1 HTEX manager (the exec-local wait_for_workers bound)
+_N_WORKERS_WAIT_S = 30.0
+# parsl death classes, matched by chain name-string
+_WORKER_DEATH_NAMES = ("WorkerLost", "ManagerLost")
 
 
 class _ParslFuture:
     """A thin :class:`SubmitFuture` over a parsl future. ``result()`` unwraps the ``(result, events)``
     shim envelope and dispatches the buffered monitor events to the backend's driver-side handler
     registry exactly once (completion-granularity piggyback); ``done``/``exception``/``cancel``/``cancelled``
-    delegate."""
+    delegate.
+    """
 
     __slots__ = ("_dispatched", "_handlers", "_raw")
 
-    def __init__(self, raw: Any, handlers: dict[str, Callable[[list[dict[str, object]]], None]]) -> None:
+    def __init__(
+        self, raw: Any, handlers: dict[str, Callable[[list[dict[str, object]]], None]]
+    ) -> None:
         self._raw = raw
         self._handlers = handlers
         self._dispatched = False
@@ -118,13 +123,15 @@ class ParslBackend:
         """m47: True on HTEX (the §1.4 peer plane runs on distinct worker PROCESSES), False on TPE
         (driver-process threads — a 'peer exchange' there is loopback head-node routing). A
         parsl_backend-private attribute the facade gates ``shuffle_method='transport'`` on; NEVER a
-        ``SubmitCapabilities`` field (the frozen 7-field vector stays unchanged)."""
+        ``SubmitCapabilities`` field (the frozen 7-field vector stays unchanged).
+        """
         return self._is_htex
 
     def n_workers(self) -> int:
         if not self._is_htex:
             return int(self._executor.max_threads)
-        import time  # noqa: PLC0415  (stdlib; the bounded manager-registration wait, not an assertion)
+        # stdlib; the bounded manager-registration wait, not an assertion
+        import time  # noqa: PLC0415
 
         deadline = time.monotonic() + _N_WORKERS_WAIT_S
         total = self._count_htex_workers()
@@ -141,7 +148,8 @@ class ParslBackend:
 
     def task_slots(self) -> int:
         """Tasks the executor runs at once, without :meth:`n_workers`' wait: 0 on an HTEX with no
-        manager connected yet."""
+        manager connected yet.
+        """
         return self._count_htex_workers() if self._is_htex else int(self._executor.max_threads)
 
     def _count_htex_workers(self) -> int:
@@ -170,14 +178,19 @@ class ParslBackend:
         anything else). A failed task is resubmitted from the driver up to ``retries`` times: parsl's
         own retries live in the DFK this backend does not use. ``key``/``resources``/``workers`` are
         advisory hints this backend ignores. The shim wrap happens HERE, after any spy seam, so a
-        submitted-fn-name witness records the raw ``fn`` (design-minor-3)."""
+        submitted-fn-name witness records the raw ``fn`` (design-minor-3).
+        """
         resolved = tuple(a.result() if isinstance(a, _ParslFuture) else a for a in args)
         spec: dict[str, int] = {"priority": priority} if (self._is_htex and priority) else {}
 
         def attempt() -> Any:
             return self._executor.submit(_parsl_task_shim, spec, fn, *resolved)
 
-        raw = attempt() if retries <= 0 else _resubmitting(attempt, retries, cancels=not self._is_htex)
+        raw = (
+            attempt()
+            if retries <= 0
+            else _resubmitting(attempt, retries, cancels=not self._is_htex)
+        )
         return _ParslFuture(raw, self._handlers)
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
@@ -201,7 +214,8 @@ class ParslBackend:
         parsl's result thread raises ``InvalidStateError`` on it and dies: every later task of the
         executor then never resolves, and the thread's zmq socket stays open, so a later collection of
         its context blocks in ``term()`` (the ``transport_peer`` cleanup avoids cancel for the same
-        reason). A TPE future is cancelled only if its thread has not taken it."""
+        reason). A TPE future is cancelled only if its thread has not taken it.
+        """
         if self._is_htex:
             return
         for fut in futures:
@@ -223,7 +237,8 @@ class ParslBackend:
         then attributes to a NON-EMPTY, meaningful unit (``StageError.partition`` / ``frame.filename``
         = the death message) rather than to an empty key; an m47 worker-death driver, which knows
         which partitions the dead peer owned, layers its partition context on top. Anything unrelated
-        returns ``None``."""
+        returns ``None``.
+        """
         seen: set[int] = set()
         node: BaseException | None = exc
         while node is not None and id(node) not in seen:
@@ -237,7 +252,8 @@ class ParslBackend:
 
 def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) -> Future[Any]:
     """A future of ``attempt()`` that calls ``attempt`` again on each failure, ``retries`` times at most.
-    With ``cancels``, cancelling it cancels the attempt in flight (never on HTEX: see ``cancel``)."""
+    With ``cancels``, cancelling it cancels the attempt in flight (never on HTEX: see ``cancel``).
+    """
     outer: Future[Any] = Future()
     current: list[Any] = []
 
@@ -249,7 +265,8 @@ def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) ->
         if exc is not None and left > 0 and not outer.cancelled():
             try:
                 current[0] = attempt()
-            except Exception as resubmit:  # a raise in a done-callback is only logged: settle instead
+            # a raise in a done-callback is only logged: settle instead
+            except Exception as resubmit:
                 exc = resubmit
             else:
                 current[0].add_done_callback(lambda r: watch(r, left - 1))
@@ -277,7 +294,8 @@ def parsl_runner(
 ) -> SubmitRunner:
     """The user-facing one-liner: a :class:`SubmitRunner` over a :class:`ParslBackend` on a started
     parsl executor. ``close()`` does NOT shut the caller's executor down (the launch helper documents
-    teardown via ``stop_htex``). ``services`` are the runner's given service endpoints."""
+    teardown via ``stop_htex``). ``services`` are the runner's given service endpoints.
+    """
     return SubmitRunner(
         ParslBackend(executor),
         monitor=monitor,

@@ -43,13 +43,22 @@ class FakeCollector:
 def fake_htcondor(pool: str) -> Any:
     kinds = SimpleNamespace(Schedd="schedd")
     return SimpleNamespace(
-        param={"POOL": pool}, Collector=FakeCollector, AdType=kinds, DaemonType=kinds, Schedd=lambda ad: ad
+        param={"POOL": pool},
+        Collector=FakeCollector,
+        AdType=kinds,
+        DaemonType=kinds,
+        Schedd=lambda ad: ad,
     )
 
 
 def queried_site() -> SiteProfile:
     return SiteProfile(
-        name="q", submit={}, spool=False, ship_env=False, sandbox_root=None, schedd_query=("POOL", "true")
+        name="q",
+        submit={},
+        spool=False,
+        ship_env=False,
+        sandbox_root=None,
+        schedd_query=("POOL", "true"),
     )
 
 
@@ -100,7 +109,8 @@ def test_the_default_log_dir_is_fresh_under_the_sandbox_root(
 
 class CredBindings:
     """Bindings and schedd in one: the credd answers ``stored``, ``issue_credentials`` raises ``error``
-    when given, and each call lands in ``log`` in order."""
+    when given, and each call lands in ``log`` in order.
+    """
 
     CredType = SimpleNamespace(Kerberos="krb")
 
@@ -137,7 +147,10 @@ LXPLUS = {"MY.SendCredential": "True"}
 
 @pytest.mark.parametrize(
     ("stored", "want"),
-    [(None, ["query krb", "issue", "submit", "spool"]), ("1790802437", ["query krb", "submit", "spool"])],
+    [
+        (None, ["query krb", "issue", "submit", "spool"]),
+        ("1790802437", ["query krb", "submit", "spool"]),
+    ],
 )
 def test_a_credential_is_stored_before_the_submit_only_when_the_credd_holds_none(
     stored: str | None, want: list[str]
@@ -154,7 +167,9 @@ def test_a_credential_is_stored_before_the_submit_only_when_the_credd_holds_none
 
 def test_a_failed_store_names_the_host_command_and_submits_nothing() -> None:
     fake = CredBindings(None, OSError("Failed to launch /usr/bin/batch_krb5_credential"))
-    with pytest.raises(RuntimeError, match=r"batch_krb5_credential.*condor_store_cred add-krb -i -"):
+    with pytest.raises(
+        RuntimeError, match=r"batch_krb5_credential.*condor_store_cred add-krb -i -"
+    ):
         CondorPilots("lxplus", image="img")._submit(fake, fake, LXPLUS, 1, ExitStack())
     assert fake.log == ["query krb", "issue"]
 

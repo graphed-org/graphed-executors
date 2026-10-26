@@ -1,5 +1,6 @@
 """m54 §2 item 6 pool witness: a behavior METHOD with arguments, registered on the backend alone,
-evaluates on spawned workers bit-identically to in-process — through the import-ref backend."""
+evaluates on spawned workers bit-identically to in-process — through the import-ref backend.
+"""
 
 from __future__ import annotations
 

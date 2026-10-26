@@ -34,8 +34,10 @@ TIMEOUT_S = 40.0
 
 
 def _work(partition: Partition, n_floats: int) -> np.ndarray:
-    time.sleep(partition.n_entries / 1000.0)  # the leaf weight, in ms — data-free stand-in for a read
-    if partition.uri.startswith("boom"):  # a leaf marked by `plan(boom=...)` fails once its weight is up
+    # the leaf weight, in ms — data-free stand-in for a read
+    time.sleep(partition.n_entries / 1000.0)
+    # a leaf marked by `plan(boom=...)` fails once its weight is up
+    if partition.uri.startswith("boom"):
         raise ValueError("kaboom")
     return np.ones(n_floats, dtype=np.float64)
 
@@ -84,7 +86,8 @@ def _entry(target: Callable[..., None], args: tuple[Any, ...], dump_path: str) -
 def _kill_tree(child: mp.process.BaseProcess) -> None:
     """POSIX: kill the child AND its worker processes — a wedged pool's workers outlive their driver.
     Windows has no process groups here, so it degrades to killing the child only and the orphaned
-    workers are left to the OS."""
+    workers are left to the OS.
+    """
     assert child.pid is not None  # set once the child is started; killpg needs a real pid
     if sys.platform != "win32":
         with contextlib.suppress(OSError):

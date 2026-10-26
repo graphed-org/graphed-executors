@@ -1,5 +1,6 @@
 """A worker holding stolen leaves never grants one on, so every stolen partial reaches its owner over
-the pinned pool's bounded overlay."""
+the pinned pool's bounded overlay.
+"""
 
 from __future__ import annotations
 
@@ -89,5 +90,7 @@ def test_a_thief_denies_a_steal_while_holding_only_stolen_leaves() -> None:
 
     assert [e[:3] for e in log if not e[3]] == []
     assert root == sum(range(1, n + 1))
-    to_w3 = [m for src, dest, m, _ok in log if (src, dest) == ("w1", "w3") and m[0] == "steal_resp"]
+    to_w3 = [
+        m for src, dest, m, _ok in log if (src, dest) == ("w1", "w3") and m[0] == "steal_resp"
+    ]
     assert to_w3[0][1] == []

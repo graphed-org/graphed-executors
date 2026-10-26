@@ -42,7 +42,8 @@ from ._transport_run import (
     sorted_addresses,
 )
 
-_ROOT_TIMEOUT_S = 30.0  # generous vs a sub-second in-cluster reduction; a peer error triggers restart
+# generous vs a sub-second in-cluster reduction; a peer error triggers restart
+_ROOT_TIMEOUT_S = 30.0
 _MISSING: Any = object()
 
 
@@ -53,13 +54,15 @@ def _select_root(driver_root: Any, results: dict[str, Any], missing: Any) -> Any
     captured one, RAISE a ``TransportDeliveryError`` (R2): the reduction was aborted before producing a
     root (e.g. ``collect_peer_root`` timed out and broadcast ``('done',)``, ending the actors) — returning
     ``plan.empty()`` here would silently substitute the identity value for the real answer (hard
-    constraint 8). The raise is restart-worthy, so it escalates through §1.5, never a silent wrong result."""
+    constraint 8). The raise is restart-worthy, so it escalates through §1.5, never a silent wrong result.
+    """
     if driver_root is not missing:
         return driver_root
     for r in results.values():
         if r.get("has_root"):
             return r["root"]
-    from .transport import TransportDeliveryError  # noqa: PLC0415  (deferred: distributed-touching)
+    # deferred: distributed-touching
+    from .transport import TransportDeliveryError  # noqa: PLC0415
 
     raise TransportDeliveryError(
         f"peer reduction completed with no captured root across {len(results)} peer(s): the driver root "
@@ -82,7 +85,8 @@ def _dask_peer_main(
     plugin + spec, ``secede`` (free the pool slot for the long-running loop), then run
     ``process_and_reduce`` UNCHANGED over this endpoint and this worker's owned leaf slice. Returns
     the reducer witness plus the root value the endpoint captured (the §1.1.3 belt-and-braces
-    fallback: worker 0 also ships the root to the driver over ``log_event``)."""
+    fallback: worker 0 also ships the root to the driver over ``log_event``).
+    """
     import distributed  # noqa: PLC0415  (worker-side only)
     from graphed.core.execution import LocalResources  # noqa: PLC0415
 
@@ -91,7 +95,8 @@ def _dask_peer_main(
     from .transport import open_endpoint  # noqa: PLC0415  (deferred: distributed-touching)
 
     endpoint = open_endpoint(spec)
-    distributed.secede()  # research §5: free the ThreadPool slot; the worker keeps serving handlers
+    # research §5: free the ThreadPool slot; the worker keeps serving handlers
+    distributed.secede()
     counters = process_and_reduce(
         endpoint.address,
         endpoint,
@@ -133,7 +138,8 @@ def transport_run_plan(
     wait (R4; default ``_ROOT_TIMEOUT_S``) — raise it for a legitimately long reduction, since a lost
     root now RAISES rather than defaulting to the identity value (R2). Failure semantics (§1.5): an
     exhausted send / worker death / no captured root restarts the whole run under a fresh epoch up to
-    ``epoch_restarts_allowed``, else surfaces as an attributed ``StageError``."""
+    ``epoch_restarts_allowed``, else surfaces as an attributed ``StageError``.
+    """
     refuse_staged(plan, "transport_run_plan", "DaskBackend(client)")
     require_bound(plan)  # resolves no services: an unbound plan is refused before any task
     require_pin(backend)
@@ -151,7 +157,8 @@ def transport_run_plan(
         open_driver_endpoint,
     )
 
-    ensure_engine_plugins(backend._client)  # the shim needs graphed-worker; idempotent for transport
+    # the shim needs graphed-worker; idempotent for transport
+    ensure_engine_plugins(backend._client)
     addresses = sorted_addresses(backend)
     k = max(1, min(len(addresses), n))
     worker_addrs = tuple(addresses[:k])
@@ -164,7 +171,9 @@ def transport_run_plan(
     for attempt in range(epoch_restarts_allowed + 1):
         nonce = uuid.uuid4().hex
         witness.epoch_nonces.append(nonce)
-        spec = make_transport_spec(nonce, worker_addrs, inbox_maxsize=inbox_maxsize, overlay=overlay)
+        spec = make_transport_spec(
+            nonce, worker_addrs, inbox_maxsize=inbox_maxsize, overlay=overlay
+        )
         driver_ep = open_driver_endpoint(backend, spec)
         # pre-create every worker's inbox so an early boundary-node send can never be stale-rejected
         # (hard constraint 8); the peer tasks then attach to the SAME per-epoch state.
@@ -219,4 +228,8 @@ def transport_run_plan(
             raise build_stage_error(last_exc, backend) from last_exc
 
     witness.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise build_stage_error(last_exc, backend) if last_exc is not None else RuntimeError("no epochs run")
+    raise (
+        build_stage_error(last_exc, backend)
+        if last_exc is not None
+        else RuntimeError("no epochs run")
+    )

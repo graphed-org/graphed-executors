@@ -21,7 +21,8 @@ from graphed_executors.submit.engine import _reset_worker_env, set_worker_env
 class _DaskWorkerEnv:
     """A :class:`WorkerEnv` over a dask worker: the plugin's ``open_once`` resources, the worker's
     dask address as identity, and ``emit`` bound to ``Worker.log_event`` (msgpack control channel,
-    off the data path). Emission is swallow-on-error — telemetry never breaks a run (M37 passivity)."""
+    off the data path). Emission is swallow-on-error — telemetry never breaks a run (M37 passivity).
+    """
 
     def __init__(
         self, resources: WorkerResources, worker_name: str, log_event: Callable[[str, Any], None]

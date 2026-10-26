@@ -54,9 +54,12 @@ from ._transport_run import DRIVER, PLUGIN_NAME  # dask-free constants (single s
 SEND_RETRIES = 5
 SEND_ATTEMPT_TIMEOUT_S = 5.0
 PULL_ATTEMPT_TIMEOUT_S = 5.0
-_SEND_BACKOFF_S = 0.05  # first inter-attempt sleep; doubles each retry (bounded by the attempt count)
-_DEFAULT_INBOX_MAXSIZE = 1 << 20  # generous: reduction traffic is O(n_leaves/k + log k + steal chatter)
-_CANARY_RPC_TIMEOUT_S = 2.0  # bound the setup self-RPC so a nanny-restart startup can never deadlock
+# first inter-attempt sleep; doubles each retry (bounded by the attempt count)
+_SEND_BACKOFF_S = 0.05
+# generous: reduction traffic is O(n_leaves/k + log k + steal chatter)
+_DEFAULT_INBOX_MAXSIZE = 1 << 20
+# bound the setup self-RPC so a nanny-restart startup can never deadlock
+_CANARY_RPC_TIMEOUT_S = 2.0
 
 # distinct from ``None``: a genuinely-``None`` reduction root must not read as "no root captured"
 # (R2 — the silent-empty-root bug). ``DaskWorkerTransport.has_root`` tests identity against this.
@@ -79,7 +82,8 @@ class TransportDeliveryError(Exception):
     """A ``send`` exhausted its bounded at-least-once retries against a live peer. Raised OUT of the
     pinned peer/gather task (never a silent ``False`` on reduction-class traffic) so it escalates to
     the §1.5 epoch restart / attributed ``StageError`` — the un-editable consumers ignore ``send``'s
-    bool (``_peer.py:214``/``:453``), so raising is the only sound exhaustion semantics."""
+    bool (``_peer.py:214``/``:453``), so raising is the only sound exhaustion semantics.
+    """
 
 
 class PullTimeoutError(Exception):
@@ -87,7 +91,8 @@ class PullTimeoutError(Exception):
     gather task with the holder named, so §1.5 classifies it restart-worthy (a timed-out holder is
     treated as lost → whole-run restart onto the survivors) instead of leaking a bare
     ``asyncio.TimeoutError`` as an opaque ``StageError`` (R4). ``pull_blocks(..., timeout_s=…)`` lets a
-    caller widen the ceiling for a legitimately large coalesced batch before the restart budget burns."""
+    caller widen the ceiling for a legitimately large coalesced batch before the restart budget burns.
+    """
 
 
 def _driver_topic(epoch: str) -> str:
@@ -102,13 +107,15 @@ def _digest(data: bytes) -> str:
 @dataclass(frozen=True)
 class _TransportSpec:
     """A picklable description of one run epoch: the ordered worker addresses (F8 sorted), an
-    optional bounded per-address send overlay (``None`` ⇒ full mesh + driver), and the inbox size."""
+    optional bounded per-address send overlay (``None`` ⇒ full mesh + driver), and the inbox size.
+    """
 
     epoch: str
     addresses: tuple[str, ...]
     overlay: dict[str, tuple[str, ...]] | None = None
     inbox_maxsize: int = _DEFAULT_INBOX_MAXSIZE
-    pull_timeout_s: float = PULL_ATTEMPT_TIMEOUT_S  # per-holder block-pull ceiling (R4; caller-settable)
+    # per-holder block-pull ceiling (R4; caller-settable)
+    pull_timeout_s: float = PULL_ATTEMPT_TIMEOUT_S
 
     def peers_of(self, address: str) -> tuple[str, ...]:
         if self.overlay is not None:
@@ -127,7 +134,8 @@ def make_transport_spec(
     """Build the picklable spec. ``overlay=None`` means every worker may send to every other worker
     and to ``"driver"`` (the engine passes its own bounded ``worker_outbox_addresses`` overlay).
     ``pull_timeout_s=None`` uses the ``PULL_ATTEMPT_TIMEOUT_S`` default; a caller widens it for large
-    block batches (R4)."""
+    block batches (R4).
+    """
     ov = None if overlay is None else {a: tuple(v) for a, v in overlay.items()}
     return _TransportSpec(
         epoch=epoch,
@@ -157,14 +165,16 @@ _COUNTER_KEYS = (
 class _RunState:
     """One epoch's per-worker state: a bounded inbox, a digest-keyed block store (RAM + producer-local
     spill), and the witness counters. ``lock`` guards the block store (task thread writes, IO-loop
-    handler serves); the inbox is a thread-safe ``queue.Queue`` and needs no extra lock."""
+    handler serves); the inbox is a thread-safe ``queue.Queue`` and needs no extra lock.
+    """
 
     inbox_maxsize: int
     spill_dir: str
     inbox: queue.Queue[tuple[str, Any]] = field(init=False)
     blocks: dict[str, bytes] = field(default_factory=dict)  # digest -> RAM-resident wire
     spilled: dict[str, str] = field(default_factory=dict)  # digest -> producer-local spill path
-    seen_payload: set[str] = field(default_factory=set)  # content-digest of delivered recv payloads
+    # content-digest of delivered recv payloads
+    seen_payload: set[str] = field(default_factory=set)
     counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys(_COUNTER_KEYS, 0))
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -178,7 +188,8 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
     (``name='graphed-transport'``, ``idempotent=True`` — the m42 idiom, so a harness pre-registration
     and the engine's own registration are ONE instance). ``setup`` registers the three handlers, then
     runs the §1.7 canary (a self-RPC ping) so a drifted worker-handler seam fails LOUDLY at register
-    time instead of corrupting a run."""
+    time instead of corrupting a run.
+    """
 
     name = PLUGIN_NAME
     idempotent = True
@@ -301,7 +312,8 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
                 wire = disk[d]
             served += len(wire)
             wires.append(to_serialize(wire))
-        with run.lock:  # evict-after-serve: the reader plane never holds producer store + gathered dest
+        # evict-after-serve: the reader plane never holds producer store + gathered dest
+        with run.lock:
             for d in digests:
                 run.blocks.pop(d, None)
                 path = run.spilled.pop(d, None)
@@ -389,7 +401,8 @@ def pull_blocks(
     ``timeout_s`` bounds each coalesced batch (default ``PULL_ATTEMPT_TIMEOUT_S``; the gather task
     passes ``spec.pull_timeout_s`` so a caller can widen it for a legitimately large batch — R4). No
     per-pull retry: a timed-out or lost holder restarts the WHOLE run under a fresh epoch (a fresh
-    ``PullTimeoutError`` is the §1.5 restart-worthy signal), not this one pull."""
+    ``PullTimeoutError`` is the §1.5 restart-worthy signal), not this one pull.
+    """
     worker = distributed.get_worker()
 
     async def _go() -> list[bytes]:
@@ -404,7 +417,9 @@ def pull_blocks(
                 f"({len(digests)} digest(s), epoch {epoch}) — holder slow or dead"
             ) from exc
         if reply.get("stale"):
-            raise RuntimeError(f"graphed_block_pull hit a stale/purged epoch {epoch} on holder {holder}")
+            raise RuntimeError(
+                f"graphed_block_pull hit a stale/purged epoch {epoch} on holder {holder}"
+            )
         return [bytes(w) for w in reply["wires"]]
 
     out: list[bytes] = sync(worker.loop, _go)
@@ -414,7 +429,8 @@ def pull_blocks(
 def _get_plugin() -> GraphedTransportPlugin:
     worker = distributed.get_worker()
     plugin: GraphedTransportPlugin | None = worker.extensions.get(PLUGIN_NAME)
-    if plugin is None:  # the engine registers the plugin before any run; a missing one is a real bug
+    # the engine registers the plugin before any run; a missing one is a real bug
+    if plugin is None:
         raise RuntimeError("graphed-transport plugin is not registered on this worker")
     return plugin
 
@@ -422,7 +438,8 @@ def _get_plugin() -> GraphedTransportPlugin:
 # ---- worker-side endpoint -----------------------------------------------------------------------
 class DaskWorkerTransport:
     """A worker-side ``WorkerTransport``: ``send`` bridges the task thread to the IO loop and rides
-    ``worker.rpc``; ``recv``/``poll`` drain the plugin inbox on the task thread (thread-safe queue)."""
+    ``worker.rpc``; ``recv``/``poll`` drain the plugin inbox on the task thread (thread-safe queue).
+    """
 
     def __init__(self, plugin: GraphedTransportPlugin, spec: _TransportSpec) -> None:
         self._plugin = plugin
@@ -430,13 +447,15 @@ class DaskWorkerTransport:
         self._worker = plugin._worker
         self.address = self._worker.address
         self._run = plugin.ensure_run(spec)
-        self.root_sent: Any = _NO_ROOT  # set when send("driver", ("root", v)) fires (the F3 fallback)
+        # set when send("driver", ("root", v)) fires (the F3 fallback)
+        self.root_sent: Any = _NO_ROOT
 
     @property
     def has_root(self) -> bool:
         """True once this endpoint has shipped a reduction root to the driver — even a ``None`` root
         (R2: ``root_sent is None`` must NOT read as 'no root', or a genuinely-None reduction defaults to
-        the identity value on the F3 fallback path)."""
+        the identity value on the F3 fallback path).
+        """
         return self.root_sent is not _NO_ROOT
 
     def peers(self) -> tuple[str, ...]:
@@ -462,7 +481,8 @@ class DaskWorkerTransport:
                     ),
                     timeout=SEND_ATTEMPT_TIMEOUT_S,
                 )
-            except Exception as exc:  # comm-class failure (CommClosedError/OSError/timeout) -> retry
+            # comm-class failure (CommClosedError/OSError/timeout) -> retry
+            except Exception as exc:
                 if attempt >= SEND_RETRIES:
                     raise TransportDeliveryError(
                         f"send to {dest} exhausted {SEND_RETRIES} attempts: {type(exc).__name__}: {exc}"
@@ -474,7 +494,8 @@ class DaskWorkerTransport:
             if reply.get("accepted"):
                 self._plugin.record(self._spec.epoch, peer_sends=1)
                 return True
-            return False  # a live handler answered accepted:False (inbox full / stale) — the drop signal
+            # a live handler answered accepted:False (inbox full / stale) — the drop signal
+            return False
         return False  # unreachable (the loop returns or raises), but keeps mypy total
 
     def broadcast(self, message: object) -> None:
@@ -492,7 +513,11 @@ class DaskWorkerTransport:
 
     def recv(self, timeout: float | None = None) -> tuple[str, object] | None:
         try:
-            return self._run.inbox.get(timeout=timeout) if timeout is not None else self._run.inbox.get()
+            return (
+                self._run.inbox.get(timeout=timeout)
+                if timeout is not None
+                else self._run.inbox.get()
+            )
         except queue.Empty:
             return None
 
@@ -502,7 +527,8 @@ class DaskWorkerTransport:
 
 def open_endpoint(spec: _TransportSpec) -> DaskWorkerTransport:
     """Worker-task-side construction from ``get_worker().extensions['graphed-transport']`` + the spec.
-    Idempotent per (worker, epoch): re-opening attaches to the SAME inbox/state."""
+    Idempotent per (worker, epoch): re-opening attaches to the SAME inbox/state.
+    """
     return DaskWorkerTransport(_get_plugin(), spec)
 
 
@@ -516,7 +542,8 @@ def _ensure_run_probe(spec: _TransportSpec, dask_worker: Any = None) -> bool:
     """Create the epoch's per-worker inbox/state BEFORE any peer sends — the peer protocol has no
     barrier, so a fast worker can ship a boundary node before the owner's task has opened its
     endpoint; without a pre-created inbox that reduction message would be stale-rejected and LOST
-    (hard constraint 8). The local executor builds every inbox up front for the same reason."""
+    (hard constraint 8). The local executor builds every inbox up front for the same reason.
+    """
     plugin = dask_worker.extensions.get(PLUGIN_NAME)
     if plugin is not None:
         plugin.ensure_run(spec)
@@ -526,7 +553,8 @@ def _ensure_run_probe(spec: _TransportSpec, dask_worker: Any = None) -> bool:
 class DriverTransport:
     """The reserved ``"driver"`` endpoint in the client process. Asymmetric by design (workers cannot
     ``rpc`` into the client): worker→driver arrives over ``subscribe_topic`` (fed by the workers'
-    ``log_event``); driver→all/unicast is a reliable ``client.run`` ``put_nowait`` on the targets."""
+    ``log_event``); driver→all/unicast is a reliable ``client.run`` ``put_nowait`` on the targets.
+    """
 
     address = DRIVER
 
@@ -574,7 +602,8 @@ class DriverTransport:
 
 def open_driver_endpoint(backend: Any, spec: _TransportSpec) -> DriverTransport:
     """The reserved ``"driver"`` endpoint over ``backend`` (a ``DaskBackend``): ``address == "driver"``,
-    ``peers() == spec worker addresses``, fed by ``backend.subscribe_events`` on the run topic."""
+    ``peers() == spec worker addresses``, fed by ``backend.subscribe_events`` on the run topic.
+    """
     return DriverTransport(backend, spec)
 
 
@@ -582,7 +611,8 @@ def ensure_engine_plugins(client: Any) -> None:
     """Register ``GraphedWorkerPlugin`` (idempotent) — it backs the ``DaskBackend`` submit shim's
     ``WorkerEnv`` and the shim ``KeyError``s without it. ``GraphedTransportPlugin`` is registered by
     the caller (``dask_transport_setup`` / the harness) so its instance — and any armed test injection
-    seam on it — is never disturbed mid-run by a re-registration."""
+    seam on it — is never disturbed mid-run by a re-registration.
+    """
     from .plugin import GraphedWorkerPlugin  # noqa: PLC0415  (lazy: distributed extra)
 
     client.register_plugin(GraphedWorkerPlugin())
@@ -591,7 +621,8 @@ def ensure_engine_plugins(client: Any) -> None:
 def dask_transport_setup(client: Any) -> None:
     """User-facing one-liner: register both engine plugins on a ready ``client`` before calling a
     ``transport_run_*`` entry point (the frozen suite calls it as ``install_transport_plugin`` for the
-    transport half + relies on the engine's ``ensure_engine_plugins`` for the worker half)."""
+    transport half + relies on the engine's ``ensure_engine_plugins`` for the worker half).
+    """
     from .plugin import GraphedWorkerPlugin  # noqa: PLC0415  (lazy: distributed extra)
 
     client.register_plugin(GraphedWorkerPlugin())

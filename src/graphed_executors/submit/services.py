@@ -80,7 +80,8 @@ class ServiceStatus:
     """How one service of a set was satisfied: ``leg`` is ``"user"``, ``"site"`` or ``"managed"``;
     ``host`` is ``"driver"`` or ``"cluster"`` for a managed one; ``identity`` is the host a managed
     service runs on (``None`` for user and site endpoints, where any worker's passing answer passes);
-    ``detail`` keeps why earlier legs were passed over. Times are ``time.time()`` stamps."""
+    ``detail`` keeps why earlier legs were passed over. Times are ``time.time()`` stamps.
+    """
 
     name: str
     leg: str
@@ -98,7 +99,8 @@ class ServiceUnavailable(Exception):
 
     def __init__(self, name: str, legs: Mapping[str, str]) -> None:
         legs = dict(legs)
-        super().__init__(name, legs)  # exactly the constructor's arguments: stdlib pickling rebuilds it
+        # exactly the constructor's arguments: stdlib pickling rebuilds it
+        super().__init__(name, legs)
         self.name = name
         self.legs = legs
 
@@ -109,7 +111,8 @@ class ServiceUnavailable(Exception):
 
 class ServiceUnreachable(Exception):
     """Service ``name`` at ``endpoint`` did not pass its check from a worker (``worker`` the answering
-    host's identity, empty when none answered); ``reason`` says why."""
+    host's identity, empty when none answered); ``reason`` says why.
+    """
 
     def __init__(self, name: str, endpoint: str, worker: str, reason: str) -> None:
         super().__init__(name, endpoint, worker, reason)
@@ -125,7 +128,8 @@ class ServiceUnreachable(Exception):
 
 class Endpoints(Mapping[str, str]):
     """A started set's endpoints (service name -> ``scheme://host:port``). :meth:`on_close` registers a
-    callback the set runs when it closes, before it releases any service."""
+    callback the set runs when it closes, before it releases any service.
+    """
 
     def __init__(
         self, endpoints: Mapping[str, str], register: Callable[[Callable[[], object]], None]
@@ -157,7 +161,8 @@ class Endpoints(Mapping[str, str]):
 
 def machine_ad(attr: str, env: str = "_CONDOR_MACHINE_AD") -> str | None:
     """``attr`` of the ad file ``$<env>`` names (string quotes dropped; ``_CONDOR_JOB_AD`` for the job's own
-    ad), read without the bindings; ``None`` outside a job or when the ad has no such line."""
+    ad), read without the bindings; ``None`` outside a job or when the ad has no such line.
+    """
     path = os.environ.get(env)
     if path and os.path.isfile(path):
         with open(path) as ad:
@@ -170,13 +175,15 @@ def machine_ad(attr: str, env: str = "_CONDOR_MACHINE_AD") -> str | None:
 
 def host_identity() -> str:
     """This host as the pool names it: ``Machine`` from ``$_CONDOR_MACHINE_AD`` (a container's own
-    hostname is not the execute node's), else ``socket.getfqdn()``."""
+    hostname is not the execute node's), else ``socket.getfqdn()``.
+    """
     return machine_ad("Machine") or socket.getfqdn()
 
 
 def listeners(port: int, proc: str = "/proc") -> set[str]:
     """The inodes of the sockets listening on ``port``, read from ``{proc}/net/tcp`` and ``{proc}/net/tcp6``;
-    a file that cannot be read contributes none, so a host without ``/proc`` has no listener here."""
+    a file that cannot be read contributes none, so a host without ``/proc`` has no listener here.
+    """
     found: set[str] = set()
     for name in ("tcp", "tcp6"):
         try:
@@ -193,13 +200,15 @@ def listeners(port: int, proc: str = "/proc") -> set[str]:
 
 def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
     """Whether ``pid`` and its descendants (each ``{proc}/<pid>/stat`` names its parent) hold every one of
-    ``inodes`` among their fds; a process whose ``stat`` or ``fd`` cannot be read holds none."""
+    ``inodes`` among their fds; a process whose ``stat`` or ``fd`` cannot be read holds none.
+    """
     kids: dict[int, list[int]] = {}
     for entry in os.listdir(proc):
         if entry.isdigit():
             try:
                 with open(os.path.join(proc, entry, "stat")) as f:
-                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])  # comm, in parentheses, may hold spaces
+                    # comm, in parentheses, may hold spaces
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
             except (OSError, IndexError, ValueError):
                 continue
             kids.setdefault(ppid, []).append(int(entry))
@@ -211,14 +220,16 @@ def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
         fds = os.path.join(proc, str(p), "fd")
         with contextlib.suppress(OSError):
             for fd in os.listdir(fds):
-                with contextlib.suppress(OSError):  # an fd closed meanwhile, or a host without symlinks
+                # an fd closed meanwhile, or a host without symlinks
+                with contextlib.suppress(OSError):
                     links.add(os.readlink(os.path.join(fds, fd)))
     return {f"socket:[{inode}]" for inode in inodes} <= links
 
 
 def physical_memory_mb() -> int:
     """This host's physical memory in MiB: ``GlobalMemoryStatusEx`` on Windows, ``os.sysconf`` pages
-    elsewhere."""
+    elsewhere.
+    """
     if sys.platform == "win32":
         import ctypes  # noqa: PLC0415  (Windows only)
 
@@ -245,7 +256,8 @@ def physical_memory_mb() -> int:
 
 def minted_endpoint(check: str, host: str, port: int) -> str:
     """The endpoint of a managed (plaintext) instance on ``host:port``: its scheme is the check's wire
-    (``http:`` -> ``http://``, ``grpc:`` -> ``grpc://``, ``tcp`` -> ``tcp://``)."""
+    (``http:`` -> ``http://``, ``grpc:`` -> ``grpc://``, ``tcp`` -> ``tcp://``).
+    """
     scheme = _MINTED_SCHEME.get(check.partition(":")[0], "tcp")
     netloc = f"[{host}]" if ":" in host else host
     return f"{scheme}://{netloc}:{port}"
@@ -259,7 +271,8 @@ def check_ready(endpoint: str, check: str, timeout: float) -> str | None:
     is the standard ``grpc.health.v1`` Check of ``<svc>`` (grpcio, imported here), over TLS exactly for
     ``grpcs``, ready iff SERVING. A check runs only over a wire that carries it (``http:`` over
     ``http(s)``, ``grpc:`` over ``grpc(s)``, ``tcp`` over any); a mismatch or an unknown form is refused
-    without dialling."""
+    without dialling.
+    """
     try:
         scheme, _hostport = split_endpoint(endpoint)
     except ValueError as exc:
@@ -281,7 +294,9 @@ def check_ready(endpoint: str, check: str, timeout: float) -> str | None:
 def _check_tcp(endpoint: str, timeout: float) -> str | None:
     parts = urlsplit(endpoint)
     try:
-        with socket.create_connection((str(parts.hostname), int(parts.port or 0)), timeout=timeout):
+        with socket.create_connection(
+            (str(parts.hostname), int(parts.port or 0)), timeout=timeout
+        ):
             return None
     except OSError as exc:
         return f"tcp connect to {endpoint} failed: {exc}"
@@ -290,7 +305,8 @@ def _check_tcp(endpoint: str, timeout: float) -> str | None:
 def _check_http(url: str, timeout: float) -> str | None:
     # a service endpoint is dialled directly: an environment proxy never sits between a job and it
     opener = urllib.request.build_opener(
-        urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ssl.create_default_context())
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
     )
     try:
         with opener.open(url, timeout=timeout) as resp:
@@ -315,7 +331,8 @@ def _varint(n: int) -> bytes:
 
 def _check_grpc(endpoint: str, service: str, *, tls: bool, timeout: float) -> str | None:
     """The health Check with grpcio alone: the one-field request and the reply as raw protobuf bytes
-    (generated stubs would add a dependency for a two-byte message)."""
+    (generated stubs would add a dependency for a two-byte message).
+    """
     try:
         grpc: Any = importlib.import_module("grpc")
     except ImportError as exc:
@@ -340,8 +357,11 @@ def _check_grpc(endpoint: str, service: str, *, tls: bool, timeout: float) -> st
 
 def _probe_services(checks: Sequence[tuple[str, str]]) -> tuple[str, tuple[str | None, ...]]:
     """The worker probe task: this worker's :func:`host_identity` and each ``(endpoint, check)``'s
-    reason (``None`` = ready)."""
-    return host_identity(), tuple(check_ready(endpoint, check, PROBE_CHECK_S) for endpoint, check in checks)
+    reason (``None`` = ready).
+    """
+    return host_identity(), tuple(
+        check_ready(endpoint, check, PROBE_CHECK_S) for endpoint, check in checks
+    )
 
 
 # ---- releases --------------------------------------------------------------------------------------
@@ -349,7 +369,8 @@ def _probe_services(checks: Sequence[tuple[str, str]]) -> tuple[str, tuple[str |
 
 def release_quietly(what: str, fn: Callable[..., object], *args: object) -> None:
     """Run one release step; its failure is logged, never raised, so the first exception is the one
-    that surfaces and a later release still runs. Every release in this package goes through it."""
+    that surfaces and a later release still runs. Every release in this package goes through it.
+    """
     try:
         fn(*args)
     except Exception:
@@ -377,7 +398,8 @@ def _free_port(host: str, ports: tuple[int, int]) -> int:
     runs walk off a small range). On Linux a listener still refuses that bind, but on macOS/BSD
     ``SO_REUSEADDR`` lets a specific-address bind pass a port another process holds on the wildcard
     address, and on Windows a non-exclusive wildcard listener does not refuse a specific bind either;
-    the connect catches both: a port something listens on is never handed out."""
+    the connect catches both: a port something listens on is never handed out.
+    """
     low, high = ports
     error: OSError = OSError(f"no port in {low}-{high}")
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
@@ -424,7 +446,8 @@ class ServiceSet:
 
     ``endpoints`` are leg-1 endpoints by service name, each ``scheme://host:port`` (refused here
     otherwise). ``scope`` names this set's probe keys and the keys ``host_service`` mints: a
-    submission passes its run nonce; a set held by the user mints its own."""
+    submission passes its run nonce; a set held by the user mints its own.
+    """
 
     def __init__(
         self,
@@ -484,7 +507,9 @@ class ServiceSet:
         if given is not None:
             reason = check_ready(given, spec.check, spec.timeout_s)
             if reason is not None:
-                raise ServiceUnavailable(spec.name, {"user": f"the given endpoint {given} failed: {reason}"})
+                raise ServiceUnavailable(
+                    spec.name, {"user": f"the given endpoint {given} failed: {reason}"}
+                )
             return self._record(spec, "user", None, given, None, None)
         legs["user"] = "no endpoint given"
         site = getattr(self.backend, "site_services", None) or {}
@@ -498,11 +523,15 @@ class ServiceSet:
             legs["site"] = f"the site endpoint {endpoint} failed: {reason}"
         return self._managed(spec, legs, stack)
 
-    def _managed(self, spec: ServiceSpec, legs: dict[str, str], stack: contextlib.ExitStack) -> _Resolved:
+    def _managed(
+        self, spec: ServiceSpec, legs: dict[str, str], stack: contextlib.ExitStack
+    ) -> _Resolved:
         launch = spec.launch
         detail = "; ".join(f"{leg}: {why}" for leg, why in legs.items())
         if launch is None:
-            raise ServiceUnavailable(spec.name, {**legs, "managed": "the spec has no launch recipe"})
+            raise ServiceUnavailable(
+                spec.name, {**legs, "managed": "the spec has no launch recipe"}
+            )
         hosts = tuple(getattr(self.backend, "service_hosts", ("driver",)))
         host_service = getattr(self.backend, "host_service", None)
         if launch.image is None and not launch.resources.get("gpus", 0) and "driver" in hosts:
@@ -530,15 +559,19 @@ class ServiceSet:
         started = time.time()
         try:
             endpoint, identity, key = host_service(spec, self.scope)
-        except ServiceUnavailable as exc:  # the backend's refusal, beside why the earlier legs failed
+        # the backend's refusal, beside why the earlier legs failed
+        except ServiceUnavailable as exc:
             raise ServiceUnavailable(spec.name, {**legs, **exc.legs}) from exc
-        stack.callback(release_quietly, f"service {spec.name!r} ({key})", self.backend.release_service, key)
+        stack.callback(
+            release_quietly, f"service {spec.name!r} ({key})", self.backend.release_service, key
+        )
         return self._record(spec, "managed", "cluster", endpoint, identity, started, detail)
 
     def _driver_refusal(self, size: int) -> str | None:
         """Why ``size`` MiB more beside the driver does not fit, or ``None`` when it does: the set's
         services there, this one included, must sum to no more than ``backend.driver_memory_mb``
-        (duck-typed), else the host's physical memory."""
+        (duck-typed), else the host's physical memory.
+        """
         limit = getattr(self.backend, "driver_memory_mb", None)
         source = "the backend's driver_memory_mb"
         if limit is None:
@@ -564,14 +597,20 @@ class ServiceSet:
             env = {**os.environ, **spec.launch.env}
             proc = subprocess.Popen(_render(spec.launch.argv, host, port), env=env)
             stack.callback(
-                release_quietly, f"service {spec.name!r} (pid {proc.pid})", _stop_child, proc, spec.name
+                release_quietly,
+                f"service {spec.name!r} (pid {proc.pid})",
+                _stop_child,
+                proc,
+                spec.name,
             )
             endpoint = minted_endpoint(spec.check, host, port)
             deadline = time.monotonic() + spec.timeout_s
             while True:
                 code = proc.poll()
                 if code is not None:
-                    reason = f"{proc.args!r} exited with returncode {code} before {spec.check!r} passed"
+                    reason = (
+                        f"{proc.args!r} exited with returncode {code} before {spec.check!r} passed"
+                    )
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
                 left = deadline - time.monotonic()
                 reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
@@ -587,9 +626,7 @@ class ServiceSet:
                     reason = f"{spec.check!r} passed but the service exited with returncode {code}"
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
                 if time.monotonic() >= deadline:
-                    reason = (
-                        f"{spec.check!r} never passed on {endpoint} within {spec.timeout_s}s: {reason_now}"
-                    )
+                    reason = f"{spec.check!r} never passed on {endpoint} within {spec.timeout_s}s: {reason_now}"
                     raise ServiceUnavailable(spec.name, {**legs, "managed": reason})
                 time.sleep(_POLL_S)
         return self._record(spec, "managed", "driver", endpoint, identity, started, detail)
@@ -609,7 +646,9 @@ class ServiceSet:
         )
         self._statuses.append(status)
         where = f" ({host})" if host is not None else ""
-        logger.info("service %r: %s leg%s at %s", spec.name, leg, where, endpoint, extra={"status": status})
+        logger.info(
+            "service %r: %s leg%s at %s", spec.name, leg, where, endpoint, extra={"status": status}
+        )
         return _Resolved(spec, status)
 
     def _driver_identity(self) -> str:
@@ -624,7 +663,8 @@ class ServiceSet:
         """Probe every endpoint from a worker until each passes: a managed service needs an answer
         from a host other than its own, or its own host must be the driver's. One task checks every
         service; each answer is awaited up to the largest ``timeout_s`` among the set's services (the
-        set's one bound, not a per-service one), and at most ``max(2, n_workers())`` tasks are sent."""
+        set's one bound, not a per-service one), and at most ``max(2, n_workers())`` tasks are sent.
+        """
         if not resolved:
             return
         checks = [(r.status.endpoint, r.spec.check) for r in resolved]
@@ -639,12 +679,17 @@ class ServiceSet:
             except TimeoutError:
                 first = resolved[pending[0]]
                 raise ServiceUnreachable(
-                    first.spec.name, first.status.endpoint, "", f"no worker answered within {timeout}s"
+                    first.spec.name,
+                    first.status.endpoint,
+                    "",
+                    f"no worker answered within {timeout}s",
                 ) from None
             for j in pending:
                 if answers[j] is not None:
                     r = resolved[j]
-                    raise ServiceUnreachable(r.spec.name, r.status.endpoint, worker, str(answers[j]))
+                    raise ServiceUnreachable(
+                        r.spec.name, r.status.endpoint, worker, str(answers[j])
+                    )
             pending = [j for j in pending if not self._passes(resolved[j].status.identity, worker)]
             if not pending:
                 return

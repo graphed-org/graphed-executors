@@ -1,5 +1,6 @@
 """A fixed run with a monitor raises well within the drain timeout whatever leaves complete after it (C1's
-drain constraint)."""
+drain constraint).
+"""
 
 from __future__ import annotations
 
@@ -51,7 +52,10 @@ def test_a_two_leaf_fixed_run_with_a_monitor_raises_within_the_drain_timeout(
     mark = tmp_path / "mark"
     mark.mkdir()
     plan = Plan(
-        stop_leaf, pair_concat, empty_tuple, tuple(Task(i, p) for i, p in enumerate(partitions(mark, 2)))
+        stop_leaf,
+        pair_concat,
+        empty_tuple,
+        tuple(Task(i, p) for i, p in enumerate(partitions(mark, 2))),
     )
     try:
         begun = time.monotonic()
@@ -64,10 +68,16 @@ def test_a_two_leaf_fixed_run_with_a_monitor_raises_within_the_drain_timeout(
     assert took < _DRAIN_TIMEOUT_S / 2, f"raised after {took:.1f}s"
 
 
-def test_a_task_whose_service_is_gone_raises_within_the_drain_timeout_with_a_monitor(tmp_path: Path) -> None:
+def test_a_task_whose_service_is_gone_raises_within_the_drain_timeout_with_a_monitor(
+    tmp_path: Path,
+) -> None:
     web = Web()
-    backend = HTCondorBackend(LocalPilots(pythonpath=[HARNESS_DIR]), 1, host="127.0.0.1", port_range=(0, 0))
-    runner = HTCondorRunner(backend, min_pilots=1, monitor=EventLog(), services={SERVICE: web.endpoint})
+    backend = HTCondorBackend(
+        LocalPilots(pythonpath=[HARNESS_DIR]), 1, host="127.0.0.1", port_range=(0, 0)
+    )
+    runner = HTCondorRunner(
+        backend, min_pilots=1, monitor=EventLog(), services={SERVICE: web.endpoint}
+    )
     mark = tmp_path / "mark"
     try:
         run_bounded(runner.wait_for_pilots, 120.0)

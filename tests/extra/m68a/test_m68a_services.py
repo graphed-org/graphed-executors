@@ -3,7 +3,8 @@ backends: each leg, each refusal, the probe's identity rule and bound, the relea
 start acquired, and the engine's bind/resolve around a run. The frozen suite pins these through its
 harness; these witnesses keep ``submit/`` gated in the ``test-dask`` job, which runs no frozen m68a
 protocol file, and reach the branches a correct run never takes (a child that dies after its check
-passes, a child that ignores ``terminate``, graphed's resolve walk once it lands)."""
+passes, a child that ignores ``terminate``, graphed's resolve walk once it lands).
+"""
 
 from __future__ import annotations
 
@@ -51,7 +52,9 @@ def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
             return None
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -134,7 +137,9 @@ class Duck(ThreadBackend):
 class Hosting(Duck):
     """Hosts a service on the cluster as an in-process HTTP server reported on ``service_identity``."""
 
-    def __init__(self, service_identity: str, driver_identity: str, *, release_raises: bool = False) -> None:
+    def __init__(
+        self, service_identity: str, driver_identity: str, *, release_raises: bool = False
+    ) -> None:
         super().__init__()
         self.service_identity = service_identity
         self.driver_identity = driver_identity
@@ -175,7 +180,9 @@ def statuses(caplog: pytest.LogCaptureFixture) -> list[svc.ServiceStatus]:
 # ---- the legs through the engine -----------------------------------------------------------------------
 
 
-def test_a_given_endpoint_binds_and_the_value_is_resolved(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_given_endpoint_binds_and_the_value_is_resolved(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     with (
         serving() as endpoint,
         caplog.at_level(logging.INFO),
@@ -206,7 +213,9 @@ def test_the_site_leg_passes_or_falls_through(caplog: pytest.LogCaptureFixture) 
             assert dict(eps) == {"web": site}
         backend.close()
     with serving(503) as dead:
-        backend = Duck(site_services={"http": dead}, service_hosts=("driver",), advertise_host="127.0.0.1")
+        backend = Duck(
+            site_services={"http": dead}, service_hosts=("driver",), advertise_host="127.0.0.1"
+        )
         spec = replace(http_server("web"), ports=free_ports(), timeout_s=30.0)
         with svc.ServiceSet([spec], backend) as eps:
             assert eps["web"].startswith("http://127.0.0.1:")
@@ -312,20 +321,30 @@ def test_a_child_that_ignores_terminate_is_killed(monkeypatch: pytest.MonkeyPatc
 
 
 def hosted() -> ServiceSpec:
-    return ServiceSpec("web", "http", check="http:/", launch=Launch(("serve",), image="img"), timeout_s=10.0)
+    return ServiceSpec(
+        "web", "http", check="http:/", launch=Launch(("serve",), image="img"), timeout_s=10.0
+    )
 
 
-def test_a_hosted_service_passes_off_its_host_and_is_released(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_hosted_service_passes_off_its_host_and_is_released(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     backend = Hosting("elsewhere.example", "driver.example")
     with caplog.at_level(logging.INFO), svc.ServiceSet([hosted()], backend, scope="s1") as eps:
         assert eps["web"].startswith("http://127.0.0.1:")
     assert backend.released == ["s1-0"]
     (status,) = statuses(caplog)
-    assert (status.leg, status.host, status.identity) == ("managed", "cluster", "elsewhere.example")
+    assert (status.leg, status.host, status.identity) == (
+        "managed",
+        "cluster",
+        "elsewhere.example",
+    )
     backend.close()
 
 
-def test_a_hosted_service_only_its_own_host_reaches_is_refused(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_hosted_service_only_its_own_host_reaches_is_refused(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     backend = Hosting(svc.host_identity(), "driver.example", release_raises=True)
     with caplog.at_level(logging.INFO), pytest.raises(svc.ServiceUnreachable) as excinfo:
         svc.ServiceSet([hosted()], backend, scope="s2").start()
@@ -337,8 +356,12 @@ def test_a_hosted_service_only_its_own_host_reaches_is_refused(caplog: pytest.Lo
 
 def test_a_probe_reason_and_an_unanswered_probe() -> None:
     backend = Duck()
-    with serving(ok_first=1) as once, pytest.raises(svc.ServiceUnreachable, match="503") as excinfo:
-        svc.ServiceSet([bare()], backend, endpoints={"web": once}).start()  # the leg check, then 503
+    with (
+        serving(ok_first=1) as once,
+        pytest.raises(svc.ServiceUnreachable, match="503") as excinfo,
+    ):
+        # the leg check, then 503
+        svc.ServiceSet([bare()], backend, endpoints={"web": once}).start()
     assert excinfo.value.worker == svc.host_identity()
     backend.close()
     silent = Silent()
@@ -366,7 +389,8 @@ def test_statuses_are_stamped_when_the_set_closes() -> None:
 
 def test_graphed_s_resolve_walk_is_what_a_run_returns(monkeypatch: pytest.MonkeyPatch) -> None:
     """The engine hands the run's value to ``graphed.services.resolve_services`` with the bound plan
-    and returns what it gives back; a process without the hook comes back unchanged."""
+    and returns what it gives back; a process without the hook comes back unchanged.
+    """
     seen: list[Any] = []
     real = graphed_services.resolve_services
 
@@ -377,7 +401,10 @@ def test_graphed_s_resolve_walk_is_what_a_run_returns(monkeypatch: pytest.Monkey
     plain = plan_of(leaf_uri, [])
     assert graphed_services.resolve_services(plain, ("v",)) == ("v",)  # no hook: the value itself
     monkeypatch.setattr(graphed_services, "resolve_services", walk)
-    with serving() as endpoint, SubmitRunner(ThreadBackend(2), services={"web": endpoint}) as runner:
+    with (
+        serving() as endpoint,
+        SubmitRunner(ThreadBackend(2), services={"web": endpoint}) as runner,
+    ):
         result = runner.run(plan_of(GetProcess(), [bare()]))
     assert result.value == ("walked", ("resolved", "body", "body"))
     ((process, value),) = seen
@@ -391,7 +418,9 @@ def test_a_run_without_services_cancels_nothing() -> None:
     assert result.n_partitions == 2 and backend.cancelled == []
 
 
-def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     backend = ThreadBackend(1)
     ran: list[str] = []
 
@@ -404,7 +433,9 @@ def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(caplog: pytest
             eps.on_close(lambda: ran.append("first"))
             eps.on_close(raising)
         assert ran == ["raising", "first"]
-    assert any("on_close fault (extra)" in str(r.exc_info[1]) for r in caplog.records if r.exc_info)
+    assert any(
+        "on_close fault (extra)" in str(r.exc_info[1]) for r in caplog.records if r.exc_info
+    )
     backend.close()
 
 
@@ -414,7 +445,10 @@ def test_the_http_server_recipe_serves_its_root(tmp_path: Any) -> None:
     spec = replace(http_server("web", root=str(tmp_path)), ports=free_ports(), timeout_s=30.0)
     backend = ThreadBackend(1)
     try:
-        with svc.ServiceSet([spec], backend) as eps, urllib.request.urlopen(eps["web"] + "/marker.txt") as r:
+        with (
+            svc.ServiceSet([spec], backend) as eps,
+            urllib.request.urlopen(eps["web"] + "/marker.txt") as r,
+        ):
             assert r.read() == b"from root"
     finally:
         backend.close()
@@ -422,7 +456,8 @@ def test_the_http_server_recipe_serves_its_root(tmp_path: Any) -> None:
 
 def test_the_scan_skips_a_port_something_answers_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """A port whose bind passes (as on macOS/BSD beside a wildcard listener) is still skipped when a
-    connect is answered; the next one is handed out."""
+    connect is answered; the next one is handed out.
+    """
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen(1)

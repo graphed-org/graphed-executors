@@ -24,7 +24,8 @@ from typing import Any
 @dataclass
 class TransportWitness:
     """The transport-plane witness (``result.transport``): the run epochs, restarts performed, and
-    the per-worker sender/holder/reduction counters (aggregated driver-side before purge)."""
+    the per-worker sender/holder/reduction counters (aggregated driver-side before purge).
+    """
 
     epoch_nonces: list[str] = field(default_factory=list)
     epoch_restarts: int = 0
@@ -34,7 +35,8 @@ class TransportWitness:
 @dataclass
 class TransportShuffleResult:
     """Carries the local engine's shape (``.dest_block_hashes``/``.value``/``.witness`` — the imported
-    ``ShuffleWitness`` counter names) plus the transport-plane witness."""
+    ``ShuffleWitness`` counter names) plus the transport-plane witness.
+    """
 
     dest_block_hashes: dict[int, str]
     value: dict[int, Any]
@@ -52,7 +54,9 @@ class TransportExecResult:
     transport: TransportWitness
 
 
-def merge_counters(per_worker: dict[str, dict[str, int]], counters: Mapping[str, Mapping[str, int]]) -> None:
+def merge_counters(
+    per_worker: dict[str, dict[str, int]], counters: Mapping[str, Mapping[str, int]]
+) -> None:
     for addr, c in counters.items():
         acc = per_worker.setdefault(addr, {})
         for key, val in c.items():
@@ -80,7 +84,8 @@ def is_restart_worthy(exc: BaseException | None, backend: Any) -> bool:
     """A run restarts under a fresh epoch on ANY of: an exhausted-send ``TransportDeliveryError``, a
     block-plane ``PullTimeoutError`` (a timed-out holder is classified LOST — the whole-run restart
     re-runs the producers onto the survivors), a ``describe_failure``-recognized worker death
-    (``KilledWorker``/``WorkerLost``/``ManagerLost``), or a bare comm loss to a dead holder."""
+    (``KilledWorker``/``WorkerLost``/``ManagerLost``), or a bare comm loss to a dead holder.
+    """
     if exc is None:
         return False
     if _in_chain(exc, "TransportDeliveryError") or _in_chain(exc, "PullTimeoutError"):
@@ -93,7 +98,8 @@ def is_restart_worthy(exc: BaseException | None, backend: Any) -> bool:
 
 def pick_attributable(errs: Mapping[Any, BaseException], backend: Any) -> BaseException:
     """Prefer a ``describe_failure``-attributable death (names the victim worker) over a generic
-    comm/delivery failure, so the surfaced ``StageError`` names the true cause."""
+    comm/delivery failure, so the surfaced ``StageError`` names the true cause.
+    """
     describe = getattr(backend, "describe_failure", None)
     if describe is not None:
         for exc in errs.values():
@@ -105,7 +111,8 @@ def pick_attributable(errs: Mapping[Any, BaseException], backend: Any) -> BaseEx
 def _with_frames(exc: BaseException) -> str:
     """``str(exc)`` plus the exception's own traceback frames when it carries one (a worker task's
     exception ships its remote traceback through ``fut.result()``). Best-effort: never let formatting
-    mask the real error."""
+    mask the real error.
+    """
     base = str(exc)
     tb = getattr(exc, "__traceback__", None)
     if tb is None:
@@ -123,8 +130,10 @@ def build_stage_error(exc: BaseException, backend: Any) -> Any:
     """Wrap a run-fatal failure as an attributed ``StageError`` (never a raw ``KilledWorker`` /
     ``WorkerLost`` / ``TransportDeliveryError`` to the user, §1.5 / m42 precedent). A
     ``describe_failure``-recognized death names the victim; anything else keeps its own type +
-    message (with the wrapped traceback frames appended, so a CI-only crash names its site)."""
-    from graphed.debug import SourceFrame, StageError  # noqa: PLC0415  (dask/parsl-free; error path only)
+    message (with the wrapped traceback frames appended, so a CI-only crash names its site).
+    """
+    # dask/parsl-free; error path only
+    from graphed.debug import SourceFrame, StageError  # noqa: PLC0415
 
     describe = getattr(backend, "describe_failure", None)
     info = describe(exc) if describe is not None else None

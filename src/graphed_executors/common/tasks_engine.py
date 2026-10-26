@@ -67,17 +67,21 @@ if TYPE_CHECKING:
 class DaskShuffleWitness:
     """The dask future-graph mechanism counters. The local ``ShuffleWitness``'s
     announcement/manifest/steal counters are RETIRED — under dask the future graph is completeness
-    and the scheduler owns stealing, so those mechanisms (and their counters) do not exist here."""
+    and the scheduler owns stealing, so those mechanisms (and their counters) do not exist here.
+    """
 
     n_producer_tasks: int = 0  # T
-    blocks_per_producer_task: dict[int, int] = field(default_factory=dict)  # task -> non-empty dests <= P
+    # task -> non-empty dests <= P
+    blocks_per_producer_task: dict[int, int] = field(default_factory=dict)
     peak_writer_buffer_bytes: int = 0  # the reused ``_coalesce_task`` streaming bound
     broadcast_chosen: bool = False  # the honoured F6 plan choice
     peak_join_bytes: int = 0  # reused ``_join_with_budget`` (B5)
     join_spilled_partitions: int = 0
     join_output_rows: int = 0
-    producer_sites: dict[int, tuple[int, str]] = field(default_factory=dict)  # task -> (pid, address)
-    gather_sites: dict[int, tuple[int, str]] = field(default_factory=dict)  # block key -> (pid, address)
+    # task -> (pid, address)
+    producer_sites: dict[int, tuple[int, str]] = field(default_factory=dict)
+    # block key -> (pid, address)
+    gather_sites: dict[int, tuple[int, str]] = field(default_factory=dict)
 
 
 def _result(
@@ -96,7 +100,8 @@ def _result(
 
 def _require_peer(backend: Any) -> None:
     """Both entry points refuse a head-node-routed backend (parsl-HTEX class) BEFORE any submit —
-    routing every block through the driver is the exact pathology §1.3.4 rejects."""
+    routing every block through the driver is the exact pathology §1.3.4 rejects.
+    """
     if not backend.capabilities.peer_data_movement:
         raise NotImplementedError(
             "shuffle on a backend without peer data movement requires the store-handle data plane — Phase 2"
@@ -105,13 +110,15 @@ def _require_peer(backend: Any) -> None:
 
 def _skey(nonce: str, *parts: object) -> str:
     """A namespaced, per-run-nonced, collision-proof task key: the ``graphed-`` prefix can never
-    collide with a user string arg (dask/dask#9969) and the nonce re-executes across two runs."""
+    collide with a user string arg (dask/dask#9969) and the nonce re-executes across two runs.
+    """
     return "graphed-shuffle-" + nonce + "-" + "-".join(str(p) for p in parts)
 
 
 def _site() -> tuple[int, str]:
     """(pid, worker address) recorded AT EXECUTION — the worker address via the submit-engine's
-    ``current_env()`` seam (no dask import), so a driver-side kernel loop would leak the driver pid."""
+    ``current_env()`` seam (no dask import), so a driver-side kernel loop would leak the driver pid.
+    """
     return os.getpid(), current_env().worker
 
 
@@ -119,7 +126,8 @@ class _WorkerStore:
     """A minimal ``cluster`` stand-in for the reused ``_join_with_budget`` disk-spill (its only use of
     ``cluster`` is ``store_dir(node_i)``). The budgeted join's radix partitions spill to a worker-local
     temp dir and are read back (the kernel's F5 contract); ``store_dir`` is never touched when the
-    budget is ``None`` (the kernel returns before spilling), so no temp dir is created then."""
+    budget is ``None`` (the kernel returns before spilling), so no temp dir is created then.
+    """
 
     def __init__(self) -> None:
         self._dir: str | None = None
@@ -141,7 +149,8 @@ class _WorkerStore:
 @dataclass
 class _MapOut:
     """One producer task's output: ``dest -> wire bytes`` (the pick indexes it) + the driver-side
-    metadata fragment (non-empty dest count, the writer peak, and where it ran)."""
+    metadata fragment (non-empty dest count, the writer peak, and where it ran).
+    """
 
     payload: dict[int, bytes]
     blocks: int
@@ -171,7 +180,8 @@ class _JoinOut:
 
 def _dask_map_write(backend: Any, owned_blocks: Sequence[Any], parts: int, salt: int) -> _MapOut:
     """Route + coalesce one producer task's owned src blocks into <= P dest blocks, then to_wire each
-    (worker-side). Reuses ``_coalesce_task`` (ascending-src merge, O(P·rg) writer buffer) verbatim."""
+    (worker-side). Reuses ``_coalesce_task`` (ascending-src merge, O(P·rg) writer buffer) verbatim.
+    """
     per_dest, peak = _coalesce_task(backend, owned_blocks, parts, salt)
     payload = {dest: bytes(backend.to_wire(block)) for dest, block in per_dest.items()}
     return _MapOut(payload=payload, blocks=len(per_dest), peak=peak, site=_site())
@@ -179,13 +189,15 @@ def _dask_map_write(backend: Any, owned_blocks: Sequence[Any], parts: int, salt:
 
 def _dask_pick(map_out: _MapOut, dest: int) -> bytes | None:
     """Select one dest's wire bytes from a producer's output. Runs ON the holder (dask locality), so a
-    gather's dep is scoped to a single block — it never pulls a producer's whole P-dict."""
+    gather's dep is scoped to a single block — it never pulls a producer's whole P-dict.
+    """
     return map_out.payload.get(dest)
 
 
 def _dask_gather(backend: Any, dest: int, *picks: bytes | None) -> _GatherOut | None:
     """Gather one dest across all producers in ascending-task order (== ascending-src, the
-    deterministic merge), concat, and sha256 the wire bytes (worker-side)."""
+    deterministic merge), concat, and sha256 the wire bytes (worker-side).
+    """
     blocks = [backend.from_wire(w) for w in picks if w is not None]
     if not blocks:
         return None  # no producer wrote this dest
@@ -208,7 +220,8 @@ def _dask_gather_join(
     spilling under ``mem_budget`` via the reused ``_join_with_budget``. F1 one-sided-dest handling
     mirrors ``_run_shuffle_join``: a build-only dest under how=left/outer null-fills against the probe
     schema carrier (``right_carrier``), and vice versa; a partitionless absent side (carrier ``None``)
-    keeps the present rows as-is."""
+    keeps the present rows as-is.
+    """
     build_side = [backend.from_wire(w) for w in picks[:n_left] if w is not None]
     probe_side = [backend.from_wire(w) for w in picks[n_left:] if w is not None]
     if not build_side and not probe_side:
@@ -223,12 +236,16 @@ def _dask_gather_join(
     elif build_side:
         if right_carrier is None:  # partitionless probe side -> keep the build rows (never drop)
             blk = backend.concat(build_side)
-            return _JoinOut(dest, [blk], [_sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site())
+            return _JoinOut(
+                dest, [blk], [_sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
+            )
         build, probe, how_here = backend.concat(build_side), right_carrier, "left"
     else:
         if left_carrier is None:  # partitionless build side -> keep the probe rows (never drop)
             blk = backend.concat(probe_side)
-            return _JoinOut(dest, [blk], [_sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site())
+            return _JoinOut(
+                dest, [blk], [_sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
+            )
         build, probe, how_here = left_carrier, backend.concat(probe_side), "right"
 
     store = _WorkerStore()
@@ -254,7 +271,8 @@ def _dask_broadcast_join_part(
     """Join one probe block against the (broadcast) whole build side — the large side is NEVER
     shuffled. Mirrors ``_run_broadcast_join``'s per-block body: ``take_indices`` restricts the build to
     its unmatched rows (the once-only how=left/outer tail); ``track_unmatched`` returns the build
-    indices this block matched so the driver can emit the never-matched build rows exactly once."""
+    indices this block matched so the driver can emit the never-matched build rows exactly once.
+    """
     build = backend.from_wire(build_wire)
     if take_indices is not None:
         build = backend.take(build, list(take_indices))
@@ -283,7 +301,8 @@ def dask_run_repartition(
 ) -> ShuffleResult:
     """Hash-repartition ``src_blocks`` into ``parts`` dests as a dask future graph (T producers ->
     T·P picks -> P gathers). ``dest_block_hashes`` are byte-identical across runs and equal to the
-    local ``run_repartition`` on identical inputs. ``salt`` folds into the pinned route (skew)."""
+    local ``run_repartition`` on identical inputs. ``salt`` folds into the pinned route (skew).
+    """
     _require_peer(runner.backend)
     submit = runner.backend.submit
     n_src = len(src_blocks)
@@ -292,7 +311,12 @@ def dask_run_repartition(
 
     map_futs = [
         submit(
-            _dask_map_write, backend, [src_blocks[s] for s in owned], parts, salt, key=_skey(nonce, "map", i)
+            _dask_map_write,
+            backend,
+            [src_blocks[s] for s in owned],
+            parts,
+            salt,
+            key=_skey(nonce, "map", i),
         )
         for i, owned in enumerate(_assign(n_src, t))
     ]
@@ -326,7 +350,8 @@ def dask_run_repartition(
     producer_sites: dict[int, tuple[int, str]] = {}
     blocks_per: dict[int, int] = {}
     peak = 0
-    for i, f in enumerate(map_futs):  # small metadata pull; payloads stay worker-side for the gathers
+    # small metadata pull; payloads stay worker-side for the gathers
+    for i, f in enumerate(map_futs):
         mo = cast("_MapOut", f.result())
         producer_sites[i] = mo.site
         blocks_per[i] = mo.blocks
@@ -358,14 +383,23 @@ def dask_run_join(
     """Distributed relational hash JOIN of two block sets as a dask future graph. ``broadcast=None``
     lets the pinned cost rule choose, keyed on ``parts`` (F6 — never the live worker count);
     ``True``/``False`` honour a plan-recorded choice. ``mem_budget_bytes`` bounds the gather-join
-    working set by spilling duplicated OUTPUT partitions (the reused ``_join_with_budget``)."""
+    working set by spilling duplicated OUTPUT partitions (the reused ``_join_with_budget``).
+    """
     _require_peer(runner.backend)
     build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
     probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
-    chosen = broadcast_join_choice(build_bytes, probe_bytes, parts) if broadcast is None else bool(broadcast)
+    chosen = (
+        broadcast_join_choice(build_bytes, probe_bytes, parts)
+        if broadcast is None
+        else bool(broadcast)
+    )
     if chosen:
-        return _broadcast_join(backend, left_blocks, right_blocks, on, how, mem_budget_bytes, runner)
-    return _shuffle_join(backend, left_blocks, right_blocks, parts, on, how, salt, mem_budget_bytes, runner)
+        return _broadcast_join(
+            backend, left_blocks, right_blocks, on, how, mem_budget_bytes, runner
+        )
+    return _shuffle_join(
+        backend, left_blocks, right_blocks, parts, on, how, salt, mem_budget_bytes, runner
+    )
 
 
 def _shuffle_join(
@@ -499,7 +533,9 @@ def _broadcast_join(
 
     build_concat = backend.concat(list(left_blocks))
     build_wire = bytes(backend.to_wire(build_concat))
-    handle = runner.backend.broadcast(build_wire, token=f"bjoin-{nonce}-{_sha256_hex(build_wire)[:12]}")
+    handle = runner.backend.broadcast(
+        build_wire, token=f"bjoin-{nonce}-{_sha256_hex(build_wire)[:12]}"
+    )
     per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
     track_unmatched = how in ("left", "outer")
 
@@ -538,9 +574,11 @@ def _broadcast_join(
                 value[next_key], dest_block_hashes[next_key] = ch, h
                 next_key += 1
 
-    if track_unmatched:  # emit the never-matched build rows exactly once (F2 of _run_broadcast_join)
+    # emit the never-matched build rows exactly once (F2 of _run_broadcast_join)
+    if track_unmatched:
         unmatched = tuple(sorted(set(range(len(build_concat))) - matched))
-        if unmatched and right_blocks:  # empty probe -> no schema carrier: local drops the tail (no crash)
+        # empty probe -> no schema carrier: local drops the tail (no crash)
+        if unmatched and right_blocks:
             tail = cast(
                 "_JoinOut",
                 submit(

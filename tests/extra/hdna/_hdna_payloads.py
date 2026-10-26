@@ -22,9 +22,13 @@ class Events:
         return self.data
 
     def partitions(self, steps_per_file: int = 1) -> tuple[Partition, ...]:
-        return tuple(Partition.blind("mem://events", "", s, steps_per_file) for s in range(steps_per_file))
+        return tuple(
+            Partition.blind("mem://events", "", s, steps_per_file) for s in range(steps_per_file)
+        )
 
-    def read_partition(self, partition: Partition, columns: Any, resources: WorkerResources) -> ak.Array:
+    def read_partition(
+        self, partition: Partition, columns: Any, resources: WorkerResources
+    ) -> ak.Array:
         part = partition.resolve(len(self.data))
         return self.data[part.entry_start : part.entry_stop]
 
@@ -51,7 +55,8 @@ def nothing() -> None:
 @dataclass(frozen=True)
 class FailFirst:
     """A task process that raises on its first ``failures`` attempts at each partition and returns 1
-    after; each attempt leaves a marker file under ``marks``, so the count crosses worker processes."""
+    after; each attempt leaves a marker file under ``marks``, so the count crosses worker processes.
+    """
 
     marks: str
     failures: int = 1
@@ -70,7 +75,8 @@ class FailFirst:
 @dataclass(frozen=True)
 class HangAt:
     """Sleeps ``hang_s`` on the first ``hangs`` attempts at ``uri`` and returns 1 otherwise; each
-    attempt there leaves a file named by its pid under ``attempts``."""
+    attempt there leaves a file named by its pid under ``attempts``.
+    """
 
     uri: str
     attempts: str
@@ -106,7 +112,8 @@ def zero() -> float:
     return 0.0
 
 
-LAMBDA_BEHAVIOR: dict[Any, Any] = {"unused": lambda x: x}  # vector's behavior holds lambdas like this
+# vector's behavior holds lambdas like this
+LAMBDA_BEHAVIOR: dict[Any, Any] = {"unused": lambda x: x}
 
 
 def make_lambda_behavior_backend() -> AwkwardBackend:

@@ -1,5 +1,6 @@
 """Coverage-policy rollout (ci/per-file-coverage-policy): closes `local/_transport.py` to the
-per-file >=90% gate. Not frozen; may be extended or replaced by later coverage work."""
+per-file >=90% gate. Not frozen; may be extended or replaced by later coverage work.
+"""
 
 from __future__ import annotations
 
@@ -66,7 +67,9 @@ def test_detect_routable_host_returns_none_when_the_udp_probe_fails(
     assert T._detect_routable_host() is None
 
 
-def test_select_advertise_host_raises_when_nothing_is_detected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_select_advertise_host_raises_when_nothing_is_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(T, "_detect_routable_host", lambda: None)
     with pytest.raises(ValueError, match="no routable"):
         T.select_advertise_host()
@@ -82,7 +85,8 @@ def test_pipe_inbox_get_returns_a_ready_item() -> None:
     inbox = PipeInbox(ctx)
     try:
         inbox.put_nowait("hello")
-        assert inbox.get(timeout=5) == "hello"  # the item-ready branch, not the queue.Empty timeout
+        # the item-ready branch, not the queue.Empty timeout
+        assert inbox.get(timeout=5) == "hello"
     finally:
         inbox.close()
 
@@ -132,7 +136,8 @@ def test_http_recv_returns_none_when_closed_while_waiting() -> None:
     waiter = threading.Thread(target=_blocking_recv)
     waiter.start()
     time.sleep(0.05)  # let recv() enter its poll loop before closing
-    transport.close()  # sets `_stop`, which wakes the waiting recv() with None (no deadline reached)
+    # sets `_stop`, which wakes the waiting recv() with None (no deadline reached)
+    transport.close()
     waiter.join(timeout=5)
     assert result == [None]
 
@@ -140,7 +145,8 @@ def test_http_recv_returns_none_when_closed_while_waiting() -> None:
 def test_http_sender_skips_a_message_whose_dest_left_the_registry() -> None:
     transport = HttpTransport("w0")
     try:
-        lane = transport._lane("ghost")  # starts the real sender thread; "ghost" is not in the registry
+        # starts the real sender thread; "ghost" is not in the registry
+        lane = transport._lane("ghost")
         lane.put(b"orphan")
         time.sleep(0.3)  # the sender wakes (0.1s poll), target lookup misses, `continue`s
         # neither counter moved: the message was skipped before the deliver-or-drop accounting ran

@@ -39,13 +39,14 @@ class BindingsReached(Exception):
     pass
 
 
-@pytest.mark.parametrize(("port_range", "expected"), [(None, LXPLUS_PORTS), (OTHER_PORTS, OTHER_PORTS)])
+@pytest.mark.parametrize(
+    ("port_range", "expected"), [(None, LXPLUS_PORTS), (OTHER_PORTS, OTHER_PORTS)]
+)
 def test_htcondor_runner_binds_the_site_ports_unless_overridden(
     port_range: tuple[int, int] | None, expected: tuple[int, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert (
-        not OTHER_PORTS[0] <= SITES["lxplus"].driver_ports[0] <= OTHER_PORTS[1]
-    )  # the override beats a real default
+    # the override beats a real default
+    assert not OTHER_PORTS[0] <= SITES["lxplus"].driver_ports[0] <= OTHER_PORTS[1]
     seen: list[str] = []
 
     def prepare(self: Any, url: str, secret: bytes) -> None:
@@ -54,7 +55,9 @@ def test_htcondor_runner_binds_the_site_ports_unless_overridden(
 
     monkeypatch.setattr(CondorPilots, "prepare", prepare)
     with pytest.raises(BindingsReached):
-        htcondor_runner(n_pilots=1, site="lxplus", image="img", host="127.0.0.1", port_range=port_range)
+        htcondor_runner(
+            n_pilots=1, site="lxplus", image="img", host="127.0.0.1", port_range=port_range
+        )
     assert expected[0] <= bound_port(seen[0]) <= expected[1], seen
 
 

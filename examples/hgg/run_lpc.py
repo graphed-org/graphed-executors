@@ -49,14 +49,17 @@ def manifests(paths: Sequence[str]) -> dict[str, list[str]]:
     return samples
 
 
-def steps(samples: dict[str, list[str]], datasets: Sequence[str], files: int, parts: int) -> dict[str, Any]:
-    """coffea's fileset over each dataset's first ``files`` files, each in ``parts`` steps."""
+def steps(
+    samples: dict[str, list[str]], datasets: Sequence[str], files: int, parts: int
+) -> dict[str, Any]:
+    """Coffea's fileset over each dataset's first ``files`` files, each in ``parts`` steps."""
     return {ds: fileset(samples[ds][:files], ds, parts)[ds] for ds in datasets}
 
 
 class ServerTimes(logging.Formatter):
     """A record's line, and for a service status, when its server was submitted and when it was ready
-    (``time.time()`` stamps)."""
+    (``time.time()`` stamps).
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         line = super().format(record)
@@ -68,28 +71,38 @@ class ServerTimes(logging.Formatter):
 
 def driverless_memory_mb(ctx: histserv.Context, pilots: int, pilot_mb: int) -> int:
     """A driverless job's slot: the driver, its local pilots, and every server the context opened."""
-    return DRIVER_MB + pilots * pilot_mb + sum(int(mb) for _name, mb, _predicted, _n in ctx.servers())
+    return (
+        DRIVER_MB + pilots * pilot_mb + sum(int(mb) for _name, mb, _predicted, _n in ctx.servers())
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("manifest", nargs="+", help="HiggsDNA sample manifests ({dataset: [file, ...]})")
+    parser.add_argument(
+        "manifest", nargs="+", help="HiggsDNA sample manifests ({dataset: [file, ...]})"
+    )
     parser.add_argument("--datasets", nargs="+", default=list(DATASETS))
     parser.add_argument("--files", type=int, default=1, help="each dataset's first N files")
     parser.add_argument("--parts", type=int, default=1, help="entry ranges per file")
     parser.add_argument("--year", default="2024")
     parser.add_argument("--pilots", type=int, default=4)
     parser.add_argument("--pilot-mb", type=int, default=2048, help="each pilot's memory")
-    parser.add_argument("--server-mb", type=int, nargs="+", default=[512], help="server sizes offered")
+    parser.add_argument(
+        "--server-mb", type=int, nargs="+", default=[512], help="server sizes offered"
+    )
     parser.add_argument("--placement", choices=("cluster", "driver"), default="cluster")
     parser.add_argument("--driverless", action="store_true")
     parser.add_argument("--image", default=IMAGE)
     parser.add_argument("--env", default=None, help="a venv to ship to the jobs")
     parser.add_argument("--log-dir", default=None)
-    parser.add_argument("--out", default=None, help="default: root://cmseos.fnal.gov//store/user/<user>/hgg/")
-    parser.add_argument("--histograms", default="hgg_diagnostics.json", help="where the UHI JSON goes")
+    parser.add_argument(
+        "--out", default=None, help="default: root://cmseos.fnal.gov//store/user/<user>/hgg/"
+    )
+    parser.add_argument(
+        "--histograms", default="hgg_diagnostics.json", help="where the UHI JSON goes"
+    )
     args = parser.parse_args(argv)
 
     handler = logging.StreamHandler()

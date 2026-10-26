@@ -1,5 +1,6 @@
 """A driver's in-job rerun after a SERVICE node re-announces runs the plan ``resumable`` wrapped, so
-with a store the tasks the first run finished are served, not run again."""
+with a store the tasks the first run finished are served, not run again.
+"""
 
 from __future__ import annotations
 
@@ -34,7 +35,9 @@ def test_a_rerun_reuses_what_the_first_run_stored(
 ) -> None:
     # its result is a status code, self-contained; the driver unpickles the plan into this module
     monkeypatch.setattr(GatedGet, "checkpointable", True, raising=False)
-    monkeypatch.setenv("_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "driver.ad", "127.0.0.1")))
+    monkeypatch.setenv(
+        "_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "driver.ad", "127.0.0.1"))
+    )
     site_copy(monkeypatch, "m-dee-node", "generic", worker_ports=free_range(3))
     mark, job, dag = tmp_path / "mark", tmp_path / "job", tmp_path / "dag"
     dag.mkdir()
@@ -56,5 +59,7 @@ def test_a_rerun_reuses_what_the_first_run_stored(
     assert (code, ok) == (0, True), (code, value, (job / "driver.log").read_text()[-4000:])
     assert len(log_lines(job, "rerun:")) == 1, log_lines(job, "rerun:")
     assert (mark / "t0.start").exists() is not store
-    reused = [line.split(" INFO ")[-1].split(" from ")[0] for line in log_lines(job, "tasks reused from")]
+    reused = [
+        line.split(" INFO ")[-1].split(" from ")[0] for line in log_lines(job, "tasks reused from")
+    ]
     assert reused == (["0 of 2 tasks reused", "1 of 2 tasks reused"] if store else []), reused

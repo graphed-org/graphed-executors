@@ -32,10 +32,13 @@ def split(stop: int, parts: int) -> list[tuple[int, int]]:
 
 
 def fileset(uris: list[str], dataset: str, parts: int) -> dict[str, dict[str, Any]]:
-    """coffea's ``{dataset: {file: {"object_path", "steps"}}}``, each file in ``parts`` steps."""
+    """Coffea's ``{dataset: {file: {"object_path", "steps"}}}``, each file in ``parts`` steps."""
     return {
         dataset: {
-            uri: {"object_path": "Events", "steps": [list(r) for r in split(num_entries(uri), parts)]}
+            uri: {
+                "object_path": "Events",
+                "steps": [list(r) for r in split(num_entries(uri), parts)],
+            }
             for uri in uris
         }
     }
@@ -43,14 +46,18 @@ def fileset(uris: list[str], dataset: str, parts: int) -> dict[str, dict[str, An
 
 def report(value: Mapping[str, Any], histograms: str) -> None:
     """Print each dataset's counters as JSON and save its diagnostics, ``{dataset: {name: histogram}}``,
-    as UHI JSON at ``histograms``."""
+    as UHI JSON at ``histograms``.
+    """
     print(
         json.dumps(
-            {ds: {k: x for k, x in v.items() if k != "diagnostics"} for ds, v in value.items()}, indent=1
+            {ds: {k: x for k, x in v.items() if k != "diagnostics"} for ds, v in value.items()},
+            indent=1,
         )
     )
     with open(histograms, "w") as f:
-        json.dump({ds: v["diagnostics"] for ds, v in value.items()}, f, default=uhi.io.json.default)
+        json.dump(
+            {ds: v["diagnostics"] for ds, v in value.items()}, f, default=uhi.io.json.default
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -61,13 +68,19 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dataset", default="MC")
     parser.add_argument("--year", default="2024")
     parser.add_argument("--parts", type=int, default=1)
-    parser.add_argument("--workers", type=int, default=1, help="1 runs in-process; more use a thread pool")
+    parser.add_argument(
+        "--workers", type=int, default=1, help="1 runs in-process; more use a thread pool"
+    )
     parser.add_argument("--out", default="output_inclusive")
-    parser.add_argument("--histograms", default="hgg_diagnostics.json", help="where the UHI JSON goes")
+    parser.add_argument(
+        "--histograms", default="hgg_diagnostics.json", help="where the UHI JSON goes"
+    )
     args = parser.parse_args(argv)
 
     plan = analysis.plan(fileset(args.uri, args.dataset, args.parts), year=args.year, out=args.out)
-    runner: Any = SequentialRunner() if args.workers == 1 else SubmitRunner(ThreadBackend(args.workers))
+    runner: Any = (
+        SequentialRunner() if args.workers == 1 else SubmitRunner(ThreadBackend(args.workers))
+    )
     try:
         value = runner.run(plan).value
     finally:

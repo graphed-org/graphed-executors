@@ -10,7 +10,8 @@ pilot submit in flight that close() waits for and removes; a wait timed from the
 its call, whichever is later, and a wait below min_pilots that is not the first need's; a held pilot
 counted alive, a running pilot's claim taken out of its slot, a later plan's failed service start releasing
 the pilots it held, a driver job's too-big service refused naming the sizes, and graphed's release leaving a
-user's hold (that one on a real schedd). The rest run over stand-ins."""
+user's hold (that one on a real schedd). The rest run over stand-ins.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +34,12 @@ from graphed.services import Launch, ServiceSpec
 from graphed_executors.htcondor_backend import SITES, CondorPilots, HTCondorBackend, launch
 from graphed_executors.htcondor_backend import backend as backend_mod
 from graphed_executors.htcondor_backend import server as server_mod
-from graphed_executors.htcondor_backend.services import ServiceJob, _as_whole, _less_claim, machine_ads
+from graphed_executors.htcondor_backend.services import (
+    ServiceJob,
+    _as_whole,
+    _less_claim,
+    machine_ads,
+)
 from graphed_executors.submit import ThreadBackend
 from graphed_executors.submit.services import (
     ServiceSet,
@@ -44,9 +50,7 @@ from graphed_executors.submit.services import (
 )
 
 MIB = 1 << 20
-LISTEN = (
-    "import socket, sys, time; s = socket.create_server((sys.argv[1], int(sys.argv[2]))); time.sleep(120)"
-)
+LISTEN = "import socket, sys, time; s = socket.create_server((sys.argv[1], int(sys.argv[2]))); time.sleep(120)"
 
 
 # ---- the host's physical memory ------------------------------------------------------------------------
@@ -71,7 +75,9 @@ def test_a_failed_windows_call_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     kernel32 = SimpleNamespace(GlobalMemoryStatusEx=lambda ref: 0)
     monkeypatch.setattr(ctypes, "windll", SimpleNamespace(kernel32=kernel32), raising=False)
-    monkeypatch.setattr(ctypes, "WinError", lambda: OSError("GlobalMemoryStatusEx failed"), raising=False)
+    monkeypatch.setattr(
+        ctypes, "WinError", lambda: OSError("GlobalMemoryStatusEx failed"), raising=False
+    )
     with pytest.raises(OSError, match="GlobalMemoryStatusEx failed"):
         physical_memory_mb()
 
@@ -88,7 +94,8 @@ def test_the_posix_branch_multiplies_pages(monkeypatch: pytest.MonkeyPatch) -> N
 
 class HostingBackend(ThreadBackend):
     """``ThreadBackend(1)`` holding ``driver_memory_mb`` beside the driver and hosting the rest "on the
-    cluster" as listeners here, or refusing them with ``refuse``."""
+    cluster" as listeners here, or refusing them with ``refuse``.
+    """
 
     service_hosts = ("driver", "cluster")
 
@@ -126,7 +133,9 @@ def backends() -> Iterator[list[HostingBackend]]:
         backend.close()
 
 
-def hosting(made: list[HostingBackend], driver_memory_mb: int, refuse: str | None = None) -> HostingBackend:
+def hosting(
+    made: list[HostingBackend], driver_memory_mb: int, refuse: str | None = None
+) -> HostingBackend:
     made.append(HostingBackend(driver_memory_mb, refuse))
     return made[-1]
 
@@ -145,7 +154,9 @@ def test_a_server_the_driver_cannot_hold_runs_on_the_cluster_and_says_why(
     assert key.startswith(services.scope)
 
 
-def test_a_cluster_refusal_keeps_why_the_earlier_legs_failed(backends: list[HostingBackend]) -> None:
+def test_a_cluster_refusal_keeps_why_the_earlier_legs_failed(
+    backends: list[HostingBackend],
+) -> None:
     backend = hosting(backends, 137, refuse="no slot holds it")
     with pytest.raises(ServiceUnavailable) as err:
         ServiceSet([spec("big", 311)], backend).start()
@@ -221,14 +232,17 @@ def test_a_driver_job_refuses_a_service_too_big_for_its_slot_naming_the_sizes(
     ad = tmp_path / ".machine.ad"
     ad.write_text('Machine = "127.0.0.1"\nMemory = 100\n')
     monkeypatch.setenv("_CONDOR_MACHINE_AD", str(ad))
+    # its host_service answers the DAG's SERVICE nodes only
     backend = HTCondorBackend(
         NoPilots(), 1, host="127.0.0.1", in_job=SITES["generic"], announced={"gpu": "svc0"}
-    )  # its host_service answers the DAG's SERVICE nodes only
+    )
     try:
         with pytest.raises(ServiceUnavailable) as refused:
             ServiceSet([spec("small", 200)], backend, scope="p").start()
         managed = refused.value.legs["managed"]
-        assert "200 MiB" in managed and "driver_memory_mb of 100 MiB" in managed, refused.value.legs
+        assert "200 MiB" in managed and "driver_memory_mb of 100 MiB" in managed, (
+            refused.value.legs
+        )
     finally:
         backend.close()
 
@@ -258,7 +272,9 @@ def condor(monkeypatch: pytest.MonkeyPatch) -> Iterator[HTCondorBackend]:
         backend.close()
 
 
-def announcing_after(backend: HTCondorBackend, monkeypatch: pytest.MonkeyPatch, polls: int) -> None:
+def announcing_after(
+    backend: HTCondorBackend, monkeypatch: pytest.MonkeyPatch, polls: int
+) -> None:
     """``wait_announce`` answers on its ``polls``-th call."""
     calls = iter(range(polls))
 
@@ -278,7 +294,9 @@ def test_a_waiting_job_is_logged_once_per_interval_and_never_timed_out(
 ) -> None:
     monkeypatch.setattr(backend_mod, "IDLE_LOG_S", every_s)
     announcing_after(condor, monkeypatch, 3)
-    job: Any = Answers([{"JobStatus": 1}, {"JobStatus": 1}, {"JobStatus": 5, "HoldReasonCode": 16}])
+    job: Any = Answers(
+        [{"JobStatus": 1}, {"JobStatus": 1}, {"JobStatus": 5, "HoldReasonCode": 16}]
+    )
     waits = ServiceSpec("waits", kind="m69b", check="tcp", timeout_s=0.01)
     with caplog.at_level(logging.INFO, logger="graphed_executors"):
         got = condor._await_announce(job, waits)
@@ -287,7 +305,9 @@ def test_a_waiting_job_is_logged_once_per_interval_and_never_timed_out(
     assert len(logged) == lines and "JobStatus=1" in logged[0], logged
 
 
-def test_the_deadline_outlives_an_eviction(condor: HTCondorBackend, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_deadline_outlives_an_eviction(
+    condor: HTCondorBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
     announcing_after(condor, monkeypatch, 10**6)
     job: Any = Answers([{"JobStatus": 2}, {"JobStatus": 1}])
     quick = ServiceSpec("evicted", kind="m69b", check="tcp", timeout_s=0.2)
@@ -303,7 +323,10 @@ def test_machine_ads_ask_the_schedd_s_pool_for_its_slots_but_dynamic_ones(
     locate: tuple[str, str] | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     asked: list[tuple[Any, ...]] = []
-    ads = [{"Name": "slot1", "SlotType": "Partitionable"}, {"Name": "slot1_1", "SlotType": "Dynamic"}]
+    ads = [
+        {"Name": "slot1", "SlotType": "Partitionable"},
+        {"Name": "slot1_1", "SlotType": "Dynamic"},
+    ]
 
     def collector(*pool: str) -> Any:
         def query(constraint: str) -> list[dict[str, str]]:
@@ -338,7 +361,9 @@ def test_a_job_that_left_the_queue_is_not_refused_by_the_match(tmp_path: Path) -
     schedd = SimpleNamespace(query=lambda constraint: [])
     pilots = CondorPilots("generic", log_dir=tmp_path)
     pilots._schedd = schedd
-    job = ServiceJob(spec("gone", None), pilots, key="scope-gone", url="http://127.0.0.1:1", secret=b"s")
+    job = ServiceJob(
+        spec("gone", None), pilots, key="scope-gone", url="http://127.0.0.1:1", secret=b"s"
+    )
     job.cluster = 4242
     assert job.match_refusal([{"SlotType": "Partitionable"}]) is None
 
@@ -346,8 +371,11 @@ def test_a_job_that_left_the_queue_is_not_refused_by_the_match(tmp_path: Path) -
 def test_a_job_waiting_only_on_a_busy_node_s_disk_matches() -> None:
     classad2 = pytest.importorskip("classad2")  # ships with the htcondor bindings (Linux)
     job = classad2.ClassAd("[ RequestDisk = 1048576; Requirements = TARGET.Disk >= RequestDisk ]")
-    busy = "[ PartitionableSlot = true; Disk = 524288; TotalSlotDisk = 2097152; Requirements = true ]"
-    assert not job.symmetricMatch(classad2.ClassAd(busy))  # the collector's busy node, as it reports it
+    busy = (
+        "[ PartitionableSlot = true; Disk = 524288; TotalSlotDisk = 2097152; Requirements = true ]"
+    )
+    # the collector's busy node, as it reports it
+    assert not job.symmetricMatch(classad2.ClassAd(busy))
     assert job.symmetricMatch(_as_whole(classad2.ClassAd(busy)))
 
 
@@ -356,7 +384,8 @@ def test_a_job_waiting_only_on_a_busy_node_s_disk_matches() -> None:
 
 class Pool:
     """``htcondor2`` over a schedd whose every job answers ``status`` (``None``: gone) and a collector that
-    lists no slot; ``log`` records submits (by batch name) and actions."""
+    lists no slot; ``log`` records submits (by batch name) and actions.
+    """
 
     def __init__(self, status: int | None) -> None:
         self.status = status
@@ -387,7 +416,9 @@ class Pool:
         self.log.append(("act", f"{action} {constraint}"))
 
     def service_cluster(self) -> str:
-        (submit,) = [entry for kind, entry in self.log if kind == "submit" and "graphed-service-" in entry]
+        (submit,) = [
+            entry for kind, entry in self.log if kind == "submit" and "graphed-service-" in entry
+        ]
         return submit.rsplit(" ", 1)[1]
 
 
@@ -396,7 +427,8 @@ def pooled(
 ) -> tuple[HTCondorBackend, Pool]:
     pool = Pool(status)
     monkeypatch.setattr(launch, "_htcondor", lambda: pool)
-    monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)  # the stand-in's pilots never exit by themselves
+    # the stand-in's pilots never exit by themselves
+    monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)
     pilots = CondorPilots("generic", log_dir=tmp_path)
     return HTCondorBackend(pilots, 1, host="127.0.0.1", service_hosts=("cluster",)), pool
 
@@ -420,14 +452,17 @@ def test_a_pool_whose_collector_lists_no_slot_submits_and_waits(
 
 
 def key_of(pool: Pool) -> str:
-    (submit,) = [entry for kind, entry in pool.log if kind == "submit" and "graphed-service-" in entry]
+    (submit,) = [
+        entry for kind, entry in pool.log if kind == "submit" and "graphed-service-" in entry
+    ]
     return submit.split(" ", 1)[0].removeprefix("graphed-service-")
 
 
 def test_backend_close_removes_a_waiting_service_job_before_it_returns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(server_mod, "POLL_S", 3.0)  # the waiter's own poll comes long after close() returns
+    # the waiter's own poll comes long after close() returns
+    monkeypatch.setattr(server_mod, "POLL_S", 3.0)
     backend, pool = pooled(1, tmp_path, monkeypatch)  # the job stays idle
     raised: list[BaseException] = []
 
@@ -471,7 +506,9 @@ def submitted_job(
     monkeypatch.setattr(launch, "_htcondor", lambda: pool)
     pilots = CondorPilots("generic", log_dir=tmp_path)
     pilots.prepare("http://127.0.0.1:1", b"s")
-    job = ServiceJob(spec("web", 64), pilots, key="scope-web", url="http://127.0.0.1:1", secret=b"s")
+    job = ServiceJob(
+        spec("web", 64), pilots, key="scope-web", url="http://127.0.0.1:1", secret=b"s"
+    )
     if submit:
         job.submit()
     return job
@@ -499,7 +536,9 @@ def test_a_second_stop_returns_only_after_the_first_removal(
         assert pool.acting.wait(10.0), "the first stop() never reached its removal"
         second.start()
         second.join(1.0)
-        assert second.is_alive() and returned == [], "a second stop() returned before the removal ran"
+        assert second.is_alive() and returned == [], (
+            "a second stop() returned before the removal ran"
+        )
     finally:
         pool.gate.set()
         first.join(10.0)
@@ -566,7 +605,9 @@ def test_a_need_beside_a_starting_service_submits_no_pilot_once_the_run_ends(
         ServiceSet([spec("idle", 64)], backend, scope="s").start()
 
     server = threading.Thread(target=call, args=("server", starting), daemon=True)
-    need = threading.Thread(target=call, args=("need", lambda: backend.wait_for_pilots(1)), daemon=True)
+    need = threading.Thread(
+        target=call, args=("need", lambda: backend.wait_for_pilots(1)), daemon=True
+    )
     try:
         server.start()
         assert wait_until(lambda: any(kind == "submit" for kind, _ in pool.log), 10.0)
@@ -688,7 +729,8 @@ def test_a_later_plan_s_failed_service_start_releases_the_pilots_it_held(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(server_mod, "POLL_S", 0.05)
-    backend, pool = pooled(None, tmp_path, monkeypatch)  # the service job leaves the queue unannounced
+    # the service job leaves the queue unannounced
+    backend, pool = pooled(None, tmp_path, monkeypatch)
     try:
         backend.min_pilots = 0
         backend.wait_for_pilots(0)  # a first plan ran
@@ -729,7 +771,9 @@ def test_a_set_waiting_its_turn_to_start_ends_when_the_runner_closes(
     ended: dict[str, BaseException] = {}
 
     def start(name: str) -> None:
-        waits = ServiceSpec(name, kind="m69b", check="tcp", launch=Launch(("serve",)), timeout_s=600.0)
+        waits = ServiceSpec(
+            name, kind="m69b", check="tcp", launch=Launch(("serve",)), timeout_s=600.0
+        )
         try:
             ServiceSet([waits], backend, scope=name).start()
         except Exception as exc:
@@ -747,7 +791,9 @@ def test_a_set_waiting_its_turn_to_start_ends_when_the_runner_closes(
         second.join(5.0)
         assert not second.is_alive(), "plan b still waited its turn after the runner closed"
         # its turn may come as plan a ends: then the closing backend refuses its submit
-        assert isinstance(ended["b"], RuntimeError) and re.search("runner (is )?clos", str(ended["b"])), ended
+        assert isinstance(ended["b"], RuntimeError) and re.search(
+            "runner (is )?clos", str(ended["b"])
+        ), ended
     finally:
         backend.close()
         first.join(10.0)
@@ -778,7 +824,10 @@ def test_a_need_deferred_by_a_service_start_times_its_wait_from_the_pilots_submi
         waiter.join(10.0)
         assert len(pilot_submits(pool)) == 1, pool.log
         ((at, exc),) = raised
-        assert "0 of 1 pilots connected after 1.0s" in str(exc) and at - ended >= 1.0, (at - ended, exc)
+        assert "0 of 1 pilots connected after 1.0s" in str(exc) and at - ended >= 1.0, (
+            at - ended,
+            exc,
+        )
     finally:
         backend.close()
 
@@ -803,7 +852,8 @@ def test_a_wait_below_min_pilots_leaves_the_first_need_s_wait_to_come(
 ) -> None:
     backend, _pool = pooled(1, tmp_path, monkeypatch)
     live = [0]
-    monkeypatch.setattr(backend._server, "live_pilots", lambda: live[0])  # pilots connect when the row says
+    # pilots connect when the row says
+    monkeypatch.setattr(backend._server, "live_pilots", lambda: live[0])
     got: list[int] = []
     first = threading.Thread(target=lambda: got.append(backend.n_workers()), daemon=True)
     later = threading.Thread(target=lambda: got.append(backend.n_workers()), daemon=True)
@@ -849,7 +899,9 @@ def test_a_running_job_s_claim_leaves_the_slot_it_runs_in() -> None:
     static = {"Name": "slot2@wn", "Memory": 4000, "Cpus": 1, "Disk": 1000}
     other = {"Name": "slot1@wn2", "Memory": 16000, "Cpus": 8, "Disk": 1000}
     slots = [dict(whole), dict(static), dict(other)]
-    dynamic = Ad(RemoteHost="slot1_3@wn", MemoryProvisioned=6144, CpusProvisioned=2, RequestMemory=6000)
+    dynamic = Ad(
+        RemoteHost="slot1_3@wn", MemoryProvisioned=6144, CpusProvisioned=2, RequestMemory=6000
+    )
     asked_only = Ad(RemoteHost="slot2@wn", RequestMemory=4000, RequestCpus=1, RequestGPUs=1)
     _less_claim(slots, dynamic)
     _less_claim(slots, asked_only)
@@ -862,7 +914,8 @@ def test_a_running_job_s_claim_leaves_the_slot_it_runs_in() -> None:
 
 class SlotPool(Pool):
     """``Pool`` whose collector lists one 1000 MiB partitionable slot; the schedd answers a job's ad (its
-    request, as ``classad2``) and, once the job is in ``running``, its claim on that slot."""
+    request, as ``classad2``) and, once the job is in ``running``, its claim on that slot.
+    """
 
     SLOT = (
         '[ Name = "slot1@wn"; SlotType = "Partitionable"; PartitionableSlot = true; Memory = 0; '
@@ -890,7 +943,9 @@ class SlotPool(Pool):
         if "JobStatus == 2" in constraint:
             claim = Ad(RemoteHost="slot1_1@wn", MemoryProvisioned=self.asked[cluster])
             return [claim] if cluster in self.running else []
-        request = f"RequestMemory = {self.asked[cluster]}; Requirements = TARGET.Memory >= RequestMemory"
+        request = (
+            f"RequestMemory = {self.asked[cluster]}; Requirements = TARGET.Memory >= RequestMemory"
+        )
         return [self.classad2.ClassAd(f"[ {request} ]")]
 
 
@@ -944,11 +999,17 @@ def test_a_first_plan_s_server_is_refused_where_only_its_set_s_earlier_server_ho
         with pytest.raises(ServiceUnavailable) as refused:
             ServiceSet([spec("web1", 600), spec("web2", 600)], backend, scope="s").start()
         managed = refused.value.legs["managed"]
-        web1, web2 = (int(e.rsplit(" ", 1)[1]) for k, e in pool.log if k == "submit" and "-s-" in e)
-        assert f"'web1' (cluster {web1}, whose slot stays taken until the run ends)" in managed, managed
+        web1, web2 = (
+            int(e.rsplit(" ", 1)[1]) for k, e in pool.log if k == "submit" and "-s-" in e
+        )
+        assert f"'web1' (cluster {web1}, whose slot stays taken until the run ends)" in managed, (
+            managed
+        )
         assert "'other'" not in managed, managed
         assert "beside them is 400 MiB" in managed, managed
-        assert pilots.cluster is None and ("act", f"Remove ClusterId == {web2}") in pool.log, pool.log
+        assert pilots.cluster is None and ("act", f"Remove ClusterId == {web2}") in pool.log, (
+            pool.log
+        )
     finally:
         backend.close()
 
@@ -956,14 +1017,18 @@ def test_a_first_plan_s_server_is_refused_where_only_its_set_s_earlier_server_ho
 def test_a_real_schedd_releases_graphed_s_hold_and_not_the_user_s(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    htc = pytest.importorskip("htcondor2", reason="the htcondor bindings (Linux; the test-htcondor job)")
+    htc = pytest.importorskip(
+        "htcondor2", reason="the htcondor bindings (Linux; the test-htcondor job)"
+    )
     monkeypatch.setattr(launch, "CLOSE_WAIT_S", 0.0)
-    pilots = CondorPilots("generic", log_dir=tmp_path, request_memory_mb=10**7)  # never matched: idle
+    # never matched: idle
+    pilots = CondorPilots("generic", log_dir=tmp_path, request_memory_mb=10**7)
     pilots.start("http://127.0.0.1:1", b"s", 2)
     try:
         assert pilots.cluster is not None
         cluster = pilots.cluster[1]
-        pilots._schedd.act(htc.JobAction.Hold, f"ClusterId == {cluster} && ProcId == 1")  # the user's
+        # the user's
+        pilots._schedd.act(htc.JobAction.Hold, f"ClusterId == {cluster} && ProcId == 1")
 
         def statuses() -> list[int]:
             ads = pilots._schedd.query(

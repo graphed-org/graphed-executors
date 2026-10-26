@@ -49,7 +49,8 @@ def _child_interrupted_mid_submit(persistent: bool, comms: str, out_path: str) -
         fut = real(self, *args, **kwargs)
         submitted.append(fut)
         if len(submitted) == 1:
-            raise KeyboardInterrupt  # where a SIGINT lands while the first submit spawns the workers
+            # where a SIGINT lands while the first submit spawns the workers
+            raise KeyboardInterrupt
         return fut
 
     executor = ProcessPoolExecutor(

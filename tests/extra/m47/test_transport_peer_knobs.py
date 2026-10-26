@@ -41,7 +41,8 @@ from graphed_executors.parsl_backend.transport_peer import _resolve_k
 def _spy_endpoint_ctor(monkeypatch: Any) -> dict[str, dict[str, Any]]:
     """Record ``(inbox_maxsize, idle_deadline_s)`` per address the peer/driver endpoints are built
     with — patching the method on the class so the ``from … import EscalatingHttpTransport`` name in
-    transport_peer (the SAME class object) is covered too."""
+    transport_peer (the SAME class object) is covered too.
+    """
     import graphed_executors.common.http_plane as hp  # noqa: PLC0415
 
     recorded: dict[str, dict[str, Any]] = {}
@@ -98,7 +99,9 @@ def test_inbox_maxsize_and_root_timeout_reach_the_peers(monkeypatch: Any) -> Non
     assert peers, "no peer endpoints were constructed"
     for addr, seen in peers.items():
         # finding 2: the inbox bound must reach every peer (pre-fix it stayed None — unbounded)
-        assert seen["inbox_maxsize"] == 7, f"{addr}: inbox_maxsize not forwarded ({seen['inbox_maxsize']})"
+        assert seen["inbox_maxsize"] == 7, (
+            f"{addr}: inbox_maxsize not forwarded ({seen['inbox_maxsize']})"
+        )
         # finding 4: the peer idle deadline is derived from root_timeout_s (pre-fix it was a bare 90.0
         # regardless of root_timeout_s, which did not even exist as a parameter)
         assert seen["idle_deadline_s"] == expected_idle, (

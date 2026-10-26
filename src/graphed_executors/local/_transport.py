@@ -52,7 +52,8 @@ CLOSE_DRAIN_S = 5.0
 def is_routable_host(host: str) -> bool:
     """True iff ``host`` is a concrete address a PEER can dial — NOT loopback (``127.0.0.0/8`` / ``::1``)
     and NOT the bind-all wildcard (``0.0.0.0`` / ``::``). Private ranges (10.x, 192.168.x) ARE routable
-    (they are exactly the cluster-internal addresses). A non-IP string is not routable."""
+    (they are exactly the cluster-internal addresses). A non-IP string is not routable.
+    """
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
@@ -62,14 +63,16 @@ def is_routable_host(host: str) -> bool:
 
 def _detect_routable_host() -> str | None:
     """A concrete non-loopback IP for this host, or ``None``. Tries the hostname's resolved address,
-    then the source address a UDP socket would use toward a public IP (no packet is actually sent)."""
+    then the source address a UDP socket would use toward a public IP (no packet is actually sent).
+    """
     with contextlib.suppress(OSError):
         candidate = socket.gethostbyname(socket.gethostname())
         if is_routable_host(candidate):
             return candidate
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s.connect(("8.8.8.8", 80))  # no packet is sent for a connected UDP socket; picks the source IP
+        # no packet is sent for a connected UDP socket; picks the source IP
+        s.connect(("8.8.8.8", 80))
         candidate = s.getsockname()[0]
     except OSError:
         return None
@@ -81,7 +84,8 @@ def _detect_routable_host() -> str | None:
 def select_advertise_host(candidate: str | None = None) -> str:
     """The address to ANNOUNCE to peers (the transport may BIND ``0.0.0.0``, but it must never
     announce loopback/wildcard — a peer cannot dial those). Validates an explicit ``candidate`` or
-    auto-detects one; raises ``ValueError`` on loopback/``0.0.0.0`` (or when none is available)."""
+    auto-detects one; raises ``ValueError`` on loopback/``0.0.0.0`` (or when none is available).
+    """
     if candidate is not None:
         if not is_routable_host(candidate):
             raise ValueError(f"advertise host {candidate!r} is not routable (loopback or 0.0.0.0)")
@@ -107,7 +111,8 @@ class PipeInbox:
     ``put_nowait`` therefore **blocks** whenever the message exceeds the OS pipe buffer (~64 KB) until
     the peer reads — a reduction partial (many histograms, or systematic universes) easily does, and a
     parked write holds this inbox's write lock against everyone else. Callers keep that safe by never
-    sending from the thread that has to keep reading: see ``_peer._Outbox`` / ``_peer.release_workers``."""
+    sending from the thread that has to keep reading: see ``_peer._Outbox`` / ``_peer.release_workers``.
+    """
 
     def __init__(self, ctx: Any) -> None:
         self._q = ctx.SimpleQueue()
@@ -136,13 +141,17 @@ class PipeInbox:
 class QueueTransport:
     """IPC transport: a per-endpoint inbox queue plus a registry of peers' inboxes. ``queue.Queue``
     (threads / in-process) or :class:`PipeInbox` (processes) — it only calls ``put_nowait`` /
-    ``get_nowait`` / ``get``, so the queue type is the caller's choice."""
+    ``get_nowait`` / ``get``, so the queue type is the caller's choice.
+    """
 
-    def __init__(self, address: str, inbox: Any, outboxes: dict[str, Any], via: Any = None) -> None:
+    def __init__(
+        self, address: str, inbox: Any, outboxes: dict[str, Any], via: Any = None
+    ) -> None:
         self.address = address
         self._inbox = inbox
         self._outboxes = outboxes  # peer address -> that peer's inbox queue
-        self._via = via  # the driver's inbox, which forwards a ``node`` for a peer outside ``outboxes``
+        # the driver's inbox, which forwards a ``node`` for a peer outside ``outboxes``
+        self._via = via
 
     def peers(self) -> tuple[str, ...]:
         return tuple(self._outboxes)
@@ -173,7 +182,11 @@ class QueueTransport:
 
     def recv(self, timeout: float | None = None) -> tuple[str, object] | None:
         try:
-            return self._inbox.get(timeout=timeout) if timeout is not None else self._inbox.get_nowait()  # type: ignore[no-any-return]
+            return (
+                self._inbox.get(timeout=timeout)
+                if timeout is not None
+                else self._inbox.get_nowait()
+            )  # type: ignore[no-any-return]
         except queue.Empty:
             return None
 
@@ -188,8 +201,11 @@ def build_ipc_transports(
     """Build a fully-connected set of in-process IPC transports (one ``queue.Queue`` inbox each).
 
     Used for the thread pool and the conformance tests; the process pool builds the same class over
-    ``multiprocessing.Queue`` inboxes handed to workers via the pool initializer (P5)."""
-    inboxes: dict[str, queue.Queue[Any]] = {addr: queue.Queue(maxsize=maxsize) for addr in addresses}
+    ``multiprocessing.Queue`` inboxes handed to workers via the pool initializer (P5).
+    """
+    inboxes: dict[str, queue.Queue[Any]] = {
+        addr: queue.Queue(maxsize=maxsize) for addr in addresses
+    }
     return {
         addr: QueueTransport(addr, inboxes[addr], {p: inboxes[p] for p in addresses if p != addr})
         for addr in addresses
@@ -212,7 +228,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 class LookupFreeHTTPServer(ThreadingHTTPServer):
     """A ``ThreadingHTTPServer`` that binds without ``HTTPServer.server_bind``'s ``socket.getfqdn``, a
-    reverse lookup that can stall for tens of seconds while the socket is bound but not yet listening."""
+    reverse lookup that can stall for tens of seconds while the socket is bound but not yet listening.
+    """
 
     def server_bind(self) -> None:
         socketserver.TCPServer.server_bind(self)
@@ -257,9 +274,12 @@ class HttpTransport:
     shutdown accepts the connection and never responds) holds every later message hostage for its
     retries — including the driver's ``done`` for the workers that are still alive, which is exactly
     what the teardown waits on. Per destination, order is still preserved and a dead peer delays only
-    its own messages."""
+    its own messages.
+    """
 
-    def __init__(self, address: str, *, host: str = "127.0.0.1", maxsize: int = _DEFAULT_MAXSIZE) -> None:
+    def __init__(
+        self, address: str, *, host: str = "127.0.0.1", maxsize: int = _DEFAULT_MAXSIZE
+    ) -> None:
         self.address = address
         self._server = _InboxServer((host, 0))
         self.host = str(self._server.server_address[0])
@@ -387,7 +407,8 @@ class HttpTransport:
 
 def build_http_transports(addresses: tuple[str, ...]) -> dict[str, HttpTransport]:
     """Build a connected set of loopback HTTP transports: bind each endpoint's server (so it has a
-    port), then hand every endpoint the full ``{address: (host, port)}`` registry."""
+    port), then hand every endpoint the full ``{address: (host, port)}`` registry.
+    """
     transports = {addr: HttpTransport(addr) for addr in addresses}
     registry = {addr: (t.host, t.port) for addr, t in transports.items()}
     for t in transports.values():

@@ -85,45 +85,39 @@ fail_under = 90
 show_missing = true
 
 [tool.ruff]
-line-length = 110
+line-length = 99
 src = ["src", "tests", "examples/hgg"]
 target-version = "py311"
 # the owner's original H->gg processor, kept byte-identical as the m69a oracle
 extend-exclude = ["tests/frozen/m69a/data/inclusive_processor.py"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PLC0415"]
-ignore = ["E501"]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF", "PLC0415", "N", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.per-file-ignores]
+# test functions are named for the behavior they check, so a docstring would restate the name
+"tests/**" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
+# the translation keeps the HiggsDNA processor's names so it reads line for line against the original
+"examples/hgg/analysis.py" = ["N802", "N803", "N806", "N815"]
+# the fakes stand in for htcondor2's class-named factories (Schedd, Collector, Credd, ...)
+"tests/extra/m66/test_m66_launcher.py" = ["N802"]
+"tests/extra/m68b/test_m68b_dag.py" = ["N802"]
+"tests/extra/m69b/test_m69b_schedulable.py" = ["N802"]
 
 [tool.ruff.lint.isort]
-# The package was renamed graphed-exec-local -> graphed-executors, but the immutable frozen suites
-# import the graphed_exec_local back-compat shim and group it as a first-party import. Recent ruff
-# derives first-party from the project name, so the rename would reclassify graphed_exec_local as
-# third-party and trip I001 on read-only frozen tests. Pin BOTH names first-party so the sort
-# classification matches the frozen files unchanged.
+# graphed_exec_local's submodules are sys.modules aliases with no file under src/, so ruff cannot
+# find them and would otherwise sort the shim's imports as third-party.
 known-first-party = ["graphed_executors", "graphed_exec_local"]
 
-# The M39 frozen test files ship an author-inconsistent import grouping (missing the blank line
-# between the third-party test-helper import and the first-party `graphed_exec_local` import that
-# I001 requires — the numpy/awkward frozen m39 tests DO have it, these six do not). They are
-# read-only under the frozen-test integrity rule, so I cannot reformat them; I001 is a pure
-# auto-formatting rule (not a correctness check on the code under test), so it is exempted here for
-# exactly these immutable files while every src file and every other test stays fully I001-enforced.
-# See `.graphed/M39/disputes/frozen_m39_import_sort.md` — remove this once the frozen files are
-# re-tagged with the blank line.
-
 [tool.ruff.format]
-# Immutable frozen suites (tests/frozen/**) are read-only under the §A.7 integrity rule, so they
-# cannot be reformatted. `ruff format` is a pure auto-formatting pass (no correctness check on the
-# code under test), so the frozen tree is exempted from it here — every src file and every non-frozen
-# test stays fully format-enforced, and `ruff check` (real lint) still covers the frozen files. This
-# extends the M39 I001 exemption above to the formatter; see `.graphed/m41/disputes/frozen_format.md`.
-# Remove once the frozen files are re-tagged format-clean.
-# Markdown is excluded too: ruff formats python blocks inside .md, which would reflow the README's
+# Markdown is excluded: ruff formats python blocks inside .md, which would reflow the README's
 # examples (aligned trailing comments, deliberate one-liners) into something less readable. The
 # prek hooks only ever pass python/pyi files to the formatter, so this keeps a bare
 # `ruff format --check .` — the command CONTRIBUTING gives — agreeing with what CI runs.
-exclude = ["tests/frozen/**", "*.md"]
+exclude = ["*.md"]
 
 [tool.mypy]
 python_version = "3.12"

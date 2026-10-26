@@ -55,7 +55,8 @@ def tree_reduce(
 ) -> tuple[R, int]:
     """Reduce n leaves to one value. ``completed`` yields (leaf_index, partial) as leaves finish.
     ``on_combine(leaves_delivered_so_far)`` is called per combine (lets tests prove the reduction is
-    incremental, not a barrier). Returns (value, n_combines)."""
+    incremental, not a barrier). Returns (value, n_combines).
+    """
     combines, root = plan_tree(n)
     if root is None:
         return empty(), 0
@@ -103,7 +104,8 @@ class LazyReducer(Generic[R]):
     bit-for-bit identical regardless of the order leaves are fed. A node whose sibling position lies
     past the (odd-sized) level's end is *unpaired* and carries up unchanged. Only nodes still waiting
     for a sibling are held (``present``) — the live **frontier**, O(log N) for roughly in-order
-    completion, never the whole tree. Peer reduction (P3) reuses this per worker over a leaf range."""
+    completion, never the whole tree. Peer reduction (P3) reuses this per worker over a leaf range.
+    """
 
     def __init__(
         self,
@@ -120,14 +122,16 @@ class LazyReducer(Generic[R]):
         self._present: dict[tuple[int, int], R] = {}
         self.n_combines = 0
         self.delivered = 0
-        self.max_frontier = 0  # largest live frontier seen (test/diagnostic: proves no O(N) blowup)
+        # largest live frontier seen (test/diagnostic: proves no O(N) blowup)
+        self.max_frontier = 0
 
     def _level_size(self, level: int) -> int:
         return (self.n + (1 << level) - 1) >> level
 
     def feed(self, leaf: int, value: R, level: int = 0) -> None:
         """Deliver one partial (leaf index + value), or with ``level`` a whole node at ``(level, leaf)``,
-        bubbling it up as far as siblings allow."""
+        bubbling it up as far as siblings allow.
+        """
         self.delivered += 1
         pos = leaf
         present = self._present
@@ -136,7 +140,8 @@ class LazyReducer(Generic[R]):
                 present[(level, pos)] = value
                 break
             if pos % 2 == 0:
-                if pos + 1 >= self._level_size(level):  # unpaired (last node of an odd level) -> carry
+                # unpaired (last node of an odd level) -> carry
+                if pos + 1 >= self._level_size(level):
                     level, pos = level + 1, pos >> 1
                     continue
                 sib = pos + 1
@@ -157,7 +162,9 @@ class LazyReducer(Generic[R]):
 
     def frontier(self) -> list[tuple[int, R]]:
         """The parked nodes as ``(first leaf, value)`` in leaf order: the root alone once every leaf is in."""
-        return sorted(((pos << level, v) for (level, pos), v in self._present.items()), key=lambda p: p[0])
+        return sorted(
+            ((pos << level, v) for (level, pos), v in self._present.items()), key=lambda p: p[0]
+        )
 
     def result(self) -> R:
         """The reduced value. Valid once all ``n`` leaves have been fed (the root has formed)."""
@@ -190,7 +197,8 @@ def running_fold(
     empty: Callable[[], R],
 ) -> tuple[R, int]:
     """A degenerate (chain) reduction for the adaptive path, where the partition set is not known up
-    front: fold partials in completion order. Requires a commutative+associative ``combine``."""
+    front: fold partials in completion order. Requires a commutative+associative ``combine``.
+    """
     acc: R | None = None
     n_combines = 0
     for _key, value in completed:

@@ -94,11 +94,13 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
         )
     else:
         launcher = LocalPilots(python=sys.executable, pythonpath=[job])
-    if run["pilots"] == "condor" or announced:  # dialled from other nodes: pilot jobs, SERVICE nodes
+    # dialled from other nodes: pilot jobs, SERVICE nodes
+    if run["pilots"] == "condor" or announced:
         host, ports = host_identity(), profile.worker_ports
     else:  # the slot's own pilots dial loopback; any free port serves them
         host, ports = "127.0.0.1", profile.worker_ports or (0, 0)
-    with ExitStack() as on_error:  # held until the runner exists: a failure after the pilots stops them
+    # held until the runner exists: a failure after the pilots stops them
+    with ExitStack() as on_error:
         backend = HTCondorBackend(
             launcher,
             n,
@@ -139,7 +141,8 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
 def _result_blob(ok: bool, payload: object) -> bytes:
     """``pickle.dumps((ok, payload))``, returned only once it loads again: an outcome that does not
     round-trip (unpicklable, or an exception whose constructor differs from its ``args``) reaches the
-    submitter as a ``RuntimeError`` carrying its text."""
+    submitter as a ``RuntimeError`` carrying its text.
+    """
     try:
         try:
             blob = pickle.dumps((ok, payload))
@@ -154,9 +157,12 @@ def _result_blob(ok: bool, payload: object) -> bytes:
 
 def _exit_code(exc: Exception) -> int:
     """The exit of an exception from inside ``runner.run(plan)``: 1 (retried) for lost workers and for
-    the run's service phase and the checkpoint store, 3 (not retried) for everything else, the plan's own error."""
+    the run's service phase and the checkpoint store, 3 (not retried) for everything else, the plan's own error.
+    """
     lost = isinstance(exc, StageError) and exc.cause_type == "KilledWorker"
-    environment = isinstance(exc, ServiceUnavailable | ServiceUnreachable | WorkerLost | StoreUnavailable)
+    environment = isinstance(
+        exc, ServiceUnavailable | ServiceUnreachable | WorkerLost | StoreUnavailable
+    )
     return EXIT_FAILED if lost or environment else EXIT_PLAN_ERROR
 
 
@@ -216,7 +222,9 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 announced = run.get("announce_only") or {}
                 while True:
-                    result, error, code = _attempt(plan, runner, run.get("endpoints") or {}, log, start)
+                    result, error, code = _attempt(
+                        plan, runner, run.get("endpoints") or {}, log, start
+                    )
                     # a run binds its endpoints once: a SERVICE node's new one takes a new run
                     if not (isinstance(error, ServiceUnreachable) and error.name in announced):
                         break

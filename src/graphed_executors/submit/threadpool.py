@@ -24,7 +24,8 @@ from .protocol import SubmitCapabilities, SubmitFuture
 
 class _ThreadEnv:
     """A per-worker-thread :class:`WorkerEnv`: its own ``open_once`` resources and an ``emit`` that
-    delivers event dicts straight to the driver handler (shared memory — no head-node copy)."""
+    delivers event dicts straight to the driver handler (shared memory — no head-node copy).
+    """
 
     def __init__(self, backend: ThreadBackend) -> None:
         self.resources: WorkerResources = LocalResources()
@@ -40,7 +41,8 @@ class _ThreadEnv:
 class ThreadBackend:
     """A :class:`SubmitBackend` over a stdlib thread pool. ``peer_data_movement=True`` (shared
     memory), everything else ``False`` — no scatter, no pin, no per-task retries/resources, no
-    running-cancel, no worker file cache."""
+    running-cancel, no worker file cache.
+    """
 
     capabilities = SubmitCapabilities(
         peer_data_movement=True,
@@ -110,7 +112,8 @@ class ThreadBackend:
         return unsub
 
     def cancel(self, futures: Sequence[Any]) -> None:
-        for fut in futures:  # best-effort: only not-yet-started work is prevented (cancel_running=False)
+        # best-effort: only not-yet-started work is prevented (cancel_running=False)
+        for fut in futures:
             fut.cancel()
 
     def close(self) -> None:
