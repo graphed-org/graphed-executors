@@ -1,5 +1,7 @@
-"""m43 headline determinism gate — CROSS-ENGINE bit-for-bit repartition (plan §1.3.4 point 3;
-blueprint §3 `test_dask_repartition_hashes`).
+"""m43 headline determinism gate.
+
+CROSS-ENGINE bit-for-bit repartition (plan §1.3.4 point 3; blueprint §3
+`test_dask_repartition_hashes`).
 
 `dask_run_repartition` run twice must produce identical `dest_block_hashes`, AND the same dict the
 LOCAL two-phase engine (`graphed_executors.local.shuffle.run_repartition`) produces on identical
@@ -13,7 +15,8 @@ wholesale is the wrong implementation this discriminates).
 
 Discriminates: any non-ascending-task concat or non-sha256 route (hash dicts diverge from local),
 driver-side hashing of re-serialized blocks (bytes drift), a salt that never reaches the route,
-and a witness that still names retired machinery."""
+and a witness that still names retired machinery.
+"""
 
 from __future__ import annotations
 
@@ -52,7 +55,9 @@ def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
     return request.param
 
 
-def test_two_dask_runs_and_the_local_engine_agree_bit_for_bit(adapter: ShuffleJoinAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_two_dask_runs_and_the_local_engine_agree_bit_for_bit(
+    adapter: ShuffleJoinAdapter, client
+) -> None:  # type: ignore[no-untyped-def]
     src = repartition_blocks(adapter)
     install_worker_plugin(client)
     runner = make_submit_runner(build_dask_backend(client))
@@ -75,8 +80,11 @@ def test_two_dask_runs_and_the_local_engine_agree_bit_for_bit(adapter: ShuffleJo
 
 
 def test_salt_reroutes_deterministically(adapter: ShuffleJoinAdapter, client) -> None:  # type: ignore[no-untyped-def]
-    """`salt` must reach the pinned route: two salted runs agree with each other and differ from
-    the unsalted run (content-neutral re-placement — the m40 skew-salt discipline on dask)."""
+    """`salt` must reach the pinned route.
+
+    Two salted runs agree with each other and differ from the unsalted run (content-neutral
+    re-placement — the m40 skew-salt discipline on dask).
+    """
     src = repartition_blocks(adapter)
     install_worker_plugin(client)
     runner = make_submit_runner(build_dask_backend(client))
@@ -93,7 +101,9 @@ def test_salt_reroutes_deterministically(adapter: ShuffleJoinAdapter, client) ->
     assert total_result_rows(s1.value) == sum(len(b) for b in src)  # type: ignore[arg-type]
 
 
-def test_witness_names_dask_mechanisms_and_retires_local_ones(adapter: ShuffleJoinAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_witness_names_dask_mechanisms_and_retires_local_ones(
+    adapter: ShuffleJoinAdapter, client
+) -> None:  # type: ignore[no-untyped-def]
     src = repartition_blocks(adapter)
     install_worker_plugin(client)
     runner = make_submit_runner(build_dask_backend(client))
@@ -121,5 +131,6 @@ def test_witness_names_dask_mechanisms_and_retires_local_ones(adapter: ShuffleJo
     ):
         assert not hasattr(w, retired), (
             f"witness still carries retired counter {retired!r} — announcements/manifests/steals "
-            "do not exist under dask (the future graph IS completeness; the scheduler owns stealing)"
+            "do not exist under dask (the future graph IS completeness; the scheduler owns "
+            "stealing)"
         )

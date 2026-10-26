@@ -1,12 +1,15 @@
-"""m68b part B2 on data (every OS, bindings recorded): `SiteProfile.job_root`, the driverless DAG with
-SERVICE nodes, the in-job backend that waits for their announces, and `RunHandle(dag=True)`
-(plan-services.md §3.3 "B2 — DAG driverless, `job_root`, lxplus", the `test_driverless_dag.py` row).
+"""m68b part B2 on data (every OS, bindings recorded).
 
-`submit_driverless` runs over `m68b_dag_harness.record_bindings`; what it wrote (`run.dag`, the node
-`.sub` files, `service-svc<i>/`, `run.json`, `driver.sh`) is read back from the run directory. The
-in-job legs build `driver._runner(...)` with a machine ad and no bindings. The fixture comparison
-(`data/from_dag-generic.txt`, the description `probes/m68b/probe_dag_service.txt` printed) needs real
-bindings and `condor_dagman` on `PATH` (the `test-htcondor` job) and is skipped elsewhere.
+`SiteProfile.job_root`, the driverless DAG with SERVICE nodes, the in-job backend that waits for
+their announces, and `RunHandle(dag=True)` (plan-services.md §3.3 "B2 — DAG driverless, `job_root`,
+lxplus", the `test_driverless_dag.py` row).
+
+`submit_driverless` runs over `m68b_dag_harness.record_bindings`; what it wrote (`run.dag`, the
+node `.sub` files, `service-svc<i>/`, `run.json`, `driver.sh`) is read back from the run directory.
+The in-job legs build `driver._runner(...)` with a machine ad and no bindings. The fixture
+comparison (`data/from_dag-generic.txt`, the description `probes/m68b/probe_dag_service.txt`
+printed) needs real bindings and `condor_dagman` on `PATH` (the `test-htcondor` job) and is skipped
+elsewhere.
 """
 
 from __future__ import annotations
@@ -71,9 +74,13 @@ DAGMAN = 7  # the DAGMan cluster of the recorded ads; its driver tries are 9, 10
 MACHINE = "localhost"  # the driver job's slot, from its machine ad
 SERVICE_IDENTITY = "svc-node.m68b.example"
 
-# what probe_dag_service.txt's description embeds of its own run: DAG dir, bindings version, condor_dagman
+# what probe_dag_service.txt's description embeds of its own run: DAG dir, bindings version,
+# condor_dagman
 PROBE_DAG_DIR = "/home/submituser/m68b-dag-R"
-PROBE_CSD = "$CondorVersion:' '25.13.2' '2026-08-19' 'BuildID:' '943576' 'PackageID:' '25.13.2-1' 'GitSHA:' '589a5b38' '$"
+PROBE_CSD = (
+    "$CondorVersion:' '25.13.2' '2026-08-19' 'BuildID:' '943576' 'PackageID:' '25.13.2-1' "
+    "'GitSHA:' '589a5b38' '$"
+)
 PROBE_DAGMAN = "/usr/bin/condor_dagman"
 
 
@@ -105,7 +112,7 @@ def submit(monkeypatch: pytest.MonkeyPatch, plan: Any, **kwargs: Any) -> tuple[A
 
 
 def refused(monkeypatch: pytest.MonkeyPatch, plan: Any, **kwargs: Any) -> str:
-    """The message of the ``ValueError`` ``submit_driverless`` raises before any bindings call."""
+    """Return the ``ValueError`` message ``submit_driverless`` raises before any bindings call."""
     fake = record_bindings(monkeypatch, DagSchedd())
     kwargs.setdefault("request_memory_mb", 1024)
     with pytest.raises(ValueError) as excinfo:
@@ -115,10 +122,12 @@ def refused(monkeypatch: pytest.MonkeyPatch, plan: Any, **kwargs: Any) -> str:
 
 
 def inputs_of(sub: Mapping[str, str]) -> set[str]:
-    return {Path(e.strip()).name for e in sub.get("transfer_input_files", "").split(",") if e.strip()}
+    return {
+        Path(e.strip()).name for e in sub.get("transfer_input_files", "").split(",") if e.strip()
+    }
 
 
-# ---- job_root ------------------------------------------------------------------------------------------
+# ---- job_root -----------------------------------------------------------------------------------
 
 
 def test_sites_carry_job_root_and_no_name_keyed_root_is_left() -> None:
@@ -131,10 +140,14 @@ def test_sites_carry_job_root_and_no_name_keyed_root_is_left() -> None:
     assert not hasattr(driverless_api(), "_SELF_SUBMIT_ROOT")
 
 
-def test_self_submission_reads_job_root_from_the_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_self_submission_reads_job_root_from_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     plan = service_plan(())
     site_copy(monkeypatch, "m68b-nojr", "generic", name="m68b-nojr", job_root=None)
-    assert "job_root" in refused(monkeypatch, plan, site="m68b-nojr", pilots="condor", log_dir=tmp_path / "a")
+    assert "job_root" in refused(
+        monkeypatch, plan, site="m68b-nojr", pilots="condor", log_dir=tmp_path / "a"
+    )
     _, fake = submit(monkeypatch, plan, site="m68b-nojr", pilots="local", log_dir=tmp_path / "b")
     assert len(submitted(fake.log)) == 1, "control: the same row runs a fat slot"
     venv = fake_venv(tmp_path / "env")
@@ -147,11 +160,13 @@ def test_self_submission_reads_job_root_from_the_row(tmp_path: Path, monkeypatch
     assert str(root) in refused(monkeypatch, plan, site="m68b-jr", pilots="condor", log_dir=None)
     site_copy(monkeypatch, "lxplus", "lxplus", job_root=str(tmp_path))
     handle, fake = submit(monkeypatch, plan, log_dir=tmp_path / "d", **lxplus)
-    assert len(submitted(fake.log)) == 1, "an lxplus row whose job_root holds log_dir must self-submit"
+    assert len(submitted(fake.log)) == 1, (
+        "an lxplus row whose job_root holds log_dir must self-submit"
+    )
     assert json.loads((Path(handle.log_dir) / "run.json").read_text())["pilots"] == "condor"
 
 
-# ---- which specs become SERVICE nodes -----------------------------------------------------------------
+# ---- which specs become SERVICE nodes -----------------------------------------------------------
 
 
 def test_a_kind_the_site_serves_is_not_a_service_node(
@@ -186,7 +201,8 @@ def test_a_kind_the_site_serves_is_not_a_service_node(
 def test_service_nodes_are_named_by_derived_ids_in_name_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # declared out of name order; "0web" sorts first but the driver job hosts it; "given" has an endpoint
+    # declared out of name order; "0web" sorts first but the driver job hosts it; "given" has an
+    # endpoint
     specs = (gpu_spec("driver"), imaged_spec("a b"), cpu_spec("0web"), gpu_spec("given"))
     handle, fake = submit(
         monkeypatch,
@@ -217,7 +233,9 @@ def test_service_nodes_are_named_by_derived_ids_in_name_order(
     assert driver["request_cpus"] == "2" and {"plan.pkl", "run.json"} <= inputs_of(driver), driver
     assert "periodic_remove" not in driver, driver
     nodes = {node: read_sub(run_dir / f"{node}.sub") for node in ("svc0", "svc1")}
-    assert job_attr(nodes["svc0"], "SingularityImage") == '"registry.m68b.example/service:1"', nodes["svc0"]
+    assert job_attr(nodes["svc0"], "SingularityImage") == '"registry.m68b.example/service:1"', (
+        nodes["svc0"]
+    )
     assert nodes["svc1"].get("request_gpus") == "1", nodes["svc1"]
     for node, sub in nodes.items():
         node_dir = run_dir / f"service-{node}"
@@ -253,9 +271,14 @@ def test_an_lxplus_service_node_keeps_its_credential_and_env_and_the_dag_is_not_
     )
     run_dir = Path(handle.log_dir)
     assert job_attr(read_sub(run_dir / "svc0.sub"), "SendCredential") == "True"
-    assert os.path.isfile(run_dir / "service-svc0" / "env.tgz"), "the node's env.tgz link does not resolve"
+    assert os.path.isfile(run_dir / "service-svc0" / "env.tgz"), (
+        "the node's env.tgz link does not resolve"
+    )
     (call,) = logged(fake.log, "from_dag")
-    assert Path(call[1]) == run_dir / "run.dag" and call[2] == {**DAG_OPTIONS, "dagman": "/usr/bin/condor_dagman"}, call
+    assert Path(call[1]) == run_dir / "run.dag" and call[2] == {
+        **DAG_OPTIONS,
+        "dagman": "/usr/bin/condor_dagman",
+    }, call
     (entry,) = logged(fake.log, "submit")
     assert entry[3] is False and logged(fake.log, "spool") == [], fake.log
 
@@ -272,15 +295,17 @@ def test_a_user_module_path_holding_a_comma_is_refused(
     good.write_text("X = 1\n")
     msg = refused(monkeypatch, plan, site="generic", log_dir=tmp_path / "a", user_modules=[bad])
     assert "a,b.py" in msg or "user_modules" in msg, msg
-    _, fake = submit(monkeypatch, plan, site="generic", log_dir=tmp_path / "b", user_modules=[good])
+    _, fake = submit(
+        monkeypatch, plan, site="generic", log_dir=tmp_path / "b", user_modules=[good]
+    )
     assert len(submitted(fake.log)) == 1, "control: the same module without the comma submits"
 
 
-# ---- the placeholder result --------------------------------------------------------------------------
+# ---- the placeholder result ---------------------------------------------------------------------
 
 
 def driver_sh_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], int]:
-    """The plain driver job's ``driver.sh`` lines and the index of its ``exec`` line."""
+    """Return the plain driver job's ``driver.sh`` lines and the index of its ``exec`` line."""
     _, fake = submit(monkeypatch, service_plan(()), site="generic", log_dir=tmp_path / "logs")
     (desc,) = submitted(fake.log)
     script = Path(desc.get("initialdir") or tmp_path / "logs", desc["executable"])
@@ -306,16 +331,21 @@ def test_the_placeholder_loads_as_a_runtime_error_naming_the_log(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     (scratch / "pre-exec.sh").write_text("\n".join(lines[:i]) + "\n")
-    # its status is the last pre-exec command's (the env.tgz test gives 1 without one): not asserted
-    proc = subprocess.run(["sh", "pre-exec.sh"], cwd=scratch, capture_output=True, timeout=60, check=False)
+    # its status is the last pre-exec command's (the env.tgz test gives 1 without one): not
+    # asserted
+    proc = subprocess.run(
+        ["sh", "pre-exec.sh"], cwd=scratch, capture_output=True, timeout=60, check=False
+    )
     assert (scratch / "result.pkl").is_file(), (lines[:i], proc.stderr)
     ok, exc = pickle.loads((scratch / "result.pkl").read_bytes())
     assert ok is False and type(exc) is RuntimeError, repr(exc)
     assert "driver.log" in str(exc) and PLACEHOLDER_TEXT in str(exc), str(exc)
-    assert (scratch / "driver.log").is_file(), "a missing driver.log holds the job like a missing result.pkl"
+    assert (scratch / "driver.log").is_file(), (
+        "a missing driver.log holds the job like a missing result.pkl"
+    )
 
 
-# ---- the run directory -----------------------------------------------------------------------------------
+# ---- the run directory --------------------------------------------------------------------------
 
 
 def test_each_dag_submission_gets_a_new_run_directory(
@@ -327,14 +357,24 @@ def test_each_dag_submission_gets_a_new_run_directory(
     run1 = Path(first.log_dir)
     assert run1.parent == log_dir and re.fullmatch(r"graphed-[0-9a-f]{8}", run1.name), run1
     names = {p.name for p in run1.iterdir()}
-    assert {"run.dag", "driver.sub", "svc0.sub", "service-svc0", "run.json", "plan.pkl", "driver.sh"} <= names
+    assert {
+        "run.dag",
+        "driver.sub",
+        "svc0.sub",
+        "service-svc0",
+        "run.json",
+        "plan.pkl",
+        "driver.sh",
+    } <= names
     batch = read_sub(run1 / "driver.sub")["jobbatchname"].strip('"')
     assert run1.name == "graphed-" + batch.removeprefix("graphed-driverless-"), (run1.name, batch)
     before = tree_bytes(run1)
     second, fake = submit(monkeypatch, plan, site="generic", log_dir=log_dir)
     run2 = Path(second.log_dir)
     assert run2 != run1 and run2.parent == log_dir, (run1, run2)
-    assert sorted(log_dir.iterdir()) == sorted([run1, run2]), "a submission wrote outside its run directory"
+    assert sorted(log_dir.iterdir()) == sorted([run1, run2]), (
+        "a submission wrote outside its run directory"
+    )
     assert tree_bytes(run1) == before, "the second submission changed the first run's files"
     (call,) = logged(fake.log, "from_dag")
     assert Path(call[1]) == run2 / "run.dag"
@@ -407,11 +447,14 @@ def test_the_job_root_check_is_lexical(tmp_path: Path, monkeypatch: pytest.Monke
     assert len(logged(fake.log, "from_dag")) == 1 and len(submitted(fake.log)) == 1, fake.log
 
 
-# ---- in the driver job ---------------------------------------------------------------------------------
+# ---- in the driver job --------------------------------------------------------------------------
 
 
 def in_job_run(site: str, tmp_path: Path, *, dag: bool = False) -> dict[str, Any]:
-    """A ``run.json`` as the submitter writes it: m68a's keys, plus ``announce_only``/``dag_dir`` for a DAG."""
+    """Return a ``run.json`` as the submitter writes it.
+
+    m68a's keys, plus ``announce_only``/``dag_dir`` for a DAG.
+    """
     run: dict[str, Any] = {
         "pilots": "local",
         "n_pilots": 1,
@@ -434,9 +477,13 @@ def in_job_run(site: str, tmp_path: Path, *, dag: bool = False) -> dict[str, Any
 
 
 @contextmanager
-def in_job_runner(run: dict[str, Any], job: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
-    """``driver._runner`` as the driver job calls it: a machine ad whose ``Machine`` is ``localhost``, no
-    bindings; closed at exit."""
+def in_job_runner(
+    run: dict[str, Any], job: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Any]:
+    """``driver._runner`` as the driver job calls it.
+
+    A machine ad whose ``Machine`` is ``localhost``, no bindings; closed at exit.
+    """
     job.mkdir()
     monkeypatch.setitem(sys.modules, "htcondor2", None)
     monkeypatch.setenv("_CONDOR_MACHINE_AD", str(write_machine_ad(job / "machine.ad", MACHINE)))
@@ -449,7 +496,7 @@ def in_job_runner(run: dict[str, Any], job: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def in_job_site(monkeypatch: pytest.MonkeyPatch) -> tuple[int, int]:
-    """A generic row whose ``worker_ports`` is a free range apart from its ``driver_ports``."""
+    """Return a generic row whose ``worker_ports`` is a free range apart from ``driver_ports``."""
     ports = free_range(3)
     site_copy(monkeypatch, "m68b-injob", "generic", name="m68b-injob", worker_ports=ports)
     return ports
@@ -468,23 +515,40 @@ def test_the_driver_job_publishes_an_announce_secret_then_its_url(
 
     monkeypatch.setattr(os, "replace", spy_replace)
     dag_dir = tmp_path / "dag"
-    with in_job_runner(in_job_run("m68b-injob", tmp_path, dag=True), tmp_path / "job", monkeypatch) as runner:
-        assert [p.name for p in replaced if p.parent == dag_dir] == ["graphed-secret", "driver.url"], replaced
+    with in_job_runner(
+        in_job_run("m68b-injob", tmp_path, dag=True), tmp_path / "job", monkeypatch
+    ) as runner:
+        assert [p.name for p in replaced if p.parent == dag_dir] == [
+            "graphed-secret",
+            "driver.url",
+        ], replaced
         secret_file = dag_dir / "graphed-secret"
         if sys.platform != "win32":
             assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
         url = (dag_dir / "driver.url").read_text().strip().rstrip("/")
         parts = urlsplit(url)
-        assert parts.hostname == MACHINE and parts.port is not None and low <= parts.port <= high, url
+        assert (
+            parts.hostname == MACHINE and parts.port is not None and low <= parts.port <= high
+        ), url
         announce = bytes.fromhex(secret_file.read_text().strip())
-        pilots = bytes.fromhex((Path(runner.backend.launcher.log_dir) / "graphed-secret").read_text().strip())
-        signed_by_announce, signed_by_pilots = tmp_path / "announce.marker", tmp_path / "pilots.marker"
-        assert post(url + "/result", pickle.dumps(MarkerBomb(str(signed_by_announce))), announce) == 403
+        pilots = bytes.fromhex(
+            (Path(runner.backend.launcher.log_dir) / "graphed-secret").read_text().strip()
+        )
+        signed_by_announce, signed_by_pilots = (
+            tmp_path / "announce.marker",
+            tmp_path / "pilots.marker",
+        )
+        assert (
+            post(url + "/result", pickle.dumps(MarkerBomb(str(signed_by_announce))), announce)
+            == 403
+        )
         post(url + "/result", pickle.dumps(MarkerBomb(str(signed_by_pilots))), pilots)
         assert signed_by_pilots.exists(), "control: a pickle the pilots' secret signs is loaded"
         assert not signed_by_announce.exists(), "the announce secret signed a pickle"
     # a run.json without the two keys builds as m67's
-    with in_job_runner(in_job_run("m68b-injob", tmp_path / "p"), tmp_path / "plain", monkeypatch) as runner:
+    with in_job_runner(
+        in_job_run("m68b-injob", tmp_path / "p"), tmp_path / "plain", monkeypatch
+    ) as runner:
         assert runner.backend.advertise_host == "127.0.0.1"
         assert not hasattr(runner.backend, "host_service")
         assert not (tmp_path / "plain" / "driver.url").exists()
@@ -516,13 +580,15 @@ def test_the_in_job_backend_resolves_a_service_node_by_its_announce(
                 assert dict(endpoints) == {"web": endpoint}
             finally:
                 run_bounded(service_set.close)
-    statuses = [r.status for r in caplog.records if r.name == SERVICES_LOGGER and hasattr(r, "status")]
+    statuses = [
+        r.status for r in caplog.records if r.name == SERVICES_LOGGER and hasattr(r, "status")
+    ]
     assert [(s.name, s.leg, s.host, s.identity) for s in statuses] == [
         ("web", "managed", "cluster", SERVICE_IDENTITY)
     ]
 
 
-# ---- RunHandle(dag=True) ---------------------------------------------------------------------------------
+# ---- RunHandle(dag=True) ------------------------------------------------------------------------
 
 
 def dag_handle(log_dir: Path, *, site: str = "generic", dag: bool = True) -> Any:
@@ -552,7 +618,8 @@ def driver_try(cluster: int, exit_code: int | None) -> dict[str, Any]:
     return ad
 
 
-# driver-node history in recorded order (Q-03: not ClusterId order), and the outcome of the latest try
+# driver-node history in recorded order (Q-03: not ClusterId order), and the outcome of the latest
+# try
 OUTCOMES: dict[str, tuple[list[dict[str, Any]], str]] = {
     "latest-last-exit-0": ([driver_try(9, 1), driver_try(10, 0)], "done"),
     "latest-between-exit-0": ([driver_try(9, 1), driver_try(11, 0), driver_try(10, 1)], "done"),
@@ -567,12 +634,15 @@ def test_a_finished_dag_takes_its_outcome_from_the_latest_driver_try(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tries, expected = OUTCOMES[case]
-    dagman = {"ClusterId": DAGMAN, "JobStatus": 4, "ExitCode": 1, "JobUniverse": 7}  # never the outcome
+    # never the outcome
+    dagman = {"ClusterId": DAGMAN, "JobStatus": 4, "ExitCode": 1, "JobUniverse": 7}
     schedd = DagSchedd(dagman_history=[dagman], node_history=tries)
     record_bindings(monkeypatch, schedd)
     assert run_bounded(dag_handle(tmp_path).status) == expected
     node_history = [e for e in logged(schedd.log, "history") if is_node_constraint(e[1])]
-    assert node_history and all(names_the_driver_node(e[1]) and e[3] == 1 for e in node_history), node_history
+    assert node_history and all(names_the_driver_node(e[1]) and e[3] == 1 for e in node_history), (
+        node_history
+    )
     assert_no_dag_counters(schedd.log)
 
 
@@ -593,7 +663,9 @@ def test_a_held_driver_node_reads_held_and_wait_times_out_naming_it(
         run_bounded(lambda: handle.wait(timeout=0.3, poll_s=0.02), 60)
     assert_no_dag_counters(schedd.log)
     record_bindings(monkeypatch, DagSchedd(**ads))
-    assert run_bounded(dag_handle(tmp_path, dag=False).status) == "running", "control: m67's mapping"
+    assert run_bounded(dag_handle(tmp_path, dag=False).status) == "running", (
+        "control: m67's mapping"
+    )
 
 
 RUNNING_NODE = [{"ClusterId": 9, "JobStatus": 2}]
@@ -612,7 +684,9 @@ def test_every_dagman_job_status_is_mapped(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     status, node, expected = DAGMAN_STATUS[case]
-    schedd = DagSchedd(dagman=[{"ClusterId": DAGMAN, "JobStatus": status, "HoldReasonCode": 3}], node=node)
+    schedd = DagSchedd(
+        dagman=[{"ClusterId": DAGMAN, "JobStatus": status, "HoldReasonCode": 3}], node=node
+    )
     record_bindings(monkeypatch, schedd)
     assert run_bounded(dag_handle(tmp_path).status) == expected
     assert_no_dag_counters(schedd.log)
@@ -621,7 +695,9 @@ def test_every_dagman_job_status_is_mapped(
 def test_a_finished_dag_still_queued_on_a_spooled_site_is_read_without_a_retrieve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    value = ExecResult(value=("m68b-b2",), n_partitions=1, n_combines=0, stopped=StopReason.EXHAUSTED)
+    value = ExecResult(
+        value=("m68b-b2",), n_partitions=1, n_combines=0, stopped=StopReason.EXHAUSTED
+    )
     (tmp_path / "result.pkl").write_bytes(pickle.dumps((True, value)))
     ads = {
         "dagman": [{"ClusterId": DAGMAN, "JobStatus": 4, "ExitCode": 1}],
@@ -643,7 +719,9 @@ def test_a_finished_dag_still_queued_on_a_spooled_site_is_read_without_a_retriev
 def test_a_failed_dag_without_a_result_names_the_dagman_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    schedd = DagSchedd(dagman_history=[{"ClusterId": DAGMAN, "JobStatus": 4, "ExitCode": 1}], node_history=[])
+    schedd = DagSchedd(
+        dagman_history=[{"ClusterId": DAGMAN, "JobStatus": 4, "ExitCode": 1}], node_history=[]
+    )
     record_bindings(monkeypatch, schedd)
     handle = dag_handle(tmp_path)
     assert run_bounded(handle.status) == "failed"
@@ -667,7 +745,7 @@ def test_an_m67_saved_handle_loads_as_a_plain_job(tmp_path: Path) -> None:
     assert api.RunHandle.load(tmp_path / "dag-handle.json").dag is True
 
 
-# ---- the DAGMan description (test-htcondor) ----------------------------------------------------------
+# ---- the DAGMan description (test-htcondor) -----------------------------------------------------
 
 
 def description_lines(desc: Mapping[str, Any], subs: Mapping[str, str]) -> list[str]:
@@ -681,21 +759,30 @@ def description_lines(desc: Mapping[str, Any], subs: Mapping[str, str]) -> list[
 
 
 @needs_dagman
-def test_the_dag_description_is_the_probe_s(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_dag_description_is_the_probe_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     real = pytest.importorskip(
         "htcondor2", reason="the fixture comparison needs real bindings (test-htcondor)"
     )
     dagman = shutil.which("condor_dagman")
     assert dagman is not None
     handle, fake = submit(
-        monkeypatch, service_plan((gpu_spec("web"),)), site="generic", log_dir=tmp_path / "logs", real=real
+        monkeypatch,
+        service_plan((gpu_spec("web"),)),
+        site="generic",
+        log_dir=tmp_path / "logs",
+        real=real,
     )
     assert len(logged(fake.log, "from_dag")) == 1, f"no DAG was submitted: {fake.log}"
     (desc,) = submitted(fake.log)
     csd = str(real.version()).replace(" ", "' '")  # the shell-escaped form -CsdVersion carries
     got = description_lines(desc, {str(handle.log_dir): "<DAG>", csd: "<CSD>", dagman: "<DAGMAN>"})
     fixture = dict(
-        line.partition(" = ")[::2] for line in (DATA_DIR / "from_dag-generic.txt").read_text().splitlines()
+        line.partition(" = ")[::2]
+        for line in (DATA_DIR / "from_dag-generic.txt").read_text().splitlines()
     )
-    want = description_lines(fixture, {PROBE_DAG_DIR: "<DAG>", PROBE_CSD: "<CSD>", PROBE_DAGMAN: "<DAGMAN>"})
+    want = description_lines(
+        fixture, {PROBE_DAG_DIR: "<DAG>", PROBE_CSD: "<CSD>", PROBE_DAGMAN: "<DAGMAN>"}
+    )
     assert got == want

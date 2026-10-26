@@ -1,11 +1,14 @@
-"""m45 join pins — facade joins are byte-identical to the direct engine calls on both methods
-(inner AND outer), and join's ``mem_budget_bytes`` is a COMMON knob: explicit ``"tasks"`` +
+"""m45 join pins: facade joins match the direct engine calls byte for byte.
+
+m45 join pins — facade joins are byte-identical to the direct engine calls on both methods (inner
+AND outer), and join's ``mem_budget_bytes`` is a COMMON knob: explicit ``"tasks"`` +
 ``mem_budget_bytes`` SUCCEEDS with the m43 spill counters engaging (m45-facade-plan §1.2 r2
 correction + §2 items 7/8 — the r1 draft would have raised a spurious ValueError on exactly this
 frozen-m43-exercised usage; this module makes that bug unshippable).
 
 Budget sizing mirrors frozen m43 ``test_dask_shuffle_bounded_memory`` (hot key, n*n duplicated
-output, budget = output_bytes // 8)."""
+output, budget = output_bytes // 8).
+"""
 
 from __future__ import annotations
 
@@ -48,8 +51,14 @@ def test_join_parity_with_both_engines(client, how: str) -> None:  # type: ignor
     )
     res_t = run_bounded(
         lambda: facade_join(
-            BACKEND, left, right, PARTS, how=how, dbackend=dbackend,
-            shuffle_method="transport", broadcast=False,
+            BACKEND,
+            left,
+            right,
+            PARTS,
+            how=how,
+            dbackend=dbackend,
+            shuffle_method="transport",
+            broadcast=False,
         )
     )["result"]
     assert res_t.dest_block_hashes == t_oracle.dest_block_hashes, (
@@ -62,8 +71,14 @@ def test_join_parity_with_both_engines(client, how: str) -> None:  # type: ignor
     )
     res_k = run_bounded(
         lambda: facade_join(
-            BACKEND, left, right, PARTS, how=how, dbackend=dbackend,
-            shuffle_method="tasks", broadcast=False,
+            BACKEND,
+            left,
+            right,
+            PARTS,
+            how=how,
+            dbackend=dbackend,
+            shuffle_method="tasks",
+            broadcast=False,
         )
     )["result"]
     assert res_k.dest_block_hashes == k_oracle.dest_block_hashes, (
@@ -79,7 +94,13 @@ def test_tasks_join_accepts_mem_budget_and_the_spill_engages(client) -> None:  #
     budget = (n * n * row_bytes) // 8
     dbackend = build_dask_backend(client)
     oracle = dask_run_join(
-        BACKEND, left, right, 4, runner=make_runner(dbackend), broadcast=False, mem_budget_bytes=budget
+        BACKEND,
+        left,
+        right,
+        4,
+        runner=make_runner(dbackend),
+        broadcast=False,
+        mem_budget_bytes=budget,
     )
     assert oracle.witness.join_spilled_partitions > 0, (
         "scenario guard misfired: this budget must engage the m43 spill on the direct engine"
@@ -88,8 +109,14 @@ def test_tasks_join_accepts_mem_budget_and_the_spill_engages(client) -> None:  #
     spy = SpyDaskBackend(dbackend)
     outcome = run_bounded(
         lambda: facade_join(
-            BACKEND, left, right, 4, dbackend=spy, shuffle_method="tasks",
-            broadcast=False, mem_budget_bytes=budget,
+            BACKEND,
+            left,
+            right,
+            4,
+            dbackend=spy,
+            shuffle_method="tasks",
+            broadcast=False,
+            mem_budget_bytes=budget,
         ),
         timeout_s=300.0,
     )

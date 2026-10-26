@@ -26,7 +26,9 @@ def test_probe_driven_reshaping_processes_all_events_correctly() -> None:
         state["batches"] += 1
         return tasks
 
-    plan = Plan(process=A.count_entries, combine=A.add_int, empty=A.zero_int, next_tasks=next_tasks)
+    plan = Plan(
+        process=A.count_entries, combine=A.add_int, empty=A.zero_int, next_tasks=next_tasks
+    )
     r = ThreadExecutor(max_workers=4).run(plan)
     assert r.value == total  # every event folded in correctly despite the resized partitions
     assert state["batches"] >= 2  # genuinely reshaped across more than one wave
@@ -34,7 +36,8 @@ def test_probe_driven_reshaping_processes_all_events_correctly() -> None:
 
 
 def test_stops_at_target_events() -> None:
-    # an effectively-infinite supply of 100-event chunks; a target-events stop must end the run early
+    # an effectively-infinite supply of 100-event chunks; a target-events stop must end the run
+    # early
     def next_tasks(ctx: ExecContext):
         base = ctx.n_done
         return [Task(base + k, Partition("f", "E", 0, 100)) for k in range(4)]

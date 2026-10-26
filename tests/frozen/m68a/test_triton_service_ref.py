@@ -1,14 +1,18 @@
-"""m68a D7 through the engine: a graphed plan whose Triton External names ``service="triton"`` runs through
-``SubmitRunner(ThreadBackend, services={"triton": "grpc://<fake>"})``, and the evaluator connects to the
-endpoint the run bound. Every OS; no ``tritonclient``.
+"""m68a D7 through the engine.
 
-The fake transport is graphed's ``fake_triton.py`` copied (``m68a_triton``); its connect log records the
-``url`` each evaluator was built with, and a fake "server" answers only at the endpoint it was served
-at. The declared spec's ``check`` is ``tcp``, so the harness binds a TCP listener at that endpoint (its
-accept counter shows the engine checked and probed it; ``tcp`` passes on every scheme).
+A graphed plan whose Triton External names ``service="triton"`` runs through
+``SubmitRunner(ThreadBackend, services={"triton": "grpc://<fake>"})``, and the evaluator connects
+to the endpoint the run bound. Every OS; no ``tritonclient``.
 
-Discriminates: a URL-blind cache (two nodes on two services must connect twice), a service name in the
-engine (the literal-``url`` plan carries no service and starts no set), and a replaced given endpoint.
+The fake transport is graphed's ``fake_triton.py`` copied (``m68a_triton``); its connect log
+records the ``url`` each evaluator was built with, and a fake "server" answers only at the endpoint
+it was served at. The declared spec's ``check`` is ``tcp``, so the harness binds a TCP listener at
+that endpoint (its accept counter shows the engine checked and probed it; ``tcp`` passes on every
+scheme).
+
+Discriminates: a URL-blind cache (two nodes on two services must connect twice), a service name in
+the engine (the literal-``url`` plan carries no service and starts no set), and a replaced given
+endpoint.
 """
 
 from __future__ import annotations
@@ -87,7 +91,9 @@ def test_the_literal_url_plan_starts_no_service_set(caplog: pytest.LogCaptureFix
     with CountingListener() as listener:
         with (
             caplog.at_level(logging.INFO),
-            closing_bounded(runner_over(backend, services={"triton": listener.endpoint("grpc")})) as runner,
+            closing_bounded(
+                runner_over(backend, services={"triton": listener.endpoint("grpc")})
+            ) as runner,
         ):
             (row,) = run_bounded(lambda: runner.run(plan), BOUND_S).value
         assert listener.settled() == 0, "a service set checked an endpoint the plan does not name"
@@ -98,5 +104,8 @@ def test_the_literal_url_plan_starts_no_service_set(caplog: pytest.LogCaptureFix
 
 
 def _payload(tag: str, w: float = 0.45, b: float = -0.1) -> bytes:
-    """A served model's descriptor: the fake server at an endpoint computes with these weights."""
+    """Return a served model's descriptor.
+
+    The fake server at an endpoint computes with these weights.
+    """
     return descriptor(tag, w, b)

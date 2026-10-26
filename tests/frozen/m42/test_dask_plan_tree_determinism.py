@@ -1,5 +1,7 @@
-"""m42 determinism: the fixed `plan_tree` future graph is bit-for-bit vs `SequentialRunner`,
-across two runs on one client, and invariant to worker count (plan §1.2.1, §1.2.3; blueprint §3
+"""m42 determinism.
+
+The fixed `plan_tree` future graph is bit-for-bit vs `SequentialRunner`, across two runs on one
+client, and invariant to worker count (plan §1.2.1, §1.2.3; blueprint §3
 `test_dask_plan_tree_determinism`).
 
 The payload is an associative but NON-commutative concat with staggered leaf delays (later keys
@@ -7,7 +9,8 @@ finish first): any arrival-ordered fold — the coffea-style batched reduction w
 with worker count, exactly what `plan_tree` exists to avoid — concats out of key order and fails
 loudly here. The re-execution witness (disjoint per-invocation marks across two runs) discriminates
 content-only task keys without a run nonce: with reused keys the second run would return the first
-run's cached partials instead of re-executing (plan §1.2.3)."""
+run's cached partials instead of re-executing (plan §1.2.3).
+"""
 
 from __future__ import annotations
 
@@ -47,9 +50,11 @@ def test_two_runs_are_bit_identical_and_equal_sequential(client) -> None:
 
 
 def test_result_is_invariant_to_worker_count(client) -> None:
-    """The same plan on 1-worker and 3-worker clusters equals the 2-worker and sequential value —
-    the topology-invariance kill for arrival/batch-grouped reductions (grouping fixed by leaf
-    index, never by worker count or completion order)."""
+    """The same plan on 1-worker and 3-worker clusters equals the 2-worker and sequential value.
+
+    The topology-invariance kill for arrival/batch-grouped reductions (grouping fixed by leaf
+    index, never by worker count or completion order).
+    """
     plan = concat_plan(16, "dettopo", staggered=True)
     expected = expected_concat(16, "dettopo")
     with make_dask_runner(client) as runner:
@@ -60,9 +65,12 @@ def test_result_is_invariant_to_worker_count(client) -> None:
 
 
 def test_second_run_reexecutes_instead_of_returning_cached_futures(client) -> None:
-    """Two runs of a mark-carrying plan: payloads identical, but the per-invocation nonce sets are
-    DISJOINT — every leaf and combine genuinely re-executed. A content-only key scheme (no run
-    nonce) hands run 2 the cached run-1 partials: identical marks, caught here."""
+    """Two runs of a mark-carrying plan.
+
+    Payloads identical, but the per-invocation nonce sets are DISJOINT — every leaf and combine
+    genuinely re-executed. A content-only key scheme (no run nonce) hands run 2 the cached
+    run-1 partials: identical marks, caught here.
+    """
     plan = prov_plan(16, "detre")
     with make_dask_runner(client) as runner:
         p1 = runner.run(plan).value

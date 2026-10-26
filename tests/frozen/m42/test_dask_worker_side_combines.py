@@ -1,10 +1,13 @@
-"""m42 worker-side reduction: combines execute ON WORKERS with peer-fetched inputs, never on the
-driver (plan §1.2.1 "worker-side combines for free"; blueprint §3 `test_dask_worker_side_combines`;
-witness style: tests/frozen/m38/test_peer_reduce.py `test_witness_reduction_is_genuinely_off_driver`).
+"""m42 worker-side reduction.
+
+Combines execute ON WORKERS with peer-fetched inputs, never on the driver (plan §1.2.1 "worker-side
+combines for free"; blueprint §3 `test_dask_worker_side_combines`; witness style:
+tests/frozen/m38/test_peer_reduce.py `test_witness_reduction_is_genuinely_off_driver`).
 
 Discriminates: an implementation that gathers all partials to the driver and combines there
 (combine pids == driver pid), and one that funnels every combine to a single worker without any
-cross-worker input movement (no (producer != combiner) move pair)."""
+cross-worker input movement (no (producer != combiner) move pair).
+"""
 
 from __future__ import annotations
 

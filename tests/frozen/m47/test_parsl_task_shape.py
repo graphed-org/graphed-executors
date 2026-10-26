@@ -1,9 +1,11 @@
-"""m47 anti-super-linear guard, reshaped for k persistent peers (plan §3 omissions item 3 —
-tests-M3): the submit-seam witness is **submit-count == k + O(1) control, independent of T and
-P**, asserted across a {parts, 2*parts} x {T, 2*T} ladder, plus row-count independence. The m44
-O(T+P) per-submit gate does NOT port (the map/pull/gather loops run INSIDE the k peer tasks,
-invisible at the submit seam); its other two thirds live in `test_parsl_block_plane` (pull
-coalescing <= k*k) and `test_parsl_rendezvous_barrier` (exactly k hellos).
+"""m47 anti-super-linear guard: submit count is k + O(1), independent of T and P.
+
+m47 anti-super-linear guard, reshaped for k persistent peers (plan §3 omissions item 3 — tests-M3):
+the submit-seam witness is **submit-count == k + O(1) control, independent of T and P**, asserted
+across a {parts, 2*parts} x {T, 2*T} ladder, plus row-count independence. The m44 O(T+P) per-submit
+gate does NOT port (the map/pull/gather loops run INSIDE the k peer tasks, invisible at the submit
+seam); its other two thirds live in `test_parsl_block_plane` (pull coalescing <= k*k) and
+`test_parsl_rendezvous_barrier` (exactly k hellos).
 
 Counted at the ONLY pinned seam — ``pbackend.submit`` — via the harness ``SpyP2PBackend``,
 classified by the pinned module-level fn name ``_parsl_peer_main``. Per-cell EXACT equality:
@@ -14,7 +16,8 @@ nothing. Counts, never clocks (R0.10a).
 
 Discriminates: a per-partition-task engine (count grows with P); a per-src-task engine (grows
 with T); a relay-in-disguise (``_dask_map_write``/``_dask_gather`` submits); per-row/per-fragment
-task creation (the M39 anti-pattern)."""
+task creation (the M39 anti-pattern).
+"""
 
 from __future__ import annotations
 
@@ -57,7 +60,9 @@ def htex():  # type: ignore[no-untyped-def]
 def _spy_run(htex, src, parts: int) -> SpyP2PBackend:  # type: ignore[no-untyped-def]
     spy = SpyP2PBackend(make_parsl_backend(htex))
     run_bounded(
-        lambda: transport_repartition(numpy_p2p_adapter().backend, src, parts, pbackend=spy, workers=K)
+        lambda: transport_repartition(
+            numpy_p2p_adapter().backend, src, parts, pbackend=spy, workers=K
+        )
     )
     return spy
 

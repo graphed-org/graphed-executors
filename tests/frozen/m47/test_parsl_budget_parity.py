@@ -1,6 +1,7 @@
-"""m47 budget goldens (m41 carried via the shared bodies) — the peer-exchange gather and join
-bound their working sets with the SAME ``common/transport_tasks`` counters the dask job gates
-(plan §1.4/§1.6; blueprint §3 `test_parsl_budget_parity`).
+"""m47 budget goldens (m41 carried via the shared bodies).
+
+The peer-exchange gather and join bound their working sets with the SAME ``common/transport_tasks``
+counters the dask job gates (plan §1.4/§1.6; blueprint §3 `test_parsl_budget_parity`).
 
 Each arm first runs the LOCAL engine with the same budget as an in-test SCENARIO GUARD (the
 budget provably engages the mechanism there — numbers pre-validated while authoring: fetch
@@ -12,7 +13,8 @@ local spilled 7 == chunks_read 7, peak 15360, rows 4096), then pins the p2p engi
 - join plane: ``join_spilled_partitions > 0`` and ``== join_chunks_read`` (F5: every spilled
   radix partition read back exactly once), ``peak_join_bytes <= budget``, and the duplicated
   output row count exact — counters produced by genuine ``_join_with_budget`` reuse; a
-  re-implementation diverges from the shared counter semantics."""
+  re-implementation diverges from the shared counter semantics.
+"""
 
 from __future__ import annotations
 
@@ -68,7 +70,9 @@ def test_fetch_budget_engages_and_never_changes_the_bytes(htex) -> None:  # type
             be, src, PARTS, pbackend=make_parsl_backend(htex), fetch_budget_bytes=budget
         )
     )
-    assert r.dest_block_hashes == base.dest_block_hashes, "a fetch budget must never change the bytes"
+    assert r.dest_block_hashes == base.dest_block_hashes, (
+        "a fetch budget must never change the bytes"
+    )
     assert r.witness.fetch_spill_count > 0, "the p2p gather never engaged the fetch spill"
     assert r.witness.peak_fetch_bytes <= budget + one_block, (
         f"peak_fetch_bytes={r.witness.peak_fetch_bytes} exceeded budget+one_block="
@@ -108,4 +112,6 @@ def test_join_budget_spill_counters_engage_with_f5_read_back_parity(htex) -> Non
     )
     assert w.peak_join_bytes <= budget, "the join working set exceeded its budget (B5)"
     assert w.join_output_rows == n * n, "the duplicated output row count drifted"
-    assert r.dest_block_hashes == local.dest_block_hashes, "a join budget must never change the bytes"
+    assert r.dest_block_hashes == local.dest_block_hashes, (
+        "a join budget must never change the bytes"
+    )

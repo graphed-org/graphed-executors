@@ -1,5 +1,7 @@
-"""m46 relay engine — relational join on HTEX (plan §1.3; §3 m46 `test_parsl_relay_join`; the
-m40/m43 golden lineage). HTEX fixture deliberately — site provenance is vacuous on TPE.
+"""m46 relay engine.
+
+Relational join on HTEX (plan §1.3; §3 m46 `test_parsl_relay_join`; the m40/m43 golden lineage).
+HTEX fixture deliberately — site provenance is vacuous on TPE.
 
 Witnesses: inner == the TEST-AUTHORED duplicating oracle (routes via the golden-pinned
 `partition`, never the join kernel) AND `dest_block_hashes` byte-identical to the LOCAL `run_join`
@@ -13,7 +15,8 @@ duplicated rows intact); every gather-join site is a worker pid; the RelayShuffl
 Discriminates: a grouped/dedup join (multiset differs), dropped one-sided dests (13/17 rows
 vanish), a per-dest re-emission of unmatched rows (13/17 counts inflate), a full-RAM concat under
 budget (peak exceeds), driver-side gather-join (site pids), and an unlabeled relay (witness
-fields)."""
+fields).
+"""
 
 from __future__ import annotations
 
@@ -59,7 +62,9 @@ def htex():  # type: ignore[no-untyped-def]
 
 def _relay_join(htex, left, right, **kwargs):  # type: ignore[no-untyped-def]
     spy = SpyParslBackend(make_parsl_backend(htex))
-    res = run_bounded(lambda: relay_join(BACKEND, left, right, PARTS, runner=make_runner(spy), **kwargs))
+    res = run_bounded(
+        lambda: relay_join(BACKEND, left, right, PARTS, runner=make_runner(spy), **kwargs)
+    )
     return spy, res
 
 
@@ -106,7 +111,9 @@ def test_noninner_arms_match_local_nullable_with_one_sided_rows(how: str, htex) 
     assert got == nullable_join_multiset(local.value), (
         f"how={how}: relay diverged from the local engine's null-aware relation"
     )
-    assert res.dest_block_hashes == local.dest_block_hashes, f"how={how}: cross-engine hashes diverged"
+    assert res.dest_block_hashes == local.dest_block_hashes, (
+        f"how={how}: cross-engine hashes diverged"
+    )
     _assert_relay_witness(res)
 
     # the unmatched witnesses, explicit (never trust only the shared-kernel comparison):
@@ -114,11 +121,15 @@ def test_noninner_arms_match_local_nullable_with_one_sided_rows(how: str, htex) 
     n13 = sum(c for (k, _lv, rv), c in got.items() if k == 13 and rv is None)
     n17 = sum(c for (k, lv, _rv), c in got.items() if k == 17 and lv is None)
     if how in ("left", "outer"):
-        assert n13 == 2, f"how={how}: the two unmatched build rows (key 13) must appear EXACTLY once each"
+        assert n13 == 2, (
+            f"how={how}: the two unmatched build rows (key 13) must appear EXACTLY once each"
+        )
     else:
         assert n13 == 0
     if how in ("right", "outer"):
-        assert n17 == 2, f"how={how}: the two unmatched probe rows (key 17) must appear EXACTLY once each"
+        assert n17 == 2, (
+            f"how={how}: the two unmatched probe rows (key 17) must appear EXACTLY once each"
+        )
     else:
         assert n17 == 0
 
@@ -127,21 +138,30 @@ def test_budgeted_join_spills_and_streams_within_the_budget(htex) -> None:  # ty
     n_left = n_right = 64  # -> 4096 duplicated output rows in a single hot dest
     left, right = join_hot_key_sides(n_left, n_right)
     oracle = dup_join_all(left, right, PARTS)
-    assert sum(oracle.values()) == n_left * n_right, "scenario must duplicate to n_left*n_right rows"
+    assert sum(oracle.values()) == n_left * n_right, (
+        "scenario must duplicate to n_left*n_right rows"
+    )
 
     # bound the duplicated output from the input row widths (the m40 sizing idiom), then squeeze
     row_bytes = (
-        int(BACKEND.estimated_bytes(left[0])) // n_left + int(BACKEND.estimated_bytes(right[0])) // n_right
+        int(BACKEND.estimated_bytes(left[0])) // n_left
+        + int(BACKEND.estimated_bytes(right[0])) // n_right
     )
     budget = (n_left * n_right * row_bytes) // 8
 
-    _spy, res = _relay_join(htex, left, right, how="inner", broadcast=False, mem_budget_bytes=budget)
+    _spy, res = _relay_join(
+        htex, left, right, how="inner", broadcast=False, mem_budget_bytes=budget
+    )
     w = res.witness
     assert w.peak_join_bytes <= budget, (
         "the gather-join working set exceeded the budget — a full-RAM concat of the duplicated "
         "dest instead of the reused _join_with_budget spill+stream kernel"
     )
     assert w.join_spilled_partitions > 0, "spill never engaged — the budget was never exercised"
-    assert w.join_output_rows == n_left * n_right, "relational duplication must emit n_left*n_right rows"
-    assert observed_join_all(res.value) == oracle, "spilled/streamed join content diverged from the oracle"
+    assert w.join_output_rows == n_left * n_right, (
+        "relational duplication must emit n_left*n_right rows"
+    )
+    assert observed_join_all(res.value) == oracle, (
+        "spilled/streamed join content diverged from the oracle"
+    )
     _assert_relay_witness(res)

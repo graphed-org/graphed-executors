@@ -1,16 +1,19 @@
-"""m68a D4 and the §3.1 ``htcondor_backend`` bullet: the site table's service data, the recipes, the
-driver-job backend's service surface, and what the m66 acquirers leave behind when they fail. Every OS,
-no bindings (``launch._htcondor`` is a recorder, and ``sys.modules["htcondor2"] = None`` in the driver-job
-legs, so any bindings import there fails).
+"""m68a D4 and the §3.1 ``htcondor_backend`` bullet.
 
-The measured rows (P6, P7, m66) are pinned; the ``services`` values are site data, so only their form is:
-each passes ``split_endpoint``. A driver-job backend is taken from ``driver._runner(...)``, never built
-with ``HTCondorBackend(..., in_job=)`` here, so the leg guards that ``driver.py`` passes ``in_job``.
+The site table's service data, the recipes, the driver-job backend's service surface, and what the
+m66 acquirers leave behind when they fail. Every OS, no bindings (``launch._htcondor`` is a
+recorder, and ``sys.modules["htcondor2"] = None`` in the driver-job legs, so any bindings import
+there fails).
 
-Discriminates: drifted site data, a bare ``host:port`` site endpoint, a driver job that ignores its site
-row (lxplus through the launcher fallback's generic row would offer ``("driver", "cluster")``; the
-attached lxplus row offers ``("cluster",)``), a bindings-backed identity inside a job, and an acquirer
-that leaves a pilot, a cluster or a bound port behind a failure.
+The measured rows (P6, P7, m66) are pinned; the ``services`` values are site data, so only their
+form is: each passes ``split_endpoint``. A driver-job backend is taken from
+``driver._runner(...)``, never built with ``HTCondorBackend(..., in_job=)`` here, so the leg guards
+that ``driver.py`` passes ``in_job``.
+
+Discriminates: drifted site data, a bare ``host:port`` site endpoint, a driver job that ignores its
+site row (lxplus through the launcher fallback's generic row would offer ``("driver", "cluster")``;
+the attached lxplus row offers ``("cluster",)``), a bindings-backed identity inside a job, and an
+acquirer that leaves a pilot, a cluster or a bound port behind a failure.
 """
 
 from __future__ import annotations
@@ -81,11 +84,17 @@ ROWS = {
 
 def synthetic(name: str, **kwargs: Any) -> Any:
     return htcondor_api().SiteProfile(
-        name=name, submit={}, spool=False, ship_env=False, sandbox_root=None, schedd_query=None, **kwargs
+        name=name,
+        submit={},
+        spool=False,
+        ship_env=False,
+        sandbox_root=None,
+        schedd_query=None,
+        **kwargs,
     )
 
 
-# ---- the site table -----------------------------------------------------------------------------------
+# ---- the site table -----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("site", sorted(ROWS))
@@ -115,23 +124,34 @@ def test_site_services_are_endpoints(site: str) -> None:
     ids=["both", "no-service-ports", "no-worker-ports", "neither"],
 )
 def test_service_hosts_derive_from_the_port_ranges(
-    service_ports: tuple[int, int] | None, worker_ports: tuple[int, int] | None, hosts: tuple[str, ...]
+    service_ports: tuple[int, int] | None,
+    worker_ports: tuple[int, int] | None,
+    hosts: tuple[str, ...],
 ) -> None:
-    profile = synthetic("m68a-synthetic", service_ports=service_ports, worker_ports=worker_ports, services={})
+    profile = synthetic(
+        "m68a-synthetic", service_ports=service_ports, worker_ports=worker_ports, services={}
+    )
     assert profile.service_hosts == hosts
     assert dict(profile.services) == {}
 
 
 @pytest.mark.parametrize(
-    ("service_ports", "worker_ports"), [(None, (20000, 20010)), (None, None)], ids=["cluster-only", "neither"]
+    ("service_ports", "worker_ports"),
+    [(None, (20000, 20010)), (None, None)],
+    ids=["cluster-only", "neither"],
 )
 def test_an_attached_backend_without_a_driver_host_refuses_a_managed_start(
     service_ports: tuple[int, int] | None, worker_ports: tuple[int, int] | None, children: Any
 ) -> None:
-    """Leg 3 on an attached profile without ``"driver"``: m68a has no ``host_service``, so the managed
-    leg is refused naming the attribute; a profile with neither range leaves legs 1-2 only."""
+    """Leg 3 on an attached profile without ``"driver"``.
+
+    m68a has no ``host_service``, so the managed leg is refused naming the attribute; a profile
+    with neither range leaves legs 1-2 only.
+    """
     services = services_api()
-    profile = synthetic("m68a-nodriver", service_ports=service_ports, worker_ports=worker_ports, services={})
+    profile = synthetic(
+        "m68a-nodriver", service_ports=service_ports, worker_ports=worker_ports, services={}
+    )
     backend = run_bounded(
         lambda: backend_api().HTCondorBackend(
             NoStartLauncher(profile), 1, host="127.0.0.1", port_range=(0, 0)
@@ -145,7 +165,10 @@ def test_an_attached_backend_without_a_driver_host_refuses_a_managed_start(
         assert not callable(getattr(backend, "host_service", None))
         with pytest.raises(services.ServiceUnavailable) as excinfo:
             run_bounded(
-                services.ServiceSet([child_spec("web", report, ports=free_range())], backend).start, BOUND_S
+                services.ServiceSet(
+                    [child_spec("web", report, ports=free_range())], backend
+                ).start,
+                BOUND_S,
             )
     finally:
         run_bounded(backend.close, BOUND_S)
@@ -154,20 +177,28 @@ def test_an_attached_backend_without_a_driver_host_refuses_a_managed_start(
     assert not report.exists(), "a managed child started on a profile without a driver host"
 
 
-@pytest.mark.parametrize("bare", ["triton.m68a.example:443", "grpcs://triton.m68a.example", "triton://h:1"])
-def test_a_services_value_that_is_not_an_endpoint_fails_construction_naming_the_row(bare: str) -> None:
+@pytest.mark.parametrize(
+    "bare", ["triton.m68a.example:443", "grpcs://triton.m68a.example", "triton://h:1"]
+)
+def test_a_services_value_that_is_not_an_endpoint_fails_construction_naming_the_row(
+    bare: str,
+) -> None:
     with pytest.raises(ValueError) as excinfo:
-        synthetic("m68a-bare-row", service_ports=None, worker_ports=None, services={"triton": bare})
+        synthetic(
+            "m68a-bare-row", service_ports=None, worker_ports=None, services={"triton": bare}
+        )
     assert "m68a-bare-row" in str(excinfo.value), str(excinfo.value)
     ok = synthetic("m68a-good-row", services={"triton": "grpcs://triton.m68a.example:443"})
     assert dict(ok.services) == {"triton": "grpcs://triton.m68a.example:443"}
 
 
-# ---- the recipes -----------------------------------------------------------------------------------------
+# ---- the recipes --------------------------------------------------------------------------------
 
 
 def test_the_triton_recipe_is_grpc_only() -> None:
-    spec = recipes_api().triton("triton", "/cvmfs/unpacked.example/tritonserver:24.11-py3", "models/")
+    spec = recipes_api().triton(
+        "triton", "/cvmfs/unpacked.example/tritonserver:24.11-py3", "models/"
+    )
     assert (spec.name, spec.kind, spec.check) == ("triton", "triton", "grpc:")
     argv = spec.launch.argv
     assert argv[0] == "tritonserver"
@@ -221,19 +252,25 @@ def test_python_is_rendered_as_the_driver_interpreter(children: Any) -> None:
     report = children.report()
     backend = submit_api().ThreadBackend(1)
     try:
-        with bounded_set(services.ServiceSet([child_spec("svc", report, ports=free_range())], backend)):
+        with bounded_set(
+            services.ServiceSet([child_spec("svc", report, ports=free_range())], backend)
+        ):
             assert read_report(report)["python"] == sys.executable
     finally:
         run_bounded(backend.close, BOUND_S)
 
 
-# ---- host identity -------------------------------------------------------------------------------------
+# ---- host identity ------------------------------------------------------------------------------
 
 
-def test_an_attached_backend_names_the_host_condor_writes_as_machine(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_attached_backend_names_the_host_condor_writes_as_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     record_bindings(monkeypatch, RecordingSchedd(), full_hostname="login42.m68a.example")
     backend = run_bounded(
-        lambda: backend_api().HTCondorBackend(NoStartLauncher(), 1, host="127.0.0.1", port_range=(0, 0)),
+        lambda: backend_api().HTCondorBackend(
+            NoStartLauncher(), 1, host="127.0.0.1", port_range=(0, 0)
+        ),
         BOUND_S,
     )
     try:
@@ -262,9 +299,13 @@ def driver_run(site: str, tmp_path: Path) -> dict[str, Any]:
 def job_runner(site: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     """``driver._runner`` as a driver job calls it: a machine ad, no bindings."""
     monkeypatch.setitem(sys.modules, "htcondor2", None)
-    monkeypatch.setenv("_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "machine.ad", MACHINE)))
+    monkeypatch.setenv(
+        "_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "machine.ad", MACHINE))
+    )
     with open(tmp_path / "driver.log", "a") as log:
-        return run_bounded(lambda: driver_api()._runner(driver_run(site, tmp_path), tmp_path, log), BOUND_S)
+        return run_bounded(
+            lambda: driver_api()._runner(driver_run(site, tmp_path), tmp_path, log), BOUND_S
+        )
 
 
 def test_the_lpc_driver_job_backend_reads_its_own_row(
@@ -284,7 +325,8 @@ def test_the_lxplus_driver_job_hosts_a_service_beside_the_driver(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     services = services_api()
-    backstop = popen_backstop()  # http.server writes no pid report: stop it here if the set did not
+    # http.server writes no pid report: stop it here if the set did not
+    backstop = popen_backstop()
     backstop.__enter__()
     runner = job_runner("lxplus", tmp_path, monkeypatch)
     try:
@@ -312,12 +354,17 @@ def test_the_lxplus_driver_job_hosts_a_service_beside_the_driver(
             backstop.__exit__(None, None, None)
 
 
-# ---- the m66 acquirers: a failure leaves nothing ---------------------------------------------------------
+# ---- the m66 acquirers: a failure leaves nothing ------------------------------------------------
 
 
-def _sleepers(monkeypatch: pytest.MonkeyPatch, fail_at: int | None) -> list[subprocess.Popen[bytes]]:
-    """Replace ``subprocess.Popen`` (as the launcher reaches it) by one that starts a sleeper per pilot
-    and raises on spawn number ``fail_at``."""
+def _sleepers(
+    monkeypatch: pytest.MonkeyPatch, fail_at: int | None
+) -> list[subprocess.Popen[bytes]]:
+    """Replace ``subprocess.Popen`` with a sleeper per pilot that fails at spawn ``fail_at``.
+
+    Replace ``subprocess.Popen`` (as the launcher reaches it) by one that starts a sleeper per
+    pilot and raises on spawn number ``fail_at``.
+    """
     real = subprocess.Popen
     spawned: list[subprocess.Popen[bytes]] = []
 
@@ -339,7 +386,9 @@ def _stop_all(procs: list[subprocess.Popen[bytes]]) -> None:
         proc.wait(30)
 
 
-def test_a_failed_second_pilot_spawn_leaves_no_pilot_and_no_port(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_failed_second_pilot_spawn_leaves_no_pilot_and_no_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     spawned = _sleepers(monkeypatch, fail_at=2)
     port = closed_port()
     try:
@@ -417,7 +466,10 @@ def test_close_frees_the_task_server_port_when_the_launcher_stop_raises() -> Non
     launcher = NoStartLauncher(stop_raises=RuntimeError("launcher stop raised (injected)"))
     port = closed_port()
     backend = run_bounded(
-        lambda: backend_api().HTCondorBackend(launcher, 1, host="127.0.0.1", port_range=(port, port)), BOUND_S
+        lambda: backend_api().HTCondorBackend(
+            launcher, 1, host="127.0.0.1", port_range=(port, port)
+        ),
+        BOUND_S,
     )
     assert not port_free(port)
     try:

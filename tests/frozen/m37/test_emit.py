@@ -1,6 +1,8 @@
-"""M37 frozen suite (graphed-exec-local slice): both reference executors EMIT dashboard events, and
-do so **passively** — attaching a monitor never changes the reduced result, and a misbehaving
-monitor never breaks the run. Worker-side STARTED/FINISHED/ERRORED + driver-side SUBMITTED.
+"""M37 frozen suite (graphed-exec-local slice).
+
+Both reference executors EMIT dashboard events, and do so **passively** — attaching a monitor never
+changes the reduced result, and a misbehaving monitor never breaks the run. Worker-side
+STARTED/FINISHED/ERRORED + driver-side SUBMITTED.
 
 Pinned to ``comms=None`` (the hub monitor seam) since M38: M37 is the hub-path dashboard milestone,
 so these assertions exercise the hub collector. Peer-path emission parity is covered by m38
@@ -22,7 +24,10 @@ EXECUTORS = [("thread", ThreadExecutor), ("process", ProcessExecutor)]
 
 
 class Recorder:
-    """A thread-safe driver-side monitor (on_task fires from worker threads / the collector thread)."""
+    """A thread-safe driver-side monitor.
+
+    on_task fires from worker threads / the collector thread.
+    """
 
     def __init__(self) -> None:
         self.events: list[TaskEvent] = []
@@ -51,16 +56,19 @@ def _plan(n: int = 8) -> tuple[list[Task], Plan[int]]:
 
 @pytest.mark.parametrize("name,Executor", EXECUTORS)
 def test_emit_full_phase_sequence(name: str, Executor: type) -> None:
-    """Worker-side counts are lower bounds: the process drain is best-effort and shutdown must not
-    stall to make it exhaustive."""
+    """Worker-side counts are lower bounds.
+
+    The process drain is best-effort and shutdown must not stall to make it exhaustive.
+    """
     _, plan = _plan(8)
     rec = Recorder()
     with Executor(max_workers=3, monitor=rec, comms=None) as ex:
         result = ex.run(plan)
     phases = collections.Counter(e.phase for e in rec.events)
-    # Threads emit in-process (synchronously, inside the future's callable) so their counts are exact;
-    # processes ship over a bounded buffer + a suppressed put + a daemon flush at worker exit, none of
-    # which guarantee delivery -- hence a floor of 1, held up by the worker-label witness below.
+    # Threads emit in-process (synchronously, inside the future's callable) so their counts are
+    # exact; processes ship over a bounded buffer + a suppressed put + a daemon flush at worker
+    # exit, none of which guarantee delivery -- hence a floor of 1, held up by the worker-label
+    # witness below.
     lo = 8 if name == "thread" else 1
     assert phases[TaskPhase.SUBMITTED] == 8  # driver-side, emitted before the submit
     assert lo <= phases[TaskPhase.STARTED] <= 8
@@ -92,7 +100,10 @@ def test_errored_task_emits_errored_and_propagates(name: str, Executor: type) ->
     tasks = [Task(0, Partition("bad.root", "Events", 0, 10))]
     plan = Plan(process=boom, combine=add, empty=lambda: 0, tasks=tasks)
     rec = Recorder()
-    with pytest.raises(ValueError, match="boom"), Executor(max_workers=2, monitor=rec, comms=None) as ex:
+    with (
+        pytest.raises(ValueError, match="boom"),
+        Executor(max_workers=2, monitor=rec, comms=None) as ex,
+    ):
         ex.run(plan)
     errored = [e for e in rec.events if e.phase is TaskPhase.ERRORED]
     assert len(errored) >= 1

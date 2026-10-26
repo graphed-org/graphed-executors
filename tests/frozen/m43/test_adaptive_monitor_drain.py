@@ -1,7 +1,9 @@
-"""m43 carried follow-up F2a (m42 review, wf_20cb8bd3-42f APPROVE): an ADAPTIVE run with a monitor
-attached must deliver every consumed task's STARTED/FINISHED events to the monitor BEFORE `run()`
-returns — at parity with the fixed path's trailing-event drain (engine.py `_run_fixed` drains
-`events_seen >= 2n` before unsubscribing; the adaptive path unsubscribes without any drain).
+"""m43 carried follow-up F2a (m42 review, wf_20cb8bd3-42f APPROVE).
+
+An ADAPTIVE run with a monitor attached must deliver every consumed task's STARTED/FINISHED events
+to the monitor BEFORE `run()` returns — at parity with the fixed path's trailing-event drain
+(engine.py `_run_fixed` drains `events_seen >= 2n` before unsubscribing; the adaptive path
+unsubscribes without any drain).
 
 Engine-level and dask-free (runs in the MAIN matrix): the mechanism under test lives in
 `graphed_executors.submit.engine.SubmitRunner`, shared by every backend. The harness
@@ -13,7 +15,8 @@ DETERMINISTIC assertion failure, not a race (the delay is scenario construction;
 are event-set counts, R0.10a).
 
 The fixed-path CONTROL test runs the same wrapper and passes on current HEAD — proving delivery
-through the delayed transport works and the adaptive failure is specifically the missing drain."""
+through the delayed transport works and the adaptive failure is specifically the missing drain.
+"""
 
 from __future__ import annotations
 
@@ -65,9 +68,12 @@ def test_adaptive_run_delivers_all_task_events_before_returning() -> None:
 
 
 def test_fixed_run_control_delivers_under_the_same_delayed_transport() -> None:
-    """CONTROL (passes on current HEAD): the fixed path drains before unsubscribing, so the same
-    delayed transport delivers everything by return — the adaptive failure above is therefore the
-    missing drain, not a harness artifact."""
+    """CONTROL (passes on current HEAD).
+
+    The fixed path drains before unsubscribing, so the same delayed transport delivers
+    everything by return — the adaptive failure above is therefore the missing drain, not a
+    harness artifact.
+    """
     tasks = tuple(Task(i, p) for i, p in enumerate(f2_partitions(N, "f2a-fixed")))
     monitor = EventRecordingMonitor()
     backend = DelayedEventBackend(ThreadBackend(max_workers=2), delay_s=0.5)

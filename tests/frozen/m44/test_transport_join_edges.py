@@ -1,6 +1,8 @@
-"""m44 FROZEN FIXUP — join edge surfaces mutation testing found frozen-unexecuted (orchestrator
-mandate after REVIEW; the m43 `test_dask_join_parity_edges.py` precedent, new repo-unique
-basename). Two gaps, pinned through the SAME entry points and harness as the main suite:
+"""m44 FROZEN FIXUP.
+
+Join edge surfaces mutation testing found frozen-unexecuted (orchestrator mandate after REVIEW; the
+m43 `test_dask_join_parity_edges.py` precedent, new repo-unique basename). Two gaps, pinned through
+the SAME entry points and harness as the main suite:
 
 GAP-A — broadcast left/outer with never-matched BUILD rows: the forced-broadcast path must emit
 the null-fill tail for build rows that match nothing in the probe (and, under outer, the
@@ -24,7 +26,8 @@ inner: 0/0 · left: L-empty 0, R-empty 7 · right: L-empty 7, R-empty 0 · outer
 Discriminates: a broadcast join that drops (or double-emits) the unmatched build tail; a
 sentinel-null fill; an engine that crashes or hangs on a partitionless side; one that treats a
 zero-row carrier like a missing side (loses the null-filled column, hashes diverge); a counter
-that stops naming the emitted rows."""
+that stops naming the emitted rows.
+"""
 
 from __future__ import annotations
 
@@ -77,8 +80,10 @@ def adapter(request) -> TransportAdapter:  # type: ignore[no-untyped-def]
 
 
 def _bcast_tail_sides(adapter: TransportAdapter) -> tuple[list[object], list[object]]:
-    """Build keys 98/99 match NOTHING in the probe (the GAP-A null-fill tail); probe key 55
-    matches nothing in the build (outer's other tail)."""
+    """Build keys 98/99 match NOTHING in the probe (the GAP-A null-fill tail).
+
+    Probe key 55 matches nothing in the build (outer's other tail).
+    """
     left = [adapter.make_side([1, 2, 3, 98, 99], "lval", [10, 20, 30, 980, 990])]
     probe_keys = [1, 1, 2, 3, 3, 3, 2, 2, 1, 3, 1, 2, 3, 1, 2, 3, 2, 55]
     right = [
@@ -96,14 +101,18 @@ def _full_side(adapter: TransportAdapter, field: str) -> list[object]:
 
 
 @pytest.mark.parametrize("how", ["left", "outer"])
-def test_broadcast_join_emits_the_null_filled_build_tail(adapter: TransportAdapter, client, how: str) -> None:  # type: ignore[no-untyped-def]
+def test_broadcast_join_emits_the_null_filled_build_tail(
+    adapter: TransportAdapter, client, how: str
+) -> None:  # type: ignore[no-untyped-def]
     left, right = _bcast_tail_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how=how, broadcast=True)
 
     install_transport_plugin(client)
     spy = SpyDaskBackend(build_dask_backend(client))
     outcome = run_bounded(
-        lambda: transport_join(adapter.backend, left, right, PARTS, how=how, dbackend=spy, broadcast=True),
+        lambda: transport_join(
+            adapter.backend, left, right, PARTS, how=how, dbackend=spy, broadcast=True
+        ),
         timeout_s=240.0,
     )
     assert "error" not in outcome, f"forced-broadcast {how} join raised: {outcome.get('error')!r}"
@@ -112,7 +121,9 @@ def test_broadcast_join_emits_the_null_filled_build_tail(adapter: TransportAdapt
     # the broadcast path really ran (the GAP-A surface, not a silent shuffle fallback)
     assert r.witness.broadcast_chosen is True
     names = spy.submitted_fn_names()
-    assert names["_transport_map_task"] == 0, f"broadcast {how} join shuffled a side: {dict(names)}"
+    assert names["_transport_map_task"] == 0, (
+        f"broadcast {how} join shuffled a side: {dict(names)}"
+    )
     # one pinned part task per LOCAL-oracle output partition: len(right) probe parts + the
     # unmatched-build tail partition the non-inner arms emit (measured: local dests == [0,1,2,3])
     assert names["_transport_broadcast_join_part"] == len(local.value), (
@@ -133,14 +144,18 @@ def test_broadcast_join_emits_the_null_filled_build_tail(adapter: TransportAdapt
     assert null_tail >= 2, f"how={how}: the never-matched build rows (98, 99) emitted no null tail"
     if how == "outer":
         assert any(row[1] is None for row in got), "outer lost the probe-only (55) null tail"
-    assert r.dest_block_hashes == local.dest_block_hashes, f"how={how}: broadcast bytes diverged from local"
+    assert r.dest_block_hashes == local.dest_block_hashes, (
+        f"how={how}: broadcast bytes diverged from local"
+    )
     assert r.witness.join_output_rows == sum(got.values())
 
 
 @pytest.mark.parametrize("kind", ["none", "carrier"])
 @pytest.mark.parametrize("empty_side", ["left", "right"])
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
-def test_one_side_empty_matches_the_local_oracle(adapter: TransportAdapter, client, how: str, empty_side: str, kind: str) -> None:  # type: ignore[no-untyped-def]
+def test_one_side_empty_matches_the_local_oracle(
+    adapter: TransportAdapter, client, how: str, empty_side: str, kind: str
+) -> None:  # type: ignore[no-untyped-def]
     empty_field = "lval" if empty_side == "left" else "rval"
     empty: list[object] = [] if kind == "none" else [adapter.make_side([], empty_field, [])]
     if empty_side == "left":
@@ -153,12 +168,15 @@ def test_one_side_empty_matches_the_local_oracle(adapter: TransportAdapter, clie
     install_transport_plugin(client)
     dbackend = build_dask_backend(client)
     outcome = run_bounded(
-        lambda: transport_join(adapter.backend, left, right, PARTS, how=how, dbackend=dbackend, broadcast=False),
+        lambda: transport_join(
+            adapter.backend, left, right, PARTS, how=how, dbackend=dbackend, broadcast=False
+        ),
         timeout_s=240.0,
     )
     assert "error" not in outcome, (
         f"{how}/{empty_side}-empty/{kind}: the engine crashed on a "
-        f"{'partitionless' if kind == 'none' else 'zero-row carrier'} side: {outcome.get('error')!r}"
+        f"{'partitionless' if kind == 'none' else 'zero-row carrier'} side: "
+        f"{outcome.get('error')!r}"
     )
     r = outcome["result"]
 

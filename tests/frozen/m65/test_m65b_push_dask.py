@@ -1,5 +1,8 @@
-"""m65 B: ``dask_runner`` workers push their task events through the monitor's per-worker factory,
-one connection per worker process."""
+"""m65 B: ``dask_runner`` workers push task events through the per-worker factory.
+
+m65 B: ``dask_runner`` workers push their task events through the monitor's per-worker factory, one
+connection per worker process.
+"""
 
 from __future__ import annotations
 
@@ -37,12 +40,16 @@ def test_dask_workers_push_one_connection_per_worker(client: Any, tmp_path: Path
     assert res.value == (1,) * mp.N
     driver_name = os.path.basename(driver.path)
     conns = bp.connections(str(tmp_path))
-    workers = [c for c, name in zip(conns, sorted(os.listdir(tmp_path)), strict=True) if name != driver_name]
+    workers = [
+        c
+        for c, name in zip(conns, sorted(os.listdir(tmp_path)), strict=True)
+        if name != driver_name
+    ]
     names = frozenset().union(*(w for _, w, _ in workers))
     assert len(names) >= 1
     assert len(conns) == 1 + len(names)
     assert os.getpid() not in {pid for pid, _, _ in workers}
-    assert sorted(e["key"] for _, _, evs in workers for e in evs if e["phase"] == "finished") == list(
-        range(mp.N)
-    )
+    assert sorted(
+        e["key"] for _, _, evs in workers for e in evs if e["phase"] == "finished"
+    ) == list(range(mp.N))
     assert not [e for e in driver.events if e.phase is TaskPhase.FINISHED]

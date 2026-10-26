@@ -1,16 +1,20 @@
-"""Shared harness for the m66 frozen suite: the direct HTCondor backend (lanes/htcondor/plan.md §2-§3).
+"""Shared harness for the m66 frozen suite.
+
+The direct HTCondor backend (lanes/htcondor/plan.md §2-§3).
 
 The m42 ``submit_backends.py`` helpers that the copied conformance bodies use are copied here (D1):
-frozen suites never import each other across directories, and no second ``submit_backends`` basename
-may exist. ``where()`` reads the backend-installed worker identity (the m46 idiom), because a pilot is
-not a dask worker.
+frozen suites never import each other across directories, and no second ``submit_backends``
+basename may exist. ``where()`` reads the backend-installed worker identity (the m46 idiom),
+because a pilot is not a dask worker.
 
-Everything a pilot unpickles is module-level here. Pilots import this module by name: ``LocalPilots``
-gets this directory on its ``PYTHONPATH``, and the live-pool file ships this file in ``user_modules``.
+Everything a pilot unpickles is module-level here. Pilots import this module by name:
+``LocalPilots`` gets this directory on its ``PYTHONPATH``, and the live-pool file ships this file
+in ``user_modules``.
 
-The implementation under test is reached only through the ``*_api()`` accessors, inside test bodies,
-so the suite collects before ``graphed_executors.htcondor_backend`` exists and each test then fails at
-the accessor with an ImportError/AttributeError that names the missing module or symbol.
+The implementation under test is reached only through the ``*_api()`` accessors, inside test
+bodies, so the suite collects before ``graphed_executors.htcondor_backend`` exists and each test
+then fails at the accessor with an ImportError/AttributeError that names the missing module or
+symbol.
 """
 
 from __future__ import annotations
@@ -36,48 +40,64 @@ DATA_DIR = Path(HARNESS_DIR) / "data"
 # never parents[3]: a pilot imports this file from a scratch dir that may be only one level deep
 REPO_ROOT = (Path(HARNESS_DIR) / ".." / ".." / "..").resolve()
 
-PILOT_WAIT_S = 120.0  # local pilots register in about a second; the bound turns a hang into a failure
+# local pilots register in about a second; the bound turns a hang into a failure
+PILOT_WAIT_S = 120.0
 RUN_TIMEOUT_S = 240.0
 
 # ---- deferred accessors for the implementation under test ---------------------------------------
 
 
 def htcondor_api() -> Any:
-    """``graphed_executors.htcondor_backend``: HTCondorBackend, HTCondorRunner, htcondor_runner,
-    CondorPilots, LocalPilots, PilotLauncher, SiteProfile, SITES, WorkerLost."""
-    import graphed_executors.htcondor_backend as mod  # noqa: PLC0415  (deferred: module under test)
+    """``graphed_executors.htcondor_backend``.
+
+    HTCondorBackend, HTCondorRunner, htcondor_runner, CondorPilots, LocalPilots, PilotLauncher,
+    SiteProfile, SITES, WorkerLost.
+    """
+    # deferred: module under test
+    import graphed_executors.htcondor_backend as mod  # noqa: PLC0415
 
     return mod
 
 
 def sites_api() -> Any:
-    """``graphed_executors.htcondor_backend.sites``: schedd_weight, choose_schedd, counts_as_alive."""
-    import graphed_executors.htcondor_backend.sites as mod  # noqa: PLC0415  (deferred: module under test)
+    """``graphed_executors.htcondor_backend.sites``.
+
+    schedd_weight, choose_schedd, counts_as_alive.
+    """
+    # deferred: module under test
+    import graphed_executors.htcondor_backend.sites as mod  # noqa: PLC0415
 
     return mod
 
 
 def launch_api() -> Any:
-    """``graphed_executors.htcondor_backend.launch``: the lazy ``_htcondor()`` accessor lives here."""
-    import graphed_executors.htcondor_backend.launch as mod  # noqa: PLC0415  (deferred: module under test)
+    """``graphed_executors.htcondor_backend.launch``.
+
+    The lazy ``_htcondor()`` accessor lives here.
+    """
+    # deferred: module under test
+    import graphed_executors.htcondor_backend.launch as mod  # noqa: PLC0415
 
     return mod
 
 
 def server_api() -> Any:
     """``graphed_executors.htcondor_backend.server``: LEASE_S, read at call time."""
-    import graphed_executors.htcondor_backend.server as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.htcondor_backend.server as mod  # noqa: PLC0415
 
     return mod
 
 
-# ---- pilot pools ---------------------------------------------------------------------------------
+# ---- pilot pools --------------------------------------------------------------------------------
 
 
 class RecordingLauncher:
-    """A ``PilotLauncher`` that records every ``start(url, secret, n)`` and delegates to ``inner``
-    (none: no pilots, ``alive() == 0``). It is how a test learns the server's url and secret without
-    naming the backend's private attributes."""
+    """A ``PilotLauncher`` that records every ``start(url, secret, n)`` and delegates to ``inner``.
+
+    None: no pilots, ``alive() == 0``. It is how a test learns the server's url and secret
+    without naming the backend's private attributes.
+    """
 
     def __init__(self, inner: Any = None) -> None:
         self.inner = inner
@@ -101,8 +121,11 @@ def local_pilots() -> Any:
 
 
 def local_backend(n: int, launcher: Any = None) -> Any:
-    """``HTCondorBackend`` over ``n`` local pilots on 127.0.0.1, returned once all ``n`` said hello,
-    so ``n_workers() == n`` cannot race pilot start-up."""
+    """Return an ``HTCondorBackend`` over ``n`` local pilots once all of them said hello.
+
+    ``HTCondorBackend`` over ``n`` local pilots on 127.0.0.1, returned once all ``n`` said hello,
+    so ``n_workers() == n`` cannot race pilot start-up.
+    """
     backend = htcondor_api().HTCondorBackend(
         launcher if launcher is not None else local_pilots(), n, host="127.0.0.1"
     )
@@ -120,8 +143,11 @@ def make_runner(backend: Any, **kwargs: Any) -> Any:
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
-    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``: a hang is a
-    failure, never a wedged CI job. Returns the value or re-raises the call's exception."""
+    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``.
+
+    A hang is a failure, never a wedged CI job. Returns the value or re-raises the call's
+    exception.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -146,7 +172,7 @@ def wait_for(predicate: Callable[[], bool], timeout_s: float = 30.0) -> None:
         time.sleep(0.05)
 
 
-# ---- where work ran ------------------------------------------------------------------------------
+# ---- where work ran -----------------------------------------------------------------------------
 
 
 def where() -> tuple[int, str]:
@@ -165,8 +191,13 @@ def double_with_site(x: int) -> tuple[int, int, str]:
 
 
 def payload_len(x: object) -> int:
-    """The broadcast contract probe: the task fn must receive the raw bytes on the worker."""
-    assert isinstance(x, (bytes, bytearray)), f"broadcast handle must resolve to raw bytes, got {type(x)}"
+    """Return the broadcast contract probe.
+
+    The task fn must receive the raw bytes on the worker.
+    """
+    assert isinstance(x, (bytes, bytearray)), (
+        f"broadcast handle must resolve to raw bytes, got {type(x)}"
+    )
     return len(x)
 
 
@@ -176,11 +207,11 @@ def pilot_prefix() -> tuple[str, str]:
 
 
 def harness_origin() -> tuple[str, str | None, str]:
-    """(this module's file, $PYTHONPATH, $_CONDOR_SCRATCH_DIR) on the pilot."""
+    """Return (this module's file, $PYTHONPATH, $_CONDOR_SCRATCH_DIR) on the pilot."""
     return HARNESS_FILE, os.environ.get("PYTHONPATH"), os.environ.get("_CONDOR_SCRATCH_DIR", "")
 
 
-# ---- the unpickle marker (auth witness) ----------------------------------------------------------
+# ---- the unpickle marker (auth witness) ---------------------------------------------------------
 
 
 def touch_marker(path: str) -> str:
@@ -198,7 +229,7 @@ class MarkerBomb:
         return touch_marker, (self.path,)
 
 
-# ---- scenario partitions + pure payloads (copied from m42) ---------------------------------------
+# ---- scenario partitions + pure payloads (copied from m42) --------------------------------------
 
 
 def mem_partitions(n: int, tag: str) -> tuple[Partition, ...]:
@@ -235,9 +266,14 @@ def empty_text() -> str:
     return ""
 
 
-def concat_plan(n: int, tag: str, *, staggered: bool = False, reverse_tasks: bool = False) -> Plan[str]:
-    """Associative, non-commutative concat: any grouping over key-ordered leaves matches
-    ``SequentialRunner`` bit-for-bit; an arrival-ordered fold does not."""
+def concat_plan(
+    n: int, tag: str, *, staggered: bool = False, reverse_tasks: bool = False
+) -> Plan[str]:
+    """Associative, non-commutative concat.
+
+    Any grouping over key-ordered leaves matches ``SequentialRunner`` bit-for-bit; an
+    arrival-ordered fold does not.
+    """
     tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(n, tag)))
     if reverse_tasks:
         tasks = tuple(reversed(tasks))
@@ -249,7 +285,7 @@ def expected_concat(n: int, tag: str) -> str:
     return "".join(leaf_text(p) for p in mem_partitions(n, tag))
 
 
-# ---- provenance-carrying partials (copied from m42) ----------------------------------------------
+# ---- provenance-carrying partials (copied from m42) ---------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -275,7 +311,10 @@ def prov_process(partition: Partition, resources: object) -> Prov:
 
 
 def paced_prov_process(partition: Partition, resources: object) -> Prov:
-    """``prov_process`` after a short sleep, so two pilots both pull leaves (scenario construction)."""
+    """``prov_process`` after a short sleep, so two pilots both pull leaves.
+
+    Scenario construction.
+    """
     time.sleep(0.2)
     return prov_process(partition, resources)
 
@@ -296,14 +335,18 @@ def prov_empty() -> Prov:
     return Prov("", frozenset(), frozenset(), frozenset(), frozenset(), where())
 
 
-def prov_plan(n: int, tag: str, process: Callable[[Partition, object], Prov] = prov_process) -> Plan[Prov]:
+def prov_plan(
+    n: int, tag: str, process: Callable[[Partition, object], Prov] = prov_process
+) -> Plan[Prov]:
     tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(n, tag)))
     return Plan(process=process, combine=prov_combine, empty=prov_empty, tasks=tasks)
 
 
-# ---- failure scenarios (copied from m42, plus PoisonUriProcess) ----------------------------------
+# ---- failure scenarios (copied from m42, plus PoisonUriProcess) ---------------------------------
 
-USER_FRAME = SourceFrame(filename="user_analysis.py", lineno=42, function="my_cut", source="pt > 30")
+USER_FRAME = SourceFrame(
+    filename="user_analysis.py", lineno=42, function="my_cut", source="pt > 30"
+)
 
 
 def make_stage_error() -> StageError:
@@ -334,8 +377,10 @@ def exit_process(partition: Partition, resources: object) -> str:
 
 @dataclass(frozen=True)
 class DieOnceProcess:
-    """The first attempt at ``poison_uri`` writes its pid to ``marker_path`` and kills its pilot; the
-    re-run (marker present) succeeds."""
+    """The first attempt at ``poison_uri`` writes its pid to ``marker_path`` and kills its pilot.
+
+    The re-run (marker present) succeeds.
+    """
 
     marker_path: str
     poison_uri: str
@@ -352,8 +397,11 @@ class DieOnceProcess:
 
 @dataclass(frozen=True)
 class PoisonUriProcess:
-    """``exit_process`` for ``poison_uri`` only, ``concat_process`` otherwise. Each poisoned attempt
-    first creates ``attempts_dir/<pid>``, so the directory counts the pilots the uri killed."""
+    """``exit_process`` for ``poison_uri`` only, ``concat_process`` otherwise.
+
+    Each poisoned attempt first creates ``attempts_dir/<pid>``, so the directory counts the
+    pilots the uri killed.
+    """
 
     poison_uri: str
     attempts_dir: str | None = None
@@ -366,7 +414,7 @@ class PoisonUriProcess:
         return concat_process(partition, resources)
 
 
-# ---- adaptive scenario (copied from m42) ---------------------------------------------------------
+# ---- adaptive scenario (copied from m42) --------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -403,7 +451,7 @@ class Feed:
         return self.batches.pop(0) if self.batches else None
 
 
-# ---- RecordingMonitor (copied from m42) ----------------------------------------------------------
+# ---- RecordingMonitor (copied from m42) ---------------------------------------------------------
 
 
 class RecordingMonitor:

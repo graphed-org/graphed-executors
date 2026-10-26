@@ -1,4 +1,4 @@
-"""m69a: the oracle is the owner's original script, on fixtures the builder reproduces byte for byte."""
+"""m69a: the oracle is the owner's original script, on fixtures rebuilt byte for byte."""
 
 from __future__ import annotations
 
@@ -15,13 +15,17 @@ import hgg_harness as h
 import pytest
 import uproot
 
-SOURCE_SHA256 = "0ee769872082459bf2ccbef08b916c26b3070b64969812aea4d75a0cfa006256"  # coffea tests/samples
-#: the internal GluGluH NanoAODv15 file the MC slice is cut from (make_hgg_fixture.py names its /store path)
+# coffea tests/samples
+SOURCE_SHA256 = "0ee769872082459bf2ccbef08b916c26b3070b64969812aea4d75a0cfa006256"
+#: the internal GluGluH NanoAODv15 file the MC slice is cut from (make_hgg_fixture.py names its
+#: /store path)
 MC_SOURCE_ENV = "GRAPHED_HGG_MC_SOURCE"
 MC_SOURCE_SHA256 = "019a22e881c54c05d3ddbb3ed19ce54dcfed4e5c2e4c1a4c604af8305b15ba57"
 MC_SHA256 = "f3929eabca0c3e00690515ddfef57105445db5543a2f26e4b319d0be405fc1f1"
 FILE_UUID = str(uuid.UUID(int=20260925))
-MC_COUNTERS = {"MC": {"nTot": 200, "nPos": 170, "nNeg": 30, "nEff": 140, "genWeightSum": 29368.84375}}
+MC_COUNTERS = {
+    "MC": {"nTot": 200, "nPos": 170, "nNeg": 30, "nEff": 140, "genWeightSum": 29368.84375}
+}
 DATA_ROWS = 23
 
 
@@ -57,15 +61,23 @@ def test_the_committed_mc_fixture_is_the_pinned_slice() -> None:
 
 
 def test_the_oracle_on_the_mc_fixture_in_one_chunk(tmp_path: Path) -> None:
-    ((counters, table),) = h.oracle_parts(str(h.MC_FIXTURE), "MC", h.YEAR, [(0, 200)], tmp_path).values()
+    ((counters, table),) = h.oracle_parts(
+        str(h.MC_FIXTURE), "MC", h.YEAR, [(0, 200)], tmp_path
+    ).values()
     assert counters == MC_COUNTERS
     assert counters["MC"]["nNeg"] > 0
     assert [type(v) for v in counters["MC"].values()] == [int, int, int, int, float]
     assert (table.num_rows, table.num_columns) == (86, 145)
     assert table.column_names == sorted(table.column_names)
-    assert table.schema.metadata == {b"sum_genw_presel": b"29368.844", b"sum_weight_central": b"12167.092"}
+    assert table.schema.metadata == {
+        b"sum_genw_presel": b"29368.844",
+        b"sum_weight_central": b"12167.092",
+    }
     (path,) = tmp_path.rglob("*.parquet")
-    assert path.relative_to(tmp_path / "0-200").as_posix() == f"MC/nominal/{FILE_UUID}_Events_0-200.parquet"
+    assert (
+        path.relative_to(tmp_path / "0-200").as_posix()
+        == f"MC/nominal/{FILE_UUID}_Events_0-200.parquet"
+    )
 
 
 def _event_index(uri: Path) -> dict[int, int]:
@@ -74,7 +86,10 @@ def _event_index(uri: Path) -> dict[int, int]:
 
 
 def _injected_mc(tmp_path: Path) -> Path:
-    """The builder's injection mode on ``nano_tt_v15.root``: the MC the data fixture was made from."""
+    """Return the builder's injection mode on ``nano_tt_v15.root``.
+
+    The MC the data fixture was made from.
+    """
     injected = tmp_path / "nano_hgg_v15.root"
     builder = [
         sys.executable,
@@ -114,12 +129,15 @@ def test_on_the_data_fixture_only_events_0_to_29_survive(tmp_path: Path) -> None
 
 
 def test_the_second_chunk_is_an_empty_selection(tmp_path: Path) -> None:
-    parts = h.oracle_parts(str(h.DATA_FIXTURE), "DataC_2024", h.YEAR, [(0, 100), (100, 200)], tmp_path)
+    parts = h.oracle_parts(
+        str(h.DATA_FIXTURE), "DataC_2024", h.YEAR, [(0, 100), (100, 200)], tmp_path
+    )
     assert parts[(0, 100)][1].num_rows > 0
     assert parts[(100, 200)][1].num_rows == 0
 
 
-# the MC leg exists only where GRAPHED_HGG_MC_SOURCE names the internal source; CI has the sha256 pin
+# the MC leg exists only where GRAPHED_HGG_MC_SOURCE names the internal source; CI has the sha256
+# pin
 REBUILDS = ["data", *(["mc"] if os.environ.get(MC_SOURCE_ENV) else [])]
 
 
@@ -129,9 +147,19 @@ def test_a_rebuilt_fixture_is_byte_identical(fixture: str, tmp_path: Path) -> No
         source, target, mode = h.DATA / "nano_tt_v15.root", h.DATA_FIXTURE, ["--data"]
         assert h.sha256(source) == SOURCE_SHA256
     else:
-        source, target, mode = Path(os.environ[MC_SOURCE_ENV]), h.MC_FIXTURE, ["--slice", "0", "200"]
+        source, target, mode = (
+            Path(os.environ[MC_SOURCE_ENV]),
+            h.MC_FIXTURE,
+            ["--slice", "0", "200"],
+        )
         assert h.sha256(source) == MC_SOURCE_SHA256, source
     rebuilt = tmp_path / target.name
-    builder = [sys.executable, str(h.DATA / "make_hgg_fixture.py"), *mode, str(source), str(rebuilt)]
+    builder = [
+        sys.executable,
+        str(h.DATA / "make_hgg_fixture.py"),
+        *mode,
+        str(source),
+        str(rebuilt),
+    ]
     subprocess.run(builder, check=True, capture_output=True)
     assert rebuilt.read_bytes() == target.read_bytes(), target.name

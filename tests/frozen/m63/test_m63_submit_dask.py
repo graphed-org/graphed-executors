@@ -110,7 +110,11 @@ def test_retries_behave_as_under_run(client: Any, tmp_path: Path) -> None:
             marker = tmp_path / f"retry-{leg}"
             assert not marker.exists()
             plan = flaky_plan(str(marker))
-            result = runner.run(plan) if leg == "run" else runner.submit(plan).result(timeout=GATE_TIMEOUT_S)
+            result = (
+                runner.run(plan)
+                if leg == "run"
+                else runner.submit(plan).result(timeout=GATE_TIMEOUT_S)
+            )
             assert marker.exists()
             got[leg] = fbytes(result.value)
     assert got == {"run": ref, "submit": ref}
@@ -120,7 +124,9 @@ def test_retries_behave_as_under_run(client: Any, tmp_path: Path) -> None:
             marker = tmp_path / f"noretry-{leg}"
             plan = flaky_plan(str(marker))
             with pytest.raises(ValueError, match="m63 flaky leaf") as caught:
-                runner.run(plan) if leg == "run" else runner.submit(plan).result(timeout=GATE_TIMEOUT_S)
+                runner.run(plan) if leg == "run" else runner.submit(plan).result(
+                    timeout=GATE_TIMEOUT_S
+                )
             assert marker.exists()
             errors[leg] = type(caught.value)
     assert errors["run"] is errors["submit"]

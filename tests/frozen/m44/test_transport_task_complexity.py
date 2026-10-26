@@ -1,6 +1,8 @@
-"""m44 O(T+P) structural gate — the scheduler graph is EXACTLY T map tasks + P gather tasks + a
-CONSTANT control tail, with zero pick-shaped futures (plan §1.4 "Graph shape — the whole point",
-F11 exact-slope tightening; blueprint §3 `test_transport_task_complexity`).
+"""m44 O(T+P) structural gate.
+
+The scheduler graph is EXACTLY T map tasks + P gather tasks + a CONSTANT control tail, with zero
+pick-shaped futures (plan §1.4 "Graph shape — the whole point", F11 exact-slope tightening;
+blueprint §3 `test_transport_task_complexity`).
 
 Counted at the ONLY pinned seam — ``dbackend.submit`` — via the harness SpyDaskBackend, classified
 by the pinned module-level task-fn names. Per-class EXACT equality across the {P,2P,4P} x {T,2T}
@@ -10,7 +12,8 @@ O(k) control tail, k fixed). The m43 engine's shape (T·P ``_dask_pick`` futures
 count and the zero-pick gate; per-row task creation fails row-count independence. Strict pinning
 is witnessed at the seam: every map submit carries a single-address ``workers=`` pin following the
 F8 ``sorted_addrs[t % k]`` round-robin, every gather submit a single-address pin, both reproduced
-identically on a second run (determinism). Counts, never clocks (R0.10a)."""
+identically on a second run (determinism). Counts, never clocks (R0.10a).
+"""
 
 from __future__ import annotations
 
@@ -47,7 +50,9 @@ def adapter(request) -> TransportAdapter:  # type: ignore[no-untyped-def]
     return request.param
 
 
-def _spy_run(adapter: TransportAdapter, client, parts: int, n_tasks: int, copies: int = 1) -> SpyDaskBackend:  # type: ignore[no-untyped-def]
+def _spy_run(
+    adapter: TransportAdapter, client, parts: int, n_tasks: int, copies: int = 1
+) -> SpyDaskBackend:  # type: ignore[no-untyped-def]
     install_transport_plugin(client)
     spy = SpyDaskBackend(build_dask_backend(client))
     transport_repartition(
@@ -56,7 +61,9 @@ def _spy_run(adapter: TransportAdapter, client, parts: int, n_tasks: int, copies
     return spy
 
 
-def test_graph_is_T_maps_P_gathers_and_a_constant_control_tail(adapter: TransportAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_graph_is_T_maps_P_gathers_and_a_constant_control_tail(
+    adapter: TransportAdapter, client
+) -> None:  # type: ignore[no-untyped-def]
     control_tails: set[int] = set()
     for n_tasks in LADDER_T:
         for parts in LADDER_P:
@@ -69,7 +76,8 @@ def test_graph_is_T_maps_P_gathers_and_a_constant_control_tail(adapter: Transpor
                 "hidden extra stage"
             )
             assert names["_dask_pick"] == 0 and not any("pick" in n for n in names), (
-                f"pick-shaped futures detected: {dict(names)} — the m43 T·P fan-out must not exist "
+                f"pick-shaped futures detected: {dict(names)} — the m43 T·P fan-out must not "
+                "exist "
                 "in the transport engine"
             )
             control_tails.add(sum(names.values()) - n_tasks - parts)
@@ -88,7 +96,9 @@ def test_counts_are_row_count_independent(adapter: TransportAdapter, client) -> 
     )
 
 
-def test_map_and_gather_submits_are_strict_pinned_and_deterministic(adapter: TransportAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_map_and_gather_submits_are_strict_pinned_and_deterministic(
+    adapter: TransportAdapter, client
+) -> None:  # type: ignore[no-untyped-def]
     addrs = sorted_worker_addresses(client)
     spy = _spy_run(adapter, client, 8, 4)
 
@@ -106,4 +116,6 @@ def test_map_and_gather_submits_are_strict_pinned_and_deterministic(adapter: Tra
 
     spy2 = _spy_run(adapter, client, 8, 4)
     assert spy2.pins_of("_transport_map_task") == map_pins, "map pin sequence not deterministic"
-    assert spy2.pins_of("_transport_gather_task") == gather_pins, "gather pin sequence not deterministic"
+    assert spy2.pins_of("_transport_gather_task") == gather_pins, (
+        "gather pin sequence not deterministic"
+    )

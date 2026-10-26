@@ -39,4 +39,7 @@ def test_single_partition(Ex: type) -> None:
 
 def test_thread_and_process_agree() -> None:
     plan = _count_plan(37)
-    assert ThreadExecutor(max_workers=4).run(plan).value == ProcessExecutor(max_workers=4).run(plan).value
+    assert (
+        ThreadExecutor(max_workers=4).run(plan).value
+        == ProcessExecutor(max_workers=4).run(plan).value
+    )

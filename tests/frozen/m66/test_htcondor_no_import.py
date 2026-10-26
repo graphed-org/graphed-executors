@@ -1,12 +1,15 @@
-"""m66 D3: ``graphed_executors.htcondor_backend`` imports, with all its public names, where the htcondor
-bindings cannot be imported, and it never attempts to import them at module load. ``submit/`` never
-names htcondor.
+"""m66 D3: ``htcondor_backend`` imports without the htcondor bindings.
 
-A fresh interpreter blocks ``htcondor``, ``htcondor2`` and ``classad2`` with a meta-path finder that
-records each attempt, so an eager import fails the probe even when it is wrapped in ``try``.
+m66 D3: ``graphed_executors.htcondor_backend`` imports, with all its public names, where the
+htcondor bindings cannot be imported, and it never attempts to import them at module load.
+``submit/`` never names htcondor.
+
+A fresh interpreter blocks ``htcondor``, ``htcondor2`` and ``classad2`` with a meta-path finder
+that records each attempt, so an eager import fails the probe even when it is wrapped in ``try``.
 
 Discriminates an eager bindings import anywhere on the package import path, a missing public name,
-and an htcondor reference in the backend-neutral engine."""
+and an htcondor reference in the backend-neutral engine.
+"""
 
 from __future__ import annotations
 
@@ -56,6 +59,8 @@ def test_submit_names_htcondor_nowhere() -> None:
         p.name: p.read_text(encoding="utf-8")
         for p in (REPO_ROOT / "src/graphed_executors/submit").glob("*.py")
     }
-    assert any("SubmitBackend" in t for t in texts.values()), f"the scan read nothing useful: {sorted(texts)}"
+    assert any("SubmitBackend" in t for t in texts.values()), (
+        f"the scan read nothing useful: {sorted(texts)}"
+    )
     hits = sorted(name for name, text in texts.items() if "htcondor" in text.lower())
     assert hits == [], hits

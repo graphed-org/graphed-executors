@@ -1,12 +1,17 @@
-"""m66 site profiles, schedd choice and launcher refusals, on data only: no htcondor bindings, every OS.
+"""m66 site profiles, schedd choice and launcher refusals, on data only.
 
-The schedd ads are the recorded LPC collector answer (``data/lpc-schedd-ads.json``). Each per-term set
-is two ads derived from those records: the deciding term picks the full-formula winner and the other
-two terms together rank the pair the other way, so a weight missing that term picks the other ad.
+No htcondor bindings, every OS.
 
-Discriminates a weight formula missing any term, the proxy-default trap (``use_x509userproxy`` without
-an explicit ``x509userproxy`` path), site keys leaking into the generic profile, a missing secret or env
-transfer, and launcher refusals that are late (after the bindings are touched) or absent."""
+The schedd ads are the recorded LPC collector answer (``data/lpc-schedd-ads.json``). Each per-term
+set is two ads derived from those records: the deciding term picks the full-formula winner and the
+other two terms together rank the pair the other way, so a weight missing that term picks the other
+ad.
+
+Discriminates a weight formula missing any term, the proxy-default trap (``use_x509userproxy``
+without an explicit ``x509userproxy`` path), site keys leaking into the generic profile, a missing
+secret or env transfer, and launcher refusals that are late (after the bindings are touched) or
+absent.
+"""
 
 from __future__ import annotations
 
@@ -27,7 +32,10 @@ LPC_QUERY = (
     "FERMIHTC_REMOTE_POOL",
     'FERMIHTC_DRAIN_LPCSCHEDD=?=FALSE && FERMIHTC_SCHEDD_TYPE=?="CMSLPC" && MaxJobsRunning!=0',
 )
-IMAGE = "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/coffea-almalinux9-noml:2026.9.0-py3.12"
+IMAGE = (
+    "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/"
+    "coffea-almalinux9-noml:2026.9.0-py3.12"
+)
 URL = "http://127.0.0.1:10000"
 SITE_KEYS = (
     "use_x509userproxy",
@@ -45,7 +53,7 @@ def recorded_ads() -> dict[str, dict[str, Any]]:
 
 
 def terms(ad: dict[str, Any]) -> tuple[float, float, float]:
-    """The wrapper formula's three terms (plan §2 ``schedd_weight``)."""
+    """Return the wrapper formula's three terms (plan §2 ``schedd_weight``)."""
     return (
         0.7 * ad["RecentDaemonCoreDutyCycle"] * 100,
         0.2 * ad["ShadowsRunning"] / ad["MaxJobsRunning"] * 100,
@@ -54,7 +62,7 @@ def terms(ad: dict[str, Any]) -> tuple[float, float, float]:
 
 
 def per_term_sets() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
-    """term index name -> (winner, loser). The winner leads on the deciding term only."""
+    """Term index name -> (winner, loser). The winner leads on the deciding term only."""
     rec = recorded_ads()
     s4, s5, s6 = rec["lpcschedd4.fnal.gov"], rec["lpcschedd5.fnal.gov"], rec["lpcschedd6.fnal.gov"]
     return {
@@ -98,7 +106,9 @@ def test_choose_schedd_picks_the_recorded_winner_in_both_orders() -> None:
     "term", ["RecentDaemonCoreDutyCycle", "ShadowsRunning/MaxJobsRunning", "TotalIdleJobs"]
 )
 def test_each_weight_term_decides_its_derived_set(term: str) -> None:
-    index = ["RecentDaemonCoreDutyCycle", "ShadowsRunning/MaxJobsRunning", "TotalIdleJobs"].index(term)
+    index = ["RecentDaemonCoreDutyCycle", "ShadowsRunning/MaxJobsRunning", "TotalIdleJobs"].index(
+        term
+    )
     winner, loser = per_term_sets()[term]
     tw, tl = terms(winner), terms(loser)
     # the set is well-formed: the term favours the winner, the other two favour the loser
@@ -234,27 +244,38 @@ def test_start_refuses_an_lpc_log_dir_outside_the_sandbox(
 
 
 def fake_venv(root: Path, *, editable: bool | None) -> Path:
-    """A directory shaped like a venv (``editable=None``: no pyvenv.cfg) with one dist-info."""
+    """Return a venv-shaped directory (``editable=None``: no pyvenv.cfg) with one dist-info."""
     root.mkdir()
     if editable is not None:
         (root / "pyvenv.cfg").write_text("home = /usr/bin\ninclude-system-site-packages = false\n")
     purelib = Path(
-        sysconfig.get_path("purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)})
+        sysconfig.get_path(
+            "purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)}
+        )
     )
     dist = purelib / "probedist-0.1.dist-info"
     dist.mkdir(parents=True)
     dir_info = {"editable": True} if editable else {}
-    (dist / "direct_url.json").write_text(json.dumps({"url": "file:///src/probedist", "dir_info": dir_info}))
+    (dist / "direct_url.json").write_text(
+        json.dumps({"url": "file:///src/probedist", "dir_info": dir_info})
+    )
     return root
 
 
 def ship_site() -> Any:
     return htcondor_api().SiteProfile(
-        name="m66-ship", submit={}, spool=False, ship_env=True, sandbox_root=None, schedd_query=None
+        name="m66-ship",
+        submit={},
+        spool=False,
+        ship_env=True,
+        sandbox_root=None,
+        schedd_query=None,
     )
 
 
-@pytest.mark.parametrize(("editable", "names"), [(True, ("editable", "probedist")), (None, ("venv",))])
+@pytest.mark.parametrize(
+    ("editable", "names"), [(True, ("editable", "probedist")), (None, ("venv",))]
+)
 def test_start_refuses_an_unshippable_env(
     editable: bool | None, names: tuple[str, ...], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

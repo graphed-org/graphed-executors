@@ -1,7 +1,8 @@
-"""m47 peer reduction hosted on parsl — ``parsl_run_plan`` runs the UNCHANGED M38
-``process_and_reduce`` protocol (review N1) over in-task ``EscalatingHttpTransport`` endpoints on
-real HTEX worker processes (plan §1.4 peer task shape step 3; blueprint §3
-`test_parsl_peer_reduce`).
+"""m47 peer reduction hosted on parsl.
+
+``parsl_run_plan`` runs the UNCHANGED M38 ``process_and_reduce`` protocol (review N1) over in-task
+``EscalatingHttpTransport`` endpoints on real HTEX worker processes (plan §1.4 peer task shape step
+3; blueprint §3 `test_parsl_peer_reduce`).
 
 Witnesses (mechanism, never clocks): result equals ``SequentialRunner`` bit-for-bit, TWICE, each
 run under a FRESH epoch nonce; the SubmitBackend spy saw exactly k ``_parsl_peer_main`` submits
@@ -13,7 +14,8 @@ only control classes — ``recv_class_root >= 1`` and ``recv_class_node == recv_
 
 Discriminates: a driver-side fold that matches the value but has zero cross-worker hand-offs and
 node/leaf traffic at the driver; a per-leaf future graph (submit count explodes past k); a relayed
-"peer" reduction whose partials ride the driver inbox (recv_class_node > 0)."""
+"peer" reduction whose partials ride the driver inbox (recv_class_node > 0).
+"""
 
 from __future__ import annotations
 
@@ -77,15 +79,19 @@ def test_peer_reduction_matches_sequential_twice_and_is_genuinely_distributed(ht
 
     rows = peer_rows(r1)
     assert int(rows[W1].get("peer_sends", 0)) >= 1, (
-        f"no worker->worker node hand-off recorded on {W1} — a driver-side fold, not peer reduction"
+        f"no worker->worker node hand-off recorded on {W1} — a driver-side fold, not peer "
+        "reduction"
     )
-    assert int(rows[W0].get("peer_recvs", 0)) >= 1, f"the root-subtree owner {W0} never consumed a peer node"
+    assert int(rows[W0].get("peer_recvs", 0)) >= 1, (
+        f"the root-subtree owner {W0} never consumed a peer node"
+    )
 
     drv = driver_row(r1)
     assert int(drv.get("recv_class_root", 0)) >= 1, "the root never arrived at the driver endpoint"
     assert int(drv.get("recv_class_node", 0)) == 0 and int(drv.get("recv_class_leaf", 0)) == 0, (
         f"the DRIVER inbox saw reduction data ({dict(drv)}) — partials must move peer-to-peer, "
-        "never through the submit host (the head-node pathology the transport engine exists to end)"
+        "never through the submit host (the head-node pathology the transport engine exists to "
+        "end)"
     )
 
     spy2, r2 = _run_once(htex)

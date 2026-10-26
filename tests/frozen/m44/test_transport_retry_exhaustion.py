@@ -1,7 +1,8 @@
-"""m44 non-loss retry/raise arc (plan §1.1 r2/r3, hard constraint 8; blueprint §3
-`test_transport_retry_exhaustion`, added by review r3 to kill the exact pre-r2 bug: ``_asend``
-returning a silent ``False`` on a transient comm failure — which the un-editable consumers ignore,
-losing a reduction node forever).
+"""m44 non-loss retry/raise arc.
+
+Plan §1.1 r2/r3, hard constraint 8; blueprint §3 `test_transport_retry_exhaustion`, added by review
+r3 to kill the exact pre-r2 bug: ``_asend`` returning a silent ``False`` on a transient comm
+failure — which the un-editable consumers ignore, losing a reduction node forever.
 
 Three arms, each on its own tier-A cluster, all driven through the §1.1 gated injection seam
 (deliver-then-raise, budget decremented per handler invocation — clock-free, deterministic):
@@ -20,7 +21,8 @@ Three arms, each on its own tier-A cluster, all driven through the §1.1 gated i
 Discriminates: the pre-r2 silent-False regression fails (a) via ``sends_retried == 0`` plus a lost
 node (hang/wrong value, both surfaced); an engine without the exhaustion raise fails (b)/(c) by
 completing silently or hanging; an engine that leaks the raw delivery error fails (c)'s
-StageError type pin."""
+StageError type pin.
+"""
 
 from __future__ import annotations
 
@@ -44,7 +46,8 @@ pytest.importorskip("distributed")
 
 N_LEAVES = 12
 N_TRANSIENT = 2  # < SEND_RETRIES: the retry absorbs it
-N_EXHAUST = 8  # >= SEND_RETRIES: the first exhaustion fires; the leftover (< SEND_RETRIES) is survivable
+# >= SEND_RETRIES: the first exhaustion fires; the leftover (< SEND_RETRIES) is survivable
+N_EXHAUST = 8
 
 
 def _oracle_value() -> int:
@@ -68,17 +71,22 @@ def test_transient_failures_are_absorbed_by_the_send_retry() -> None:
         set_inject_recv_failures(client, a0, a1, N_TRANSIENT)
 
         outcome = run_bounded(
-            lambda: transport_plan_run(make_peer_plan(N_LEAVES, "m44retry"), build_dask_backend(client)),
+            lambda: transport_plan_run(
+                make_peer_plan(N_LEAVES, "m44retry"), build_dask_backend(client)
+            ),
             timeout_s=240.0,
         )
         assert "error" not in outcome, f"transient-failure run raised: {outcome.get('error')!r}"
         res = outcome["result"]
 
         assert res.value == _oracle_value(), "a transiently-failed send lost a reduction message"
-        assert res.transport.epoch_restarts == 0, "transient failures must ride the retry, not a restart"
+        assert res.transport.epoch_restarts == 0, (
+            "transient failures must ride the retry, not a restart"
+        )
         pw = tw_per_worker(res)
         assert pw[a1].get("sends_retried", 0) >= N_TRANSIENT, (
-            f"sends_retried={pw[a1].get('sends_retried', 0)} < {N_TRANSIENT}: m44's OWN retry path "
+            f"sends_retried={pw[a1].get('sends_retried', 0)} < {N_TRANSIENT}: m44's OWN retry "
+            "path "
             "never engaged — the pre-r2 silent-False bug (dask's base RPC retries nothing; "
             "comm.retry.count is 0 by default)"
         )
@@ -92,7 +100,9 @@ def test_exhausted_retries_restart_the_epoch_and_complete() -> None:
 
         outcome = run_bounded(
             lambda: transport_plan_run(
-                make_peer_plan(N_LEAVES, "m44retry"), build_dask_backend(client), epoch_restarts_allowed=1
+                make_peer_plan(N_LEAVES, "m44retry"),
+                build_dask_backend(client),
+                epoch_restarts_allowed=1,
             ),
             timeout_s=300.0,
         )
@@ -108,7 +118,9 @@ def test_exhausted_retries_restart_the_epoch_and_complete() -> None:
         assert len(nonces) == 2 and nonces[0] != nonces[1]
         for _addr, epochs in client.run(probe_active_epochs).items():
             for nonce in nonces:
-                assert nonce not in epochs, f"epoch {nonce} survived the run — purge did not happen"
+                assert nonce not in epochs, (
+                    f"epoch {nonce} survived the run — purge did not happen"
+                )
 
 
 def test_exhausted_restart_budget_is_an_attributed_stage_error_never_a_hang() -> None:
@@ -119,7 +131,9 @@ def test_exhausted_restart_budget_is_an_attributed_stage_error_never_a_hang() ->
 
         outcome = run_bounded(
             lambda: transport_plan_run(
-                make_peer_plan(N_LEAVES, "m44retry"), build_dask_backend(client), epoch_restarts_allowed=0
+                make_peer_plan(N_LEAVES, "m44retry"),
+                build_dask_backend(client),
+                epoch_restarts_allowed=0,
             ),
             timeout_s=300.0,
         )

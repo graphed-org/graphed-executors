@@ -1,10 +1,13 @@
-"""A single slow straggler must NOT block the reduction of the other partitions (tree reduction),
-i.e. combines fire as ready instead of waiting for all leaves (plan M7).
+"""A single slow straggler must not block reducing the other partitions.
+
+A single slow straggler must NOT block the reduction of the other partitions (tree reduction), i.e.
+combines fire as ready instead of waiting for all leaves (plan M7).
 
 M38: this pins ``comms=None`` (the hub path). The ``on_combine`` hook firing *incrementally* (a
 combine as soon as its two inputs are ready) is a property of the hub's driver-side tree reduction;
 peer reduction does its combines off-driver and reports the count, so it can't assert incremental
-ordering. Peer's straggler tolerance — work-stealing — is covered by the M38 work-stealing suite."""
+ordering. Peer's straggler tolerance — work-stealing — is covered by the M38 work-stealing suite.
+"""
 
 from __future__ import annotations
 

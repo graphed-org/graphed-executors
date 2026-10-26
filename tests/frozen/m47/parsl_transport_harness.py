@@ -1,6 +1,8 @@
-"""Shared harness for the m47 frozen suite: the parsl HTTP **self-rendezvous worker transport**
-(k persistent peers over an `EscalatingHttpTransport` dual-route plane), the **runtime reachability
-probe** with ``on_unreachable={"error","fallback"}``, and the **parsl facade** reusing the shared
+"""Shared harness for the m47 frozen suite.
+
+The parsl HTTP **self-rendezvous worker transport** (k persistent peers over an
+`EscalatingHttpTransport` dual-route plane), the **runtime reachability probe** with
+``on_unreachable={"error","fallback"}``, and the **parsl facade** reusing the shared
 ``common/facade.py`` resolver (parsl-backend-plan §1.4-§1.6, §2 m47, §3 m47 — plan FINAL at r3;
 review minors N1/N2 honored: the reduce actor is ``process_and_reduce``, and ``send()`` must
 special-case HTTP 503 BEFORE the generic retry).
@@ -12,9 +14,9 @@ paths, symbols, and observable behaviors; the m47 README carries the traceabilit
 edit-frozen base is NEVER modified; plan §1.4 block plane + design-A/design-B):
 
     TransportDeliveryError(Exception)     # same-NAMED parsl-side classes: the reused classifier
-    PullTimeoutError(Exception)           # (common.transport_run.is_restart_worthy) matches by name
-    SEND_RETRIES == 5                     # the frozen local sender policy, restated (:293-306)
-    EscalatingHttpTransport(address, *, epoch, host="127.0.0.1", inbox_maxsize=None,
+    PullTimeoutError(Exception)           # (common.transport_run.is_restart_worthy) matches by
+    name SEND_RETRIES == 5                     # the frozen local sender policy, restated
+    (:293-306) EscalatingHttpTransport(address, *, epoch, host="127.0.0.1", inbox_maxsize=None,
                             idle_deadline_s=None)
         # a graphed WorkerTransport on a DUAL-ROUTE ThreadingHTTPServer: POST /msg -> inbox
         # delivery, POST /pull -> block-store reads. .host/.port are OS-assigned at construction
@@ -196,51 +198,60 @@ NJRow = tuple[int | None, int | None, int | None]
 
 
 def http_plane_api() -> Any:
-    """``graphed_executors.common.http_plane`` — absent pre-implementation: the right-reason
-    ``ModuleNotFoundError`` for every endpoint-level test lands here."""
-    import graphed_executors.common.http_plane as mod  # noqa: PLC0415  (deferred: module under test)
+    """``graphed_executors.common.http_plane`` — absent pre-implementation.
+
+    The right-reason ``ModuleNotFoundError`` for every endpoint-level test lands here.
+    """
+    # deferred: module under test
+    import graphed_executors.common.http_plane as mod  # noqa: PLC0415
 
     return mod
 
 
 def transport_run_api() -> Any:
     """``graphed_executors.common.transport_run`` (the §1.6 m47 move)."""
-    import graphed_executors.common.transport_run as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.common.transport_run as mod  # noqa: PLC0415
 
     return mod
 
 
 def peer47_api() -> Any:
     """``graphed_executors.parsl_backend.transport_peer`` (m47 IT2)."""
-    import graphed_executors.parsl_backend.transport_peer as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.parsl_backend.transport_peer as mod  # noqa: PLC0415
 
     return mod
 
 
 def shuffle47_api() -> Any:
     """``graphed_executors.parsl_backend.transport_shuffle`` (m47 IT3)."""
-    import graphed_executors.parsl_backend.transport_shuffle as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.parsl_backend.transport_shuffle as mod  # noqa: PLC0415
 
     return mod
 
 
 def papi() -> Any:
     """``graphed_executors.parsl_backend.api`` (m47 IT4)."""
-    import graphed_executors.parsl_backend.api as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.parsl_backend.api as mod  # noqa: PLC0415
 
     return mod
 
 
 def launch47_api() -> Any:
     """``graphed_executors.parsl_backend.launch`` — m46-built, m47-extended (heartbeat_period)."""
-    import graphed_executors.parsl_backend.launch as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.parsl_backend.launch as mod  # noqa: PLC0415
 
     return mod
 
 
 def relay47_api() -> Any:
     """``graphed_executors.common.relay_engine`` — the m46 relay engine (the fallback target)."""
-    import graphed_executors.common.relay_engine as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.common.relay_engine as mod  # noqa: PLC0415
 
     return mod
 
@@ -266,7 +277,10 @@ def plan_run(*args: Any, **kwargs: Any) -> Any:
 
 
 def transport_repartition(*args: Any, **kwargs: Any) -> Any:
-    """``transport_run_repartition(backend, src_blocks, parts, *, pbackend, ...)`` (contract pin)."""
+    """``transport_run_repartition(backend, src_blocks, parts, *, pbackend, ...)``.
+
+    Contract pin.
+    """
     return shuffle47_api().transport_run_repartition(*args, **kwargs)
 
 
@@ -301,9 +315,12 @@ def make_runner(backend: Any, *, retries: int = 3) -> Any:
 
 
 def ensure_m47_harness_on_worker_path() -> None:
-    """Prepend this directory to ``PYTHONPATH`` so spawned HTEX workers can unpickle this module's
+    """Put this directory on ``PYTHONPATH`` so spawned HTEX workers can unpickle task fns.
+
+    Prepend this directory to ``PYTHONPATH`` so spawned HTEX workers can unpickle this module's
     task fns by reference (measured load-bearing, the m46 precedent). Idempotent; deliberately not
-    restored (process-level; restoring would race module-scoped pools across files)."""
+    restored (process-level; restoring would race module-scoped pools across files).
+    """
     existing = os.environ.get("PYTHONPATH", "")
     if HARNESS_DIR not in existing.split(os.pathsep):
         os.environ["PYTHONPATH"] = HARNESS_DIR + (os.pathsep + existing if existing else "")
@@ -311,16 +328,21 @@ def ensure_m47_harness_on_worker_path() -> None:
 
 @contextmanager
 def p2p_htex_pool(workers: int = 2, *, heartbeat_period: int | None = None) -> Iterator[Any]:
-    """A started HTEX via the planned ``start_htex``. ``heartbeat_period`` engages the m47
-    signature extension (the death-latency compression knob, measured working at 2 s); ``None``
-    keeps the frozen m46 call shape so ordinary pools never depend on the extension."""
+    """Yield a started HTEX via the planned ``start_htex``.
+
+    ``heartbeat_period`` engages the m47 signature extension (the death-latency compression
+    knob, measured working at 2 s); ``None`` keeps the frozen m46 call shape so ordinary pools
+    never depend on the extension.
+    """
     ensure_m47_harness_on_worker_path()
     run_dir = tempfile.mkdtemp(prefix="graphed-m47-htex-")
     api = launch47_api()
     if heartbeat_period is None:
         executor = api.start_htex(workers=workers, run_dir=run_dir)
     else:
-        executor = api.start_htex(workers=workers, run_dir=run_dir, heartbeat_period=heartbeat_period)
+        executor = api.start_htex(
+            workers=workers, run_dir=run_dir, heartbeat_period=heartbeat_period
+        )
     try:
         yield executor
     finally:
@@ -330,11 +352,16 @@ def p2p_htex_pool(workers: int = 2, *, heartbeat_period: int | None = None) -> I
 
 @contextmanager
 def p2p_tpe_pool(max_threads: int = 2) -> Iterator[Any]:
-    """A started parsl ``ThreadPoolExecutor`` (harness-owned: parsl's public API, not the
-    implementation under test)."""
-    from parsl.executors import ThreadPoolExecutor  # noqa: PLC0415  (parsl modules importorskip first)
+    """Yield a started parsl ``ThreadPoolExecutor``.
 
-    executor = ThreadPoolExecutor(label=f"graphed-m47-tpe-{uuid.uuid4().hex[:8]}", max_threads=max_threads)
+    Harness-owned: parsl's public API, not the implementation under test.
+    """
+    # parsl modules importorskip first
+    from parsl.executors import ThreadPoolExecutor  # noqa: PLC0415
+
+    executor = ThreadPoolExecutor(
+        label=f"graphed-m47-tpe-{uuid.uuid4().hex[:8]}", max_threads=max_threads
+    )
     executor.start()
     try:
         yield executor
@@ -346,8 +373,11 @@ def p2p_tpe_pool(max_threads: int = 2) -> Iterator[Any]:
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = 240.0) -> Any:
-    """Run ``fn`` on a daemon thread with a HARD join timeout: a hang surfaces as an assertion
-    failure, never a hung CI job. Returns the value or re-raises the call's exception."""
+    """Run ``fn`` on a daemon thread with a HARD join timeout.
+
+    A hang surfaces as an assertion failure, never a hung CI job. Returns the value or
+    re-raises the call's exception.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -359,7 +389,9 @@ def run_bounded(fn: Callable[[], Any], timeout_s: float = 240.0) -> Any:
     thread = threading.Thread(target=_drive, daemon=True)
     thread.start()
     thread.join(timeout_s)
-    assert not thread.is_alive(), f"HARD TIMEOUT: the driven call did not finish within {timeout_s}s"
+    assert not thread.is_alive(), (
+        f"HARD TIMEOUT: the driven call did not finish within {timeout_s}s"
+    )
     if "error" in out:
         raise out["error"]
     return out["result"]
@@ -376,8 +408,11 @@ def poll_until(predicate: Callable[[], bool], timeout_s: float = 120.0) -> None:
 
 
 def closed_loopback_port() -> int:
-    """A loopback port that was just bound and released — dialing it is a deterministic, instant
-    connection-refused (the clock-free failure the registry-poisoner and exhaustion arms use)."""
+    """Return a loopback port that was just bound and released.
+
+    Dialing it is a deterministic, instant connection-refused (the clock-free failure the
+    registry-poisoner and exhaustion arms use).
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
     port = int(s.getsockname()[1])
@@ -386,18 +421,22 @@ def closed_loopback_port() -> int:
 
 
 def wire_endpoints(*endpoints: Any) -> None:
-    """Hand every endpoint the full ``{address: (host, port)}`` registry (the build_http_transports
-    idiom, over the endpoints' own OS-assigned ports)."""
+    """Hand every endpoint the full ``{address: (host, port)}`` registry.
+
+    The build_http_transports idiom, over the endpoints' own OS-assigned ports.
+    """
     registry = {ep.address: (ep.host, ep.port) for ep in endpoints}
     for ep in endpoints:
         ep.set_registry(dict(registry))
 
 
 def post_msg(host: str, port: int, sender: str, epoch: str, message: object) -> int:
-    """The stale-epoch INJECTOR: speak the pinned /msg envelope directly —
+    """Return the stale-epoch INJECTOR: speak the pinned /msg envelope directly.
+
     ``pickle.dumps((sender, epoch, message))`` — and return the HTTP status (an ``HTTPError``
-    status is returned, not raised; a connection-level failure returns -1). Assertions live with
-    the caller: the contract is delivery/counters, not the status line."""
+    status is returned, not raised; a connection-level failure returns -1). Assertions live
+    with the caller: the contract is delivery/counters, not the status line.
+    """
     body = pickle.dumps((sender, epoch, message))
     req = urllib.request.Request(f"http://{host}:{port}/msg", data=body, method="POST")
     try:
@@ -409,13 +448,19 @@ def post_msg(host: str, port: int, sender: str, epoch: str, message: object) -> 
         return -1
 
 
-def poison_one(addr: str, port: int) -> Callable[[dict[str, tuple[str, int]]], dict[str, tuple[str, int]]]:
-    """A ``registry_rewrite`` that repoints ``addr`` at a closed loopback port — the plan's
-    registry-poisoner (connection-refused is deterministic, no clocks)."""
+def poison_one(
+    addr: str, port: int
+) -> Callable[[dict[str, tuple[str, int]]], dict[str, tuple[str, int]]]:
+    """Return a ``registry_rewrite`` that repoints ``addr`` at a closed loopback port.
+
+    The plan's registry-poisoner (connection-refused is deterministic, no clocks).
+    """
 
     def rewrite(registry: dict[str, tuple[str, int]]) -> dict[str, tuple[str, int]]:
         out = dict(registry)
-        assert addr in out, f"poisoner misfired: {addr!r} not in the assembled registry {sorted(out)}"
+        assert addr in out, (
+            f"poisoner misfired: {addr!r} not in the assembled registry {sorted(out)}"
+        )
         host, _real = out[addr]
         out[addr] = (host, port)
         return out
@@ -452,10 +497,13 @@ def _fn_name(fn: Any) -> str:
 
 
 class SpyP2PBackend:
-    """A delegating ``SubmitBackend`` recording every submitted task fn's RAW name + key and every
-    broadcast token (the m45/m46 idiom: delegation by ``__getattr__`` so capabilities /
-    ``peer_transport`` / n_workers pass through untouched). The engine-shape and complexity gates
-    read these — counts, never clocks."""
+    """A delegating ``SubmitBackend`` that records submitted task fns and broadcast tokens.
+
+    A delegating ``SubmitBackend`` recording every submitted task fn's RAW name + key and every
+    broadcast token (the m45/m46 idiom: delegation by ``__getattr__`` so capabilities
+    /``peer_transport`` / n_workers pass through untouched). The engine-shape and complexity gates
+    read these — counts, never clocks.
+    """
 
     def __init__(self, inner: Any) -> None:
         self.inner = inner
@@ -478,9 +526,11 @@ class SpyP2PBackend:
 
 
 class RefusingP2PBackend:
-    """Protocol-shaped stub carrying an explicit capability vector + ``peer_transport``: any facade
-    path that must raise BEFORE work leaves it untouched (``submit``/``broadcast`` count and
-    refuse — the m43/m44/m45 gate idiom)."""
+    """Protocol-shaped stub carrying an explicit capability vector + ``peer_transport``.
+
+    Any facade path that must raise BEFORE work leaves it untouched (``submit``/``broadcast``
+    count and refuse — the m43/m44/m45 gate idiom).
+    """
 
     def __init__(self, capabilities: SubmitCapabilities, *, peer_transport: bool) -> None:
         self.capabilities = capabilities
@@ -513,7 +563,7 @@ class RefusingP2PBackend:
 
 
 def htex_floor_caps() -> SubmitCapabilities:
-    """The all-seven-False "parsl floor" (the frozen m46 HTEX vector)."""
+    """Return the all-seven-False "parsl floor" (the frozen m46 HTEX vector)."""
     return SubmitCapabilities(
         peer_data_movement=False,
         scatter_broadcast=False,
@@ -529,7 +579,10 @@ def htex_floor_caps() -> SubmitCapabilities:
 
 
 def p2p_double(x: int) -> int:
-    """The pool-liveness probe: after a barrier error or a probe release, the slots must be free."""
+    """Return the pool-liveness probe.
+
+    After a barrier error or a probe release, the slots must be free.
+    """
     return 2 * x
 
 
@@ -538,12 +591,15 @@ def p2p_task_pid(idx: int) -> int:
 
 
 def p2p_conformance_probe(epoch: str) -> dict[str, Any]:
-    """IN-TASK protocol conformance (plan §3 m47 conformance row): build TWO endpoints inside one
-    HTEX worker task, wire them, and exercise the WorkerTransport obligations. Returns plain
-    observations; the assertions live driver-side."""
+    """IN-TASK protocol conformance (plan §3 m47 conformance row).
+
+    Build TWO endpoints inside one HTEX worker task, wire them, and exercise the
+    WorkerTransport obligations. Returns plain observations; the assertions live driver-side.
+    """
     from graphed.core.execution import WorkerTransport  # noqa: PLC0415  (worker-side isinstance)
 
-    from graphed_executors.common.http_plane import EscalatingHttpTransport  # noqa: PLC0415  (worker-side)
+    # worker-side
+    from graphed_executors.common.http_plane import EscalatingHttpTransport  # noqa: PLC0415
 
     e1 = EscalatingHttpTransport("pa", epoch=epoch)
     e2 = EscalatingHttpTransport("pb", epoch=epoch)
@@ -649,7 +705,9 @@ def _awkward_p2p_adapter() -> P2PAdapter:
         rv = [int(v) for v in block["rval"].to_list()]  # type: ignore[index]
         return list(zip(ks, lv, rv, strict=True))
 
-    return P2PAdapter("awkward", AwkwardBackend(), make_block, keys_of, make_side, side_rows, joined_rows)
+    return P2PAdapter(
+        "awkward", AwkwardBackend(), make_block, keys_of, make_side, side_rows, joined_rows
+    )
 
 
 def _numpy_p2p_adapter() -> P2PAdapter:
@@ -675,7 +733,9 @@ def _numpy_p2p_adapter() -> P2PAdapter:
 
     def side_rows(block: object, field: str) -> list[tuple[int, int]]:
         return list(
-            zip([int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True)  # type: ignore[index]
+            zip(
+                [int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True
+            )  # type: ignore[index]
         )
 
     def joined_rows(block: object) -> list[JRow]:
@@ -688,20 +748,25 @@ def _numpy_p2p_adapter() -> P2PAdapter:
             )
         )
 
-    return P2PAdapter("numpy", NumpyBackend(), make_block, keys_of, make_side, side_rows, joined_rows)
+    return P2PAdapter(
+        "numpy", NumpyBackend(), make_block, keys_of, make_side, side_rows, joined_rows
+    )
 
 
 def p2p_adapters() -> list[P2PAdapter]:
     out: list[P2PAdapter] = []
     for factory in (_awkward_p2p_adapter, _numpy_p2p_adapter):
-        with contextlib.suppress(Exception):  # a backend not installed drops from the parametrization
+        # a backend not installed drops from the parametrization
+        with contextlib.suppress(Exception):
             out.append(factory())
     return out
 
 
 def numpy_p2p_adapter() -> P2PAdapter:
-    """The always-installed adapter for engine-plane themes where the adapter is not the variable
-    under test (death/epoch/block-plane/shape)."""
+    """Return the always-installed adapter for engine-plane themes.
+
+    The adapter is not the variable under test there (death/epoch/block-plane/shape).
+    """
     return _numpy_p2p_adapter()
 
 
@@ -718,22 +783,28 @@ _KEY_LISTS = [
 
 
 def repartition_blocks(adapter: P2PAdapter, copies: int = 1) -> list[object]:
-    """6 source blocks with overlapping key populations (multi-src multi-dest coalescing);
-    ``copies`` multiplies ROWS, never block count (the row-independence knob)."""
+    """6 source blocks with overlapping key populations (multi-src multi-dest coalescing).
+
+    ``copies`` multiplies ROWS, never block count (the row-independence knob).
+    """
     return [adapter.make_block(list(keys) * copies) for keys in _KEY_LISTS]
 
 
 def many_src_blocks(adapter: P2PAdapter, n_src: int) -> list[object]:
-    """``n_src`` blocks by cycling the key lists — the T knob of the anti-super-linear ladder
-    (varies BLOCK count, not row shape)."""
+    """``n_src`` blocks by cycling the key lists.
+
+    The T knob of the anti-super-linear ladder (varies BLOCK count, not row shape).
+    """
     return [adapter.make_block(list(_KEY_LISTS[i % len(_KEY_LISTS)])) for i in range(n_src)]
 
 
 def join_sides(adapter: P2PAdapter) -> tuple[list[object], list[object]]:
-    """Overlapping keys plus a LEFT-only key (13, two rows) and a RIGHT-only key (17, two rows):
-    the non-inner arms have real unmatched rows on both sides. Pre-validated against the frozen
+    """Overlapping keys plus a LEFT-only key (13, two rows) and a RIGHT-only key (17, two rows).
+
+    The non-inner arms have real unmatched rows on both sides. Pre-validated against the frozen
     LOCAL engine at parts=8: inner 16 rows (13/17 absent), left 18 (13 x2), right 18 (17 x2),
-    outer 20 (both x2) — measured, not invented."""
+    outer 20 (both x2) — measured, not invented.
+    """
     left = [
         adapter.make_side([0, 1, 2, 3, 4, 5], "lval", [10, 11, 12, 13, 14, 15]),
         adapter.make_side([1, 1, 2, 2, 13, 13], "lval", [22, 23, 24, 25, 32, 33]),
@@ -745,10 +816,14 @@ def join_sides(adapter: P2PAdapter) -> tuple[list[object], list[object]]:
     return left, right
 
 
-def join_hot_key_sides(adapter: P2PAdapter, n_left: int, n_right: int) -> tuple[list[object], list[object]]:
-    """A single hot key: the inner join emits ``n_left*n_right`` rows in one dest — the B5
-    output-side blowup the join budget must cover (pre-validated: 64x64 at budget=output//8 ->
-    local spilled 7 == chunks_read 7, peak 15360 <= 16384, rows 4096)."""
+def join_hot_key_sides(
+    adapter: P2PAdapter, n_left: int, n_right: int
+) -> tuple[list[object], list[object]]:
+    """Return a single hot key: the inner join emits ``n_left*n_right`` rows in one dest.
+
+    The B5 output-side blowup the join budget must cover (pre-validated: 64x64 at
+    budget=output//8 -> local spilled 7 == chunks_read 7, peak 15360 <= 16384, rows 4096).
+    """
     left = [adapter.make_side([7] * n_left, "lval", list(range(n_left)))]
     right = [adapter.make_side([7] * n_right, "rval", list(range(100, 100 + n_right)))]
     return left, right
@@ -759,7 +834,7 @@ def side_bytes(adapter: P2PAdapter, blocks: Sequence[object]) -> int:
     return sum(int(be.estimated_bytes(b)) for b in blocks)
 
 
-# ---- test-authored oracles (route via the golden-pinned ``partition``, never the join kernel) ----
+# ---- test-authored oracles (route via the golden-pinned ``partition``, never the join kernel)
 
 
 def route_oracle_dest_keys(
@@ -784,7 +859,10 @@ def total_result_rows(value: Mapping[int, object]) -> int:
 
 
 def contiguous_split(n_src: int, n_tasks: int) -> list[list[int]]:
-    """The frozen contiguous-ascending producer assignment (the m43 ``_assign`` contract)."""
+    """Return the frozen contiguous-ascending producer assignment.
+
+    The m43 ``_assign`` contract.
+    """
     base, rem = divmod(n_src, n_tasks)
     ranges: list[list[int]] = []
     start = 0
@@ -798,9 +876,12 @@ def contiguous_split(n_src: int, n_tasks: int) -> list[list[int]]:
 def per_task_dest_wires(
     adapter: P2PAdapter, src_blocks: Sequence[object], parts: int, k: int, salt: int = 0
 ) -> dict[tuple[int, int], int]:
-    """The INDEPENDENT fragment oracle: per (producer task t, dest d), the wire size of the
-    coalesced fragment — the producer's owned srcs routed with the golden-pinned ``partition``,
-    concatenated in ascending-src order, ``to_wire``'d (the frozen m39/m43 wire contract)."""
+    """Return the INDEPENDENT fragment oracle.
+
+    Per (producer task t, dest d), the wire size of the coalesced fragment — the producer's
+    owned srcs routed with the golden-pinned ``partition``, concatenated in ascending-src
+    order, ``to_wire``'d (the frozen m39/m43 wire contract).
+    """
     be: Any = adapter.backend
     out: dict[tuple[int, int], int] = {}
     for t, owned in enumerate(contiguous_split(len(src_blocks), k)):
@@ -817,9 +898,11 @@ def per_task_dest_wires(
 def cross_fragment_bytes(
     adapter: P2PAdapter, src_blocks: Sequence[object], parts: int, k: int
 ) -> tuple[int, int]:
-    """``(total cross-peer bytes, cross fragment count)`` under the pinned ownership rules:
-    producer task t runs on peer index t (contiguous split), dest d is gathered by peer d % k (F8).
-    A fragment crosses iff d % k != t — exactly the bytes the /pull plane must serve."""
+    """``(total cross-peer bytes, cross fragment count)`` under the pinned ownership rules.
+
+    Producer task t runs on peer index t (contiguous split), dest d is gathered by peer d % k
+    (F8). A fragment crosses iff d % k != t — exactly the bytes the /pull plane must serve.
+    """
     wires = per_task_dest_wires(adapter, src_blocks, parts, k)
     cross = {(t, d): v for (t, d), v in wires.items() if d % k != t}
     return sum(cross.values()), len(cross)
@@ -841,9 +924,11 @@ def _per_dest_side(
 def dup_join_all(
     adapter: P2PAdapter, left: Sequence[object], right: Sequence[object], parts: int
 ) -> Counter[JRow]:
-    """DUPLICATING relational inner join as one multiset (the m40 §3.3 pin): a probe row with k
-    build matches => k rows. Routes each side with the backend's ``partition`` only — the engine
-    under test cannot share a join-kernel bug with this oracle."""
+    """DUPLICATING relational inner join as one multiset (the m40 §3.3 pin).
+
+    A probe row with k build matches => k rows. Routes each side with the backend's
+    ``partition`` only — the engine under test cannot share a join-kernel bug with this oracle.
+    """
     left_by_dest = _per_dest_side(adapter, left, "lval", parts)
     right_by_dest = _per_dest_side(adapter, right, "rval", parts)
     total: Counter[JRow] = Counter()
@@ -863,8 +948,11 @@ def observed_join_all(adapter: P2PAdapter, value: dict[int, object]) -> Counter[
 
 
 def read_nullable_column(c: object) -> list[int | None]:
-    """One joined column to Python ints with ``None`` for a null/masked entry (the m40 option-type
-    pin: a sentinel implementation fails the multiset against real ``None`` rows)."""
+    """One joined column to Python ints with ``None`` for a null/masked entry.
+
+    The m40 option-type pin: a sentinel implementation fails the multiset against real ``None``
+    rows.
+    """
     to_list = getattr(c, "to_list", None)
     if to_list is not None:  # awkward option array -> [.., None, ..]
         return [None if v is None else int(v) for v in to_list()]
@@ -873,8 +961,10 @@ def read_nullable_column(c: object) -> list[int | None]:
 
 
 def nullable_join_multiset(value: dict[int, object]) -> Counter[NJRow]:
-    """The whole relational result as one null-aware multiset over ALL blocks (partitioning-
-    independent)."""
+    """Return the whole relational result as one null-aware multiset over ALL blocks.
+
+    Partitioning- independent.
+    """
     total: Counter[NJRow] = Counter()
     for block in value.values():
         ks = read_nullable_column(block["__joinkey__"])  # type: ignore[index]
@@ -892,13 +982,16 @@ def key_row_count(multiset: Counter[NJRow], key: int) -> int:
 
 
 class GatedP2PShuffleBackend:
-    """A delegating ``ShuffleBackend`` for the worker-death theme (the m43/m44 gated-kill
-    mechanism, clock-free): ``partition`` (map-phase only) drops a ``pmark`` file per call
-    recording the caller's pid; ``from_wire`` (gather-side only under repartition) drops a
-    ``gstart`` mark then BLOCKS until ``gate_path`` exists — holding a gather open so the driver
-    can SIGKILL a block-holding worker process mid-run deterministically. Ships to HTEX peers via
-    the spec (spawn-picklable: plain attributes + a delegate). Data is delegated UNTOUCHED, so
-    hashes stay comparable with a plain-backend local oracle run."""
+    """A delegating ``ShuffleBackend`` holding a gather open for the worker-death theme.
+
+    A delegating ``ShuffleBackend`` for the worker-death theme (the m43/m44 gated-kill mechanism,
+    clock-free): ``partition`` (map-phase only) drops a ``pmark`` file per call recording the
+    caller's pid; ``from_wire`` (gather-side only under repartition) drops a ``gstart`` mark then
+    BLOCKS until ``gate_path`` exists — holding a gather open so the driver can SIGKILL a
+    block-holding worker process mid-run deterministically. Ships to HTEX peers via the spec
+    (spawn-picklable: plain attributes + a delegate). Data is delegated UNTOUCHED, so hashes stay
+    comparable with a plain-backend local oracle run.
+    """
 
     def __init__(self, inner: Any, mark_dir: str, gate_path: str | None) -> None:
         self.inner = inner
@@ -939,4 +1032,8 @@ class GatedP2PShuffleBackend:
 
 
 def mark_pids(mark_dir: str, prefix: str) -> list[int]:
-    return [int(p.read_text()) for p in sorted(Path(mark_dir).iterdir()) if p.name.startswith(f"{prefix}-")]
+    return [
+        int(p.read_text())
+        for p in sorted(Path(mark_dir).iterdir())
+        if p.name.startswith(f"{prefix}-")
+    ]

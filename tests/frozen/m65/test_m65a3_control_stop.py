@@ -1,4 +1,4 @@
-"""m65 A3 fixup: a controlled adaptive ``SubmitRunner`` ends at its ``StopCondition`` like the bare run."""
+"""m65 A3 fixup: a controlled adaptive ``SubmitRunner`` stops at its ``StopCondition``."""
 
 from __future__ import annotations
 

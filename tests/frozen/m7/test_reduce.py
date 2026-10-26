@@ -1,4 +1,7 @@
-"""The associative tree reduction (plan M7): deterministic + straggler-tolerant, tested directly."""
+"""The associative tree reduction (plan M7).
+
+Deterministic + straggler-tolerant, tested directly.
+"""
 
 from __future__ import annotations
 
@@ -39,7 +42,8 @@ def test_tree_reduce_is_order_independent() -> None:
 
 def test_tree_reduce_empty_and_single() -> None:
     assert tree_reduce(0, iter([]), lambda a, b: a + b, lambda: -1) == (-1, 0)  # empty -> identity
-    assert tree_reduce(1, iter([(0, 99)]), lambda a, b: a + b, lambda: 0) == (99, 0)  # single -> no combine
+    # single -> no combine
+    assert tree_reduce(1, iter([(0, 99)]), lambda a, b: a + b, lambda: 0) == (99, 0)
 
 
 def test_tree_reduce_is_incremental_not_a_barrier() -> None:

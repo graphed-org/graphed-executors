@@ -1,7 +1,9 @@
-"""m44 threading bridge — handlers run ON the worker's IO loop and do nothing but an epoch check
-and a queue put; receivers drain OFF the loop from task threads (plan §1.1 handler discipline;
-blueprint §3 `test_transport_loop_discipline`). Tier A (processes=False) deliberately: the
-handler-branch execution happens in the driver process where the coverage run can see it (FU3).
+"""m44 threading bridge.
+
+Handlers run ON the worker's IO loop and do nothing but an epoch check and a queue put; receivers
+drain OFF the loop from task threads (plan §1.1 handler discipline; blueprint §3
+`test_transport_loop_discipline`). Tier A (processes=False) deliberately: the handler-branch
+execution happens in the driver process where the coverage run can see it (FU3).
 
 Witnesses: after real wire traffic, ``recv_on_loop == recv_invocations >= 1`` (every handler
 invocation executed on the loop thread — impl-recorded thread ids, not clocks); the receiving
@@ -11,7 +13,8 @@ fresh epoch round-tripping immediately afterwards on the same workers.
 
 Discriminates: an impl that bridges sync work into the handler (deadlocks/hangs the bounded
 calls); one that runs handlers off-loop (``recv_on_loop`` diverges from ``recv_invocations``);
-one whose blocking ``recv`` occupies the IO loop (the off-loop witness fails)."""
+one whose blocking ``recv`` occupies the IO loop (the off-loop witness fails).
+"""
 
 from __future__ import annotations
 

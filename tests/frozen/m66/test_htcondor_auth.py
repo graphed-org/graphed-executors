@@ -1,11 +1,16 @@
-"""m66 D2: every task-server route refuses an unsigned or wrongly signed request before ``pickle.loads``.
+"""m66 D2: every task-server route refuses an unsigned request before ``pickle.loads``.
 
-The body is a pickle whose unpickling creates a marker file, so the marker's absence after a 403 shows
-no unpickle happened, and the same body correctly signed (``X-Graphed-Sig`` = the hex HMAC-SHA256 of
-the body under the run's secret) creates it, which shows the instrument is live on that route.
+m66 D2: every task-server route refuses an unsigned or wrongly signed request before
+``pickle.loads``.
+
+The body is a pickle whose unpickling creates a marker file, so the marker's absence after a 403
+shows no unpickle happened, and the same body correctly signed (``X-Graphed-Sig`` = the hex
+HMAC-SHA256 of the body under the run's secret) creates it, which shows the instrument is live on
+that route.
 
 Discriminates unpickling before the signature check, a check skipped on any one route, and a pilot
-with the wrong secret file that still receives work."""
+with the wrong secret file that still receives work.
+"""
 
 from __future__ import annotations
 
@@ -52,7 +57,10 @@ def sign(secret: bytes, body: bytes) -> str:
 
 
 def post_in_background(url: str, body: bytes, sig: str) -> None:
-    """A signed control request; its reply may be a long poll, and only the marker is asserted."""
+    """Send a signed control request.
+
+    Its reply may be a long poll, and only the marker is asserted.
+    """
 
     def _send() -> None:
         try:
@@ -73,13 +81,18 @@ def test_route_refuses_bad_signatures_before_unpickling(route: str, tmp_path: Pa
         for label, key in (("unsigned", None), ("wrong", b"not-the-run-secret")):
             marker = tmp_path / f"{label}.marker"
             body = pickle.dumps(MarkerBomb(str(marker)))
-            assert post(target, body, None if key is None else sign(key, body)) == 403, (route, label)
+            assert post(target, body, None if key is None else sign(key, body)) == 403, (
+                route,
+                label,
+            )
             assert not marker.exists(), f"{route} unpickled a {label} body"
         control = tmp_path / "signed.marker"
         body = pickle.dumps(MarkerBomb(str(control)))
         post_in_background(target, body, sign(secret, body))
         wait_for(control.exists)
-        assert control.exists(), f"{route} never unpickled a correctly signed body: the instrument is dead"
+        assert control.exists(), (
+            f"{route} never unpickled a correctly signed body: the instrument is dead"
+        )
     finally:
         backend.close()
 

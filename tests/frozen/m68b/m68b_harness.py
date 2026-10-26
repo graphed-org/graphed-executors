@@ -1,24 +1,29 @@
-"""Shared harness for the m68b frozen suite: condor cluster-hosted services (plan-services.md §3.3).
+"""Shared harness for the m68b frozen suite.
 
-Frozen suites never import across directories, so what this suite needs from m66/m67/m68a is copied here
-under a basename of its own (a second ``services_harness`` would shadow m68a's in ``sys.modules``): the
-deferred accessors, the bounded runners, the reaped-pid and freed-port witnesses, the bindings recorder
-(``RecordingSchedd``/``FakeHTCondor``/``record_bindings``), ``write_machine_ad``, ``fake_venv``,
-``NoStartLauncher`` and the m66 auth pieces (``sign``, ``post``, ``MarkerBomb``). What is new:
+Condor cluster-hosted services (plan-services.md §3.3).
+
+Frozen suites never import across directories, so what this suite needs from m66/m67/m68a is copied
+here under a basename of its own (a second ``services_harness`` would shadow m68a's in
+``sys.modules``): the deferred accessors, the bounded runners, the reaped-pid and freed-port
+witnesses, the bindings recorder (``RecordingSchedd``/``FakeHTCondor``/``record_bindings``),
+``write_machine_ad``, ``fake_venv``, ``NoStartLauncher`` and the m66 auth pieces (``sign``,
+``post``, ``MarkerBomb``). What is new:
 
 - ``AnnounceRun``: ``announce.py`` run as ``python -m graphed_executors.htcondor_backend.announce
-  service.json`` in a job dir, the same code the job runs by path, so ``test-htcondor``'s coverage records it
-  (the env keeps ``COVERAGE_PROCESS_START``); its output is read on a thread, so a test can wait for a line.
-- ``job_config``/``write_job``: a job dir as ``ServiceJob`` lays it out (``service.json``, ``graphed-secret``,
-  optionally ``service/``), from the plan's field list.
+  service.json`` in a job dir, the same code the job runs by path, so ``test-htcondor``'s coverage
+  records it (the env keeps ``COVERAGE_PROCESS_START``); its output is read on a thread, so a test
+  can wait for a line.
+- ``job_config``/``write_job``: a job dir as ``ServiceJob`` lays it out (``service.json``,
+  ``graphed-secret``, optionally ``service/``), from the plan's field list.
 - ``m68b_child.py`` (``child_argv``): the managed child, which reports its own state at start.
 - Spies that record method calls into one ordered list (``spy_method``).
-- Plan parts pilots unpickle for the live file (``TimedGet``, ``GatedGet``); everything a pilot imports is
-  module-level here, and the live file ships this file in ``user_modules``.
+- Plan parts pilots unpickle for the live file (``TimedGet``, ``GatedGet``); everything a pilot
+  imports is module-level here, and the live file ships this file in ``user_modules``.
 
-The implementation under test is reached only through the ``*_api()`` accessors, inside test bodies, so
-the suite collects before ``htcondor_backend/services.py`` and ``announce.py`` exist. Every bindings call
-goes through ``launch._htcondor`` (``record_bindings`` also answers a direct ``import htcondor2``).
+The implementation under test is reached only through the ``*_api()`` accessors, inside test
+bodies, so the suite collects before ``htcondor_backend/services.py`` and ``announce.py`` exist.
+Every bindings call goes through ``launch._htcondor`` (``record_bindings`` also answers a direct
+``import htcondor2``).
 """
 
 from __future__ import annotations
@@ -69,24 +74,34 @@ FAKE_CLUSTER = 4242
 
 
 def htcondor_api() -> Any:
-    """``graphed_executors.htcondor_backend``: SITES, SiteProfile, HTCondorBackend, HTCondorRunner, ..."""
+    """``graphed_executors.htcondor_backend``.
+
+    SITES, SiteProfile, HTCondorBackend, HTCondorRunner, ..
+    """
     return importlib.import_module("graphed_executors.htcondor_backend")
 
 
 def launch_api() -> Any:
-    """``graphed_executors.htcondor_backend.launch``: CondorPilots; every bindings call goes through
-    ``_htcondor()``."""
+    """``graphed_executors.htcondor_backend.launch``: CondorPilots.
+
+    Every bindings call goes through ``_htcondor()``.
+    """
     return importlib.import_module("graphed_executors.htcondor_backend.launch")
 
 
 def backend_api() -> Any:
-    """``graphed_executors.htcondor_backend.backend``: HTCondorBackend, HTCondorRunner, htcondor_runner."""
+    """``graphed_executors.htcondor_backend.backend``.
+
+    HTCondorBackend, HTCondorRunner, htcondor_runner.
+    """
     return importlib.import_module("graphed_executors.htcondor_backend.backend")
 
 
 def server_api() -> Any:
-    """``graphed_executors.htcondor_backend.server``: TaskServer (announce_secret, forget_announce,
-    wait_announce), LEASE_S, POLL_S."""
+    """``graphed_executors.htcondor_backend.server``.
+
+    TaskServer (announce_secret, forget_announce, wait_announce), LEASE_S, POLL_S.
+    """
     return importlib.import_module("graphed_executors.htcondor_backend.server")
 
 
@@ -110,12 +125,15 @@ def recipes_api() -> Any:
     return importlib.import_module("graphed_executors.submit.recipes")
 
 
-# ---- bounds ----------------------------------------------------------------------------------------
+# ---- bounds -------------------------------------------------------------------------------------
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
-    """Run ``fn`` on a worker thread and fail if it does not finish in ``timeout_s``: a hang is a failure,
-    never a wedged CI job. Returns the value or re-raises the call's exception."""
+    """Run ``fn`` on a worker thread and fail if it does not finish in ``timeout_s``.
+
+    A hang is a failure, never a wedged CI job. Returns the value or re-raises the call's
+    exception.
+    """
     try:
         return in_background(fn).get(timeout_s)
     except multiprocessing.TimeoutError:
@@ -123,7 +141,10 @@ def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
 
 
 def in_background(fn: Callable[[], Any]) -> Any:
-    """``fn`` started on a daemon thread; the handle's ``ready()``/``get(t)`` behave as ``AsyncResult``'s."""
+    """``fn`` started on a daemon thread.
+
+    The handle's ``ready()``/``get(t)`` behave as ``AsyncResult``'s.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -147,7 +168,11 @@ def in_background(fn: Callable[[], Any]) -> Any:
 
 
 def get_within(result: Any, timeout_s: float, what: str) -> Any:
-    """``result.get(timeout_s)`` of an ``in_background`` call, failing with ``what`` when it is not done."""
+    """Return ``result.get(timeout_s)`` of an ``in_background`` call, failing when not done.
+
+    ``result.get(timeout_s)`` of an ``in_background`` call, failing with ``what`` when it is not
+    done.
+    """
     try:
         return result.get(timeout_s)
     except multiprocessing.TimeoutError:
@@ -155,7 +180,11 @@ def get_within(result: Any, timeout_s: float, what: str) -> Any:
 
 
 def wait_announce(server: Any, key: str, timeout_s: float) -> Any:
-    """``server.wait_announce(key, timeout_s)``, failing when it overruns its own timeout by ``MARGIN_S``."""
+    """Call ``server.wait_announce(key, timeout_s)``, failing when it overruns its timeout.
+
+    ``server.wait_announce(key, timeout_s)``, failing when it overruns its own timeout by
+    ``MARGIN_S``.
+    """
     return run_bounded(lambda: server.wait_announce(key, timeout_s), timeout_s + MARGIN_S)
 
 
@@ -169,12 +198,15 @@ def wait_for(predicate: Callable[[], bool], timeout_s: float = 30.0) -> bool:
     return True
 
 
-# ---- the reaped-pid and freed-port witnesses -----------------------------------------------------
+# ---- the reaped-pid and freed-port witnesses ----------------------------------------------------
 
 
 def pid_gone(pid: int) -> bool:
-    """Whether ``pid`` is no longer a live (or unreaped) process: ``os.kill(pid, 0)`` raises
-    ``ProcessLookupError`` once its parent has waited on it (POSIX legs only)."""
+    """Whether ``pid`` is no longer a live (or unreaped) process.
+
+    ``os.kill(pid, 0)`` raises ``ProcessLookupError`` once its parent has waited on it (POSIX
+    legs only).
+    """
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -206,7 +238,10 @@ def _bindable(host: str, port: int) -> bool:
 
 
 def port_free(port: int) -> bool:
-    """Nothing listens on ``port``: it binds on loopback and on all interfaces, and a connect is refused."""
+    """Nothing listens on ``port``.
+
+    It binds on loopback and on all interfaces, and a connect is refused.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1.0)
         listening = s.connect_ex(("127.0.0.1", port)) == 0
@@ -214,7 +249,7 @@ def port_free(port: int) -> bool:
 
 
 def free_range(n: int = 3) -> tuple[int, int]:
-    """An inclusive range of ``n`` consecutive free ports, above the 10000-10100 band the site rows use."""
+    """Return an inclusive range of ``n`` free ports above the site rows' 10000-10100 band."""
     for _ in range(200):
         low = 20000 + secrets.randbelow(30000)
         if all(port_free(p) for p in range(low, low + n)):
@@ -223,7 +258,7 @@ def free_range(n: int = 3) -> tuple[int, int]:
 
 
 def closed_port() -> int:
-    """A port nothing listens on (bound once, then released)."""
+    """Return a port nothing listens on (bound once, then released)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
@@ -231,8 +266,10 @@ def closed_port() -> int:
 
 @contextlib.contextmanager
 def wildcard_listener(port: int) -> Iterator[socket.socket]:
-    """A listener on ``("", port)``, the address ``announce.py``'s free-port bind uses (on macOS a
-    ``127.0.0.1`` listener does not refuse that bind)."""
+    """Yield a listener on ``("", port)``, the address ``announce.py``'s free-port bind uses.
+
+    On macOS a ``127.0.0.1`` listener does not refuse that bind.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.bind(("", port))
@@ -244,8 +281,10 @@ def wildcard_listener(port: int) -> Iterator[socket.socket]:
 
 @contextlib.contextmanager
 def held_range(n: int = 3) -> Iterator[tuple[int, int]]:
-    """``free_range(n)`` with its first port held by a ``wildcard_listener``; a range whose first port
-    another socket took after the check is dropped for a fresh one."""
+    """``free_range(n)`` with its first port held by a ``wildcard_listener``.
+
+    A range whose first port another socket took after the check is dropped for a fresh one.
+    """
     for _ in range(200):
         low, high = free_range(n)
         with contextlib.ExitStack() as stack:
@@ -258,16 +297,16 @@ def held_range(n: int = 3) -> Iterator[tuple[int, int]]:
     raise AssertionError(f"no {n} consecutive free ports could be held")
 
 
-# ---- HTTP and the task server's signing (the m66 auth pieces) --------------------------------------
+# ---- HTTP and the task server's signing (the m66 auth pieces) -----------------------------------
 
 
 def sign(secret: bytes, body: bytes) -> str:
-    """The hex HMAC-SHA256 pilots and ``announce.py`` put in ``X-Graphed-Sig``."""
+    """Return the hex HMAC-SHA256 pilots and ``announce.py`` put in ``X-Graphed-Sig``."""
     return hmac.new(secret, body, hashlib.sha256).hexdigest()
 
 
 def post(url: str, body: bytes, sig: str | None, timeout: float = 30.0) -> int:
-    """The status of a POST of ``body`` (signed with ``sig`` when given)."""
+    """Return the status of a POST of ``body`` (signed with ``sig`` when given)."""
     request = urllib.request.Request(url, data=body, method="POST")
     if sig is not None:
         request.add_header(SIG_HEADER, sig)
@@ -284,11 +323,13 @@ def announce_body(key: str, hostport: str, identity: str) -> bytes:
 
 def post_announce(url: str, body: bytes, secret: bytes | None) -> int:
     """POST ``body`` to ``<url>/announce``, signed with ``secret`` (unsigned when ``None``)."""
-    return post(url.rstrip("/") + "/announce", body, None if secret is None else sign(secret, body))
+    return post(
+        url.rstrip("/") + "/announce", body, None if secret is None else sign(secret, body)
+    )
 
 
 def http_status(url: str, timeout_s: float = 5.0) -> int:
-    """The status a GET of ``url`` answers."""
+    """Return the status a GET of ``url`` answers."""
     try:
         with urllib.request.urlopen(url, timeout=timeout_s) as resp:
             return int(resp.status)
@@ -297,7 +338,7 @@ def http_status(url: str, timeout_s: float = 5.0) -> int:
 
 
 def http_get(url: str, timeout_s: float = 5.0) -> str:
-    """The body of a 2xx answer; anything else raises."""
+    """Return the body of a 2xx answer; anything else raises."""
     with urllib.request.urlopen(url, timeout=timeout_s) as resp:
         return str(resp.read().decode())
 
@@ -318,7 +359,10 @@ class MarkerBomb:
 
 
 class NoStartLauncher:
-    """A ``PilotLauncher`` that starts nothing (a task server's ``launcher`` when no pilot is needed)."""
+    """A ``PilotLauncher`` that starts nothing.
+
+    A task server's ``launcher`` when no pilot is needed.
+    """
 
     def __init__(self) -> None:
         self.log_dir = None
@@ -335,7 +379,10 @@ class NoStartLauncher:
 
 @contextlib.contextmanager
 def task_server() -> Iterator[Any]:
-    """A real ``TaskServer`` on ``127.0.0.1`` and an ephemeral port; closed and shut down at exit."""
+    """Yield a real ``TaskServer`` on ``127.0.0.1`` and an ephemeral port.
+
+    Closed and shut down at exit.
+    """
     server = server_api().TaskServer("127.0.0.1", (0, 0), NoStartLauncher())
     try:
         yield server
@@ -344,7 +391,7 @@ def task_server() -> Iterator[Any]:
         server.shutdown()
 
 
-# ---- spies ---------------------------------------------------------------------------------------------
+# ---- spies --------------------------------------------------------------------------------------
 
 
 def spy_method(
@@ -354,15 +401,21 @@ def spy_method(
     events: list[tuple[Any, ...]],
     tag: str | None = None,
 ) -> None:
-    """Replace ``cls.name`` with a wrapper that appends ``(tag, *args, *kwargs.values())`` to ``events`` and
-    calls through, so a one-parameter method's argument lands at ``[1]`` however it was passed.
-    ``monkeypatch.setattr`` raises when ``cls`` has no ``name``: a missing planned method fails there."""
+    """Wrap ``cls.name`` so each call appends its tag and arguments to ``events``.
+
+    Replace ``cls.name`` with a wrapper that appends ``(tag, *args, *kwargs.values())`` to
+    ``events`` and calls through, so a one-parameter method's argument lands at ``[1]`` however it
+    was passed. ``monkeypatch.setattr`` raises when ``cls`` has no ``name``: a missing planned
+    method fails there.
+    """
     real = getattr(cls, name)
     label = tag or name
 
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         passed = (*args, *kwargs.values())
-        events.append((label, *[list(a) if isinstance(a, (list, tuple, set)) else a for a in passed]))
+        events.append(
+            (label, *[list(a) if isinstance(a, (list, tuple, set)) else a for a in passed])
+        )
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(cls, name, wrapper)
@@ -377,7 +430,7 @@ def keys_of(events: list[tuple[Any, ...]], tag: str) -> list[str]:
     return out
 
 
-# ---- recorded bindings (copied from m68a) -----------------------------------------------------------
+# ---- recorded bindings (copied from m68a) -------------------------------------------------------
 
 
 class SubmitResult:
@@ -389,9 +442,11 @@ class SubmitResult:
 
 
 class RecordingSchedd:
-    """A stand-in ``htcondor2.Schedd`` that appends every call to ``log``; ``query`` answers from
-    ``queue`` (the last answer repeats), ``history`` from ``history``; ``spool_raises`` makes ``spool``
-    raise it."""
+    """A stand-in ``htcondor2.Schedd`` that appends every call to ``log``.
+
+    ``query`` answers from ``queue`` (the last answer repeats), ``history`` from ``history``;
+    ``spool_raises`` makes ``spool`` raise it.
+    """
 
     def __init__(
         self,
@@ -404,15 +459,21 @@ class RecordingSchedd:
         self.history_ads = list(history or [])
         self.spool_raises = spool_raises
 
-    def query(self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def query(
+        self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("query", str(constraint), tuple(projection or ())))
         return self.queue.pop(0) if len(self.queue) > 1 else list(self.queue[0])
 
-    def history(self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def history(
+        self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("history", str(constraint), tuple(projection or ())))
         return list(self.history_ads)
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         self.log.append(("submit", dict(description), count, spool))
         return SubmitResult(FAKE_CLUSTER)
 
@@ -433,7 +494,9 @@ class _Collector:
         self.fake = fake
         self.pool = pool
 
-    def locate(self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def locate(
+        self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         self.fake.log.append(("locate", self.pool, str(daemon_type), name))
         return {"Name": name or FAKE_SCHEDD, "MyAddress": "<127.0.0.1:9618>", "located": True}
 
@@ -452,8 +515,10 @@ class _Credd:
 
 
 class FakeHTCondor:
-    """What ``launch._htcondor()`` returns under the recorder: ``param``, ``Collector``, ``Schedd``,
-    ``Submit`` and the enums the backend names."""
+    """What ``launch._htcondor()`` returns under the recorder.
+
+    ``param``, ``Collector``, ``Schedd``, ``Submit`` and the enums the backend names.
+    """
 
     class DaemonType:
         Schedd = "Schedd"
@@ -491,8 +556,14 @@ class FakeHTCondor:
         return dict(description or {})
 
 
-def record_bindings(monkeypatch: pytest.MonkeyPatch, schedd: RecordingSchedd, **kwargs: Any) -> FakeHTCondor:
-    """Patch ``launch._htcondor`` (and ``sys.modules["htcondor2"]``) to a ``FakeHTCondor`` over ``schedd``."""
+def record_bindings(
+    monkeypatch: pytest.MonkeyPatch, schedd: RecordingSchedd, **kwargs: Any
+) -> FakeHTCondor:
+    """Patch the bindings to a ``FakeHTCondor`` over ``schedd``.
+
+    Patch ``launch._htcondor`` (and ``sys.modules["htcondor2"]``) to a ``FakeHTCondor`` over
+    ``schedd``.
+    """
     fake = FakeHTCondor(schedd, **kwargs)
 
     def _htcondor() -> FakeHTCondor:
@@ -505,7 +576,7 @@ def record_bindings(monkeypatch: pytest.MonkeyPatch, schedd: RecordingSchedd, **
 
 
 def submits(log: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
-    """The description of every ``schedd.submit`` in ``log``, in order."""
+    """Return the description of every ``schedd.submit`` in ``log``, in order."""
     return [entry[1] for entry in log if entry[0] == "submit"]
 
 
@@ -514,34 +585,44 @@ def input_entries(desc: Mapping[str, Any]) -> list[str]:
 
 
 def write_machine_ad(path: Path, host: str = "localhost") -> Path:
-    """A machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
+    """Return a machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
     path.write_text(f'Machine = "{host}"\nName = "slot1@{host}"\nCpus = 2\n')
     return path
 
 
 def fake_venv(root: Path) -> Path:
-    """A directory shaped like a non-editable venv with one dist-info (no interpreter in it)."""
+    """Return a directory shaped like a non-editable venv with one dist-info.
+
+    No interpreter in it.
+    """
     root.mkdir(parents=True)
     (root / "pyvenv.cfg").write_text("home = /usr/bin\ninclude-system-site-packages = false\n")
     purelib = Path(
-        sysconfig.get_path("purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)})
+        sysconfig.get_path(
+            "purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)}
+        )
     )
     dist = purelib / "probedist-0.1.dist-info"
     dist.mkdir(parents=True)
-    (dist / "direct_url.json").write_text(json.dumps({"url": "file:///src/probedist", "dir_info": {}}))
+    (dist / "direct_url.json").write_text(
+        json.dumps({"url": "file:///src/probedist", "dir_info": {}})
+    )
     return root
 
 
-# ---- the job side: announce.py in a job dir ----------------------------------------------------------
+# ---- the job side: announce.py in a job dir -----------------------------------------------------
 
 
 def child_argv(mode: str, report: Path, *extra: str, python: str = "{python}") -> tuple[str, ...]:
-    """A recipe argv running ``m68b_child.py <mode> {port} <report> [extra...]``."""
+    """Return a recipe argv running ``m68b_child.py <mode> {port} <report> [extra...]``."""
     return (python, CHILD_SCRIPT, mode, "{port}", str(report), *extra)
 
 
 def job_config(**overrides: Any) -> dict[str, Any]:
-    """``service.json`` as the plan lists its fields (attached mode: ``url`` set, ``watch`` null)."""
+    """``service.json`` as the plan lists its fields.
+
+    Attached mode: ``url`` set, ``watch`` null.
+    """
     cfg: dict[str, Any] = {
         "argv": ["{python}", "-m", "http.server", "{port}"],
         "env": {},
@@ -562,8 +643,10 @@ def job_config(**overrides: Any) -> dict[str, Any]:
 
 
 def write_job(root: Path, cfg: Mapping[str, Any], secret: bytes | None) -> Path:
-    """A job dir holding ``service.json`` and, in attached mode, ``graphed-secret`` (hex, as
-    ``write_secret`` writes it)."""
+    """Return a job dir holding ``service.json`` and, in attached mode, ``graphed-secret``.
+
+    Hex, as ``write_secret`` writes it.
+    """
     root.mkdir(parents=True, exist_ok=True)
     (root / "service.json").write_text(json.dumps(dict(cfg)))
     if secret is not None:
@@ -572,13 +655,16 @@ def write_job(root: Path, cfg: Mapping[str, Any], secret: bytes | None) -> Path:
 
 
 def announce_env(machine_ad: Path, **extra: str) -> dict[str, str]:
-    """The job's environment: this process's (``COVERAGE_PROCESS_START`` included) plus a machine ad
-    whose ``Machine`` names the identity announced."""
+    """Return the job's environment.
+
+    This process's (``COVERAGE_PROCESS_START`` included) plus a machine ad whose ``Machine``
+    names the identity announced.
+    """
     return {**os.environ, "_CONDOR_MACHINE_AD": str(machine_ad), **extra}
 
 
 def read_report(path: Path, timeout_s: float = 30.0) -> dict[str, Any]:
-    """What ``m68b_child.py`` wrote at start."""
+    """Return what ``m68b_child.py`` wrote at start."""
     wait_for(path.is_file, timeout_s)
     assert path.is_file(), f"the managed child never started: no report at {path}"
     report: dict[str, Any] = json.loads(path.read_text())
@@ -592,9 +678,13 @@ def child_starts(report: Path) -> int:
 
 
 class AnnounceRun:
-    """``python -m graphed_executors.htcondor_backend.announce service.json`` with ``cwd=job``, as the job
-    runs it. Output (stdout and stderr) is collected on a thread with the time each line arrived; leaving
-    the ``with`` kills it and every child pid in ``reports`` still alive (a backstop: tests assert first)."""
+    """A run of ``announce.py`` in ``job``, as the job runs it, with timed output.
+
+    ``python -m graphed_executors.htcondor_backend.announce service.json`` with ``cwd=job``, as the
+    job runs it. Output (stdout and stderr) is collected on a thread with the time each line
+    arrived; leaving the ``with`` kills it and every child pid in ``reports`` still alive (a
+    backstop: tests assert first).
+    """
 
     def __init__(self, job: Path, env: Mapping[str, str], reports: tuple[Path, ...] = ()) -> None:
         self.reports = reports
@@ -634,14 +724,23 @@ class AnnounceRun:
         return found()
 
     def report(self, path: Path, timeout_s: float = 60.0) -> dict[str, Any]:
-        """What the child wrote at start; fails naming announce.py's output when none appears."""
+        """Return what the child wrote at start.
+
+        Fail naming announce.py's output when none appears.
+        """
         wait_for(lambda: path.is_file() or self.proc.poll() is not None, timeout_s)
         if not path.is_file():
-            raise AssertionError(f"the managed child never started; announce.py output:\n{self.output()}")
+            raise AssertionError(
+                f"the managed child never started; announce.py output:\n{self.output()}"
+            )
         return read_report(path)
 
     def wait(self, timeout_s: float) -> int:
-        """The exit code, or a failure naming the output when it does not exit within ``timeout_s``."""
+        """Return the exit code.
+
+        Return the exit code or a failure naming the output when it does not exit within
+        ``timeout_s``.
+        """
         try:
             code = self.proc.wait(timeout_s)
         except subprocess.TimeoutExpired:
@@ -657,7 +756,8 @@ class AnnounceRun:
 
     def __exit__(self, *exc: object) -> None:
         if self.proc.poll() is None:
-            self.proc.terminate()  # announce.py's own SIGTERM path reaps a child that wrote no report
+            # announce.py's own SIGTERM path reaps a child that wrote no report
+            self.proc.terminate()
             try:
                 self.proc.wait(REAP_S + MARGIN_S)
             except subprocess.TimeoutExpired:
@@ -668,7 +768,7 @@ class AnnounceRun:
                 kill_quietly(int(json.loads(report.read_text())["pid"]))
 
 
-# ---- specs ---------------------------------------------------------------------------------------------
+# ---- specs --------------------------------------------------------------------------------------
 
 
 def web_spec(
@@ -679,7 +779,10 @@ def web_spec(
     timeout_s: float = 60.0,
     **launch: Any,
 ) -> ServiceSpec:
-    """A requirement whose recipe is ``argv`` (``launch`` fields: image, inputs, env, resources)."""
+    """Return a requirement whose recipe is ``argv``.
+
+    ``launch`` fields: image, inputs, env, resources.
+    """
     return ServiceSpec(
         name,
         "http",
@@ -690,7 +793,7 @@ def web_spec(
     )
 
 
-# ---- plan parts pilots unpickle (the live file) --------------------------------------------------------
+# ---- plan parts pilots unpickle (the live file) -------------------------------------------------
 
 
 def mem_partitions(n: int, tag: str) -> tuple[Partition, ...]:
@@ -713,8 +816,11 @@ def _as_http(endpoint: str) -> str:
 
 @dataclass(frozen=True)
 class TimedGet:
-    """A plan process bound to ``service``: each task GETs ``/`` and ``/service.json`` on it and returns
-    ``((time.time() at the GET, body of /, status of /service.json),)``."""
+    """A plan process bound to ``service``.
+
+    Each task GETs ``/`` and ``/service.json`` on it and returns ``((time.time() at the GET,
+    body of /, status of /service.json),)``.
+    """
 
     service: str = "web"
     endpoint: str | None = None
@@ -725,7 +831,9 @@ class TimedGet:
             raise UnboundService(self.service)
         return replace(self, endpoint=endpoint)
 
-    def __call__(self, partition: Partition, resources: object) -> tuple[tuple[float, str, int], ...]:
+    def __call__(
+        self, partition: Partition, resources: object
+    ) -> tuple[tuple[float, str, int], ...]:
         assert self.endpoint is not None, "process called unbound"
         t = time.time()
         body = http_get(_as_http(self.endpoint) + "/")
@@ -734,8 +842,12 @@ class TimedGet:
 
 @dataclass(frozen=True)
 class GatedGet:
-    """A plan process that polls ``gate`` (an HTTP URL) until it answers ``open``, then GETs ``/`` on its
-    bound ``service`` and returns ``((time.time(), body),)``: the test decides when the task finishes."""
+    """A plan process that polls ``gate`` (an HTTP URL) until it answers ``open``.
+
+    A plan process that polls ``gate`` (an HTTP URL) until it answers ``open``, then GETs ``/`` on
+    its bound ``service`` and returns ``((time.time(), body),)``: the test decides when the task
+    finishes.
+    """
 
     gate: str
     service: str = "web"
@@ -760,4 +872,6 @@ class GatedGet:
 
 def service_plan(process: Any, n: int, tag: str, specs: tuple[ServiceSpec, ...]) -> Plan[Any]:
     tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(n, tag)))
-    return Plan(process=process, combine=pair_concat, empty=empty_tuple, tasks=tasks, services=specs)
+    return Plan(
+        process=process, combine=pair_concat, empty=empty_tuple, tasks=tasks, services=specs
+    )

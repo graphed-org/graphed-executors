@@ -1,13 +1,16 @@
-"""m68a §3.1 "Driverless endpoints" and D6: a driverless job resolves its plan's services in the driver job,
-by the three legs, and classifies a service-phase failure as environment (exit 1). Every OS, no bindings:
-``submit_driverless`` runs over the recorded bindings and the job runs as ``python -m ...driver <dir>``
-in a scratch dir laid out from the recorded ``transfer_input_files`` (the m67 idiom).
+"""m68a §3.1 "Driverless endpoints" and D6.
 
-The plan's process (``services_harness.GetProcess``) GETs its bound endpoint from each pilot task, and its
-``resolve_services`` GETs it again in the driver, while the service is up, and wraps the value; the
-managed service is ``recipes.http_server``'s requirement with ``service_child.py`` as its argv (it answers
-every GET with its pid, so the server's pid is observable). Reading of E3: this file needs no histserv
-(N11 moved the in-job histserv leg to m69b), so it does not ``importorskip`` it.
+A driverless job resolves its plan's services in the driver job, by the three legs, and classifies
+a service-phase failure as environment (exit 1). Every OS, no bindings: ``submit_driverless`` runs
+over the recorded bindings and the job runs as ``python -m ...driver <dir>`` in a scratch dir laid
+out from the recorded ``transfer_input_files`` (the m67 idiom).
+
+The plan's process (``services_harness.GetProcess``) GETs its bound endpoint from each pilot task,
+and its ``resolve_services`` GETs it again in the driver, while the service is up, and wraps the
+value; the managed service is ``recipes.http_server``'s requirement with ``service_child.py`` as
+its argv (it answers every GET with its pid, so the server's pid is observable). Reading of E3:
+this file needs no histserv (N11 moved the in-job histserv leg to m69b), so it does not
+``importorskip`` it.
 
 Discriminates: a driverless bare endpoint reaching the job, a service-phase exception exiting 3, a
 refusal that is not retried or a plan error that is, a value resolved after its service is gone (or
@@ -69,16 +72,24 @@ from services_harness import (
 
 
 def web_spec(report: Path, ports: tuple[int, int] | None = None) -> Any:
-    """``recipes.http_server("web")`` (kind ``http``, check ``http:/``) whose argv runs the pid-answering
-    child; ``ports`` a free range; a job-sized ``timeout_s``."""
+    """Return ``recipes.http_server("web")`` whose argv runs the pid-answering child.
+
+    ``recipes.http_server("web")`` (kind ``http``, check ``http:/``) whose argv runs the
+    pid-answering child; ``ports`` a free range; a job-sized ``timeout_s``.
+    """
     spec = recipes_api().http_server("web")
     return dataclasses.replace(
         spec, ports=ports or free_range(), timeout_s=60.0, launch=child_launch("serve", report)
     )
 
 
-def prepared_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: Any, **kwargs: Any) -> Path:
-    """A job scratch dir from a recorded ``submit_driverless`` (generic site, one local pilot)."""
+def prepared_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: Any, **kwargs: Any
+) -> Path:
+    """Return a job scratch dir from a recorded ``submit_driverless``.
+
+    Generic site, one local pilot.
+    """
     log_dir = tmp_path / "submit"
     log_dir.mkdir()
     fake = record_bindings(monkeypatch, RecordingSchedd())
@@ -130,7 +141,7 @@ def driver_log(job: Path) -> str:
     return path.read_text() if path.is_file() else "<no driver.log>"
 
 
-# ---- the in-job service leg -----------------------------------------------------------------------------
+# ---- the in-job service leg ---------------------------------------------------------------------
 
 
 def test_the_driver_job_hosts_the_service_and_resolves_the_value(
@@ -170,11 +181,13 @@ def test_given_endpoints_short_circuit_the_launch(
         assert json.loads((job / "run.json").read_text())["endpoints"] == {"web": srv.endpoint()}
         code, _driver_pid, err = run_driver(job)
         assert code == 0, (err, driver_log(job))
-        # the plan's count: the driver's own set (one leg-1 check, one probe answer), the run's set (the
-        # same two), one GET per task (two partitions), one by resolve_services in the driver
+        # the plan's count: the driver's own set (one leg-1 check, one probe answer), the run's set
+        # (the same two), one GET per task (two partitions), one by resolve_services in the driver
         assert srv.gets == 7, srv.gets
     _ok, result = read_result(job)
-    assert result.value.body == str(os.getpid()), "the value was not resolved against the given endpoint"
+    assert result.value.body == str(os.getpid()), (
+        "the value was not resolved against the given endpoint"
+    )
     assert result.value.endpoint == srv.endpoint()
     assert not report.exists(), "the driver job started a service it was given an endpoint for"
 
@@ -203,8 +216,11 @@ def test_a_bare_endpoint_is_refused_before_any_bindings_call(
 
 
 def test_a_plan_without_services_starts_nothing(caplog: pytest.LogCaptureFixture) -> None:
-    """r24: the driver enters a ``ServiceSet`` over ``plan.services`` for every plan; with none it
-    submits no probe, starts nothing and logs no status (and the engine's own phase does the same)."""
+    """r24: the driver enters a ``ServiceSet`` over ``plan.services`` for every plan.
+
+    With none it submits no probe, starts nothing and logs no status (and the engine's own
+    phase does the same).
+    """
     services, submit = services_api(), submit_api()
     backend = RecordingBackend(submit.ThreadBackend(1))
     try:
@@ -213,7 +229,9 @@ def test_a_plan_without_services_starts_nothing(caplog: pytest.LogCaptureFixture
                 assert dict(eps) == {}
             runner = submit.SubmitRunner(backend)
             try:
-                result = run_bounded(lambda: runner.run(plain_plan(2, "m68a-dl-none")), RUN_TIMEOUT_S)
+                result = run_bounded(
+                    lambda: runner.run(plain_plan(2, "m68a-dl-none")), RUN_TIMEOUT_S
+                )
             finally:
                 run_bounded(runner.close, RUN_TIMEOUT_S)
         assert result.n_partitions == 2
@@ -223,7 +241,7 @@ def test_a_plan_without_services_starts_nothing(caplog: pytest.LogCaptureFixture
         run_bounded(backend.close, RUN_TIMEOUT_S)
 
 
-# ---- service-phase failures exit 1 ------------------------------------------------------------------------
+# ---- service-phase failures exit 1 --------------------------------------------------------------
 
 
 def test_a_dead_given_endpoint_exits_1_with_service_unavailable(
@@ -244,7 +262,9 @@ def test_a_held_port_range_exits_1_with_os_error(
 ) -> None:
     port = closed_port()
     report = children.report()
-    job = prepared_job(tmp_path, monkeypatch, get_plan(2, "m68a-dl-held", [web_spec(report, (port, port))]))
+    job = prepared_job(
+        tmp_path, monkeypatch, get_plan(2, "m68a-dl-held", [web_spec(report, (port, port))])
+    )
     with hold_port(port):
         code, _pid, err = run_driver(job)
     assert code == 1, (code, err, driver_log(job))
@@ -256,8 +276,11 @@ def test_a_held_port_range_exits_1_with_os_error(
 def test_a_refusal_of_the_in_run_recheck_exits_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, children: Any
 ) -> None:
-    """The given endpoint answers the driver's leg-1 check and the one probe answer, then refuses: the
-    re-check inside ``runner.run`` raises ``ServiceUnavailable``, which ``_exit_code`` maps to 1."""
+    """The given endpoint answers the driver's leg-1 check and the one probe answer, then refuses.
+
+    The re-check inside ``runner.run`` raises ``ServiceUnavailable``, which ``_exit_code`` maps
+    to 1.
+    """
     with CountingHTTPServer(ok_first=2) as srv:
         plan = get_plan(2, "m68a-dl-recheck", [web_spec(children.report())])
         job = prepared_job(tmp_path, monkeypatch, plan, services={"web": srv.endpoint()})
@@ -302,7 +325,11 @@ def test_exit_code_classifies_the_in_run_types(case: str) -> None:
 
 @pytest.mark.parametrize(("fail", "exc_type"), [("ValueError", ValueError), ("OSError", OSError)])
 def test_a_plan_error_with_a_live_service_exits_3_intact(
-    fail: str, exc_type: type[BaseException], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, children: Any
+    fail: str,
+    exc_type: type[BaseException],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    children: Any,
 ) -> None:
     with CountingHTTPServer() as srv:
         plan = get_plan(2, f"m68a-dl-{fail}", [web_spec(children.report())], fail=fail)
@@ -314,13 +341,15 @@ def test_a_plan_error_with_a_live_service_exits_3_intact(
     assert "m68a-dl-" in str(exc), str(exc)
 
 
-# ---- the hop from job to submitter ------------------------------------------------------------------------
+# ---- the hop from job to submitter --------------------------------------------------------------
 
 
 def test_a_service_unreachable_round_trips_through_the_result_blob() -> None:
     services = services_api()
     unreachable = services.ServiceUnreachable("t", "grpc://h:1", "w", "refused")
-    ok, exc = pickle.loads(run_bounded(lambda: driver_api()._result_blob(False, unreachable), RUN_TIMEOUT_S))
+    ok, exc = pickle.loads(
+        run_bounded(lambda: driver_api()._result_blob(False, unreachable), RUN_TIMEOUT_S)
+    )
     assert ok is False and type(exc) is services.ServiceUnreachable, repr(exc)
     assert (exc.name, exc.endpoint, exc.worker, exc.reason) == ("t", "grpc://h:1", "w", "refused")
     assert "refused" in str(exc) and "t" in str(exc)
@@ -330,18 +359,24 @@ def test_a_service_unavailable_round_trips_through_the_result_blob() -> None:
     services = services_api()
     legs = {"user": "none given", "site": "no site row", "managed": "no launch"}
     unavailable = services.ServiceUnavailable("t", legs)
-    ok, exc = pickle.loads(run_bounded(lambda: driver_api()._result_blob(False, unavailable), RUN_TIMEOUT_S))
+    ok, exc = pickle.loads(
+        run_bounded(lambda: driver_api()._result_blob(False, unavailable), RUN_TIMEOUT_S)
+    )
     assert ok is False and type(exc) is services.ServiceUnavailable, repr(exc)
     assert exc.name == "t" and dict(exc.legs) == legs
     assert all(reason in str(exc) for reason in legs.values()), str(exc)
 
 
 def test_an_exception_that_does_not_reload_arrives_as_text(tmp_path: Path) -> None:
-    """Run in a fresh interpreter: stdlib exception pickling is process-wide state (``distributed``
-    replaces it on import)."""
+    """Run in a fresh interpreter.
+
+    Stdlib exception pickling is process-wide state (``distributed`` replaces it on import).
+    """
     out = tmp_path / "narrow.json"
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([HARNESS_DIR, env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    env["PYTHONPATH"] = os.pathsep.join([HARNESS_DIR, env.get("PYTHONPATH", "")]).rstrip(
+        os.pathsep
+    )
     code = f"import services_harness as h; h.narrow_blob_main({str(out)!r})"
     proc = subprocess.run(
         [sys.executable, "-c", code],

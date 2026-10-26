@@ -1,6 +1,9 @@
-"""M38 transport conformance suite (spike; frozen at P6). One body, both backends — every
-:class:`graphed.core.execution.WorkerTransport` implementation must pass identically, so the
-reduction / work-stealing layers above can be written once and run on either."""
+"""M38 transport conformance suite (spike; frozen at P6).
+
+One body, both backends — every :class:`graphed.core.execution.WorkerTransport` implementation must
+pass identically, so the reduction / work-stealing layers above can be written once and run on
+either.
+"""
 
 from __future__ import annotations
 

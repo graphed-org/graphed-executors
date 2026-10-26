@@ -1,11 +1,14 @@
-"""m42 M37 on dask: worker task events reach the driver monitor over the run's own namespaced
-topic, with the exact per-task phase contract, and observation NEVER perturbs the result (plan
-§1.5.1; blueprint §3 `test_dask_monitor_events`).
+"""m42 M37 on dask.
+
+Worker task events reach the driver monitor over the run's own namespaced topic, with the exact
+per-task phase contract, and observation NEVER perturbs the result (plan §1.5.1; blueprint §3
+`test_dask_monitor_events`).
 
 Discriminates: emission riding the data path (payload inflation breaks the byte-identical
 passivity gate), events dropped or duplicated per phase, worker events not attributed to real
 workers, an un-namespaced or never-unsubscribed topic, and a run broken by a monitor that raises
-(the emit-swallow contract)."""
+(the emit-swallow contract).
+"""
 
 from __future__ import annotations
 
@@ -72,7 +75,9 @@ def test_exact_phase_contract_over_the_runs_namespaced_topic(client) -> None:
 def test_errored_phase_carries_the_failure(client) -> None:
     monitor = RecordingMonitor()
     (partition,) = mem_partitions(1, "monerr")
-    plan = Plan(process=raise_value_error, combine=union, empty=empty_set, tasks=(Task(0, partition),))
+    plan = Plan(
+        process=raise_value_error, combine=union, empty=empty_set, tasks=(Task(0, partition),)
+    )
     with (
         make_runner(SpyBackend(make_dask_backend(client)), monitor=monitor, retries=0) as runner,
         pytest.raises(ValueError, match="broken partition"),
@@ -92,7 +97,10 @@ def test_observation_is_passive_byte_identical_even_when_the_monitor_raises(clie
         detached = runner.run(plan).value
     with make_runner(SpyBackend(make_dask_backend(client)), monitor=RecordingMonitor()) as runner:
         attached = runner.run(plan).value
-    with make_runner(SpyBackend(make_dask_backend(client)), monitor=RecordingMonitor(fail=True)) as runner:
-        hostile = runner.run(plan).value  # a raising monitor must be swallowed, never break the run
+    with make_runner(
+        SpyBackend(make_dask_backend(client)), monitor=RecordingMonitor(fail=True)
+    ) as runner:
+        # a raising monitor must be swallowed, never break the run
+        hostile = runner.run(plan).value
     assert pickle.dumps(detached) == pickle.dumps(attached) == pickle.dumps(hostile)
     assert detached == expected_concat(8, "monpass")

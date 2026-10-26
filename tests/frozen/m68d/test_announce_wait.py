@@ -1,7 +1,10 @@
-"""m68d A (plan §2 "A — the driver fails fast on an ended, held or unschedulable SERVICE node"), rows
-A1-A4 of §4, every OS. The in-job backend is built by ``driver._runner`` from a DAG ``run.json`` with no
-pilots, a machine ad and (unless a case drops it) a job ad naming ``DAG_ID``; the bindings are recorded
-(``FakeHTCondor`` over ``NodeSchedd``) and svc0's queue ad follows each case's phases."""
+"""m68d A: the driver fails fast on an ended, held or unschedulable SERVICE node.
+
+m68d A (plan §2 "A — the driver fails fast on an ended, held or unschedulable SERVICE node"), rows
+A1-A4 of §4, every OS. The in-job backend is built by ``driver._runner`` from a DAG ``run.json``
+with no pilots, a machine ad and (unless a case drops it) a job ad naming ``DAG_ID``; the bindings
+are recorded (``FakeHTCondor`` over ``NodeSchedd``) and svc0's queue ad follows each case's phases.
+"""
 
 from __future__ import annotations
 
@@ -55,11 +58,16 @@ IDLE, RUNNING, HELD = 1, 2, 5
 def in_job_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, locate: bool = True, job_ad: bool = True
 ) -> Iterator[tuple[Any, Path]]:
-    """``driver._runner``'s backend for a DAG driver node (no pilots), with ``driver.log`` open as
-    ``driver.main`` holds it; yields ``(backend, job)`` and closes the runner on exit."""
+    """Yield ``driver._runner``'s backend for a DAG driver node, with ``driver.log`` open.
+
+    ``driver._runner``'s backend for a DAG driver node (no pilots), with ``driver.log`` open as
+    ``driver.main`` holds it; yields ``(backend, job)`` and closes the runner on exit.
+    """
     job, dag = tmp_path / "job", tmp_path / "dag"
     dag.mkdir(parents=True)
-    monkeypatch.setenv("_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "machine.ad", "127.0.0.1")))
+    monkeypatch.setenv(
+        "_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "machine.ad", "127.0.0.1"))
+    )
     if job_ad:
         monkeypatch.setenv("_CONDOR_JOB_AD", str(write_job_ad(tmp_path / "job.ad")))
     else:
@@ -75,7 +83,7 @@ def in_job_backend(
 
 
 def text_of(err: BaseException, *paths: Path) -> str:
-    """An exception's text and its ``legs`` (a ``ServiceUnavailable``'s), with every tmp path cut."""
+    """Return an exception's text and ``legs`` (a ``ServiceUnavailable``'s), tmp paths cut."""
     legs = getattr(err, "legs", None) or {}
     return cut(" ".join([str(err), *map(str, legs.values())]), *paths)
 
@@ -88,7 +96,7 @@ def node_answers(schedd: NodeSchedd, status: int) -> list[tuple[Any, ...]]:
     return [e for e in schedd.node_queries() if e[3] == status]
 
 
-# ---- A1: a held or departed node fails the wait at once ----------------------------------------------------
+# ---- A1: a held or departed node fails the wait at once -----------------------------------------
 
 
 @pytest.mark.parametrize("case", ["held", "absent"])
@@ -113,7 +121,7 @@ def test_a_held_or_departed_service_node_fails_the_wait_at_once(
     assert any({"JobStatus", "HoldReasonCode", "HoldReason"} <= p for p in projected), schedd.log
 
 
-# ---- A2: a node no slot could ever run fails the wait; a matchable one waits for its slot ------------------
+# ---- A2: a node no slot could ever run fails the wait; a matchable one waits for its slot -------
 
 
 A2_CASES = {
@@ -146,7 +154,9 @@ def test_an_unschedulable_service_node_fails_the_wait_naming_its_request(
             assert isinstance(err, TimeoutError) and "timeout_s" in str(err), repr(err)
             first_running = node_answers(schedd, RUNNING)
             assert first_running, f"no running answer was served before the raise: {schedd.log}"
-            assert ended - first_running[0][4] >= 0.45, f"raised {ended - first_running[0][4]:.2f}s after it ran"
+            assert ended - first_running[0][4] >= 0.45, (
+                f"raised {ended - first_running[0][4]:.2f}s after it ran"
+            )
             assert node_answers(schedd, IDLE), schedd.log
         else:
             err = raised_by(lambda: backend.host_service(node_spec(600.0), "m-dee-scope"), 20.0)
@@ -156,11 +166,13 @@ def test_an_unschedulable_service_node_fails_the_wait_naming_its_request(
             assert not isinstance(err, TimeoutError), repr(err)
             assert re.search(rf"RequestMemory\D{{0,16}}{asked}\b", text), text
             assert took < 10.0, f"refused after {took:.1f}s"
-            assert logged(fake.log, "act") == [], f"the node was acted on, though DAGMan owns it: {fake.log}"
+            assert logged(fake.log, "act") == [], (
+                f"the node was acted on, though DAGMan owns it: {fake.log}"
+            )
             assert any(e[0] == "collector-query" for e in fake.log), fake.log
 
 
-# ---- A3: without schedd access the wait is the plain one ----------------------------------------------------
+# ---- A3: without schedd access the wait is the plain one ----------------------------------------
 
 
 def waited(backend: Any, dag: Path, delay_s: float = 0.6) -> None:
@@ -172,7 +184,9 @@ def waited(backend: Any, dag: Path, delay_s: float = 0.6) -> None:
 
 
 def node_lines(job: Path, pattern: str) -> list[str]:
-    return [line for line in (job / "driver.log").read_text().splitlines() if re.search(pattern, line)]
+    return [
+        line for line in (job / "driver.log").read_text().splitlines() if re.search(pattern, line)
+    ]
 
 
 A3_CASES = ["no-schedd-locate", "no-job-ad", "no-bindings", "a-raising-locate", "a-raising-query"]
@@ -188,7 +202,9 @@ def test_without_schedd_access_the_wait_is_the_plain_one(
     if case == "no-bindings":
         monkeypatch.setitem(sys.modules, "htcondor2", None)
     else:
-        record_bindings(monkeypatch, FakeHTCondor(schedd, locate_refuses=case == "a-raising-locate"))
+        record_bindings(
+            monkeypatch, FakeHTCondor(schedd, locate_refuses=case == "a-raising-locate")
+        )
     shape = {"locate": case != "no-schedd-locate", "job_ad": case != "no-job-ad"}
     with in_job_backend(tmp_path / "case", monkeypatch, **shape) as (backend, job):
         waited(backend, tmp_path / "case" / "dag")
@@ -209,7 +225,7 @@ def test_without_schedd_access_the_wait_is_the_plain_one(
     assert len(node_lines(job, token)) == 1, (job / "driver.log").read_text()
 
 
-# ---- A4: a DAG run.json names its schedd where jobs can submit ------------------------------------------------
+# ---- A4: a DAG run.json names its schedd where jobs can submit ----------------------------------
 
 
 def submitted_run(monkeypatch: pytest.MonkeyPatch, plan: Any, **kwargs: Any) -> dict[str, Any]:
@@ -230,9 +246,13 @@ def test_a_dag_run_json_names_its_schedd_where_jobs_can_submit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dag_plan = gated_plan(tmp_path / "mark", node_spec(30.0))
-    generic = submitted_run(monkeypatch, dag_plan, site="generic", pilots="local", log_dir=tmp_path / "g")
+    generic = submitted_run(
+        monkeypatch, dag_plan, site="generic", pilots="local", log_dir=tmp_path / "g"
+    )
     site_copy(monkeypatch, "lxplus", "lxplus", job_root=str(tmp_path))
-    image = "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/coffea-almalinux-noml:latest"
+    image = (
+        "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/coffea-almalinux-noml:latest"
+    )
     lxplus = submitted_run(
         monkeypatch,
         dag_plan,
@@ -242,7 +262,13 @@ def test_a_dag_run_json_names_its_schedd_where_jobs_can_submit(
         env=fake_venv(tmp_path / "env"),
         log_dir=tmp_path / "x",
     )
-    plain = submitted_run(monkeypatch, gated_plan(tmp_path / "plain", None), site="generic", pilots="local", log_dir=tmp_path / "p")
+    plain = submitted_run(
+        monkeypatch,
+        gated_plan(tmp_path / "plain", None),
+        site="generic",
+        pilots="local",
+        log_dir=tmp_path / "p",
+    )
     rows: Sequence[dict[str, Any]] = (generic, lxplus)
     assert all(run["announce_only"] == {"web": NODE} for run in rows), rows
     assert [run["schedd_locate"] for run in rows] == [LOCATE, LOCATE], rows

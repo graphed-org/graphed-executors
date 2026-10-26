@@ -1,10 +1,13 @@
-"""m42 M6 obligation on dask: a `StageError` raised inside a REAL worker process arrives at the
-driver as the SAME StageError — full structured state, byte-equal, re-renderable to the user's
-analysis line (plan §1.4 bullet 1; blueprint §3 `test_dask_stageerror_intact`).
+"""m42 M6 obligation on dask.
+
+A `StageError` raised inside a REAL worker process arrives at the driver as the SAME StageError —
+full structured state, byte-equal, re-renderable to the user's analysis line (plan §1.4 bullet 1;
+blueprint §3 `test_dask_stageerror_intact`).
 
 Discriminates: wrapping worker errors in a dask-specific or generic error, degrading to an opaque
 string, and any lossy re-raise that drops the source-frame chain (`format_traceback` must still
-name user_analysis.py:42 after the process boundary)."""
+name user_analysis.py:42 after the process boundary).
+"""
 
 from __future__ import annotations
 

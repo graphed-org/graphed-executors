@@ -1,6 +1,7 @@
-"""m44 behavioral golden (m40 carried) — ``transport_run_join`` reproduces the local engine's
-relational semantics on both backends (plan §1.4 join, DoD "join rows"; blueprint §3
-`test_transport_join_parity`).
+"""m44 behavioral golden (m40 carried).
+
+``transport_run_join`` reproduces the local engine's relational semantics on both backends (plan
+§1.4 join, DoD "join rows"; blueprint §3 `test_transport_join_parity`).
 
 Witnesses: inner rows == the duplicating multiset oracle (routes via the golden-pinned
 ``partition``, never the join kernel) == the local ``run_join``; inner ``dest_block_hashes``
@@ -9,7 +10,8 @@ nulls OPTION-TYPED (the m40 ``-1``-sentinel trap re-armed: a sentinel impl fails
 against real ``None`` rows); under ``mem_budget_bytes`` the reused ``_join_with_budget`` spill
 counters engage and match the local engine exactly (``join_spilled_partitions ==
 join_chunks_read``, F5), with the local run as an in-test scenario guard that the budget really
-engages."""
+engages.
+"""
 
 from __future__ import annotations
 
@@ -56,7 +58,9 @@ def _dbackend(client):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "outer"])
-def test_join_rows_match_local_engine_and_pandas_oracle(adapter: TransportAdapter, client, how: str) -> None:  # type: ignore[no-untyped-def]
+def test_join_rows_match_local_engine_and_pandas_oracle(
+    adapter: TransportAdapter, client, how: str
+) -> None:  # type: ignore[no-untyped-def]
     left, right = join_general_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how=how, broadcast=False)
     r = transport_join(
@@ -73,15 +77,20 @@ def test_join_rows_match_local_engine_and_pandas_oracle(adapter: TransportAdapte
         "carry OPTION-TYPED nulls (None), never a sentinel value"
     )
     if how == "inner":
-        assert r.dest_block_hashes == local.dest_block_hashes, "inner join bytes diverged from local"
+        assert r.dest_block_hashes == local.dest_block_hashes, (
+            "inner join bytes diverged from local"
+        )
         assert observed_join_all(adapter, r.value) == dup_join_all(adapter, left, right, PARTS)
 
 
-def test_join_budget_spill_counters_engage_and_match_local(adapter: TransportAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_join_budget_spill_counters_engage_and_match_local(
+    adapter: TransportAdapter, client
+) -> None:  # type: ignore[no-untyped-def]
     n_left, n_right = 200, 200  # -> 40_000 duplicated output rows in a single hot dest
     left, right = join_hot_key_sides(adapter, n_left, n_right)
     be: object = adapter.backend
-    # bound the duplicated output from the input row widths (the m40/m43 sizing idiom), then squeeze
+    # bound the duplicated output from the input row widths (the m40/m43 sizing idiom), then
+    # squeeze
     row_bytes = be.estimated_bytes(left[0]) // n_left + be.estimated_bytes(right[0]) // n_right  # type: ignore[attr-defined]
     budget = (n_left * n_right * row_bytes) // 8
 
@@ -91,8 +100,13 @@ def test_join_budget_spill_counters_engage_and_match_local(adapter: TransportAda
     )
 
     r = transport_join(
-        adapter.backend, left, right, PARTS, dbackend=_dbackend(client),
-        broadcast=False, mem_budget_bytes=budget,
+        adapter.backend,
+        left,
+        right,
+        PARTS,
+        dbackend=_dbackend(client),
+        broadcast=False,
+        mem_budget_bytes=budget,
     )
     w = r.witness
     assert w.join_spilled_partitions > 0, "the transport gather-join never engaged the spill"

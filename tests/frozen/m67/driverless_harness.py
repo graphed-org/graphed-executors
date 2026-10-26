@@ -1,15 +1,17 @@
-"""Shared harness for the m67 frozen suite: driverless runs (lanes/htcondor/plan-services.md §2, D5, D6).
+"""Shared harness for the m67 frozen suite.
+
+Driverless runs (lanes/htcondor/plan-services.md §2, D5, D6).
 
 It copies the m66 ``htcondor_harness.py`` pieces the suite uses (frozen suites never import across
-directories) and adds ``RecordingSchedd``/``FakeHTCondor``, a stand-in for the ``htcondor2`` module that
-records every bindings call, and ``job_dir``, which lays out a job's scratch dir from a recorded submit
-description the way the schedd's input transfer would.
+directories) and adds ``RecordingSchedd``/``FakeHTCondor``, a stand-in for the ``htcondor2`` module
+that records every bindings call, and ``job_dir``, which lays out a job's scratch dir from a
+recorded submit description the way the schedd's input transfer would.
 
 Everything a pilot or the driver unpickles is module-level here, and the suite ships this file as a
 ``user_modules`` entry, so the job side imports it from its scratch dir by name.
 
-The implementation under test is reached only through the ``*_api()`` accessors, inside test bodies,
-so the suite collects before ``driver.py``/``driverless.py`` exist.
+The implementation under test is reached only through the ``*_api()`` accessors, inside test
+bodies, so the suite collects before ``driver.py``/``driverless.py`` exist.
 """
 
 from __future__ import annotations
@@ -47,12 +49,18 @@ FAKE_CLUSTER = 4242
 
 
 def htcondor_api() -> Any:
-    """``graphed_executors.htcondor_backend``: submit_driverless, RunHandle, SITES, SiteProfile, ..."""
+    """``graphed_executors.htcondor_backend``.
+
+    submit_driverless, RunHandle, SITES, SiteProfile, ..
+    """
     return importlib.import_module("graphed_executors.htcondor_backend")
 
 
 def launch_api() -> Any:
-    """``graphed_executors.htcondor_backend.launch``: every bindings call goes through its ``_htcondor()``."""
+    """``graphed_executors.htcondor_backend.launch``.
+
+    Every bindings call goes through its ``_htcondor()``.
+    """
     return importlib.import_module("graphed_executors.htcondor_backend.launch")
 
 
@@ -63,12 +71,15 @@ def driver_api() -> Any:
 
 DRIVER_MODULE = "graphed_executors.htcondor_backend.driver"
 
-# ---- bounds (copied from m66) --------------------------------------------------------------------
+# ---- bounds (copied from m66) -------------------------------------------------------------------
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
-    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``: a hang is a
-    failure, never a wedged CI job. Returns the value or re-raises the call's exception."""
+    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``.
+
+    A hang is a failure, never a wedged CI job. Returns the value or re-raises the call's
+    exception.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -93,7 +104,7 @@ def wait_for(predicate: Callable[[], bool], timeout_s: float = 30.0) -> None:
         time.sleep(0.05)
 
 
-# ---- plans (copied from m66, plus the job-site plan) ---------------------------------------------
+# ---- plans (copied from m66, plus the job-site plan) --------------------------------------------
 
 
 def mem_partitions(n: int, tag: str) -> tuple[Partition, ...]:
@@ -117,8 +128,11 @@ def empty_text() -> str:
 
 
 def concat_plan(n: int, tag: str) -> Plan[str]:
-    """Associative, non-commutative concat: any grouping over key-ordered leaves matches
-    ``SequentialRunner`` bit-for-bit; an arrival-ordered fold does not."""
+    """Associative, non-commutative concat.
+
+    Any grouping over key-ordered leaves matches ``SequentialRunner`` bit-for-bit; an
+    arrival-ordered fold does not.
+    """
     tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(n, tag)))
     return Plan(process=concat_process, combine=concat, empty=empty_text, tasks=tasks)
 
@@ -148,9 +162,13 @@ class JobLeaf:
 
 
 def job_process(partition: Partition, resources: object) -> JobLeaf:
-    """The leaf text and where it ran; the sleep lets every pilot pull a leaf (scenario construction)."""
+    """Return the leaf text and where it ran.
+
+    The sleep lets every pilot pull a leaf (scenario construction).
+    """
     time.sleep(0.2)
-    url = sys.argv[1] if len(sys.argv) > 1 else ""  # a pilot runs as ``-m ...pilot <url> <secret>``
+    # a pilot runs as ``-m ...pilot <url> <secret>``
+    url = sys.argv[1] if len(sys.argv) > 1 else ""
     return JobLeaf(leaf_text(partition), frozenset({(os.getpid(), job_cluster(), url)}))
 
 
@@ -167,7 +185,9 @@ def job_plan(n: int, tag: str) -> Plan[JobLeaf]:
     return Plan(process=job_process, combine=job_combine, empty=job_empty, tasks=tasks)
 
 
-USER_FRAME = SourceFrame(filename="user_analysis.py", lineno=42, function="my_cut", source="pt > 30")
+USER_FRAME = SourceFrame(
+    filename="user_analysis.py", lineno=42, function="my_cut", source="pt > 30"
+)
 
 
 def make_stage_error() -> StageError:
@@ -187,7 +207,7 @@ def raise_stage_error(partition: Partition, resources: object) -> str:
 
 
 def stage_error_plan(n: int, tag: str) -> Plan[str]:
-    """A plan error: every leaf raises the same user-code ``StageError`` on its pilot."""
+    """Return a plan error: every leaf raises the same user-code ``StageError`` on its pilot."""
     tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(n, tag)))
     return Plan(process=raise_stage_error, combine=concat, empty=empty_text, tasks=tasks)
 
@@ -200,23 +220,27 @@ def assert_intact_stage_error(err: BaseException) -> None:
     assert err.cause_message == "negative pt"
 
 
-# ---- a shippable venv (copied from m66 test_htcondor_sites) --------------------------------------
+# ---- a shippable venv (copied from m66 test_htcondor_sites) -------------------------------------
 
 
 def fake_venv(root: Path) -> Path:
-    """A directory shaped like a non-editable venv with one dist-info."""
+    """Return a directory shaped like a non-editable venv with one dist-info."""
     root.mkdir()
     (root / "pyvenv.cfg").write_text("home = /usr/bin\ninclude-system-site-packages = false\n")
     purelib = Path(
-        sysconfig.get_path("purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)})
+        sysconfig.get_path(
+            "purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)}
+        )
     )
     dist = purelib / "probedist-0.1.dist-info"
     dist.mkdir(parents=True)
-    (dist / "direct_url.json").write_text(json.dumps({"url": "file:///src/probedist", "dir_info": {}}))
+    (dist / "direct_url.json").write_text(
+        json.dumps({"url": "file:///src/probedist", "dir_info": {}})
+    )
     return root
 
 
-# ---- recorded bindings ---------------------------------------------------------------------------
+# ---- recorded bindings --------------------------------------------------------------------------
 
 
 class SubmitResult:
@@ -230,9 +254,10 @@ class SubmitResult:
 class RecordingSchedd:
     """A stand-in ``htcondor2.Schedd`` that appends every call to ``log``.
 
-    ``queue`` is the successive answers of ``query`` (the last one repeats), ``history`` the answer of
-    ``history``. ``retrieve`` writes ``retrieved`` (``{file name: bytes}``) into ``retrieve_to``, as the
-    schedd's output transfer of a spooled job would."""
+    ``queue`` is the successive answers of ``query`` (the last one repeats), ``history`` the answer
+    of ``history``. ``retrieve`` writes ``retrieved`` (``{file name: bytes}``) into
+    ``retrieve_to``, as the schedd's output transfer of a spooled job would.
+    """
 
     def __init__(
         self,
@@ -247,18 +272,24 @@ class RecordingSchedd:
         self.retrieved = dict(retrieved or {})
         self.retrieve_to = retrieve_to
 
-    def query(self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def query(
+        self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("query", str(constraint), tuple(projection or ())))
         return self.answer_query()
 
     def answer_query(self) -> list[Any]:
         return self.queue.pop(0) if len(self.queue) > 1 else list(self.queue[0])
 
-    def history(self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def history(
+        self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("history", str(constraint), tuple(projection or ())))
         return list(self.history_ads)
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         self.log.append(("submit", dict(description), count, spool))
         return SubmitResult(FAKE_CLUSTER)
 
@@ -276,14 +307,19 @@ class RecordingSchedd:
 
 
 class PilotSchedd(RecordingSchedd):
-    """A ``RecordingSchedd`` whose ``submit`` starts the submitted pilots as local subprocesses (the
-    m66 ``LocalPilots``), reading the url from ``arguments`` and the secret from ``initialdir``."""
+    """A ``RecordingSchedd`` whose ``submit`` starts the submitted pilots locally.
+
+    A ``RecordingSchedd`` whose ``submit`` starts the submitted pilots as local subprocesses (the
+    m66 ``LocalPilots``), reading the url from ``arguments`` and the secret from ``initialdir``.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.pilots: Any = None
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         result = super().submit(description, count, spool, **kwargs)
         desc = dict(description)
         url, secret_name = str(desc["arguments"]).split()
@@ -308,7 +344,9 @@ class _Collector:
         self.fake = fake
         self.pool = pool
 
-    def locate(self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def locate(
+        self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         self.fake.log.append(("locate", self.pool, str(daemon_type), name))
         return {"Name": name, "MyAddress": "<127.0.0.1:9618>", "located": True}
 
@@ -327,9 +365,12 @@ class _Credd:
 
 
 class FakeHTCondor:
-    """What ``launch._htcondor()`` returns under the recorder: ``param``, ``Collector``, ``Schedd``,
-    ``Submit`` and the enums the backend names. ``Schedd()`` with no location is logged as
-    ``("Schedd", None)``; with a located ad as ``("Schedd", <its Name>)``."""
+    """What ``launch._htcondor()`` returns under the recorder.
+
+    ``param``, ``Collector``, ``Schedd``, ``Submit`` and the enums the backend names.
+    ``Schedd()`` with no location is logged as ``("Schedd", None)``; with a located ad as
+    ``("Schedd", <its Name>)``.
+    """
 
     class DaemonType:
         Schedd = "Schedd"
@@ -377,7 +418,7 @@ class FakeHTCondor:
 
 
 def record_bindings(monkeypatch: pytest.MonkeyPatch, schedd: RecordingSchedd) -> FakeHTCondor:
-    """Patch ``launch._htcondor`` to log ``("_htcondor",)`` and return a ``FakeHTCondor`` over ``schedd``."""
+    """Patch ``launch._htcondor`` to log its call and return a ``FakeHTCondor`` over ``schedd``."""
     fake = FakeHTCondor(schedd)
 
     def _htcondor() -> FakeHTCondor:
@@ -393,11 +434,11 @@ def submits(log: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
 
 
 def schedd_locations(log: list[tuple[Any, ...]]) -> list[Any]:
-    """The location of every ``Schedd(...)`` call: ``None`` is a bare ``Schedd()``."""
+    """Return the location of every ``Schedd(...)`` call: ``None`` is a bare ``Schedd()``."""
     return [entry[1] for entry in log if entry[0] == "Schedd"]
 
 
-# ---- the job side --------------------------------------------------------------------------------
+# ---- the job side -------------------------------------------------------------------------------
 
 
 def input_entries(desc: dict[str, Any]) -> list[str]:
@@ -405,8 +446,11 @@ def input_entries(desc: dict[str, Any]) -> list[str]:
 
 
 def job_dir(desc: dict[str, Any], log_dir: Path, dest: Path) -> Path:
-    """A job scratch dir holding what the schedd transfers: each ``transfer_input_files`` entry, resolved
-    against ``initialdir`` (else ``log_dir``), under its base name."""
+    """Return a job scratch dir holding what the schedd transfers.
+
+    Each ``transfer_input_files`` entry, resolved against ``initialdir`` (else ``log_dir``),
+    under its base name.
+    """
     iwd = Path(desc.get("initialdir") or log_dir)
     dest.mkdir(parents=True)
     for entry in input_entries(desc):
@@ -420,6 +464,6 @@ def job_dir(desc: dict[str, Any], log_dir: Path, dest: Path) -> Path:
 
 
 def write_machine_ad(path: Path, host: str = "127.0.0.1") -> Path:
-    """A machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
+    """Return a machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
     path.write_text(f'Machine = "{host}"\nName = "slot1@{host}"\nCpus = 2\n')
     return path

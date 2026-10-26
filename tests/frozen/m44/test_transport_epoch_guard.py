@@ -1,6 +1,8 @@
-"""m44 stale-epoch rejection — the P2P run_id guard verbatim: a message carrying an unknown OR
-completed-and-purged epoch is refused with the stale marker, counted, and can never corrupt a run
-(plan §1.5 run epoch; blueprint §3 `test_transport_epoch_guard`).
+"""m44 stale-epoch rejection — the P2P run_id guard verbatim.
+
+A message carrying an unknown OR completed-and-purged epoch is refused with the stale marker,
+counted, and can never corrupt a run (plan §1.5 run epoch; blueprint §3
+`test_transport_epoch_guard`).
 
 Mechanism: a pinned worker task fires RAW ``graphed_transport_recv`` RPCs (the real wire path,
 via ``worker.rpc``) at a live plugin — first with a bogus nonce, then with the nonce of a run
@@ -10,7 +12,8 @@ both; runs before/after the stale traffic stay byte-identical to the local oracl
 
 Discriminates: an engine without the guard accepts the stale payload (reply ``accepted: True``,
 counter still 0) and risks combining dead-epoch traffic into a live run; an engine that never
-purges keeps the completed epoch alive and fails the second stale reply."""
+purges keeps the completed epoch alive and fails the second stale reply.
+"""
 
 from __future__ import annotations
 
@@ -50,7 +53,9 @@ def test_stale_epochs_are_rejected_counted_and_never_corrupt_a_run() -> None:
         dbackend = build_dask_backend(client)
 
         # (1) an unknown epoch is refused with the stale marker, over the REAL rpc wire path
-        reply = pinned_call(client, fire_raw_recv, a0, f"m44-bogus-{uuid.uuid4().hex}", payload, worker=a1)
+        reply = pinned_call(
+            client, fire_raw_recv, a0, f"m44-bogus-{uuid.uuid4().hex}", payload, worker=a1
+        )
         assert reply.get("accepted") is False and reply.get("stale") is True, (
             f"unknown-epoch message was not stale-refused: {reply!r}"
         )

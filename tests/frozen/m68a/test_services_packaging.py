@@ -1,15 +1,18 @@
-"""m68a §3.1/§6 packaging facts, read from the repository's own files (text and structure, no network).
+"""m68a §3.1/§6 packaging facts, read from the repository's own files.
 
-- ``ci.yml`` ``test-htcondor`` installs ``tritonclient[grpc]`` and ``grpcio-health-checking``, starts the
-  Triton container with ``recipes.triton``'s flags on 8001 serving ``tests/frozen/m68a/data/triton_models``,
-  waits on ``check_ready``, exports ``GRAPHED_TRITON_GRPC=localhost:8001`` for the live file, runs
-  ``tests/frozen/m67`` and ``tests/frozen/m68a``, and widens its diff-cover include to
+Text and structure, no network.
+
+- ``ci.yml`` ``test-htcondor`` installs ``tritonclient[grpc]`` and ``grpcio-health-checking``,
+  starts the Triton container with ``recipes.triton``'s flags on 8001 serving
+  ``tests/frozen/m68a/data/triton_models``, waits on ``check_ready``, exports
+  ``GRAPHED_TRITON_GRPC=localhost:8001`` for the live file, runs ``tests/frozen/m67`` and
+  ``tests/frozen/m68a``, and widens its diff-cover include to
   ``src/graphed_executors/submit/services.py``; ``test-dask`` lists ``test_scope_dask_memory.py``.
 - ``.coveragerc-htcondor`` sources include ``graphed_executors.submit.services``.
 - No service is named in the engine: a case-insensitive search for ``triton``/``histserv`` over
-  ``submit/services.py``, ``submit/engine.py``, ``submit/protocol.py`` and ``htcondor_backend/`` (less
-  ``sites.py``, whose site data may name a site's Triton) finds nothing; ``submit/recipes.py`` (control)
-  names one.
+  ``submit/services.py``, ``submit/engine.py``, ``submit/protocol.py`` and ``htcondor_backend/``
+  (less ``sites.py``, whose site data may name a site's Triton) finds nothing;
+  ``submit/recipes.py`` (control) names one.
 - The frozen README states the positive leg by test file.
 
 Discriminates: a service name in the engine, and a CI leg that never runs the Triton or m68a legs.
@@ -47,7 +50,8 @@ def _jobs() -> dict[str, Any]:
         return jobs
     doc = yaml.safe_load(text)
     return {
-        name: {"doc": job, "text": yaml.safe_dump(job, width=10_000)} for name, job in doc["jobs"].items()
+        name: {"doc": job, "text": yaml.safe_dump(job, width=10_000)}
+        for name, job in doc["jobs"].items()
     }
 
 
@@ -59,20 +63,26 @@ def job_text(name: str) -> str:
 
 def test_the_htcondor_job_installs_the_grpc_clients() -> None:
     text = job_text("test-htcondor")
-    assert re.search(r"tritonclient\[grpc[\],]", text), "test-htcondor does not install tritonclient[grpc]"
+    assert re.search(r"tritonclient\[grpc[\],]", text), (
+        "test-htcondor does not install tritonclient[grpc]"
+    )
     assert "grpcio-health-checking" in text
 
 
 def test_the_htcondor_job_serves_graphed_identity_with_the_recipe_flags() -> None:
     text = job_text("test-htcondor")
     argv = recipes_api().triton("triton", "image", "/models").launch.argv
-    flags = [a.replace("{port}", "8001") for a in argv[1:] if not a.startswith("--model-repository")]
+    flags = [
+        a.replace("{port}", "8001") for a in argv[1:] if not a.startswith("--model-repository")
+    ]
     assert flags and all(flag in text for flag in flags), (flags, text)
     assert argv[0] in text and "docker run" in text
     assert re.search(r"8001:8001", text), "the container's gRPC port is not published on 8001"
     assert "tests/frozen/m68a/data/triton_models" in text
     assert "check_ready" in text, "the job does not wait on check_ready"
-    assert re.search(r"GRAPHED_TRITON_GRPC\W+localhost:8001", text), "GRAPHED_TRITON_GRPC is not exported"
+    assert re.search(r"GRAPHED_TRITON_GRPC\W+localhost:8001", text), (
+        "GRAPHED_TRITON_GRPC is not exported"
+    )
 
 
 def test_the_model_repository_holds_graphed_identity() -> None:
@@ -86,8 +96,11 @@ def test_the_model_repository_holds_graphed_identity() -> None:
 
 
 def test_the_all_os_job_installs_the_health_checking_package() -> None:
-    """§6: the all-OS ``test`` job installs ``grpcio-health-checking`` (the reference servicer the
-    gRPC cases of ``test_service_checks.py`` serve), so those cases run there instead of failing."""
+    """§6: the all-OS ``test`` job installs ``grpcio-health-checking``.
+
+    §6: the all-OS ``test`` job installs ``grpcio-health-checking`` (the reference servicer the
+    gRPC cases of ``test_service_checks.py`` serve), so those cases run there instead of failing.
+    """
     assert "grpcio-health-checking" in job_text("test")
 
 
@@ -109,7 +122,9 @@ def test_the_htcondor_coverage_sources_include_the_service_set() -> None:
     parser = configparser.ConfigParser()
     parser.read(ROOT / ".coveragerc-htcondor")
     # refrozen (owner ruling, 2026-10-20, #71): directory sources, the service set not omitted
-    roots = {(ROOT / substitute_variables(s, {})).resolve() for s in parser.get("run", "source").split()}
+    roots = {
+        (ROOT / substitute_variables(s, {})).resolve() for s in parser.get("run", "source").split()
+    }
     omit = parser.get("run", "omit", fallback="").split()
     services = (SRC / "submit" / "services.py").resolve()
     assert services.parent in roots, roots
@@ -118,8 +133,14 @@ def test_the_htcondor_coverage_sources_include_the_service_set() -> None:
 
 
 def _engine_files() -> list[Path]:
-    files = [SRC / "submit" / "services.py", SRC / "submit" / "engine.py", SRC / "submit" / "protocol.py"]
-    files += sorted(p for p in (SRC / "htcondor_backend").rglob("*") if p.is_file() and p.name != "sites.py")
+    files = [
+        SRC / "submit" / "services.py",
+        SRC / "submit" / "engine.py",
+        SRC / "submit" / "protocol.py",
+    ]
+    files += sorted(
+        p for p in (SRC / "htcondor_backend").rglob("*") if p.is_file() and p.name != "sites.py"
+    )
     return files
 
 
@@ -153,4 +174,6 @@ def test_the_readme_states_the_positive_leg_by_test_file(hosting_file: str) -> N
     readme = (Path(HARNESS_DIR) / "README.md").read_text()
     (sentence,) = [line for line in readme.splitlines() if "third recipe" in line]
     assert "http_server" in sentence and hosting_file in sentence, sentence
-    assert "§" not in sentence, "the positive-leg sentence cites plan coordinates instead of test files"
+    assert "§" not in sentence, (
+        "the positive-leg sentence cites plan coordinates instead of test files"
+    )

@@ -1,5 +1,8 @@
-"""The frozen A2 control bodies (``test_m65a2_control_routes.py`` at ``freeze-m65a2``), each with its
-route replaced by a :class:`Leg` and nothing else changed."""
+"""The frozen A2 control bodies, each with its route replaced by a :class:`Leg`.
+
+The frozen A2 control bodies (``test_m65a2_control_routes.py`` at ``freeze-m65a2``), each with its
+route replaced by a :class:`Leg` and nothing else changed.
+"""
 
 from __future__ import annotations
 
@@ -16,13 +19,14 @@ from graphed.core import RunControl, RunState, StopCondition, StopReason, TaskPh
 
 ONES = (1,) * mp.N
 ZEROS = (0,) * mp.N
-# A task handed out before the pause still starts after it; its worker may wait this long for a CPU.
+# A task handed out before the pause still starts after it; its worker may wait this long for a
+# CPU.
 PAUSE_SETTLE_S = 2.0
 
 
 @dataclass(frozen=True)
 class Leg:
-    """A ``SubmitRunner`` factory ``(monitor=None, **extra) -> runner`` and the plan path it runs."""
+    """A ``SubmitRunner`` factory ``(monitor=None, **extra) -> runner`` and its plan path."""
 
     factory: Callable[..., Any]
     adaptive: bool = False
@@ -80,7 +84,8 @@ def pause_stops_dispatch_then_resume_completes(leg: Leg) -> None:
     resumed = time.perf_counter()
     ctl.resume()
     res = run.result()
-    # Counted by the workers' own start stamps, so event delivery lag cannot move a start between the two.
+    # Counted by the workers' own start stamps, so event delivery lag cannot move a start between
+    # the two.
     starts = [e.t for e in rec.events if e.phase is TaskPhase.STARTED]
     s1 = sum(t < paused_at[0] + PAUSE_SETTLE_S for t in starts)
     s2 = sum(t < resumed for t in starts)
@@ -152,7 +157,11 @@ def cancel_no_check_saw_is_reset(leg: Leg, token: str, *, hub: bool) -> None:
     assert ctl.state is RunState.RUNNING
     full = ex.run(_plan(leg, mp.Probe(variant=variant)))
     bare = leg.make().run(_plan(leg, mp.Probe(variant=variant)))
-    assert (full.value, full.n_partitions, full.stopped) == (bare.value, mp.N, StopReason.EXHAUSTED)
+    assert (full.value, full.n_partitions, full.stopped) == (
+        bare.value,
+        mp.N,
+        StopReason.EXHAUSTED,
+    )
     if hub:
         assert (res.value, res.stopped) == (bare.value, StopReason.EXHAUSTED)
 
@@ -163,8 +172,11 @@ def stop_condition_does_not_end_a_cancel_drain(leg: Leg, tmp_path: Path) -> None
     rec = mp.Recorder()
     ex = _controlled(leg, ctl, rec)
     probe = mp.Probe(sleep_s=0.05, hold_key=0, entered_path=entered, release_path=release)
-    # Key 0 alone reaches the target, so the stop condition can only fire once it completes: in the drain.
-    plan = _plan(leg, probe, batch=mp.tasks(entries={0: 1000}), stop=StopCondition(target_events=1000))
+    # Key 0 alone reaches the target, so the stop condition can only fire once it completes: in the
+    # drain.
+    plan = _plan(
+        leg, probe, batch=mp.tasks(entries={0: 1000}), stop=StopCondition(target_events=1000)
+    )
     run = mp.Background(lambda: ex.run(plan))
     assert mp._await_file(entered)
     ctl.cancel()
@@ -192,6 +204,9 @@ def cancelled_control_does_no_work(leg: Leg, empty_plan: bool) -> None:
 
 
 def started_before_first_finished(rec: mp.Recorder) -> int:
-    """How many tasks started before any task finished (every event carries one clock: ``perf_counter``)."""
+    """How many tasks started before any task finished.
+
+    Every event carries one clock: ``perf_counter``.
+    """
     first = min(e.t for e in rec.events if e.phase is TaskPhase.FINISHED)
     return sum(e.phase is TaskPhase.STARTED and e.t < first for e in rec.events)

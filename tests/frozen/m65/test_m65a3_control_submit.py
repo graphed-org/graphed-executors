@@ -1,4 +1,8 @@
-"""m65 A3: ``SubmitRunner(ThreadBackend(2))`` honours a ``RunControl`` per A-2, on the fixed and adaptive paths."""
+"""m65 A3: a ``SubmitRunner`` over threads honours a ``RunControl``.
+
+m65 A3: ``SubmitRunner(ThreadBackend(2))`` honours a ``RunControl`` per A-2, on the fixed and
+adaptive paths.
+"""
 
 from __future__ import annotations
 
@@ -99,7 +103,10 @@ class _Slots(ThreadBackend):
 
 
 def _gate(tmp_path: Path, name: str) -> dict[str, str]:
-    return {"entered_path": str(tmp_path / f"{name}-entered"), "release_path": str(tmp_path / f"{name}-release")}
+    return {
+        "entered_path": str(tmp_path / f"{name}-entered"),
+        "release_path": str(tmp_path / f"{name}-release"),
+    }
 
 
 def _finished_at(rec: mp.Recorder, key: int) -> float:
@@ -165,7 +172,10 @@ def test_timed_wake_sees_resume_and_new_slots(leg: str, tmp_path: Path) -> None:
 
 
 class _Recording(ThreadBackend):
-    """A ``ThreadBackend(2)`` recording, per ``submit``, (an argument is a future, one is unfinished)."""
+    """A ``ThreadBackend(2)`` recording, per ``submit``.
+
+    An argument is a future, one is unfinished.
+    """
 
     def __init__(self) -> None:
         super().__init__(2)

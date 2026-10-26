@@ -1,10 +1,11 @@
 """m67: ``RunHandle`` tracks and collects a driverless job over recorded bindings (every OS).
 
-``status()`` maps one projected query of the job's ad (``JobStatus``, ``HoldReasonCode``, ``ExitCode``)
-to queued/running/held/done/removed/failed, reading the history once the job has left the queue;
-``wait`` polls to a terminal state within its bound; ``result()`` refuses before done, retrieves a
-spooled sandbox, and re-raises a pickled exception intact; ``save``/``load`` round-trip through JSON.
-Every schedd is reached by ``Collector.locate`` on the recorded name, never ``Schedd()``.
+``status()`` maps one projected query of the job's ad (``JobStatus``, ``HoldReasonCode``,
+``ExitCode``) to queued/running/held/done/removed/failed, reading the history once the job has left
+the queue; ``wait`` polls to a terminal state within its bound; ``result()`` refuses before done,
+retrieves a spooled sandbox, and re-raises a pickled exception intact; ``save``/``load`` round-trip
+through JSON. Every schedd is reached by ``Collector.locate`` on the recorded name, never
+``Schedd()``.
 
 The ads are ``data/driver-ads.json``: synthetic, in the shapes of the status lines of the LPC probe
 ``probes/services-lpc/p1-dag/transcript-p1c-spool-tif.txt``.
@@ -12,7 +13,8 @@ The ads are ``data/driver-ads.json``: synthetic, in the shapes of the status lin
 Discriminates a spooling-input hold reported as held, a completed job reported done whatever its
 exit code, a status that never reads the history, a result read from a stale file before done, a
 missing retrieve, a swallowed or stringified exception, an unbounded wait, and ``Schedd()`` (the
-submit host's default schedd, not the one that holds the job)."""
+submit host's default schedd, not the one that holds the job).
+"""
 
 from __future__ import annotations
 
@@ -88,7 +90,9 @@ def test_status_after_the_job_left_the_queue(
 
 
 @pytest.mark.parametrize("final", ["completed-exit-0", "completed-exit-3"])
-def test_wait_polls_to_a_terminal_state(final: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_polls_to_a_terminal_state(
+    final: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     schedd = RecordingSchedd(queue=[[queue_ad("idle")], [queue_ad("running")], [queue_ad(final)]])
     record_bindings(monkeypatch, schedd)
     handle = make_handle(tmp_path)
@@ -119,10 +123,13 @@ def test_result_before_done_refuses_even_with_a_stale_file(
     assert "running" in str(excinfo.value), repr(excinfo.value)
 
 
-def test_result_of_a_job_that_left_the_queue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_result_of_a_job_that_left_the_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / "result.pkl").write_bytes(pickle.dumps((True, done_result())))
     record_bindings(
-        monkeypatch, RecordingSchedd(queue=[[]], history=[dict(HISTORY["left-queue-exit-0"]["ad"])])
+        monkeypatch,
+        RecordingSchedd(queue=[[]], history=[dict(HISTORY["left-queue-exit-0"]["ad"])]),
     )
     assert make_handle(tmp_path).result() == done_result()
 

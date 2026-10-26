@@ -1,7 +1,8 @@
-"""m44 honest degradation — the transport engine refuses loudly on a backend without strict
-worker pinning, BEFORE any work is submitted, and its entry-point modules import dask-free (plan
-§1.6, §8 F13/FU2; blueprint §3 `test_transport_capability_gate`). Runs in the MAIN CI matrix —
-no distributed needed.
+"""m44 honest degradation.
+
+The transport engine refuses loudly on a backend without strict worker pinning, BEFORE any work is
+submitted, and its entry-point modules import dask-free (plan §1.6, §8 F13/FU2; blueprint §3
+`test_transport_capability_gate`). Runs in the MAIN CI matrix — no distributed needed.
 
 FU2 discrimination: the ``PinlessBackend`` stub carries the frozen-m42 ThreadBackend flag shape
 (``peer_data_movement=True, pin_to_worker=False``) so the m43-era peer-movement gate PASSES and
@@ -11,7 +12,8 @@ points (repartition, join, plan) must raise ``NotImplementedError`` naming the p
 requirement and the "Phase 2" store-plane alternative with ZERO submits/broadcasts reaching the
 stub. The subprocess probe pins F13: importing the DEFERRING entry-point modules
 (``transport_peer``, ``transport_shuffle``) leaves ``distributed``/``dask`` out of
-``sys.modules`` (``transport.py`` itself is import-dirty by design and is NOT probed)."""
+``sys.modules`` (``transport.py`` itself is import-dirty by design and is NOT probed).
+"""
 
 from __future__ import annotations
 
@@ -43,8 +45,11 @@ print("CLEAN")
 
 
 def test_entry_point_modules_import_without_touching_distributed() -> None:
-    """A fresh interpreter imports both deferring entry-point modules and the three pinned entry
-    points while distributed/dask stay unimported (works whether or not the extra is installed)."""
+    """A fresh interpreter imports the entry-point modules without importing distributed or dask.
+
+    A fresh interpreter imports both deferring entry-point modules and the three pinned entry
+    points while distributed/dask stay unimported (works whether or not the extra is installed).
+    """
     proc = subprocess.run(
         [sys.executable, "-c", PROBE], capture_output=True, text=True, timeout=120, check=False
     )
@@ -60,7 +65,9 @@ def test_missing_pin_capability_refuses_before_any_work(stub_cls) -> None:  # ty
 
     with pytest.raises(NotImplementedError, match="pin") as rep_exc:
         transport_repartition(adapter.backend, blocks, 3, dbackend=stub)
-    assert "Phase 2" in str(rep_exc.value), "the refusal must point at the Phase-2 store data plane"
+    assert "Phase 2" in str(rep_exc.value), (
+        "the refusal must point at the Phase-2 store data plane"
+    )
 
     with pytest.raises(NotImplementedError, match="pin") as join_exc:
         transport_join(adapter.backend, blocks, blocks, 3, dbackend=stub)

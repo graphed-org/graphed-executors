@@ -1,12 +1,14 @@
-"""m42 reroute: a worker killed MID-RUN (below the allowed-failures budget) costs nothing — the
-run completes bit-for-bit, the dead worker's task re-runs in a different process (plan §1.4
+"""m42 reroute: a worker killed MID-RUN (below the allowed-failures budget) costs nothing.
+
+The run completes bit-for-bit, the dead worker's task re-runs in a different process (plan §1.4
 bullets 2-3; blueprint §3 `test_dask_worker_death_reroute`).
 
 The poisoned leaf hard-kills its worker on the FIRST attempt (after atomically recording the pid),
 then succeeds when rescheduled — a deterministic mid-run death, no external kill races. A twin
 clean plan (same compute, no poison) provides the expected value, since running the poisoned plan
 through SequentialRunner would kill the test process. Discriminates: a runner that deadlocks on
-lost futures, and one whose result changes when a leaf is recomputed elsewhere."""
+lost futures, and one whose result changes when a leaf is recomputed elsewhere.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +38,9 @@ def client():
         yield c
 
 
-def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(client, tmp_path: pathlib.Path) -> None:
+def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(
+    client, tmp_path: pathlib.Path
+) -> None:
     n = 8
     parts = mem_partitions(n, "reroute")
     poison_uri = parts[3].uri
@@ -66,8 +70,10 @@ def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(client, tmp_pat
 
 
 def test_clean_twin_matches_sequential(client) -> None:
-    """Control: the same compute without the poison equals the provenance run's payload — the
-    reroute test's expected value is anchored, not self-referential."""
+    """Control: the same compute without the poison equals the provenance run's payload.
+
+    The reroute test's expected value is anchored, not self-referential.
+    """
     with make_dask_runner(client) as runner:
         prov = runner.run(prov_plan(8, "reroute")).value
     assert prov.payload == expected_concat(8, "reroute")

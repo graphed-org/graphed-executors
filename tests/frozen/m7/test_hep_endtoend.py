@@ -1,5 +1,8 @@
-"""HEP end-to-end via the executor (plan M7): a real graphed analysis runs over partitions through
-BOTH executors and reproduces the single-pass histogram bit-for-bit, invariant to partition count."""
+"""HEP end-to-end via the executor (plan M7).
+
+A real graphed analysis runs over partitions through BOTH executors and reproduces the single-pass
+histogram bit-for-bit, invariant to partition count.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +16,10 @@ from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
 def _met_plan(n_chunks: int) -> Plan:
     return Plan(
-        process=A.met_partial, combine=A.hist_add, empty=A.hist_zero, tasks=A.met_partitions(n_chunks)
+        process=A.met_partial,
+        combine=A.hist_add,
+        empty=A.hist_zero,
+        tasks=A.met_partitions(n_chunks),
     )
 
 

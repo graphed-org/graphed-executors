@@ -1,9 +1,12 @@
-"""Shared harness for the m68c frozen suite (plan-executors.md §6): join plans (``DurablePlanV2``) whose
-left side calls a server, a counting local HTTP stand-in, a recording backend, and the byte measure.
+"""Shared harness for the m68c frozen suite (plan-executors.md §6).
+
+Join plans (``DurablePlanV2``) whose left side calls a server, a counting local HTTP stand-in, a
+recording backend, and the byte measure.
 
 Frozen suites never import across directories, so the m68a pieces this suite needs are copied here
-(``run_bounded``, ``wait_for``, ``pid_gone``, ``free_range``, a trimmed ``RecordingBackend``). Everything a
-worker or pilot unpickles is module-level; ``python m68c_harness.py <port> <report>`` is the managed child.
+(``run_bounded``, ``wait_for``, ``pid_gone``, ``free_range``, a trimmed ``RecordingBackend``).
+Everything a worker or pilot unpickles is module-level; ``python m68c_harness.py <port> <report>``
+is the managed child.
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ CALL_PATH = "/sf"
 FACTOR = "3"
 
 
-# ---- the managed child (stdlib only above this line's imports) -------------------------------------
+# ---- the managed child (stdlib only above this line's imports) ----------------------------------
 
 
 class _PidHandler(BaseHTTPRequestHandler):
@@ -51,7 +54,10 @@ class _PidHandler(BaseHTTPRequestHandler):
 
 
 def child_main(argv: Sequence[str]) -> int:
-    """Write ``{"pid"}`` to ``argv[1]``, then answer every GET on ``("", argv[0])`` with this pid."""
+    """Write ``{"pid"}`` to ``argv[1]``.
+
+    Write ``{"pid"}`` to ``argv[1]``, then answer every GET on ``("", argv[0])`` with this pid.
+    """
     port, report = int(argv[0]), argv[1]
     with open(f"{report}.tmp", "w") as f:
         json.dump({"pid": os.getpid()}, f)
@@ -80,7 +86,7 @@ from graphed.services import Launch, ServiceSpec, bind_services  # noqa: E402
 
 from graphed_executors.submit import RunContext, SubmitFuture  # noqa: E402
 
-# ---- bounds and process witnesses (copied from m68a) ----------------------------------------------
+# ---- bounds and process witnesses (copied from m68a) --------------------------------------------
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
@@ -187,7 +193,7 @@ def read_report(path: Path, timeout_s: float = 60.0) -> int:
     return int(json.loads(path.read_text())["pid"])
 
 
-# ---- the local HTTP stand-in -----------------------------------------------------------------------
+# ---- the local HTTP stand-in --------------------------------------------------------------------
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -211,7 +217,7 @@ class _CountingHTTP(ThreadingHTTPServer):
 
 
 class StandIn:
-    """An HTTP server on ``127.0.0.1:0`` answering ``FACTOR`` to every GET and counting GETs by path."""
+    """An HTTP server on ``127.0.0.1:0`` answering ``FACTOR`` to each GET, counted by path."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -230,7 +236,10 @@ class StandIn:
         return FACTOR.encode()
 
     def calls(self) -> int:
-        """GETs of the External's path (readiness checks GET ``/`` and are not counted)."""
+        """Count the GETs of the External's path.
+
+        Readiness checks GET ``/`` and are not counted.
+        """
         with self._lock:
             return self._gets.get(CALL_PATH, 0)
 
@@ -250,17 +259,21 @@ class StandIn:
 
 
 def given_spec() -> ServiceSpec:
-    """A requirement without a recipe: only a given endpoint serves it."""
-    return ServiceSpec(SERVICE, "http", check="http:/", ports=(40000, 40010), launch=None, timeout_s=30.0)
+    """Return a requirement without a recipe: only a given endpoint serves it."""
+    return ServiceSpec(
+        SERVICE, "http", check="http:/", ports=(40000, 40010), launch=None, timeout_s=30.0
+    )
 
 
 def managed_spec(report: Path) -> ServiceSpec:
-    """A driver-hostable requirement whose recipe runs this file as the child."""
+    """Return a driver-hostable requirement whose recipe runs this file as the child."""
     launch = Launch(argv=("{python}", HARNESS_FILE, "{port}", str(report)))
-    return ServiceSpec(SERVICE, "http", check="http:/", ports=free_range(), launch=launch, timeout_s=60.0)
+    return ServiceSpec(
+        SERVICE, "http", check="http:/", ports=free_range(), launch=launch, timeout_s=60.0
+    )
 
 
-# ---- the server-calling External -------------------------------------------------------------------
+# ---- the server-calling External ----------------------------------------------------------------
 
 _CALLS_LOCK = threading.Lock()
 CALLS: list[str] = []  # every body the External read, in-process runners only
@@ -271,7 +284,10 @@ def _samples() -> list[bytes]:
 
 
 def _scale(resource: Any, params: Mapping[str, Any], inputs: list[Any]) -> Any:
-    """GET the bound endpoint's ``/sf`` and scale ``x`` by the answer; the record type is unchanged."""
+    """GET the bound endpoint's ``/sf`` and scale ``x`` by the answer.
+
+    The record type is unchanged.
+    """
     with urllib.request.urlopen(str(params["url"]) + CALL_PATH, timeout=10.0) as resp:
         body = resp.read().decode()
     with _CALLS_LOCK:
@@ -280,7 +296,9 @@ def _scale(resource: Any, params: Mapping[str, Any], inputs: list[Any]) -> Any:
     return ak.with_field(block, block["x"] * float(body), "x")
 
 
-SCALE = ExternalPlugin(kind="m68c_scale", content_hash=sha256_bytes, evaluate=_scale, samples=_samples)
+SCALE = ExternalPlugin(
+    kind="m68c_scale", content_hash=sha256_bytes, evaluate=_scale, samples=_samples
+)
 
 
 def calls_reset() -> None:
@@ -293,14 +311,17 @@ def calls_snapshot() -> list[str]:
         return list(CALLS)
 
 
-# ---- sources and plans -----------------------------------------------------------------------------
+# ---- sources and plans --------------------------------------------------------------------------
 
 _HOLD_LOCK = threading.Lock()
 _HOLDS: dict[str, tuple[threading.Event, list[int]]] = {}
 
 
 def hold(tag: str) -> str:
-    """A fresh hold: under it every partition read after the first waits for :func:`release`."""
+    """Return a fresh hold.
+
+    Under it every partition read after the first waits for :func:`release`.
+    """
     with _HOLD_LOCK:
         _HOLDS[tag] = (threading.Event(), [0])
     return tag
@@ -321,9 +342,13 @@ class Chunks:
     held: str | None = None
 
     def partitions(self, steps_per_file: int) -> tuple[Partition, ...]:
-        return tuple(Partition.blind(self.uri, "", s, steps_per_file) for s in range(steps_per_file))
+        return tuple(
+            Partition.blind(self.uri, "", s, steps_per_file) for s in range(steps_per_file)
+        )
 
-    def read_partition(self, partition: Partition, columns: Any, resources: WorkerResources) -> Any:
+    def read_partition(
+        self, partition: Partition, columns: Any, resources: WorkerResources
+    ) -> Any:
         if self.held is not None:
             with _HOLD_LOCK:
                 event, count = _HOLDS[self.held]
@@ -340,14 +365,16 @@ LEFT = {"k": [i % 5 for i in range(N_ROWS)], "x": [float(i) for i in range(N_ROW
 RIGHT = {"k": [i % 7 for i in range(N_ROWS)], "y": [100.0 + i for i in range(N_ROWS)]}
 
 
-def _source(s: Session, name: str, uri: str, columns: Mapping[str, list[Any]], held: str | None) -> Any:
+def _source(
+    s: Session, name: str, uri: str, columns: Mapping[str, list[Any]], held: str | None
+) -> Any:
     data = ak.Array({k: np.asarray(v) for k, v in columns.items()})
     form = AwkwardForm(ak.Array(data.layout.to_typetracer(forget_length=True)))
     return s.source(name, form=form, data=Chunks(uri, data, held))
 
 
 def rows(values: list[Any]) -> list[str]:
-    """The joined records of one dest as sorted canonical JSON (exact float reprs)."""
+    """Return the joined records of one dest as sorted canonical JSON (exact float reprs)."""
     return sorted(json.dumps(r, sort_keys=True) for v in values for r in ak.to_list(v))
 
 
@@ -367,8 +394,11 @@ def join_v2(
     held: str | None = None,
     combine: Callable[[list[str], list[str]], list[str]] = cat,
 ) -> Any:
-    """``join_plan`` of ``left`` (through the ``SCALE`` External naming ``spec`` when given) with
-    ``right`` on ``k``, folded by ``rows``/``combine``/``no_rows``."""
+    """Return ``join_plan`` of ``left`` with ``right`` on ``k``.
+
+    ``join_plan`` of ``left`` (through the ``SCALE`` External naming ``spec`` when given) with
+    ``right`` on ``k``, folded by ``rows``/``combine``/``no_rows``.
+    """
     s = Session(AwkwardBackend())
     left = _source(s, "left", f"mem://m68c-{tag}/left", LEFT, held)
     right = _source(s, "right", f"mem://m68c-{tag}/right", RIGHT, held)
@@ -382,7 +412,7 @@ def join_v2(
 
 
 def sequential(plan: Any, endpoints: Mapping[str, str] | None = None) -> Any:
-    """graphed's reference run of ``plan`` (bound to ``endpoints`` when given)."""
+    """Graphed's reference run of ``plan`` (bound to ``endpoints`` when given)."""
     bound = bind_services(plan, endpoints) if endpoints else plan
     return SequentialRunner().run(bound)
 
@@ -391,7 +421,7 @@ def stage_index(plan: Any, kind: str) -> int:
     return [st.kind for st in plan.stages].index(kind)
 
 
-# ---- task keys (plan-executors §4) -------------------------------------------------------------------
+# ---- task keys (plan-executors §4) --------------------------------------------------------------
 
 
 def is_plan_key(key: str) -> bool:
@@ -425,17 +455,21 @@ def pick_edge(key: str) -> tuple[int, int, int]:
     return int(s), int(t), int(dest)
 
 
-# ---- a backend that records what the engine hands it -------------------------------------------------
+# ---- a backend that records what the engine hands it --------------------------------------------
 
 
 class RecordingBackend:
-    """A ``SubmitBackend`` over ``inner`` recording, in order, every submit (key and args), broadcast
+    """A ``SubmitBackend`` over ``inner`` that records submits, broadcasts, cancels and starts.
+
+    A ``SubmitBackend`` over ``inner`` recording, in order, every submit (key and args), broadcast
     handle, cancel (by key) and task start; attributes it does not define are ``inner``'s.
 
     ``gate``: the inner (single) worker is held by a blocker task until the event is set.
     ``fail_key``/``fault``: ``submit`` raises ``fault`` for the first key the predicate accepts.
     ``wrap=False`` submits ``fn`` itself (for backends that ship tasks to other processes): no task
-    starts and no gather args are recorded then. With ``wrap``, each gather's resolved args are kept."""
+    starts and no gather args are recorded then. With ``wrap``, each gather's resolved args are
+    kept.
+    """
 
     def __init__(
         self,
@@ -535,7 +569,7 @@ class RecordingBackend:
             return list(self.cancels)
 
     def data_args(self, key: str) -> list[object]:
-        """The submit's args that are not a ``RunContext``, ``str``, ``Task`` or broadcast handle."""
+        """Return the submit's args other than ``RunContext``, ``str``, ``Task`` or a broadcast."""
         with self.lock:
             args = next(a for k, a in self.submits if k == key)
             handles = list(self.handles)
@@ -546,14 +580,20 @@ class RecordingBackend:
         ]
 
     def measure(self) -> tuple[int, int]:
-        """(pickled bytes of the data args of every pick and gather submit, a future counted as its
-        result; pickled bytes of every map-write result)."""
+        """Return the pickled sizes of the pick/gather data args and of the map-write results.
+
+        Return the pickled sizes of the pick/gather data args and of the map-write results (pickled
+        bytes of the data args of every pick and gather submit, a future counted as its result;
+        pickled bytes of every map-write result).
+        """
         moved = 0
         for key in [k for k in self.submitted() if is_pick(k) or is_gather(k)]:
             for arg in self.data_args(key):
                 value = arg.result() if isinstance(arg, SubmitFuture) else arg
                 moved += len(pickle.dumps(value))
-        maps = sum(len(pickle.dumps(self.futures[k].result())) for k in self.submitted() if is_map(k))
+        maps = sum(
+            len(pickle.dumps(self.futures[k].result())) for k in self.submitted() if is_map(k)
+        )
         return moved, maps
 
 

@@ -50,8 +50,9 @@ def touch(path: str) -> None:
 class Probe:
     """The task body: returns the partial for the key in ``partition.entry_start``.
 
-    ``variant``: ``"onehot"`` (a tuple naming the key), ``"float"`` (a scalar whose sum depends on the
-    fold order at 40 tasks) or ``"int"`` (the key itself). ``hold_all`` holds every key as ``hold_key``.
+    ``variant``: ``"onehot"`` (a tuple naming the key), ``"float"`` (a scalar whose sum depends on
+    the fold order at 40 tasks) or ``"int"`` (the key itself). ``hold_all`` holds every key as
+    ``hold_key``.
     """
 
     n: int = N
@@ -120,7 +121,10 @@ def tasks(n: int = N, entries: dict[int, int] | None = None) -> list[Task]:
 
 
 class OneBatch:
-    """An adaptive ``next_tasks``: every task on the first call, ``None`` after; counts its calls."""
+    """An adaptive ``next_tasks``: every task on the first call, ``None`` after.
+
+    Counts its calls.
+    """
 
     def __init__(self, batch: Iterable[Task]) -> None:
         self.batch = list(batch)
@@ -138,7 +142,10 @@ def make_plan(
     batch: Iterable[Task] | None = None,
     stop: StopCondition | None = None,
 ) -> Plan[Any]:
-    """Fixed plan over ``batch`` (default ``tasks(probe.n)``), or an adaptive one handing it out once."""
+    """Return a fixed plan over ``batch`` (default ``tasks(probe.n)``).
+
+    Fixed plan over ``batch`` (default ``tasks(probe.n)``), or an adaptive one handing it out once.
+    """
     todo = list(tasks(probe.n) if batch is None else batch)
     combine, empty = {
         "onehot": (add_tuples, zeros(probe.n)),
@@ -146,12 +153,17 @@ def make_plan(
         "int": (add, _int_zero),
     }[probe.variant]
     if adaptive:
-        return Plan(process=probe, combine=combine, empty=empty, next_tasks=OneBatch(todo), stop=stop)
+        return Plan(
+            process=probe, combine=combine, empty=empty, next_tasks=OneBatch(todo), stop=stop
+        )
     return Plan(process=probe, combine=combine, empty=empty, tasks=todo, stop=stop)
 
 
 class Recorder:
-    """A thread-safe monitor; runs ``on_first_finished`` once, in the thread delivering that event."""
+    """A thread-safe monitor.
+
+    Runs ``on_first_finished`` once, in the thread delivering that event.
+    """
 
     def __init__(self, on_first_finished: Callable[[], None] | None = None) -> None:
         self.events: list[TaskEvent] = []
@@ -165,7 +177,9 @@ class Recorder:
         with self._lock:
             self.events.append(event)
             if event.phase is TaskPhase.FINISHED and not self.first_finished.is_set():
-                self.submitted_at_first_finished = sum(e.phase is TaskPhase.SUBMITTED for e in self.events)
+                self.submitted_at_first_finished = sum(
+                    e.phase is TaskPhase.SUBMITTED for e in self.events
+                )
                 self.first_finished.set()
                 fire = True
         if fire and self._on_first_finished is not None:

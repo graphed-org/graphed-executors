@@ -1,4 +1,8 @@
-"""m65 A3: ``ParslBackend.task_slots()`` never waits, so a controlled run survives an HTEX block that arrives late."""
+"""m65 A3: ``ParslBackend.task_slots()`` never waits.
+
+m65 A3: ``ParslBackend.task_slots()`` never waits, so a controlled run survives an HTEX block that
+arrives late.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +35,9 @@ HERE = str(Path(__file__).resolve().parent)
 @pytest.fixture(autouse=True)
 def _worker_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # HTEX starts its interchange and workers by script name, and workers do not inherit sys.path.
-    monkeypatch.setenv("PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv(
+        "PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+    )
     monkeypatch.setenv("PYTHONPATH", HERE + os.pathsep + os.environ.get("PYTHONPATH", ""))
 
 

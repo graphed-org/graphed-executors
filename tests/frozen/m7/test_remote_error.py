@@ -1,5 +1,8 @@
-"""A StageError raised in a worker PROCESS surfaces in the driver intact, via M6's format_traceback
-pointing at the user's analysis line — never an opaque worker traceback (plan M7 / A.3 #8)."""
+"""A StageError raised in a worker process surfaces in the driver intact.
+
+A StageError raised in a worker PROCESS surfaces in the driver intact, via M6's format_traceback
+pointing at the user's analysis line — never an opaque worker traceback (plan M7 / A.3 #8).
+"""
 
 from __future__ import annotations
 

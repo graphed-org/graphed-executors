@@ -1,5 +1,7 @@
-"""Thousands of tiny tasks complete with no deadlock, no stall (monotonic progress), no race —
-including under the free-threaded interpreter via the experimental CI job (plan M7)."""
+"""Thousands of tiny tasks complete with no deadlock, no stall (monotonic progress), no race.
+
+Including under the free-threaded interpreter via the experimental CI job (plan M7).
+"""
 
 from __future__ import annotations
 
@@ -20,7 +22,8 @@ def test_thousands_of_tiny_tasks_complete_without_deadlock_thread() -> None:
     r = ex.run(_plan(2000))
     assert r.value == 2000  # nothing lost or double-counted
     assert r.n_combines == 1999
-    # monotonic progress: each on_combine sees a non-decreasing #leaves-delivered (no regression/stall)
+    # monotonic progress: each on_combine sees a non-decreasing #leaves-delivered (no
+    # regression/stall)
     assert combines == sorted(combines)
     assert len(combines) == 1999
 

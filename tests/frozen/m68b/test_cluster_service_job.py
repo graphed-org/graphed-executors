@@ -1,14 +1,17 @@
-"""m68b B1: ``ServiceJob``, ``announce.py`` and the attached backend's ``host_service``/``release_service``
-(plan-services.md §3.3 "B1 — attached cluster hosting", the ``test_cluster_service_job.py`` row).
+"""m68b B1: ``ServiceJob``, ``announce.py`` and the attached backend's service hosting.
 
-Three groups. The submit keys and the job dir ``ServiceJob`` builds, and ``host_service`` over a recorded
-schedd (``record_bindings``), in process on every OS. ``announce.py``'s SIGTERM handler and its ``_Stop``
-exit path, in process on every OS (the module keeps the prototype's ``main``/``serve``/``on_sigterm``/
-``_Stop``/``CHILD``). The subprocess legs, POSIX only (Windows delivers SIGTERM as ``TerminateProcess``;
-``announce.py`` only runs in a Linux job): ``python -m graphed_executors.htcondor_backend.announce
-service.json`` in a job dir laid out as the job's, against a real ``TaskServer``, with ``$_CONDOR_MACHINE_AD``
-naming a file whose ``Machine`` is ``localhost`` and identities compared with ``host_identity()`` under
-that env.
+m68b B1: ``ServiceJob``, ``announce.py`` and the attached backend's
+``host_service``/``release_service`` (plan-services.md §3.3 "B1 — attached cluster hosting", the
+``test_cluster_service_job.py`` row).
+
+Three groups. The submit keys and the job dir ``ServiceJob`` builds, and ``host_service`` over a
+recorded schedd (``record_bindings``), in process on every OS. ``announce.py``'s SIGTERM handler
+and its ``_Stop`` exit path, in process on every OS (the module keeps the prototype's
+``main``/``serve``/``on_sigterm``/ ``_Stop``/``CHILD``). The subprocess legs, POSIX only (Windows
+delivers SIGTERM as ``TerminateProcess``; ``announce.py`` only runs in a Linux job): ``python -m
+graphed_executors.htcondor_backend.announce service.json`` in a job dir laid out as the job's,
+against a real ``TaskServer``, with ``$_CONDOR_MACHINE_AD`` naming a file whose ``Machine`` is
+``localhost`` and identities compared with ``host_identity()`` under that env.
 """
 
 from __future__ import annotations
@@ -85,7 +88,10 @@ posix = pytest.mark.skipif(
 
 
 def _can_symlink() -> bool:
-    """Whether this host creates file and directory symlinks (Windows needs the symlink privilege)."""
+    """Whether this host creates file and directory symlinks.
+
+    Windows needs the symlink privilege.
+    """
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "dir").mkdir()
         (Path(d) / "file").write_text("f")
@@ -101,7 +107,7 @@ symlinks = pytest.mark.skipif(not _can_symlink(), reason="cannot create a symlin
 
 
 def _defpath_python() -> tuple[str | None, str]:
-    """The default-path ``python3`` and the ``sys.executable`` it prints when run without ``PATH``."""
+    """Return the default-path ``python3`` and the ``sys.executable`` it prints sans ``PATH``."""
     defpy = shutil.which("python3", path=os.defpath)
     if not defpy:
         return defpy, ""
@@ -119,7 +125,8 @@ def _defpath_python() -> tuple[str | None, str]:
 defpath_python3, defpath_printed = _defpath_python()
 defpath_python_distinct = pytest.mark.skipif(
     not (defpath_printed and os.path.isabs(defpath_printed) and defpath_printed != sys.executable),
-    reason=f"the default-path python3 ({defpath_python3}) does not tell {defpath_printed!r} from this interpreter",
+    reason=f"the default-path python3 ({defpath_python3}) does not tell {defpath_printed!r} from "
+    "this interpreter",
 )
 
 
@@ -136,7 +143,10 @@ def started_pilots(
     log_dir: Path | str | None = None,
     image: str | None = None,
 ) -> tuple[Any, RecordingSchedd]:
-    """A ``CondorPilots`` on ``profile`` started under the recorder (a fake venv when it ships one)."""
+    """Return a ``CondorPilots`` on ``profile`` started under the recorder.
+
+    A fake venv when it ships one.
+    """
     schedd = schedd if schedd is not None else RecordingSchedd()
     record_bindings(monkeypatch, schedd)
     venv = tmp_path / "venv"
@@ -184,7 +194,10 @@ def names_code(text: str, code: int) -> bool:
 
 
 def execs_announce_with(script: str, python: str) -> bool:
-    """An ``exec <python> [./]announce.py`` line, ``<python>`` literal or a variable the script sets to it."""
+    """Check for an ``exec <python> [./]announce.py`` line in ``script``.
+
+    ``<python>`` is literal or a variable the script sets to it.
+    """
     literal = rf"[\"']?{re.escape(python)}[\"']?"
     line = re.search(
         rf"^\s*exec\s+(?:{literal}|\"?\$\{{?(\w+)\}}?\"?)\s+[\"']?(?:\./)?announce\.py\b",
@@ -196,7 +209,7 @@ def execs_announce_with(script: str, python: str) -> bool:
     return re.search(rf"^\s*{line[1]}={literal}\s*$", script, re.MULTILINE) is not None
 
 
-# ---- the attribute ------------------------------------------------------------------------------------------
+# ---- the attribute ------------------------------------------------------------------------------
 
 
 def test_host_service_exists_iff_condor_pilots_and_a_cluster_host(
@@ -205,7 +218,12 @@ def test_host_service_exists_iff_condor_pilots_and_a_cluster_host(
     record_bindings(monkeypatch, RecordingSchedd())
     launch, backend_mod, sites = launch_api(), backend_api(), htcondor_api().SITES
     cases = [
-        ("condor generic", lambda: launch.CondorPilots(generic(), log_dir=tmp_path / "a"), {}, True),
+        (
+            "condor generic",
+            lambda: launch.CondorPilots(generic(), log_dir=tmp_path / "a"),
+            {},
+            True,
+        ),
         (
             "condor cluster only",
             lambda: launch.CondorPilots(generic(service_ports=None), log_dir=tmp_path / "b"),
@@ -242,10 +260,12 @@ def test_host_service_exists_iff_condor_pilots_and_a_cluster_host(
                 wrong.append((label, has))
         finally:
             run_bounded(backend.close, BOUND_S)
-    assert wrong == [], f"host_service/release_service present (True) or absent (False) wrongly: {wrong}"
+    assert wrong == [], (
+        f"host_service/release_service present (True) or absent (False) wrongly: {wrong}"
+    )
 
 
-# ---- ServiceJob: the job dir and the submit keys --------------------------------------------------------------
+# ---- ServiceJob: the job dir and the submit keys ------------------------------------------------
 
 
 def test_files_mirror_each_input_under_service_by_basename(
@@ -267,7 +287,9 @@ def test_files_mirror_each_input_under_service_by_basename(
         assert os.path.isabs(os.readlink(link)), f"{rel} links to a relative path"
         assert os.path.samefile(link, src / rel)
     for rel in ("models", "models/a"):
-        assert (service / rel).is_dir() and not (service / rel).is_symlink(), f"{rel} is not a real directory"
+        assert (service / rel).is_dir() and not (service / rel).is_symlink(), (
+            f"{rel} is not a real directory"
+        )
     entries = input_entries(keys)
     assert entries.count("service") == 1, entries
     assert not {"models", "weights.bin"} & set(entries), entries
@@ -310,8 +332,12 @@ def test_every_transfer_entry_is_relative_so_a_comma_in_log_dir_splits_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     schedd = RecordingSchedd()
-    plain, _ = started_pilots(monkeypatch, tmp_path, generic(), schedd=schedd, log_dir=tmp_path / "plain")
-    comma, _ = started_pilots(monkeypatch, tmp_path, generic(), schedd=schedd, log_dir=tmp_path / "lo,gs")
+    plain, _ = started_pilots(
+        monkeypatch, tmp_path, generic(), schedd=schedd, log_dir=tmp_path / "plain"
+    )
+    comma, _ = started_pilots(
+        monkeypatch, tmp_path, generic(), schedd=schedd, log_dir=tmp_path / "lo,gs"
+    )
     (tmp_path / "model.txt").write_text("m")
     spec = web_spec(inputs=(str(tmp_path / "model.txt"),))
     plain_desc, _ = submitted(service_job(spec, plain), schedd)
@@ -319,7 +345,9 @@ def test_every_transfer_entry_is_relative_so_a_comma_in_log_dir_splits_nothing(
     assert "," in str(comma_dir)
     assert input_entries(comma_desc) == input_entries(plain_desc)
     assert comma_desc["transfer_input_files"] == plain_desc["transfer_input_files"]
-    assert all(not os.path.isabs(e) for e in input_entries(comma_desc)), comma_desc["transfer_input_files"]
+    assert all(not os.path.isabs(e) for e in input_entries(comma_desc)), comma_desc[
+        "transfer_input_files"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -347,14 +375,20 @@ def test_the_submit_keys(
     assert os.path.isabs(desc["executable"])
     assert os.path.samefile(desc["executable"], initialdir / "service.sh")
     assert desc["arguments"] == "service.json"
-    assert (desc["output"], desc["error"], desc["log"]) == ("service.out", "service.err", "service.log")
+    assert (desc["output"], desc["error"], desc["log"]) == (
+        "service.out",
+        "service.err",
+        "service.log",
+    )
     assert desc["JobBatchName"] == "graphed-service-k1"
     assert desc["job_max_vacate_time"] == "30"
     assert desc["transfer_output_files"] == '""'
     for name, value in expected.items():
         assert desc.get(name) == value, (name, desc.get(name))
     leaked = [
-        (k, v) for k, v in desc.items() if URL in str(v) or SECRET.hex() in str(v) or pilot_secret in str(v)
+        (k, v)
+        for k, v in desc.items()
+        if URL in str(v) or SECRET.hex() in str(v) or pilot_secret in str(v)
     ]
     assert leaked == [], f"a secret or the task server's url is in the job ad: {leaked}"
     assert (initialdir / "graphed-secret").read_text().strip() == SECRET.hex()
@@ -465,7 +499,9 @@ def test_a_relative_log_dir_and_a_relative_input_resolve_where_they_were_written
     assert all(os.path.isfile(p) for p in links), [(p, os.readlink(p)) for p in links]
     run_bounded(pilots.stop, BOUND_S)
     assert not (a / "logs" / "graphed-secret").exists(), "the pilots' secret was left behind"
-    assert (b / "logs" / "graphed-secret").read_text() == "B's secret", "stop() unlinked another dir's secret"
+    assert (b / "logs" / "graphed-secret").read_text() == "B's secret", (
+        "stop() unlinked another dir's secret"
+    )
 
 
 @pytest.mark.parametrize(
@@ -511,7 +547,9 @@ def test_construction_accepts_a_directory_holding_a_file_symlink(
     (tmp_path / "models").mkdir()
     (tmp_path / "weights.txt").write_text("w")
     symlink(tmp_path / "weights.txt", tmp_path / "models" / "w.txt")
-    keys = files_of(service_job(web_spec(inputs=(str(tmp_path / "models"),)), pilots), tmp_path / "job")
+    keys = files_of(
+        service_job(web_spec(inputs=(str(tmp_path / "models"),)), pilots), tmp_path / "job"
+    )
     assert os.path.isfile(tmp_path / "job" / "service" / "models" / "w.txt")
     assert input_entries(keys).count("service") == 1
 
@@ -526,7 +564,9 @@ def test_stop_removes_at_once_and_unlinks_only_the_job_s_secret(
 ) -> None:
     schedd = RecordingSchedd(queue=[[ad]])
     image = LAUNCHER_IMAGE if site == "lxplus" else None
-    pilots, _ = started_pilots(monkeypatch, tmp_path, htcondor_api().SITES[site], schedd=schedd, image=image)
+    pilots, _ = started_pilots(
+        monkeypatch, tmp_path, htcondor_api().SITES[site], schedd=schedd, image=image
+    )
     job = service_job(web_spec(), pilots)
     _, initialdir = submitted(job, schedd)
     assert (initialdir / "graphed-secret").is_file()
@@ -536,7 +576,9 @@ def test_stop_removes_at_once_and_unlinks_only_the_job_s_secret(
     assert tail == (["retrieve", "act"] if retrieved else ["act"]), schedd.log[mark:]
     assert "Remove" in next(e for e in schedd.log[mark:] if e[0] == "act")[1]
     assert not (initialdir / "graphed-secret").exists(), "stop() left the job's secret"
-    assert (Path(pilots.log_dir) / "graphed-secret").is_file(), "stop() unlinked the pilots' secret"
+    assert (Path(pilots.log_dir) / "graphed-secret").is_file(), (
+        "stop() unlinked the pilots' secret"
+    )
 
 
 def test_announce_py_is_stdlib_only_python_3_9_and_the_job_runs_the_module_s_code(
@@ -553,7 +595,9 @@ def test_announce_py_is_stdlib_only_python_3_9_and_the_job_runs_the_module_s_cod
             assert node.level == 0, f"relative import in announce.py: {ast.unparse(node)}"
             imported.add(str(node.module).split(".")[0])
     assert imported, "the parse found no import at all"
-    assert imported <= set(sys.stdlib_module_names) | {"__future__"}, imported - set(sys.stdlib_module_names)
+    assert imported <= set(sys.stdlib_module_names) | {"__future__"}, imported - set(
+        sys.stdlib_module_names
+    )
     pilots, _ = started_pilots(monkeypatch, tmp_path, generic())
     files_of(service_job(web_spec(), pilots), tmp_path / "job")
     assert (tmp_path / "job" / "announce.py").read_bytes() == module_file.read_bytes()
@@ -567,13 +611,17 @@ def test_service_sh_exits_3_naming_an_interpreter_it_cannot_find(
     job_dir = tmp_path / "job"
     files_of(service_job(web_spec(), pilots), job_dir)
     done = subprocess.run(
-        ["sh", "service.sh", "service.json"], cwd=job_dir, capture_output=True, text=True, timeout=60
+        ["sh", "service.sh", "service.json"],
+        cwd=job_dir,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert done.returncode == 3, (done.returncode, done.stdout, done.stderr)
     assert "./env/bin/python" in done.stdout + done.stderr
 
 
-# ---- announce.py in process, every OS -----------------------------------------------------------------------
+# ---- announce.py in process, every OS -----------------------------------------------------------
 
 
 def test_the_sigterm_handler_never_waits_and_ignores_further_sigterms(
@@ -601,9 +649,13 @@ def test_the_sigterm_handler_never_waits_and_ignores_further_sigterms(
     assert calls == [], f"the SIGTERM handler called Popen.{calls}"
 
 
-def _stop_path(mod: Any, child: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[tuple[int, int]]]:
-    """``main()`` with ``serve`` raising ``_Stop`` over ``CHILD[0] = child``: its exit code and every
-    ``os.kill`` it made (spied, not sent)."""
+def _stop_path(
+    mod: Any, child: Any, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, list[tuple[int, int]]]:
+    """Return ``main()`` with ``serve`` raising ``_Stop`` over ``CHILD[0] = child``.
+
+    Its exit code and every ``os.kill`` it made (spied, not sent).
+    """
     kills: list[tuple[int, int]] = []
 
     def serve(*args: Any, **kwargs: Any) -> Any:
@@ -625,7 +677,9 @@ def _stop_path(mod: Any, child: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[A
     return code, kills
 
 
-def test_the_stop_path_signals_no_child_popen_already_reaped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_stop_path_signals_no_child_popen_already_reaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     mod = announce_api()
     reaped = subprocess.Popen([sys.executable, "-c", "pass"])
     reaped.wait(60)
@@ -646,7 +700,7 @@ def test_the_stop_path_signals_an_unreaped_child_once(monkeypatch: pytest.Monkey
     assert kills == [(live.pid, signal.SIGTERM)], kills
 
 
-# ---- host_service over the recorder, every OS -----------------------------------------------------------------
+# ---- host_service over the recorder, every OS ---------------------------------------------------
 
 
 def condor_backend(
@@ -655,15 +709,19 @@ def condor_backend(
     profile: Any = None,
     schedd: RecordingSchedd | None = None,
 ) -> tuple[Any, Any, RecordingSchedd]:
-    """``HTCondorBackend`` over a ``CondorPilots`` started under the recorder, with spies on the announce
-    secret's registry and on ``ServiceJob.stop``."""
+    """Return an ``HTCondorBackend`` over ``CondorPilots`` started under the recorder.
+
+    ``HTCondorBackend`` over a ``CondorPilots`` started under the recorder, with spies on the
+    announce secret's registry and on ``ServiceJob.stop``.
+    """
     schedd = schedd if schedd is not None else RecordingSchedd()
     record_bindings(monkeypatch, schedd)
     pilots = launch_api().CondorPilots(
         profile if profile is not None else generic(), log_dir=tmp_path / "logs"
     )
     backend = run_bounded(
-        lambda: backend_api().HTCondorBackend(pilots, 1, host="127.0.0.1", port_range=(0, 0)), BOUND_S
+        lambda: backend_api().HTCondorBackend(pilots, 1, host="127.0.0.1", port_range=(0, 0)),
+        BOUND_S,
     )
     return backend, pilots, schedd
 
@@ -694,7 +752,9 @@ def test_host_service_forgets_its_announce_secret_when_construction_refuses(
         minted = keys_of(events, "announce_secret")
         assert len(minted) == 1 and minted[0].startswith("scope1-"), events
         assert keys_of(events, "forget_announce") == minted
-        services = [d for d in submits(schedd.log) if str(d["JobBatchName"]).startswith("graphed-service-")]
+        services = [
+            d for d in submits(schedd.log) if str(d["JobBatchName"]).startswith("graphed-service-")
+        ]
         assert services == [], "a service job was submitted for a refused input"
     finally:
         close_backend(backend, schedd)
@@ -726,14 +786,18 @@ def test_a_failed_submit_or_spool_leaves_no_cluster_and_no_registered_secret(
         acts = [e for e in tail if e[0] == "act"]
         if fault == "spool":
             assert any(e[0] == "submit" for e in tail), tail
-            assert any("Remove" in e[1] and re.search(r"ClusterId\s*==\s*4242\b", e[2]) for e in acts), tail
+            assert any(
+                "Remove" in e[1] and re.search(r"ClusterId\s*==\s*4242\b", e[2]) for e in acts
+            ), tail
         else:
             assert ("submit-refused",) in tail and acts == [], tail
     finally:
         close_backend(backend, schedd)
 
 
-@pytest.mark.parametrize(("check", "scheme"), [("http:/", "http"), ("tcp", "tcp"), ("grpc:", "grpc")])
+@pytest.mark.parametrize(
+    ("check", "scheme"), [("http:/", "http"), ("tcp", "tcp"), ("grpc:", "grpc")]
+)
 def test_host_service_returns_the_announced_endpoint_and_releases_in_order(
     check: str, scheme: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -756,7 +820,9 @@ def test_host_service_returns_the_announced_endpoint_and_releases_in_order(
             pending.get()  # host_service returned or raised before any announce: re-raise it here
             raise AssertionError("host_service returned before its service announced")
         found = job_dir()
-        assert found is not None, "host_service wrote no service-<key>/ with service.json and graphed-secret"
+        assert found is not None, (
+            "host_service wrote no service-<key>/ with service.json and graphed-secret"
+        )
         cfg = json.loads((found / "service.json").read_text())
         key = cfg["key"]
         assert re.fullmatch(r"scope1-[0-9a-f]{16}", key), key
@@ -766,7 +832,9 @@ def test_host_service_returns_the_announced_endpoint_and_releases_in_order(
         pilot_hex = (log_dir / "graphed-secret").read_text().strip()
         assert announce_hex != pilot_hex, "the service job carries the pilots' secret"
         (service_desc,) = submits(schedd.log)
-        leaked = [k for k, v in service_desc.items() if announce_hex in str(v) or pilot_hex in str(v)]
+        leaked = [
+            k for k, v in service_desc.items() if announce_hex in str(v) or pilot_hex in str(v)
+        ]
         assert leaked == [], leaked
         body = announce_body(key, "wn9.example:10042", "wn9.example")
         assert post_announce(cfg["url"], body, bytes.fromhex(announce_hex)) == 200
@@ -777,7 +845,9 @@ def test_host_service_returns_the_announced_endpoint_and_releases_in_order(
         order = [e[0] for e in events if e[0] in ("forget_announce", "stop")]
         assert order == ["forget_announce", "stop"], events
         assert keys_of(events, "forget_announce") == [key]
-        assert any(e[0] == "act" and "Remove" in e[1] for e in schedd.log[mark:]), schedd.log[mark:]
+        assert any(e[0] == "act" and "Remove" in e[1] for e in schedd.log[mark:]), schedd.log[
+            mark:
+        ]
         assert not (found / "graphed-secret").exists()
         assert post_announce(cfg["url"], body, bytes.fromhex(announce_hex)) == 403
     finally:
@@ -793,13 +863,31 @@ FAILURES = {
         [r"JobStatus\W*4\b", r"ExitCode\W*3\b"],
     ),
     "held": (
-        [[{"JobStatus": 5, "HoldReasonCode": 13, "HoldReason": "Transfer input files failure (injected)"}]],
+        [
+            [
+                {
+                    "JobStatus": 5,
+                    "HoldReasonCode": 13,
+                    "HoldReason": "Transfer input files failure (injected)",
+                }
+            ]
+        ],
         [],
         60.0,
         RuntimeError,
-        [r"JobStatus\W*5\b", r"HoldReasonCode\W*13\b", r"Transfer input files failure \(injected\)"],
+        [
+            r"JobStatus\W*5\b",
+            r"HoldReasonCode\W*13\b",
+            r"Transfer input files failure \(injected\)",
+        ],
     ),
-    "idle": ([[{"JobStatus": 1}], [{"JobStatus": 2}]], [], 1.5, TimeoutError, [r"1\.5", r"JobStatus\W*2\b"]),
+    "idle": (
+        [[{"JobStatus": 1}], [{"JobStatus": 2}]],
+        [],
+        1.5,
+        TimeoutError,
+        [r"1\.5", r"JobStatus\W*2\b"],
+    ),
     "spooling": (
         [[{"JobStatus": 5, "HoldReasonCode": 16}], [{"JobStatus": 2}]],
         [],
@@ -832,7 +920,9 @@ def test_host_service_fails_a_gone_held_or_late_job_and_forgets_its_key(
     mark = len(schedd.log)
     try:
         with pytest.raises(error) as failed:
-            run_bounded(lambda: backend.host_service(web_spec(timeout_s=timeout_s), "scope1"), BOUND_S)
+            run_bounded(
+                lambda: backend.host_service(web_spec(timeout_s=timeout_s), "scope1"), BOUND_S
+            )
         raised = time.monotonic()
         text = str(failed.value)
         missing = [p for p in named if not re.search(p, text)]
@@ -844,12 +934,14 @@ def test_host_service_fails_a_gone_held_or_late_job_and_forgets_its_key(
         if error is RuntimeError:
             assert key in text and f"service-{key}" in text, text
         if queue[0]:
-            assert any(e[0] == "act" and "Remove" in e[1] for e in schedd.log[mark:]), schedd.log[mark:]
+            assert any(e[0] == "act" and "Remove" in e[1] for e in schedd.log[mark:]), schedd.log[
+                mark:
+            ]
     finally:
         close_backend(backend, schedd)
 
 
-# ---- announce.py as the job runs it (POSIX) ------------------------------------------------------------------
+# ---- announce.py as the job runs it (POSIX) -----------------------------------------------------
 
 
 @pytest.fixture
@@ -889,9 +981,13 @@ def test_an_attached_service_announces_once_ready_from_a_clean_start(
             port = _port_of(got[0])
             assert got == (f"{identity}:{port}", identity)
             assert cfg["ports"][0] <= port <= cfg["ports"][1]
-            assert http_status(f"http://127.0.0.1:{port}/") == 200, "announced before the service answered"
+            assert http_status(f"http://127.0.0.1:{port}/") == 200, (
+                "announced before the service answered"
+            )
             state = run.report(report)
-            assert state["secret_beside"] is False, "the child started while ../graphed-secret existed"
+            assert state["secret_beside"] is False, (
+                "the child started while ../graphed-secret existed"
+            )
             assert not (job / "graphed-secret").exists()
             assert state["cwd"] == "service"
             assert state["sigterm_blocked"] is False, "the child inherited a blocked SIGTERM"
@@ -908,7 +1004,9 @@ def test_the_child_s_cwd_holds_exactly_the_inputs(tmp_path: Path, machine_ad: Pa
     with task_server() as server:
         secret = server.announce_secret(["k1"])
         job = write_job(
-            tmp_path / "job", job_config(argv=child_argv("serve", report), key="k1", url=server.url), secret
+            tmp_path / "job",
+            job_config(argv=child_argv("serve", report), key="k1", url=server.url),
+            secret,
         )
         (job / "service" / "models").mkdir(parents=True)
         os.symlink(store / "m.txt", job / "service" / "models" / "m.txt")
@@ -950,7 +1048,9 @@ def test_a_relative_argv0_resolves_among_the_inputs(tmp_path: Path, machine_ad: 
         job = write_job(tmp_path / "job", cfg, secret)
         script = job / "service" / "serve.sh"
         script.parent.mkdir()
-        script.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{CHILD_SCRIPT}" serve "$1" "{report}"\n')
+        script.write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" "{CHILD_SCRIPT}" serve "$1" "{report}"\n'
+        )
         script.chmod(0o755)
         with AnnounceRun(job, announce_env(machine_ad), (report,)) as run:
             assert wait_announce(server, "k1", 60.0) is not None, run.output()
@@ -958,7 +1058,9 @@ def test_a_relative_argv0_resolves_among_the_inputs(tmp_path: Path, machine_ad: 
 
 
 @posix
-def test_a_missing_argv0_exits_3_naming_it_without_a_traceback(tmp_path: Path, machine_ad: Path) -> None:
+def test_a_missing_argv0_exits_3_naming_it_without_a_traceback(
+    tmp_path: Path, machine_ad: Path
+) -> None:
     cfg = job_config(argv=["./missing", "{port}"], url=f"http://127.0.0.1:{closed_port()}")
     job = write_job(tmp_path / "job", cfg, os.urandom(32))
     with AnnounceRun(job, announce_env(machine_ad)) as run:
@@ -971,11 +1073,15 @@ def test_a_missing_argv0_exits_3_naming_it_without_a_traceback(tmp_path: Path, m
 
 @posix
 @defpath_python_distinct
-def test_a_bare_python_without_path_is_resolved_on_the_default_path(tmp_path: Path, machine_ad: Path) -> None:
+def test_a_bare_python_without_path_is_resolved_on_the_default_path(
+    tmp_path: Path, machine_ad: Path
+) -> None:
     report = tmp_path / "child.json"
     with task_server() as server:
         secret = server.announce_secret(["k1"])
-        cfg = job_config(argv=child_argv("serve", report), key="k1", url=server.url, python="python3")
+        cfg = job_config(
+            argv=child_argv("serve", report), key="k1", url=server.url, python="python3"
+        )
         job = write_job(tmp_path / "job", cfg, secret)
         env = announce_env(machine_ad)
         env.pop("PATH", None)
@@ -985,12 +1091,16 @@ def test_a_bare_python_without_path_is_resolved_on_the_default_path(tmp_path: Pa
 
 
 @posix
-def test_sigterm_kills_a_child_that_ignores_it_within_the_bound(tmp_path: Path, machine_ad: Path) -> None:
+def test_sigterm_kills_a_child_that_ignores_it_within_the_bound(
+    tmp_path: Path, machine_ad: Path
+) -> None:
     report = tmp_path / "child.json"
     with task_server() as server:
         secret = server.announce_secret(["k1"])
         job = write_job(
-            tmp_path / "job", job_config(argv=child_argv("ignore", report), key="k1", url=server.url), secret
+            tmp_path / "job",
+            job_config(argv=child_argv("ignore", report), key="k1", url=server.url),
+            secret,
         )
         with AnnounceRun(job, announce_env(machine_ad), (report,)) as run:
             assert wait_announce(server, "k1", 60.0) is not None, run.output()
@@ -1004,9 +1114,13 @@ def test_sigterm_kills_a_child_that_ignores_it_within_the_bound(tmp_path: Path, 
 
 
 @posix
-def test_the_orphan_reap_kills_a_child_that_ignores_sigterm(tmp_path: Path, machine_ad: Path) -> None:
+def test_the_orphan_reap_kills_a_child_that_ignores_sigterm(
+    tmp_path: Path, machine_ad: Path
+) -> None:
     report = tmp_path / "child.json"
-    cfg = job_config(argv=child_argv("ignore", report), url=f"http://127.0.0.1:{closed_port()}", lease_s=2.0)
+    cfg = job_config(
+        argv=child_argv("ignore", report), url=f"http://127.0.0.1:{closed_port()}", lease_s=2.0
+    )
     job = write_job(tmp_path / "job", cfg, os.urandom(32))
     with AnnounceRun(job, announce_env(machine_ad), (report,)) as run:
         pid = run.report(report)["pid"]
@@ -1018,9 +1132,13 @@ def test_the_orphan_reap_kills_a_child_that_ignores_sigterm(tmp_path: Path, mach
 
 
 @posix
-def test_sigterm_during_the_orphan_reap_ends_within_the_bound(tmp_path: Path, machine_ad: Path) -> None:
+def test_sigterm_during_the_orphan_reap_ends_within_the_bound(
+    tmp_path: Path, machine_ad: Path
+) -> None:
     report = tmp_path / "child.json"
-    cfg = job_config(argv=child_argv("ignore", report), url=f"http://127.0.0.1:{closed_port()}", lease_s=2.0)
+    cfg = job_config(
+        argv=child_argv("ignore", report), url=f"http://127.0.0.1:{closed_port()}", lease_s=2.0
+    )
     job = write_job(tmp_path / "job", cfg, os.urandom(32))
     with AnnounceRun(job, announce_env(machine_ad), (report,)) as run:
         pid = run.report(report)["pid"]
@@ -1035,7 +1153,9 @@ def test_sigterm_during_the_orphan_reap_ends_within_the_bound(tmp_path: Path, ma
 
 
 @posix
-def test_a_held_first_port_announces_the_next(tmp_path: Path, machine_ad: Path, identity: str) -> None:
+def test_a_held_first_port_announces_the_next(
+    tmp_path: Path, machine_ad: Path, identity: str
+) -> None:
     # the server binds first, so its port is taken before the range is checked
     with task_server() as server, held_range(3) as (low, high):
         secret = server.announce_secret(["k1"])
@@ -1075,13 +1195,17 @@ def test_a_grpc_gateway_never_passes_http_and_the_budget_is_the_whole_start(
         with AnnounceRun(job, announce_env(machine_ad), (report,)) as run:
             code = run.wait(60.0)
             assert code == 3, run.output()
-            assert run.ended is not None and run.ended - run.started <= 3.0 + MARGIN_S, run.output()
+            assert run.ended is not None and run.ended - run.started <= 3.0 + MARGIN_S, (
+                run.output()
+            )
             assert wait_announce(server, "k1", 0.3) is None
             assert child_starts(report) == 1, "the child was restarted per port"
 
 
 @posix
-def test_a_child_that_exits_at_once_is_not_restarted_per_port(tmp_path: Path, machine_ad: Path) -> None:
+def test_a_child_that_exits_at_once_is_not_restarted_per_port(
+    tmp_path: Path, machine_ad: Path
+) -> None:
     report = tmp_path / "child.json"
     cfg = job_config(
         argv=child_argv("exit", report, "97"),
@@ -1099,7 +1223,9 @@ def test_a_child_that_exits_at_once_is_not_restarted_per_port(tmp_path: Path, ma
 
 
 @posix
-def test_a_child_that_fails_its_check_then_exits_is_started_once(tmp_path: Path, machine_ad: Path) -> None:
+def test_a_child_that_fails_its_check_then_exits_is_started_once(
+    tmp_path: Path, machine_ad: Path
+) -> None:
     for i in range(10):
         report = tmp_path / f"child-{i}.json"
         cfg = job_config(
@@ -1117,14 +1243,18 @@ def test_a_child_that_fails_its_check_then_exits_is_started_once(tmp_path: Path,
 
 @posix
 @pytest.mark.parametrize("case", ["no-200-ever", "another-secret", "server-gone"])
-def test_an_orphaned_service_is_reaped_and_exits_0(case: str, tmp_path: Path, machine_ad: Path) -> None:
+def test_an_orphaned_service_is_reaped_and_exits_0(
+    case: str, tmp_path: Path, machine_ad: Path
+) -> None:
     report = tmp_path / "child.json"
     with task_server() as server:
         registered = server.announce_secret(["k1"])
         url = f"http://127.0.0.1:{closed_port()}" if case == "no-200-ever" else server.url
         lease_s = 60.0 if case == "another-secret" else 2.0
         secret = os.urandom(32) if case != "server-gone" else registered
-        cfg = job_config(argv=child_argv("serve", report), key="k1", url=url, lease_s=lease_s, beat_s=0.5)
+        cfg = job_config(
+            argv=child_argv("serve", report), key="k1", url=url, lease_s=lease_s, beat_s=0.5
+        )
         job = write_job(tmp_path / "job", cfg, secret)
         with AnnounceRun(job, announce_env(machine_ad), (report,)) as run:
             pid = run.report(report)["pid"]
@@ -1174,4 +1304,6 @@ def test_watch_mode_announces_each_new_url_and_secret(tmp_path: Path, machine_ad
             code = run.wait(60.0)
             assert run.ended is not None and run.ended - sent <= REAP_S + MARGIN_S, run.output()
             assert code == 143, run.output()
-            assert wait_for(lambda: pid_gone(pid), 5.0), "SIGTERM left the watch-mode child running"
+            assert wait_for(lambda: pid_gone(pid), 5.0), (
+                "SIGTERM left the watch-mode child running"
+            )

@@ -1,6 +1,7 @@
-"""m44 budget goldens (m41 carried + F12 holder plane) — the pull-model gather reproduces the
-local reader-plane budgets 1:1, and the NEW holder plane is bounded too (plan §1.4 points 1-2,
-§8 F12/FU1; blueprint §3 `test_transport_budget_parity`).
+"""m44 budget goldens (m41 carried + F12 holder plane).
+
+The pull-model gather reproduces the local reader-plane budgets 1:1, and the NEW holder plane is
+bounded too (plan §1.4 points 1-2, §8 F12/FU1; blueprint §3 `test_transport_budget_parity`).
 
 Every scenario first runs the LOCAL engine (workers=2, matching k) as an in-test SCENARIO GUARD —
 the budget provably engages the mechanism there — then pins the transport engine's counters:
@@ -15,7 +16,8 @@ the budget provably engages the mechanism there — then pins the transport engi
   local engine is a recorded DISPUTE CANDIDATE (FU1) and is deliberately NOT pinned.
 - holder plane (F12): with a small ``holder_budget_bytes`` the producer-local retention spills
   (``holder_spill_count > 0``), ``peak_holder_bytes`` stays within budget + one dest wire, and
-  the bytes are unchanged — hard constraint 7 caught on BOTH planes."""
+  the bytes are unchanged — hard constraint 7 caught on BOTH planes.
+"""
 
 from __future__ import annotations
 
@@ -74,7 +76,9 @@ def test_fetch_budget_engages_and_matches_local(adapter: TransportAdapter, clien
         adapter.backend, src, PARTS, dbackend=build_dask_backend(client), fetch_budget_bytes=budget
     )
     w = r.witness
-    assert r.dest_block_hashes == base.dest_block_hashes, "a fetch budget must never change the bytes"
+    assert r.dest_block_hashes == base.dest_block_hashes, (
+        "a fetch budget must never change the bytes"
+    )
     assert w.fetch_spill_count > 0, "the transport gather never engaged the fetch spill"
     assert w.peak_fetch_bytes <= budget + one_block, (
         f"peak_fetch_bytes={w.peak_fetch_bytes} exceeded budget+one_block={budget + one_block} — "
@@ -108,11 +112,17 @@ def test_disk_budget_backpressure_under_skew(adapter: TransportAdapter, client) 
 
     install_transport_plugin(client)
     r = transport_repartition(
-        adapter.backend, src, PARTS, dbackend=build_dask_backend(client),
-        fetch_budget_bytes=1, disk_budget_bytes=disk_budget,
+        adapter.backend,
+        src,
+        PARTS,
+        dbackend=build_dask_backend(client),
+        fetch_budget_bytes=1,
+        disk_budget_bytes=disk_budget,
     )
     w = r.witness
-    assert r.dest_block_hashes == base.dest_block_hashes, "disk budgets must never change the bytes"
+    assert r.dest_block_hashes == base.dest_block_hashes, (
+        "disk budgets must never change the bytes"
+    )
     assert w.disk_budget_bytes == disk_budget, "the run must echo the configured disk budget"
     assert w.disk_backpressure_events > 0, (
         "the driver-side T3 arbitration never engaged under skew (FU1: engagement is pinned; "
@@ -132,12 +142,18 @@ def test_holder_budget_bounds_producer_retention(adapter: TransportAdapter, clie
 
     install_transport_plugin(client)
     r = transport_repartition(
-        adapter.backend, src, PARTS, dbackend=build_dask_backend(client),
+        adapter.backend,
+        src,
+        PARTS,
+        dbackend=build_dask_backend(client),
         holder_budget_bytes=holder_budget,
     )
-    assert r.dest_block_hashes == base.dest_block_hashes, "a holder budget must never change the bytes"
+    assert r.dest_block_hashes == base.dest_block_hashes, (
+        "a holder budget must never change the bytes"
+    )
     assert tw_total(r, "holder_spill_count") > 0, (
-        "the producer-local retention never spilled under a small holder budget — the holder plane "
+        "the producer-local retention never spilled under a small holder budget — the holder "
+        "plane "
         "is unbounded (the unmanaged-memory pause/terminate trap, F12)"
     )
     peak = max(c.get("peak_holder_bytes", 0) for c in tw_per_worker(r).values())

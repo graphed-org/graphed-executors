@@ -1,11 +1,12 @@
 """m69b: the H->gg diagnostics (plan-services.md, the m69b ``test_hgg_diagnostics.py`` row).
 
-``examples/hgg/analysis.py`` always fills the named diagnostics over the selected diphotons; without a
-context they are local boost histograms, with one they are histserv histograms on its servers, collated
-across both datasets under that one context. The oracle is a direct boost-histogram fill of the original
-processor's parts' columns, folded in part order; the MC fixture carries lognormal ± genWeights, so
-cancellations and float32 weights reach every bin. The ``test-hgg`` job runs this file with
-``GRAPHED_HGG_REQUIRED=1``; elsewhere it skips without coffea, higgs_dna or histserv.
+``examples/hgg/analysis.py`` always fills the named diagnostics over the selected diphotons;
+without a context they are local boost histograms, with one they are histserv histograms on its
+servers, collated across both datasets under that one context. The oracle is a direct
+boost-histogram fill of the original processor's parts' columns, folded in part order; the MC
+fixture carries lognormal ± genWeights, so cancellations and float32 weights reach every bin. The
+``test-hgg`` job runs this file with ``GRAPHED_HGG_REQUIRED=1``; elsewhere it skips without coffea,
+higgs_dna or histserv.
 """
 
 from __future__ import annotations
@@ -38,9 +39,14 @@ from graphed_executors.submit import SubmitRunner, ThreadBackend
 RUN_S = 900.0
 
 
-def served_run(analysis: Any, fixtures: dict[str, Path], out: Path, workers: int) -> tuple[Any, Any, Any]:
-    """(context, plan, value): one plan over both datasets under one context, run on
-    ``SubmitRunner(ThreadBackend(workers))`` with its servers managed beside the driver."""
+def served_run(
+    analysis: Any, fixtures: dict[str, Path], out: Path, workers: int
+) -> tuple[Any, Any, Any]:
+    """(context, plan, value).
+
+    One plan over both datasets under one context, run on
+    ``SubmitRunner(ThreadBackend(workers))`` with its servers managed beside the driver.
+    """
     ctx = histserv_api().Context(memory_mb=SERVER_MB, workers=workers, name=unique("m69b-hgg"))
     plan = analysis.plan(fileset(fixtures), year=h.YEAR, out=str(out), context=ctx)
     runner = SubmitRunner(ThreadBackend(workers))
@@ -60,7 +66,10 @@ def one_worker(
 
 
 def test_without_a_context_the_diagnostics_are_local_and_equal_the_one_worker_served_run(
-    analysis: Any, fixtures: dict[str, Path], one_worker: tuple[Any, Any, Any, Path], tmp_path: Path
+    analysis: Any,
+    fixtures: dict[str, Path],
+    one_worker: tuple[Any, Any, Any, Path],
+    tmp_path: Path,
 ) -> None:
     plan = analysis.plan(fileset(fixtures), year=h.YEAR, out=str(tmp_path))
     assert plan.services == ()
@@ -81,7 +90,9 @@ def test_one_context_over_both_datasets_fills_each_diagnostic_as_the_direct_fill
     counters = oracle_totals({"MC": oracle["MC"]})["MC"]
     assert counters["nNeg"] > 0 and counters["nPos"] > 0, counters
     weights = np.concatenate([t.column("weight").to_numpy() for _, t in oracle["MC"].values()])
-    assert weights.dtype == np.float32 and len(np.unique(np.abs(weights))) > len(weights) // 2, weights
+    assert weights.dtype == np.float32 and len(np.unique(np.abs(weights))) > len(weights) // 2, (
+        weights
+    )
     ctx, plan, value, out = one_worker
     assert len(plan.services) == len(ctx.servers()) >= 1
     assert sorted(s.name for s in plan.services) == sorted(s[0] for s in ctx.servers())

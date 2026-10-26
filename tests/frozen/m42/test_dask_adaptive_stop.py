@@ -1,13 +1,15 @@
-"""m42 adaptive + stop: `next_tasks` batches are consumed, the `StopCondition` ends the run, the
-engine CANCELS outstanding futures, refill never happens past the stop, and the fold equals the
-running_fold oracle over exactly the consumed set (plan §1.2.4; blueprint §3
-`test_dask_adaptive_stop`).
+"""m42 adaptive + stop.
+
+`next_tasks` batches are consumed, the `StopCondition` ends the run, the engine CANCELS outstanding
+futures, refill never happens past the stop, and the fold equals the running_fold oracle over
+exactly the consumed set (plan §1.2.4; blueprint §3 `test_dask_adaptive_stop`).
 
 One deliberately slow leaf guarantees an outstanding future exists when the target is reached
 (scenario construction, not an assertion — R0.10a). Discriminates: ignoring `StopCondition`
 (EXHAUSTED instead of TARGET_EVENTS), never cancelling (the spy's cancel count stays 0),
 refilling after the stop condition is satisfied (a Feed call observed at events_done >= target),
-and a fold inconsistent with its own consumed-uri set."""
+and a fold inconsistent with its own consumed-uri set.
+"""
 
 from __future__ import annotations
 
@@ -69,12 +71,19 @@ def test_stop_condition_cancels_outstanding_and_folds_consistently(client) -> No
 
 
 def test_adaptive_exhaustion_needs_no_cancel(client) -> None:
-    """Contrast run (non-vacuity for the cancel spy): batches exhaust normally — EXHAUSTED, every
-    uri consumed, and NO cancels issued."""
+    """Contrast run (non-vacuity for the cancel spy): batches exhaust normally.
+
+    EXHAUSTED, every uri consumed, and NO cancels issued.
+    """
     parts = mem_partitions(6, "adfull")
     tasks = [Task(i, p) for i, p in enumerate(parts)]
     feed = Feed([tasks[:3], tasks[3:]])
-    plan = Plan(process=SlowFoldProcess("none", 0.0), combine=fold_combine, empty=fold_empty, next_tasks=feed)
+    plan = Plan(
+        process=SlowFoldProcess("none", 0.0),
+        combine=fold_combine,
+        empty=fold_empty,
+        next_tasks=feed,
+    )
     register_worker_plugin(client)
     spy = SpyBackend(make_dask_backend(client))
     with make_runner(spy) as runner:

@@ -20,15 +20,25 @@ GOLDEN = "Cert_Collisions2024_378981_386951_Golden.json.gz"
 
 
 def pairs() -> tuple[np.ndarray, np.ndarray]:
-    """Each certified range's edges and their outside neighbours for three runs, an absent run, and the
-    data fixture's own (run, lumi)."""
+    """Each certified range's edges and their outside neighbours for three runs, an absent run.
+
+    Each certified range's edges and their outside neighbours for three runs, an absent run, and
+    the data fixture's own (run, lumi).
+    """
     golden = json.loads(h.payload(GOLDEN))
     runs = sorted(golden, key=int)
     out = [(int(runs[0]) - 1, 1)]
     for run in (runs[0], runs[len(runs) // 2], runs[-1]):
         for first, last in golden[run]:
-            out += [(int(run), first - 1), (int(run), first), (int(run), last), (int(run), last + 1)]
-    fixture = uproot.open(h.DATA_FIXTURE)["Events"].arrays(["run", "luminosityBlock"], library="np")
+            out += [
+                (int(run), first - 1),
+                (int(run), first),
+                (int(run), last),
+                (int(run), last + 1),
+            ]
+    fixture = uproot.open(h.DATA_FIXTURE)["Events"].arrays(
+        ["run", "luminosityBlock"], library="np"
+    )
     out += zip(fixture["run"].tolist(), fixture["luminosityBlock"].tolist(), strict=True)
     run, lumi = np.array(out, dtype=np.uint32).T
     return run, lumi

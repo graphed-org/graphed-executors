@@ -1,21 +1,23 @@
-"""Shared harness for the m69b frozen suite: histserv servers as the executors' services
-(plan-services.md, the m69b executors unit).
+"""Shared harness for the m69b frozen suite.
 
-Everything a pilot or a driver job unpickles is module-level here (``Steps``, ``ResolveSpy``), and the
-live files ship this file as a ``user_modules`` entry, so module-level imports stay stdlib, graphed,
-awkward, numpy and boost-histogram. The histogram backend under test is reached only through
-``histserv_api()``/``gh_api()`` inside test bodies, so the suite collects before
+Histserv servers as the executors' services (plan-services.md, the m69b executors unit).
+
+Everything a pilot or a driver job unpickles is module-level here (``Steps``, ``ResolveSpy``), and
+the live files ship this file as a ``user_modules`` entry, so module-level imports stay stdlib,
+graphed, awkward, numpy and boost-histogram. The histogram backend under test is reached only
+through ``histserv_api()``/``gh_api()`` inside test bodies, so the suite collects before
 ``graphed_histogram.histserv`` exists.
 
 - ``Steps``: a ``PartitionedSource`` over in-memory events, ``n`` blind steps.
 - ``histograms``: the two dyadic-weight fills every non-hgg row runs, backed on a context or local.
-- ``sized_memory_mb``: the one server size at which each of two slots fits a server alone and the two
-  together do not, read off ``ctx.servers()`` predictions of throwaway contexts.
-- ``ResolveSpy``: wraps a plan's process; at ``resolve_services`` it records, per receipt endpoint, the
-  receipts naming it and that server's ``stats()["histogram_count"]``, then forwards.
+- ``sized_memory_mb``: the one server size at which each of two slots fits a server alone and the
+  two together do not, read off ``ctx.servers()`` predictions of throwaway contexts.
+- ``ResolveSpy``: wraps a plan's process; at ``resolve_services`` it records, per receipt endpoint,
+  the receipts naming it and that server's ``stats()["histogram_count"]``, then forwards.
 - ``user_servers``: ``python -m histserv`` children on free ports, killed at teardown.
 - ``host_memory_mb``: the host's physical memory, read the way the engine's driver check reads it.
-- ``same_values``: bit-for-bit equality of two ``{slot: bh.Histogram}`` values (edges, storage, flow view).
+- ``same_values``: bit-for-bit equality of two ``{slot: bh.Histogram}`` values (edges, storage,
+  flow view).
 """
 
 from __future__ import annotations
@@ -54,7 +56,7 @@ N_EVENTS = 2000
 N_STEPS = 4
 DIGITLESS = str.maketrans("0123456789", "ghijklmnop")
 
-# ---- deferred accessors for the code under test --------------------------------------------------
+# ---- deferred accessors for the code under test -------------------------------------------------
 
 
 def histserv_api() -> Any:
@@ -68,18 +70,25 @@ def gh_api() -> Any:
 
 
 def require_histserv() -> Any:
-    """``histserv`` imported: a failure where the GIL is enabled, a skip only on a free-threaded
-    interpreter (grpcio has no cp314t wheel)."""
+    """``histserv`` imported.
+
+    A failure where the GIL is enabled, a skip only on a free-threaded interpreter (grpcio has
+    no cp314t wheel).
+    """
     gil_enabled = getattr(sys, "_is_gil_enabled", None)
     if gil_enabled is None or gil_enabled():
         return importlib.import_module("histserv")
     pytest_mod = importlib.import_module("pytest")
-    return pytest_mod.importorskip("histserv", reason="grpcio has no wheel for a free-threaded interpreter")
+    return pytest_mod.importorskip(
+        "histserv", reason="grpcio has no wheel for a free-threaded interpreter"
+    )
 
 
 def host_memory_mb() -> int:
-    """This host's physical memory in MiB: ``os.sysconf`` pages on POSIX, ``GlobalMemoryStatusEx`` on
-    Windows."""
+    """Return this host's physical memory in MiB.
+
+    ``os.sysconf`` pages on POSIX, ``GlobalMemoryStatusEx`` on Windows.
+    """
     if sys.platform == "win32":
         import ctypes  # noqa: PLC0415  (Windows only)
 
@@ -104,17 +113,23 @@ def host_memory_mb() -> int:
 
 
 def unique(prefix: str) -> str:
-    """A context name no other row uses (a name holds one packing state for the process). Its suffix
-    has no digits, so a number a refusal is asserted to name cannot come from the name."""
+    """Return a context name no other row uses (a name holds one packing state for the process).
+
+    Its suffix has no digits, so a number a refusal is asserted to name cannot come from the
+    name.
+    """
     return f"{prefix}-{uuid.uuid4().hex[:8].translate(DIGITLESS)}"
 
 
-# ---- bounds (copied from tests/frozen/m66/htcondor_harness.py) -----------------------------------
+# ---- bounds (copied from tests/frozen/m66/htcondor_harness.py) ----------------------------------
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
-    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``: a hang is a
-    failure, never a wedged CI job. Returns the value or re-raises the call's exception."""
+    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``.
+
+    A hang is a failure, never a wedged CI job. Returns the value or re-raises the call's
+    exception.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -132,12 +147,15 @@ def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
     return out["result"]
 
 
-# ---- the source and the fills ----------------------------------------------------------------------
+# ---- the source and the fills -------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Steps:
-    """A ``graphed.write.PartitionedSource`` over in-memory events: ``n`` blind steps of ``uri``."""
+    """A ``graphed.write.PartitionedSource`` over in-memory events.
+
+    ``n`` blind steps of ``uri``.
+    """
 
     data: ak.Array
     uri: str
@@ -146,7 +164,9 @@ class Steps:
         raise AssertionError("the whole-dataset loader must never run during a plan")
 
     def partitions(self, steps_per_file: int = 1) -> tuple[Partition, ...]:
-        return tuple(Partition.blind(self.uri, "", s, steps_per_file) for s in range(steps_per_file))
+        return tuple(
+            Partition.blind(self.uri, "", s, steps_per_file) for s in range(steps_per_file)
+        )
 
     def read_partition(self, partition: Partition, columns: Any, resources: Any) -> ak.Array:
         part = partition.resolve(len(self.data))
@@ -166,7 +186,7 @@ def events_data(seed: int = 6969) -> ak.Array:
 
 
 def events(tag: str) -> Any:
-    """A fresh session's ``events`` source over ``events_data()``."""
+    """Return a fresh session's ``events`` source over ``events_data()``."""
     data = events_data()
     session = Session(AwkwardBackend())
     form = AwkwardForm(ak.Array(data.layout.to_typetracer(forget_length=True)))
@@ -176,10 +196,13 @@ def events(tag: str) -> Any:
 def histograms(
     bins: Mapping[str, int], ctx: Any = None, backed: tuple[str, ...] | None = None
 ) -> dict[str, Any]:
-    """One Weight histogram per ``bins`` entry (``Regular(n, 0, 1)``, so a slot's flow extent is
-    ``n + 2``), each filled from its own observable with the dyadic weights; those named in ``backed``
+    """Return one Weight histogram per ``bins`` entry, filled with the dyadic weights.
+
+    One Weight histogram per ``bins`` entry (``Regular(n, 0, 1)``, so a slot's flow extent is ``n +
+    2``), each filled from its own observable with the dyadic weights; those named in ``backed``
     (default: all) are ``histserv.Histogram``s on ``ctx``, the rest local, and ``ctx=None`` is the
-    unbacked twin."""
+    unbacked twin.
+    """
     ev = events(unique("ev"))
     names = tuple(bins)
     on = names if backed is None else backed
@@ -195,13 +218,17 @@ def histograms(
     return out
 
 
-def served_plan(bins: Mapping[str, int], ctx: Any = None, backed: tuple[str, ...] | None = None) -> Any:
+def served_plan(
+    bins: Mapping[str, int], ctx: Any = None, backed: tuple[str, ...] | None = None
+) -> Any:
     return gh_api().plan(histograms(bins, ctx, backed), steps_per_file=N_STEPS)
 
 
 def predicted(plan_bins: Mapping[str, int], backed: tuple[str, ...], workers: int) -> int:
-    """The predicted bytes of the one server a throwaway context opens for ``backed`` alone."""
-    ctx = histserv_api().Context(memory_mb=UNBOUNDED_MB, workers=workers, name=unique("m69b-probe"))
+    """Return the predicted bytes of the one server a throwaway context opens for ``backed``."""
+    ctx = histserv_api().Context(
+        memory_mb=UNBOUNDED_MB, workers=workers, name=unique("m69b-probe")
+    )
     served_plan(plan_bins, ctx, backed)
     ((_name, _size, bytes_, n),) = ctx.servers()
     assert n == len(backed), ctx.servers()
@@ -209,8 +236,11 @@ def predicted(plan_bins: Mapping[str, int], backed: tuple[str, ...], workers: in
 
 
 def sized_memory_mb(bins: Mapping[str, int], workers: int) -> int:
-    """The size (MiB) at which each of the two equal slots ``bins`` names fits a server alone and the
-    two together do not."""
+    """Return the server size (MiB) that fits one of two equal slots but not both.
+
+    Return the size (MiB) at which each of the two equal slots ``bins`` names fits a server alone
+    and the two together do not.
+    """
     a, b = bins
     one = max(predicted(bins, (a,), workers), predicted(bins, (b,), workers))
     both = predicted(bins, (a, b), workers)
@@ -219,7 +249,7 @@ def sized_memory_mb(bins: Mapping[str, int], workers: int) -> int:
     return size
 
 
-# ---- what the run's servers hold ------------------------------------------------------------------
+# ---- what the run's servers hold ----------------------------------------------------------------
 
 _SEEN_LOCK = threading.Lock()
 _SEEN: dict[str, dict[str, tuple[int, int]]] = {}
@@ -239,8 +269,11 @@ def receipts(value: Mapping[Any, Any]) -> list[Any]:
 
 @dataclass(frozen=True)
 class ResolveSpy:
-    """A plan process that forwards to ``inner`` and, at ``resolve_services``, records
-    ``{endpoint: (receipts naming it, its stats() histogram_count)}`` under ``tag``."""
+    """A plan process that forwards to ``inner`` and records receipts at ``resolve_services``.
+
+    A plan process that forwards to ``inner`` and, at ``resolve_services``, records ``{endpoint:
+    (receipts naming it, its stats() histogram_count)}`` under ``tag``.
+    """
 
     inner: Any
     tag: str
@@ -269,7 +302,7 @@ def seen(tag: str) -> dict[str, tuple[int, int]]:
         return dict(_SEEN.get(tag, {}))
 
 
-# ---- ports and user-run servers -------------------------------------------------------------------
+# ---- ports and user-run servers -----------------------------------------------------------------
 
 
 def _bindable(host: str, port: int) -> bool:
@@ -292,12 +325,15 @@ def listening(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def port_free(port: int) -> bool:
-    """Nothing listens on ``port``: it binds on loopback and on all interfaces, and a connect is refused."""
+    """Nothing listens on ``port``.
+
+    It binds on loopback and on all interfaces, and a connect is refused.
+    """
     return _bindable("127.0.0.1", port) and _bindable("", port) and not listening(port)
 
 
 def free_range(n: int) -> tuple[int, int]:
-    """An inclusive range of ``n`` consecutive ports free right now, above the 10000-10100 site band."""
+    """Return an inclusive range of ``n`` ports free now, above the 10000-10100 site band."""
     for _ in range(200):
         low = 20000 + secrets.randbelow(30000)
         if all(port_free(p) for p in range(low, low + n)):
@@ -307,19 +343,31 @@ def free_range(n: int) -> tuple[int, int]:
 
 @contextlib.contextmanager
 def user_servers(n: int) -> Iterator[list[str]]:
-    """``n`` ``python -m histserv`` children the user started, as ``tcp://127.0.0.1:<port>``; killed
-    at teardown."""
+    """``n`` ``python -m histserv`` children the user started, as ``tcp://127.0.0.1:<port>``.
+
+    Killed at teardown.
+    """
     low, _high = free_range(n)
     procs: list[subprocess.Popen[bytes]] = []
     try:
         for port in range(low, low + n):
-            argv = [sys.executable, "-m", "histserv", "--port", str(port), "--log-level", "WARNING"]
+            argv = [
+                sys.executable,
+                "-m",
+                "histserv",
+                "--port",
+                str(port),
+                "--log-level",
+                "WARNING",
+            ]
             procs.append(subprocess.Popen(argv))
         deadline = time.monotonic() + SERVER_UP_S
         for port, proc in zip(range(low, low + n), procs, strict=True):
             while not listening(port):
                 assert proc.poll() is None, f"histserv on {port} exited with {proc.returncode}"
-                assert time.monotonic() < deadline, f"histserv on {port} not listening in {SERVER_UP_S}s"
+                assert time.monotonic() < deadline, (
+                    f"histserv on {port} not listening in {SERVER_UP_S}s"
+                )
                 time.sleep(0.1)
         yield [f"tcp://127.0.0.1:{port}" for port in range(low, low + n)]
     finally:
@@ -328,11 +376,14 @@ def user_servers(n: int) -> Iterator[list[str]]:
             proc.wait()
 
 
-# ---- equality ---------------------------------------------------------------------------------------
+# ---- equality -----------------------------------------------------------------------------------
 
 
 def hist_bytes(h: Any) -> tuple[Any, ...]:
-    """What bit-for-bit equality compares: the class, the storage, every axis's edges and the flow view."""
+    """Return what bit-for-bit equality compares.
+
+    The class, the storage, every axis's edges and the flow view.
+    """
     assert isinstance(h, bh.Histogram), type(h)
     edges = tuple(np.asarray(axis.edges).tobytes() for axis in h.axes)
     return (h.storage_type, edges, np.asarray(h.view(flow=True)).tobytes())

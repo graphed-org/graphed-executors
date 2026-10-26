@@ -1,9 +1,11 @@
-"""m47 non-loss arc (hard constraint 8) — the engine-level lifecycle of the §1.4
-``EscalatingHttpTransport.send`` path: transient failures ride the bounded retry; exhaustion
-RAISES and escalates to a whole-run fresh-epoch restart; an exhausted restart budget surfaces as
-an attributed ``StageError``, never a hang and never a silent wrong result (plan §1.4 send design
-+ epoch/restart; blueprint §3 `test_parsl_retry_exhaustion`; the m44-r3 silent-False bug class
-re-armed against the base class's actual ``drops += 1`` behavior).
+"""m47 non-loss arc (hard constraint 8).
+
+The engine-level lifecycle of the §1.4 ``EscalatingHttpTransport.send`` path: transient failures
+ride the bounded retry; exhaustion RAISES and escalates to a whole-run fresh-epoch restart; an
+exhausted restart budget surfaces as an attributed ``StageError``, never a hang and never a silent
+wrong result (plan §1.4 send design + epoch/restart; blueprint §3 `test_parsl_retry_exhaustion`;
+the m44-r3 silent-False bug class re-armed against the base class's actual ``drops += 1``
+behavior).
 
 Three arms over the pinned deliver-then-fail injection seam (budget-gated per (dest, src), never a
 clock), each on its OWN pool (a restart-scarred pool must not leak between arms):
@@ -20,7 +22,8 @@ clock), each on its OWN pool (a restart-scarred pool must not leak between arms)
 Discriminates: a base-``HttpTransport`` delegation (send returns after ``drops += 1``: arm (a)
 loses the node — wrong value or hang, both surfaced — and arms (b)/(c) never raise); an engine
 that swallows an errored peer future because a root happened to arrive (the injected deliveries DO
-land — ``epoch_restarts == 1`` still must hold); raw-exception leakage to the user in (c)."""
+land — ``epoch_restarts == 1`` still must hold); raw-exception leakage to the user in (c).
+"""
 
 from __future__ import annotations
 
@@ -53,7 +56,8 @@ pytestmark = pytest.mark.skipif(
 
 N_LEAVES = 12
 N_TRANSIENT = 2  # < SEND_RETRIES: the retry absorbs it
-N_EXHAUST = 8  # >= SEND_RETRIES: first exhaustion fires; the leftover (3 < SEND_RETRIES) is survivable
+# >= SEND_RETRIES: first exhaustion fires; the leftover (3 < SEND_RETRIES) is survivable
+N_EXHAUST = 8
 
 assert N_TRANSIENT < SEND_RETRIES <= N_EXHAUST  # the arm arithmetic the frozen policy implies
 
@@ -71,7 +75,9 @@ def test_transient_failures_are_absorbed_by_the_inline_retry() -> None:
         assert res.value == p2p_seq_value(N_LEAVES, "m47retry"), (
             "a transiently-failed send lost a reduction message"
         )
-        assert res.transport.epoch_restarts == 0, "transient failures must ride the retry, not a restart"
+        assert res.transport.epoch_restarts == 0, (
+            "transient failures must ride the retry, not a restart"
+        )
         retried = int(peer_rows(res)[W1].get("sends_retried", 0))
         assert retried >= N_TRANSIENT, (
             f"sends_retried={retried} < {N_TRANSIENT}: the §1.4 inline retry never engaged — the "
@@ -99,7 +105,9 @@ def test_exhausted_retries_restart_the_epoch_and_complete() -> None:
             "deliveries landed, an errored peer future is run-fatal (never silently ignored)"
         )
         nonces = list(res.transport.epoch_nonces)
-        assert len(nonces) == 2 and nonces[0] != nonces[1], f"expected two distinct nonces: {nonces}"
+        assert len(nonces) == 2 and nonces[0] != nonces[1], (
+            f"expected two distinct nonces: {nonces}"
+        )
         assert pw_total(res, "send_failures") >= 1, (
             "no send_failures counted — the exhaustion raise (the drop->raise bridge) never fired"
         )
@@ -120,5 +128,6 @@ def test_exhausted_restart_budget_is_an_attributed_stage_error_never_a_hang() ->
         err = excinfo.value
         rendered = f"{getattr(err, 'cause_type', '')}: {err}"
         assert "TransportDeliveryError" in rendered, (
-            f"the StageError must name the TransportDeliveryError exhaustion cause; got: {rendered}"
+            "the StageError must name the TransportDeliveryError exhaustion cause; got: "
+            f"{rendered}"
         )

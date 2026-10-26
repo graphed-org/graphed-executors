@@ -1,5 +1,7 @@
-"""The Ctrl-C row's child (``test_service_order.py``): one served plan under ``with htcondor_runner(...)
-as runner:``, cluster-hosted, logging at INFO to stdout.
+"""The Ctrl-C row's child (``test_service_order.py``).
+
+One served plan under ``with htcondor_runner(...) as runner:``, cluster-hosted, logging at INFO to
+stdout.
 
 argv: form (``run``: ``runner.run(plan)``; ``result``: ``runner.submit(plan).result()``; ``close``:
 ``runner.submit(plan)`` and the block left normally), log dir, server MiB, ``POLL_S``, pilot MiB.
@@ -18,7 +20,9 @@ def main(form: str, log_dir: str, server_mb: str, poll_s: str, pilot_mb: str) ->
     logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(name)s %(message)s")
     importlib.import_module("graphed_executors.htcondor_backend.server").POLL_S = float(poll_s)
     backend = importlib.import_module("graphed_executors.htcondor_backend.backend")
-    ctx = histserv_api().Context(memory_mb=int(server_mb), workers=1, name=unique("m69b-order-sigint"))
+    ctx = histserv_api().Context(
+        memory_mb=int(server_mb), workers=1, name=unique("m69b-order-sigint")
+    )
     plan = served_plan({"h": 8}, ctx)
     with backend.htcondor_runner(
         n_pilots=1,

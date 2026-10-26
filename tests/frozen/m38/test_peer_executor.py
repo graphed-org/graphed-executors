@@ -1,7 +1,9 @@
-"""M38 peer reduction through the real executors (spike; frozen at P6). ThreadExecutor and
-ProcessExecutor on BOTH transports (ipc, http) must reduce to the same value as the hub path — and,
-for a non-associative float combine, **bit-for-bit** the same (peer uses the identical fixed tree, so
-the only difference vs the hub is *where* combines run)."""
+"""M38 peer reduction through the real executors (spike; frozen at P6).
+
+ThreadExecutor and ProcessExecutor on BOTH transports (ipc, http) must reduce to the same value as
+the hub path — and, for a non-associative float combine, **bit-for-bit** the same (peer uses the
+identical fixed tree, so the only difference vs the hub is *where* combines run).
+"""
 
 from __future__ import annotations
 

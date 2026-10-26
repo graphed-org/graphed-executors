@@ -1,5 +1,8 @@
-"""The open_once file-locality directive: a multi-chunk single-file task opens the file exactly once
-per worker (counting fake reader) (plan M7)."""
+"""The open_once file-locality directive.
+
+A multi-chunk single-file task opens the file exactly once per worker (counting fake reader) (plan
+M7).
+"""
 
 from __future__ import annotations
 
@@ -10,7 +13,9 @@ from graphed_exec_local import ThreadExecutor
 
 
 def _multi_chunk_plan(n_chunks: int) -> Plan[int]:
-    tasks = [Task(i, Partition("one.root", "Events", i * 10, (i + 1) * 10)) for i in range(n_chunks)]
+    tasks = [
+        Task(i, Partition("one.root", "Events", i * 10, (i + 1) * 10)) for i in range(n_chunks)
+    ]
     return Plan(process=A.read_chunk_open_once, combine=A.add_int, empty=A.zero_int, tasks=tasks)
 
 

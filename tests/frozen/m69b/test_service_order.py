@@ -1,10 +1,11 @@
-"""m69b: a run's service jobs are submitted before its pilots (plan-services.md §5.2 "Ordering", the
-``test_service_order.py`` rows).
+"""m69b: a run's service jobs are submitted before its pilots.
 
-The recorder rows run on every OS over m68a's bindings recorder (``m69b_order.OrderSchedd``): real pilot
-processes dial the task server once their submit is recorded, and each service job's signed announce is
-posted by the recorder. The pool rows need the ``htcondor2`` bindings and a pool (the ``test-htcondor``
-job), gated as ``test_histserv_cluster.py`` gates them.
+Plan-services.md §5.2 "Ordering", the ``test_service_order.py`` rows.
+
+The recorder rows run on every OS over m68a's bindings recorder (``m69b_order.OrderSchedd``): real
+pilot processes dial the task server once their submit is recorded, and each service job's signed
+announce is posted by the recorder. The pool rows need the ``htcondor2`` bindings and a pool (the
+``test-htcondor`` job), gated as ``test_histserv_cluster.py`` gates them.
 """
 
 from __future__ import annotations
@@ -60,7 +61,8 @@ from graphed_executors.submit.services import ServiceUnavailable
 
 BOUND_S = 120.0
 LIVE_S = 600.0
-PLAN_S = 240.0  # a plan whose server cannot start beside its runner's pilots never ends: bounded here
+# a plan whose server cannot start beside its runner's pilots never ends: bounded here
+PLAN_S = 240.0
 GONE_S = 60.0
 PILOT_LATE_S = 8.0
 CLOSE_POLL_S = 0.5
@@ -120,13 +122,17 @@ def test_service_jobs_go_before_the_pilots_and_later_plans_hold_them(
                 if i < 3:
                     values.append(run_bounded(lambda p=plan: runner.run(p), BOUND_S).value)
                 else:
-                    values.append(run_bounded(lambda p=plan: runner.submit(p).result(BOUND_S), BOUND_S).value)
+                    values.append(
+                        run_bounded(lambda p=plan: runner.submit(p).result(BOUND_S), BOUND_S).value
+                    )
             schedd.mark("end")
         finally:
             run_bounded(runner.close, BOUND_S)
             schedd.stop_pilots()
         first = between(schedd.events, "plan 1", "plan 2")
-        kinds = [e.kind for e in first if e.kind in ("submit-service", "announce", "submit-pilots")]
+        kinds = [
+            e.kind for e in first if e.kind in ("submit-service", "announce", "submit-pilots")
+        ]
         assert kinds == ["submit-service", "announce", "submit-pilots"], first
         assert acts(first, "Hold") == [] and acts(first, "Release") == [], first
         (pilots,) = of_kind(first, "submit-pilots")
@@ -137,11 +143,18 @@ def test_service_jobs_go_before_the_pilots_and_later_plans_hold_them(
             services = of_kind(later, "submit-service")
             assert len(services) == len(plans[i - 1].services), later
             holds, releases = acts(later, "Hold"), acts(later, "Release")
-            assert len(holds) == 1 and len(releases) == 1, f"plan {i}: holds {holds}, releases {releases}"
+            assert len(holds) == 1 and len(releases) == 1, (
+                f"plan {i}: holds {holds}, releases {releases}"
+            )
             hold, release = holds[0], releases[0]
-            assert holds_named(hold, pilots.cluster) and re.search(r"JobStatus\s*==\s*1\b", hold.text), hold
+            assert holds_named(hold, pilots.cluster) and re.search(
+                r"JobStatus\s*==\s*1\b", hold.text
+            ), hold
             assert hold.reason, f"the pilots were held without a reason: {hold}"
-            assert holds_named(release, pilots.cluster) and hold.reason in release.text, (hold, release)
+            assert holds_named(release, pilots.cluster) and hold.reason in release.text, (
+                hold,
+                release,
+            )
             assert later.index(hold) < later.index(services[0]), (
                 f"plan {i} held its pilots after its service submit: {later}"
             )
@@ -196,7 +209,9 @@ def test_only_a_backend_whose_services_are_jobs_defers_its_pilots(
             run_bounded(backend.close, BOUND_S)
 
         mark = len(schedd.log)
-        dag = launch.CondorPilots("generic", log_dir=tmp_path / "dag", schedd_locate=(FAKE_POOL, FAKE_SCHEDD))
+        dag = launch.CondorPilots(
+            "generic", log_dir=tmp_path / "dag", schedd_locate=(FAKE_POOL, FAKE_SCHEDD)
+        )
         in_job = htcondor_api().SITES["generic"]
         backend = run_bounded(
             lambda: hb(dag, 1, host="127.0.0.1", in_job=in_job, announced={"web": "svc0"}), BOUND_S
@@ -207,10 +222,14 @@ def test_only_a_backend_whose_services_are_jobs_defers_its_pilots(
             )
             secret = backend._server.announce_secret(["svc0"])
             (job_dir := tmp_path / "svc0").mkdir()
-            (job_dir / "service.json").write_text(json.dumps({"key": "svc0", "url": backend._server.url}))
+            (job_dir / "service.json").write_text(
+                json.dumps({"key": "svc0", "url": backend._server.url})
+            )
             (job_dir / "graphed-secret").write_text(secret.hex())
             assert schedd.announce(job_dir) == 200
-            got = run_bounded(lambda: backend.host_service(hosted_spec("web"), "m69b-scope"), BOUND_S)
+            got = run_bounded(
+                lambda: backend.host_service(hosted_spec("web"), "m69b-scope"), BOUND_S
+            )
             assert tuple(got) == (service.endpoint(), IDENTITY, "svc0")
             assert submits(schedd.log[mark:]) == [], "the announced service submitted a job"
         finally:
@@ -248,9 +267,13 @@ def test_a_deferred_spool_failure_removes_its_cluster_and_close_drops_the_secret
     pilots = launch.CondorPilots(spooled, log_dir=tmp_path / "pilots")
     port = closed_port()
     try:
-        backend = run_bounded(lambda: hb(pilots, 2, host="127.0.0.1", port_range=(port, port)), BOUND_S)
+        backend = run_bounded(
+            lambda: hb(pilots, 2, host="127.0.0.1", port_range=(port, port)), BOUND_S
+        )
     except RuntimeError as exc:
-        pytest.fail(f"the pilots were submitted at construction, before any worker was needed: {exc}")
+        pytest.fail(
+            f"the pilots were submitted at construction, before any worker was needed: {exc}"
+        )
     try:
         with pytest.raises(RuntimeError, match="spool"):
             run_bounded(backend.n_workers, BOUND_S)
@@ -293,7 +316,9 @@ def test_close_waits_for_a_waiting_server_and_an_error_in_the_block_ends_the_wai
         closer = threading.Thread(target=runner.close, daemon=True)
         try:
             future = runner.submit(plan)
-            assert wait_for(lambda: schedd.service_dirs() != [], BOUND_S), "the plan submitted no service job"
+            assert wait_for(lambda: schedd.service_dirs() != [], BOUND_S), (
+                "the plan submitted no service job"
+            )
             closer.start()
             closer.join(3.0)
             assert closer.is_alive(), "close() returned while its plan's server waited for a slot"
@@ -337,11 +362,13 @@ def test_close_waits_for_a_waiting_server_and_an_error_in_the_block_ends_the_wai
         error = futures[0].exception(0)
         assert error is not None and key in str(error), error
         (submitted,) = of_kind(schedd.events, "submit-service")
-        assert submitted.cluster in [e.cluster for e in acts(schedd.events, "Remove")], schedd.events
+        assert submitted.cluster in [e.cluster for e in acts(schedd.events, "Remove")], (
+            schedd.events
+        )
         assert key in forgotten, forgotten
 
 
-# ---- the pool ------------------------------------------------------------------------------------------
+# ---- the pool -----------------------------------------------------------------------------------
 
 
 def live_runner(tmp_path: Path, n_pilots: int, **kwargs: Any) -> Any:
@@ -389,8 +416,10 @@ def test_close_at_once_finishes_a_plan_on_a_free_slot(
 
 
 def pilot_mb(total_mb: int) -> int:
-    """One quantum above half of what the largest slot leaves beside the server: one pilot fits beside
-    the server, two do not, and two fit once the server is gone."""
+    """One quantum above half of what the largest slot leaves beside the server.
+
+    One pilot fits beside the server, two do not, and two fit once the server is gone.
+    """
     half = (total_mb - SERVER_MB) / 2
     return -(-int(half) // QUANTUM_MB) * QUANTUM_MB + QUANTUM_MB
 
@@ -399,13 +428,17 @@ def names_cluster(text: str, cluster: int) -> bool:
     return re.search(rf"(?i)cluster\D{{0,16}}(?<!\d){cluster}(?!\d)", text) is not None
 
 
-def test_a_later_server_is_refused_where_only_its_runner_s_pilots_hold_room(tmp_path: Path) -> None:
+def test_a_later_server_is_refused_where_only_its_runner_s_pilots_hold_room(
+    tmp_path: Path,
+) -> None:
     htc = require_pool()
     schedd = htc.Schedd()
     sized = pilot_mb(largest_slot_mb(htc))
 
     def plan_of(name: str) -> Any:
-        ctx = histserv_api().Context(memory_mb=SERVER_MB, workers=1, timeout_s=20.0, name=unique(name))
+        ctx = histserv_api().Context(
+            memory_mb=SERVER_MB, workers=1, timeout_s=20.0, name=unique(name)
+        )
         return served_plan(SMALL, ctx)
 
     twin_value = SequentialRunner().run(served_plan(SMALL)).value
@@ -426,7 +459,9 @@ def test_a_later_server_is_refused_where_only_its_runner_s_pilots_hold_room(tmp_
         with pytest.raises(ServiceUnavailable) as err:
             run_bounded(lambda: runner.run(plan_of("m69b-order-second")), PLAN_S)
         second = since(t1, SERVICE_JOBS)
-        assert wait_for(lambda: not queued(schedd, second), GONE_S), "the refused server is still queued"
+        assert wait_for(lambda: not queued(schedd, second), GONE_S), (
+            "the refused server is still queued"
+        )
     assert same_values(first, twin_value)
     text = f"{err.value} {getattr(err.value, 'legs', '')}".replace(str(tmp_path), "")
     assert names_cluster(text, pilots), (pilots, text)
@@ -435,8 +470,13 @@ def test_a_later_server_is_refused_where_only_its_runner_s_pilots_hold_room(tmp_
     (server,) = schedd.history(
         f"{since(t0, SERVICE_JOBS)} && QDate < {t1}", ["JobCurrentStartDate"], match=10
     )
-    qdates = [int(ad["QDate"]) for ad in schedd.history(f"ClusterId == {pilots}", ["QDate"], match=10)]
-    assert len(qdates) == 2 and int(server["JobCurrentStartDate"]) <= min(qdates), (dict(server), qdates)
+    qdates = [
+        int(ad["QDate"]) for ad in schedd.history(f"ClusterId == {pilots}", ["QDate"], match=10)
+    ]
+    assert len(qdates) == 2 and int(server["JobCurrentStartDate"]) <= min(qdates), (
+        dict(server),
+        qdates,
+    )
 
 
 @posix
@@ -495,10 +535,14 @@ def test_ctrl_c_removes_a_waiting_server_and_submits_no_pilot(form: str, tmp_pat
         assert waiting.is_set(), (
             f"the {form} child never waited for a slot ({child.poll()}): {''.join(output)}"
         )
-        assert child.poll() is not None, f"the {form} child still ran {3 * CHILD_POLL_S}s after SIGINT"
+        assert child.poll() is not None, (
+            f"the {form} child still ran {3 * CHILD_POLL_S}s after SIGINT"
+        )
         assert wait_for(lambda: not queued(schedd, since(t0)), GONE_S), queued(schedd, since(t0))
         services = since(t0, SERVICE_JOBS)
-        assert wait_for(lambda: unrun(schedd, services) == [(0, False)], GONE_S), unrun(schedd, services)
+        assert wait_for(lambda: unrun(schedd, services) == [(0, False)], GONE_S), unrun(
+            schedd, services
+        )
     finally:
         if child is not None and child.poll() is None:
             child.kill()

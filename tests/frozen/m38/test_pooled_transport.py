@@ -1,4 +1,6 @@
-"""M38 (perf): the IPC peer path resolves each actor's queues from a registry INHERITED via the pool
+"""M38 (perf): the IPC peer path resolves actor queues from an inherited registry.
+
+M38 (perf): the IPC peer path resolves each actor's queues from a registry INHERITED via the pool
 initializer (``peer_pool_init``) instead of Manager-proxy submit-args — the change that removed the
 ``multiprocessing.Manager`` server process. The real path runs in worker processes, so the actor
 resolution is witnessed in-process (the M37 ``test_inprocess_paths`` pattern); persistent reuse +
@@ -49,9 +51,11 @@ def _partitions(n: int) -> list[Partition]:
 
 @pytest.mark.parametrize(("n", "w"), [(8, 4), (15, 4), (100, 8)])
 def test_pooled_actor_resolves_inherited_registry_and_matches_flat_tree(n: int, w: int) -> None:
-    """Run ``pooled_peer_actor`` in threads after installing the registry via ``peer_pool_init`` —
-    each actor must look up its OWN inbox + the peers' outboxes by address and reduce bit-for-bit
-    like the flat tree (no Manager proxies, no per-submit queue args)."""
+    """Run ``pooled_peer_actor`` in threads after installing the registry via ``peer_pool_init``.
+
+    Each actor must look up its OWN inbox + the peers' outboxes by address and reduce
+    bit-for-bit like the flat tree (no Manager proxies, no per-submit queue args).
+    """
     worker_addrs = tuple(f"w{i}" for i in range(w))
     addrs = (DRIVER, *worker_addrs)
     registry: dict[str, queue.Queue[object]] = {a: queue.Queue() for a in addrs}
@@ -61,11 +65,14 @@ def test_pooled_actor_resolves_inherited_registry_and_matches_flat_tree(n: int, 
     witness: dict[str, dict[str, int]] = {}
 
     def actor_main(addr: str) -> None:
-        witness[addr] = pooled_peer_actor(addr, n, bounds, worker_addrs, _leaf_value, _cat, items[addr])
+        witness[addr] = pooled_peer_actor(
+            addr, n, bounds, worker_addrs, _leaf_value, _cat, items[addr]
+        )
 
     try:
         peer_pool_init(registry)  # the pool initializer; in-process all threads share the global
-        assert _peer._peer_registry is registry  # witness: the registry was installed for resolution
+        # witness: the registry was installed for resolution
+        assert _peer._peer_registry is registry
         threads = [threading.Thread(target=actor_main, args=(a,)) for a in worker_addrs]
         for t in threads:
             t.start()
@@ -81,11 +88,16 @@ def test_pooled_actor_resolves_inherited_registry_and_matches_flat_tree(n: int, 
 
 
 def test_pooled_actor_without_initializer_is_a_loud_error() -> None:
-    """If the pool initializer never ran (misconfiguration), the actor refuses loudly rather than
-    resolving against a stale/absent registry."""
+    """Without the pool initializer, the actor refuses loudly instead of using a stale registry.
+
+    If the pool initializer never ran (misconfiguration), the actor refuses loudly rather than
+    resolving against a stale/absent registry.
+    """
     _peer._peer_registry = None
     with pytest.raises(AssertionError, match="peer_pool_init"):
-        pooled_peer_actor("w0", 1, [0, 1], ("w0",), _leaf_value, _cat, [(0, Partition("f", "E", 0, 1))])
+        pooled_peer_actor(
+            "w0", 1, [0, 1], ("w0",), _leaf_value, _cat, [(0, Partition("f", "E", 0, 1))]
+        )
 
 
 def _count(_part: Partition, _resources: object) -> int:
@@ -101,8 +113,12 @@ def _zero() -> int:
 
 
 def test_persistent_ipc_reuses_pool_and_registry_across_runs() -> None:
-    """A persistent full-registry IPC executor reuses its worker pool + raw-queue registry on the second
-    run (spawn paid once) and drains any straggler first — same result both runs, no Manager involved."""
+    """A persistent IPC executor reuses its pool and queue registry on a second run.
+
+    A persistent full-registry IPC executor reuses its worker pool + raw-queue registry on the
+    second run (spawn paid once) and drains any straggler first — same result both runs, no Manager
+    involved.
+    """
     tasks = tuple(Task(i, Partition(f"p{i}", "Events", i, i + 1)) for i in range(8))
     plan = Plan(process=_count, combine=_add, empty=_zero, tasks=tasks)
     with ProcessPoolExecutor(max_workers=4, persistent=True, comms="ipc", steal=True) as ex:
@@ -116,10 +132,14 @@ def test_persistent_ipc_reuses_pool_and_registry_across_runs() -> None:
 
 
 def test_full_registry_warns_when_fd_budget_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ProcessPoolExecutor WARNS (recommending PinnedPoolExecutor) rather than silently switching pools
-    when the full-registry fd footprint would strain the per-process limit. We force the predicate
-    ``_exceeds_fd_budget`` True (it is exercised for real on every normal small-w run, returning False);
-    this isolates the warning *wiring* without needing to exhaust the OS fd limit on the test host."""
+    """ProcessPoolExecutor WARNS rather than switching pools when the fd footprint is too large.
+
+    ProcessPoolExecutor WARNS (recommending PinnedPoolExecutor) rather than silently switching
+    pools when the full-registry fd footprint would strain the per-process limit. We force the
+    predicate ``_exceeds_fd_budget`` True (it is exercised for real on every normal small-w run,
+    returning False); this isolates the warning *wiring* without needing to exhaust the OS fd limit
+    on the test host.
+    """
     monkeypatch.setattr("graphed_exec_local.executors._exceeds_fd_budget", lambda _w: True)
     tasks = tuple(Task(i, Partition(f"p{i}", "Events", i, i + 1)) for i in range(4))
     plan = Plan(process=_count, combine=_add, empty=_zero, tasks=tasks)

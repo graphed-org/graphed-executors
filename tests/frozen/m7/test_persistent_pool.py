@@ -18,8 +18,10 @@ _calls = 0
 
 
 def _count_calls(partition: Partition, resources: object) -> np.ndarray:
-    """Returns THIS WORKER's cumulative call count (worker-global: survives between runs only
-    if the pool itself survives)."""
+    """Return THIS WORKER's cumulative call count.
+
+    Worker-global: survives between runs only if the pool itself survives.
+    """
     global _calls
     _calls += 1
     return np.asarray([_calls], dtype=np.int64)

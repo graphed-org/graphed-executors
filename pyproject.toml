@@ -106,6 +106,22 @@ convention = "pep257"
 "tests/extra/m66/test_m66_launcher.py" = ["N802"]
 "tests/extra/m68b/test_m68b_dag.py" = ["N802"]
 "tests/extra/m69b/test_m69b_schedulable.py" = ["N802"]
+"tests/frozen/m67/driverless_harness.py" = ["N802"]
+"tests/frozen/m68a/services_harness.py" = ["N802"]
+"tests/frozen/m68b/m68b_dag_harness.py" = ["N802"]
+"tests/frozen/m68b/m68b_harness.py" = ["N802"]
+"tests/frozen/m68c/test_m68c_htcondor.py" = ["N802"]
+"tests/frozen/m68d/m68d_harness.py" = ["N802"]
+"tests/frozen/m74/m74_harness.py" = ["N802"]
+# frozen test names spell the bounds they check (T, P, O(N P), MxR), and renaming one changes its id
+"tests/frozen/m39/test_repartition_bytes.py" = ["N802"]
+"tests/frozen/m39/test_shuffle_benchmark.py" = ["N802"]
+"tests/frozen/m39/test_shuffle_execution.py" = ["N802"]
+"tests/frozen/m40/test_join_benchmark.py" = ["N802"]
+"tests/frozen/m43/test_dask_shuffle_structure.py" = ["N802"]
+"tests/frozen/m44/test_transport_task_complexity.py" = ["N802"]
+"tests/frozen/m46/test_parsl_relay_repartition.py" = ["N802"]
+"tests/frozen/m47/test_parsl_task_shape.py" = ["N802"]
 
 [tool.ruff.lint.isort]
 # graphed_exec_local's submodules are sys.modules aliases with no file under src/, so ruff cannot

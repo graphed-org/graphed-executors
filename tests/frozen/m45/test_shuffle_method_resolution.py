@@ -1,12 +1,15 @@
-"""m45 resolution pins — ``resolve_shuffle_method`` is a pure capability truth table, an invalid
-method fails loudly before any work, and the api module imports dask-free (m45-facade-plan §1.1,
-§2 items 6/10/11). Runs in the MAIN CI matrix — no distributed needed.
+"""m45 resolution pins.
+
+``resolve_shuffle_method`` is a pure capability truth table, an invalid method fails loudly before
+any work, and the api module imports dask-free (m45-facade-plan §1.1, §2 items 6/10/11). Runs in
+the MAIN CI matrix — no distributed needed.
 
 The r2-corrected truth table: explicit methods resolve to themselves under EVERY capability
 combination (the engines' own gates handle unsupported backends); "auto" needs BOTH
 pin_to_worker AND peer_data_movement for transport (peer-only, pin-only, and neither all degrade
 to tasks); an unknown method raises ValueError naming all three valid values regardless of caps,
-with ZERO submits/broadcasts reaching the backend."""
+with ZERO submits/broadcasts reaching the backend.
+"""
 
 from __future__ import annotations
 

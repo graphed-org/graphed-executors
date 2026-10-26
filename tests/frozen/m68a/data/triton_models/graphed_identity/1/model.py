@@ -7,7 +7,8 @@ shape. graphed's Triton plugin sends an (n_events, n_features) matrix, so both t
 import importlib
 from typing import Any
 
-pb_utils = importlib.import_module("triton_python_backend_utils")  # provided by the Triton python backend
+# provided by the Triton python backend
+pb_utils = importlib.import_module("triton_python_backend_utils")
 
 
 class TritonPythonModel:

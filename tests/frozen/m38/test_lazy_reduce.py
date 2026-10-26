@@ -1,6 +1,9 @@
-"""M38 lazy reduction (spike; frozen at P6). The lazy index-arithmetic reducer must produce the
-EXACT same tree grouping as the existing ``tree_reduce`` (bit-for-bit, any completion order) while
-holding only an O(log N) frontier — never materialising the whole combine graph."""
+"""M38 lazy reduction (spike; frozen at P6).
+
+The lazy index-arithmetic reducer must produce the EXACT same tree grouping as the existing
+``tree_reduce`` (bit-for-bit, any completion order) while holding only an O(log N) frontier — never
+materialising the whole combine graph.
+"""
 
 from __future__ import annotations
 
@@ -39,8 +42,8 @@ def test_lazy_matches_tree_reduce_in_any_order(n: int) -> None:
 
 
 def test_lazy_frontier_is_logarithmic_not_linear() -> None:
-    # 100k leaves delivered in order (as tasks finish ~chronologically): the live frontier must stay
-    # O(log N), proving we never pre-build / hold the whole combine graph.
+    # 100k leaves delivered in order (as tasks finish ~chronologically): the live frontier must
+    # stay O(log N), proving we never pre-build / hold the whole combine graph.
     n = 100_000
     r: LazyReducer[int] = LazyReducer(n, lambda a, b: a + b, lambda: 0)
     for i in range(n):
@@ -56,8 +59,8 @@ def test_lazy_empty_and_singleton() -> None:
 
 
 def test_partial_then_resume_is_still_deterministic() -> None:
-    # feed half out of order, then the rest: the bubbling frontier carries across and the result still
-    # matches the canonical grouping (the property peer reduction relies on).
+    # feed half out of order, then the rest: the bubbling frontier carries across and the result
+    # still matches the canonical grouping (the property peer reduction relies on).
     n = 50
     r: LazyReducer[str] = LazyReducer(n, _cat, _empty)
     order = list(range(n))

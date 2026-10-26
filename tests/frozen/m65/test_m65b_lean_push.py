@@ -64,9 +64,13 @@ def test_lean_routes_emit_submitted_and_terminal_only(route: str) -> None:
         assert set(keys) <= set(range(mp.N))
 
 
-def _worker_files(d: Path, driver: bp.PushRecorder) -> list[tuple[int, frozenset[str], list[dict[str, Any]]]]:
+def _worker_files(
+    d: Path, driver: bp.PushRecorder
+) -> list[tuple[int, frozenset[str], list[dict[str, Any]]]]:
     name = os.path.basename(driver.path)
-    return [c for c, f in zip(bp.connections(str(d)), sorted(os.listdir(d)), strict=True) if f != name]
+    return [
+        c for c, f in zip(bp.connections(str(d)), sorted(os.listdir(d)), strict=True) if f != name
+    ]
 
 
 def _finished(conns: list[tuple[int, frozenset[str], list[dict[str, Any]]]]) -> list[int]:
@@ -109,7 +113,9 @@ def test_per_worker_push_bypasses_the_driver(route: str, tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize("comms", [None, "ipc"], ids=["hub", "ipc"])
-def test_persistent_pool_pushes_each_run_to_its_own_monitor(comms: str | None, tmp_path: Path) -> None:
+def test_persistent_pool_pushes_each_run_to_its_own_monitor(
+    comms: str | None, tmp_path: Path
+) -> None:
     n = 16
     probe = mp.Probe(n=n)
     dirs = [tmp_path / "run1", tmp_path / "run2"]
@@ -127,7 +133,10 @@ def test_persistent_pool_pushes_each_run_to_its_own_monitor(comms: str | None, t
 
 
 class _ClosingRecorder(bp._FileRecorder):
-    """Registers its own exit flush when built, as a worker monitor does; counts profiles after it."""
+    """Registers its own exit flush when built, as a worker monitor does.
+
+    Counts profiles after it.
+    """
 
     def __init__(self, directory: str) -> None:
         super().__init__(directory, False)
@@ -146,7 +155,9 @@ class _ClosingRecorder(bp._FileRecorder):
 
 
 def _drain_threads() -> list[threading.Thread]:
-    return [t for t in threading.enumerate() if t.name == "graphed-dash-worker-drain" and t.is_alive()]
+    return [
+        t for t in threading.enumerate() if t.name == "graphed-dash-worker-drain" and t.is_alive()
+    ]
 
 
 def _push(factory: Callable[[], Any], lean: bool = False) -> dict[str, Any]:
@@ -196,7 +207,11 @@ def test_inprocess_worker_push_and_lean(monkeypatch: pytest.MonkeyPatch, tmp_pat
         ex._proc_init(
             bp.fake_profiler,
             None,
-            **_push(functools.partial(factory, functools.partial(bp.worker_recorder, str(prof_dir), False))),
+            **_push(
+                functools.partial(
+                    factory, functools.partial(bp.worker_recorder, str(prof_dir), False)
+                )
+            ),
         )
         ex._proc_last_flush = 0.0
         assert ex._proc_task_shared(token, task) == 0
@@ -217,7 +232,9 @@ def test_inprocess_worker_push_and_lean(monkeypatch: pytest.MonkeyPatch, tmp_pat
         ex._proc_init(
             bp.fake_profiler,
             None,
-            **_push(functools.partial(factory, functools.partial(_ClosingRecorder, str(exit_dir)))),
+            **_push(
+                functools.partial(factory, functools.partial(_ClosingRecorder, str(exit_dir)))
+            ),
         )
         for hook in reversed(hooks):
             hook()
