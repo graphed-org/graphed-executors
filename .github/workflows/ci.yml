@@ -14,8 +14,8 @@ concurrency:
 env:
   # the former core/debug/frontend/numpy/awkward siblings are now one consolidated package
   # Pinned, not @main: graphed is an unpinned upstream whose merges can redden this frozen suite with
-  # no local change. graphed 0.0.9 from PyPI.
-  GRAPHED: "graphed[awkward,numpy]==0.0.9"
+  # no local change. graphed's feat/plan-finalize (Plan.finalize); moves to the 0.0.10 release once it ships.
+  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@8728873eeb1cc9bffc991a77eceda52ae8bc49af"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
   # The frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
@@ -164,7 +164,7 @@ jobs:
             tests/frozen/m74/test_m74_dask.py \
             tests/extra/m43 tests/extra/m44 tests/extra/m68a tests/extra/m68c \
             tests/extra/m69b/test_m69b_schedulable.py tests/extra/m69b/test_m69b_dask_driver_check.py \
-            tests/frozen/m68d tests/extra/m68d \
+            tests/frozen/m68d tests/extra/m68d tests/extra/finalize \
             --cov-config=.coveragerc-dask \
             --cov-branch --cov \
             --cov-report=term-missing
@@ -244,6 +244,7 @@ jobs:
             tests/frozen/m65/test_m65a3_control_parsl.py \
             tests/frozen/m68c/test_m68c_submit_parsl.py \
             tests/frozen/m74/test_m74_parsl.py tests/extra/hdna/test_hdna_parsl_retries.py \
+            tests/extra/finalize/test_finalize_runners.py::test_parsl_runners_finalize_once_on_the_driver \
             --cov --cov-config=.coveragerc-parsl \
             --cov-branch --cov-fail-under=0
           # TERM every leftover (pool managers, spawned workers, Manager servers, resource trackers) and
