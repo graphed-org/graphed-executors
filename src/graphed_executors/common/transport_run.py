@@ -20,6 +20,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from graphed.core import Plan
+
 
 @dataclass
 class TransportWitness:
@@ -59,6 +61,11 @@ class TransportExecResult:
     n_partitions: int
     n_combines: int
     transport: TransportWitness
+
+
+def finalized(plan: Plan[Any], value: Any) -> Any:
+    """Return the root ``value`` through ``plan.finalize``, on the driver."""
+    return value if plan.finalize is None else plan.finalize(value)
 
 
 def merge_counters(

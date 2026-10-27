@@ -56,6 +56,7 @@ from graphed.core.execution import (
     TaskPhase,
     WorkerResources,
     emit_task,
+    finalize_result,
     lean_events,
     partition_label,
     worker_monitor_factory,
@@ -469,7 +470,7 @@ class SubmitRunner:
         submitted, and released, with any of its tasks not yet done, when ``run`` returns
         or raises. A :class:`~graphed.core.DurablePlanV2` (a join or repartition) runs
         stage by stage to ``plan.value`` of its last stage; a cancel returns
-        ``value=None``.
+        ``value=None``. The plan's ``finalize`` runs here, after its services are released.
         """
         monitor = self.monitor
         control = self.control
@@ -477,7 +478,8 @@ class SubmitRunner:
         ctx = self._context(uuid.uuid4().hex[:8], monitor)
         # the submission's scope: released in reverse on exit
         with contextlib.ExitStack() as scope:
-            return self._run_scoped(plan, monitor, control, given, ctx, scope)
+            result = self._run_scoped(plan, monitor, control, given, ctx, scope)
+        return finalize_result(plan, result)
 
     def _run_scoped(
         self,
