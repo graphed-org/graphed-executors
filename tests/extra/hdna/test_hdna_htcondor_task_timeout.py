@@ -105,7 +105,7 @@ def test_a_task_past_the_timeout_fails_and_its_pilot_stops(tmp_path: Path) -> No
 
 
 def test_a_timed_out_task_s_late_result_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
-    ts = server.TaskServer("127.0.0.1", (10000, 10100), SimpleNamespace(alive=lambda: 1), 0.05)
+    ts = server.TaskServer("127.0.0.1", (0, 0), SimpleNamespace(alive=lambda: 1), 0.05)
     try:
         fut: Future[Any] = Future()
         ts.add("k1", operator.neg, (1,), fut)

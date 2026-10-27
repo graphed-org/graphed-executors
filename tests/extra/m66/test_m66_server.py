@@ -26,7 +26,6 @@ from graphed_executors.htcondor_backend import HTCondorBackend, LocalPilots, ser
 from graphed_executors.htcondor_backend.launch import write_secret
 from graphed_executors.parsl_backend.backend import _ParslFuture
 
-PORTS = (10000, 10100)
 HERE = str(Path(__file__).resolve().parent)
 
 
@@ -39,7 +38,8 @@ def raise_unpicklable() -> None:
 
 
 def task_server() -> server.TaskServer:
-    return server.TaskServer("127.0.0.1", PORTS, SimpleNamespace(alive=lambda: 1))
+    # an OS-assigned port: a fixed band hands an orphaned pilot's address to another xdist worker
+    return server.TaskServer("127.0.0.1", (0, 0), SimpleNamespace(alive=lambda: 1))
 
 
 def test_a_cancelled_queued_task_is_skipped_and_fails_its_dependent(
