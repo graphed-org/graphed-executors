@@ -72,8 +72,10 @@ def _exceeds_fd_budget(w: int) -> bool:
     w`` fds per worker); it never switches pools silently. The user picks the executor
     explicitly.
     """
-    # no POSIX RLIMIT; Windows fd/handle limits are high (CRT default 512)
-    soft = 512 if sys.platform == "win32" else resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    if sys.platform == "win32":  # no POSIX RLIMIT; Windows fd/handle limits are high (CRT 512)
+        soft = 512
+    else:
+        soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
     return 2 * (w + 1) + 64 > soft // 2  # full-registry fds would exceed half the limit
 
 
