@@ -206,7 +206,7 @@ def transport_run_repartition(
     require_pin(dbackend)
     from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
 
-    ensure_engine_plugins(dbackend._client)  # the submit shim needs graphed-worker; idempotent
+    ensure_engine_plugins(dbackend.client)  # the submit shim needs graphed-worker; idempotent
     n_src = len(src_blocks)
 
     def _attempt(
@@ -312,7 +312,7 @@ def transport_run_join(
     require_pin(dbackend)
     from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
 
-    ensure_engine_plugins(dbackend._client)
+    ensure_engine_plugins(dbackend.client)
     on_t = tuple(on)
     build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
     probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
@@ -637,13 +637,13 @@ def _run_with_restarts(
         try:
             value, hashes, witness = attempt_fn(spec, addresses, k, t)
         except BaseException as exc:  # (classify: restart or attributed StageError)
-            collect_and_purge(dbackend._client, nonce, per_worker)
+            collect_and_purge(dbackend.client, nonce, per_worker)
             last_exc = exc
             if not is_restart_worthy(exc, dbackend) or attempt >= epoch_restarts_allowed:
                 transport.per_worker = per_worker
                 raise build_stage_error(exc, dbackend) from exc
             continue
-        collect_and_purge(dbackend._client, nonce, per_worker)
+        collect_and_purge(dbackend.client, nonce, per_worker)
         transport.epoch_restarts = attempt
         transport.per_worker = per_worker
         return TransportShuffleResult(

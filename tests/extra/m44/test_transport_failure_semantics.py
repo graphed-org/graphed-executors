@@ -145,7 +145,7 @@ class _FakeClient:
 
 class _FakeBackend:
     def __init__(self, client: _FakeClient) -> None:
-        self._client = client
+        self.client = client
 
 
 def test_sorted_addresses_survives_a_transient_empty_scheduler_info() -> None:

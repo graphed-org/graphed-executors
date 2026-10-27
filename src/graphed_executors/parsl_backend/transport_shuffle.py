@@ -20,6 +20,8 @@ import time
 import uuid
 from typing import Any
 
+from graphed.debug import SourceFrame, StageError
+
 from graphed_executors.common.http_plane import PullTimeoutError
 from graphed_executors.common.transport_run import (
     TransportShuffleResult,
@@ -35,6 +37,7 @@ from graphed_executors.common.transport_tasks import (
 from graphed_executors.local._shuffle_kernels import ShuffleWitness, assign, sha256_hex
 
 from .transport_peer import (
+    _BARRIER_DEFAULT_S,
     DRIVER,
     ProbeUnreachableError,
     _barrier_and_registry,
@@ -46,6 +49,7 @@ from .transport_peer import (
     _future_errored,
     _merge_peer,
     _open_driver_endpoint,
+    _parsl_peer_main,
     _release,
     _resolve_k,
     _sender_counters,
@@ -352,8 +356,6 @@ def _run_shuffle(
     Seat k peers, rendezvous+probe, aggregate manifests, broadcast the pull assignment, collect
     results, and restart the whole run on a restart-worthy failure.
     """
-    from .transport_peer import _BARRIER_DEFAULT_S  # noqa: PLC0415
-
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
     transport = TransportWitness()
     per_worker: dict[str, dict[str, int]] = {}
@@ -372,8 +374,11 @@ def _run_shuffle(
         driver_counts: dict[str, int] = {}
         futures = {
             addr: pbackend.submit(
-                _parsl_peer_main_ref(),
-                make_peer_spec(nonce, driver_ep, worker_addrs, k, i, addr),
+                _parsl_peer_main,
+                {
+                    **make_peer_spec(nonce, driver_ep, worker_addrs, k, i, addr),
+                    "body": _peer_shuffle_body,
+                },
                 key=f"graphed-parsl-shuffle-{nonce}-{i}",
                 # ponytail: k persistent tasks gang-schedule by slot saturation
                 # (pin_to_worker=False)
@@ -437,9 +442,6 @@ def _shuffle_stage_error(exc: BaseException, pbackend: Any) -> Any:
     losing the parsl signal whose ``str`` never carries its class name), the m47 driver layers the
     victim-worker context on top of the named signal (backend.describe_failure's own note).
     """
-    # error path; dask/parsl-free
-    from graphed.debug import SourceFrame, StageError  # noqa: PLC0415
-
     describe = getattr(pbackend, "describe_failure", None)
     info = describe(exc) if describe is not None else None
     worker = f" (worker: {info[1]})" if info is not None else ""
@@ -506,12 +508,6 @@ def _drive_shuffle_attempt(
 
 
 _PROBE_COLLECT_S = 15.0
-
-
-def _parsl_peer_main_ref() -> Any:
-    from .transport_peer import _parsl_peer_main  # noqa: PLC0415
-
-    return _parsl_peer_main
 
 
 # ---- public entry points ------------------------------------------------------------------------

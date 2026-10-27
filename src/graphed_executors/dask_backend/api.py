@@ -26,9 +26,8 @@ Callers needing ``monitor=`` / ``retries=`` use the still-public ``dask_run_*`` 
 internally (a caller-supplied runner would open a ``runner.backend is not dbackend`` consistency
 hole between resolution and dispatch).
 
-Dask-import-free at module load (F13): the engine-run functions and ``SubmitRunner`` are deferred
-into the function bodies; only the dask-free result dataclasses are imported at top for the union
-annotation.
+Dask-import-free at module load (F13): both engines' entry modules and ``SubmitRunner`` are
+dask-free, the transport engine deferring its distributed-touching half to the call.
 """
 
 from __future__ import annotations
@@ -42,8 +41,11 @@ from graphed_executors.common.facade import (  # the §1.6 m47 move — re-expor
     resolve_shuffle_method,
 )
 from graphed_executors.local.shuffle import ShuffleResult
+from graphed_executors.submit import SubmitRunner
 
 from ._transport_run import TransportShuffleResult
+from .shuffle import dask_run_join, dask_run_repartition
+from .transport_shuffle import transport_run_join, transport_run_repartition
 
 __all__ = [
     "_VALID_METHODS",
@@ -90,8 +92,6 @@ def run_repartition(
         },
     )
     if resolved == "transport":
-        from .transport_shuffle import transport_run_repartition  # noqa: PLC0415  (F13: deferred)
-
         return transport_run_repartition(
             backend,
             src_blocks,
@@ -105,11 +105,6 @@ def run_repartition(
             pull_timeout_s=pull_timeout_s,
             epoch_restarts_allowed=1 if epoch_restarts_allowed is None else epoch_restarts_allowed,
         )
-    # dask-free, but keep the top clean
-    from graphed_executors.submit import SubmitRunner  # noqa: PLC0415
-
-    from .shuffle import dask_run_repartition  # noqa: PLC0415  (F13: deferred)
-
     return dask_run_repartition(
         backend, src_blocks, parts, runner=SubmitRunner(dbackend), salt=salt
     )
@@ -149,8 +144,6 @@ def run_join(
         },
     )
     if resolved == "transport":
-        from .transport_shuffle import transport_run_join  # noqa: PLC0415  (F13: deferred)
-
         return transport_run_join(
             backend,
             left_blocks,
@@ -166,10 +159,6 @@ def run_join(
             pull_timeout_s=pull_timeout_s,
             epoch_restarts_allowed=1 if epoch_restarts_allowed is None else epoch_restarts_allowed,
         )
-    from graphed_executors.submit import SubmitRunner  # noqa: PLC0415
-
-    from .shuffle import dask_run_join  # noqa: PLC0415  (F13: deferred)
-
     return dask_run_join(
         backend,
         left_blocks,

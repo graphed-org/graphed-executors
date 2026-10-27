@@ -29,13 +29,13 @@ class _ThreadEnv:
     driver handler (shared memory — no head-node copy).
     """
 
-    def __init__(self, backend: ThreadBackend) -> None:
+    def __init__(self, handlers: Mapping[str, Callable[[list[dict[str, object]]], None]]) -> None:
         self.resources: WorkerResources = LocalResources()
         self.worker = threading.current_thread().name
-        self._backend = backend
+        self._handlers = handlers  # the backend's live topic registry
 
     def emit(self, topic: str, events: list[dict[str, object]]) -> None:
-        handler = self._backend._handlers.get(topic)
+        handler = self._handlers.get(topic)
         if handler is not None:
             handler(events)
 
@@ -100,7 +100,7 @@ class ThreadBackend:
     def _env(self) -> _ThreadEnv:
         env: _ThreadEnv | None = getattr(self._local, "env", None)
         if env is None:
-            env = _ThreadEnv(self)
+            env = _ThreadEnv(self._handlers)
             self._local.env = env
         return env
 

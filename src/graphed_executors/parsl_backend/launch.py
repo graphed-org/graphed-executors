@@ -47,9 +47,8 @@ def start_htex(
     harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here
     would break worker-side imports of caller-defined task fns.
     """
-    # lazy: parsl is the optional extra
-    from parsl.executors import HighThroughputExecutor  # noqa: PLC0415
-    from parsl.providers import LocalProvider  # noqa: PLC0415
+    from parsl.executors import HighThroughputExecutor  # noqa: PLC0415  (lazy: the [parsl] extra)
+    from parsl.providers import LocalProvider  # noqa: PLC0415  (lazy: the [parsl] extra)
 
     kwargs: dict[str, Any] = {
         "label": "graphed-htex",

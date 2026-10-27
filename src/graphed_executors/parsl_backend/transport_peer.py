@@ -21,17 +21,19 @@ from __future__ import annotations
 
 import contextlib
 import os
+import socket
+import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from graphed.core.execution import Plan
+from graphed.core.execution import LocalResources, Plan
 from graphed.debug import SourceFrame, StageError
 from graphed.services import require_bound
 
 from graphed_executors.common import refuse_staged
-from graphed_executors.common.http_plane import EscalatingHttpTransport
+from graphed_executors.common.http_plane import EscalatingHttpTransport, TransportDeliveryError
 from graphed_executors.common.transport_run import (
     TransportExecResult,
     TransportWitness,
@@ -114,10 +116,9 @@ def _parsl_peer_main(spec: dict[str, Any]) -> dict[str, Any]:
                 "root": None,
                 "counters": {**base, **_sender_counters(ep)},
             }
-        # deferred; avoids a cycle
-        from .transport_shuffle import _peer_shuffle_body  # noqa: PLC0415
-
-        return _peer_shuffle_body(ep, spec, registry, prebuffered, base)
+        # the engine body the shuffle driver handed in, so this module never imports its clients
+        body = spec["body"]
+        return cast("dict[str, Any]", body(ep, spec, registry, prebuffered, base))
     except BaseException as exc:
         # a raising peer's counters ride the RESULT, which is now the exception — attach the
         # endpoint witnesses (send_failures/sends_retried/…) so an exhaustion in a discarded epoch
@@ -174,8 +175,6 @@ def _peer_reduce(
     ``("done",)``. Steal is OFF (deterministic — only the boundary hand-offs cross w1→w0, which
     the inject seam targets).
     """
-    from graphed.core.execution import LocalResources  # noqa: PLC0415
-
     counters = process_and_reduce(
         ep.address,
         ep,
@@ -207,8 +206,6 @@ def _peer_probe_leg(
     ``("proceed"|"abort")`` verdict — buffering data traffic that races ahead so the engine body
     sees it.
     """
-    import socket  # noqa: PLC0415
-
     probe_timeout = spec.get("probe_timeout_s", _PROBE_TIMEOUT_S)
     results: dict[str, bool] = {}
     for peer_addr, (host, port) in registry.items():
@@ -544,6 +541,7 @@ def _drive_reduce(
 def _future_errored(fut: Any) -> bool:
     try:
         return fut.done() and fut.exception() is not None
+    # a cancelled or broken future reads as "not errored" to this cleanup probe
     except Exception:
         return False
 
@@ -551,8 +549,6 @@ def _future_errored(fut: Any) -> bool:
 def _reduce_failure(errs: dict[str, BaseException], pbackend: Any) -> BaseException:
     if errs:
         return pick_attributable(errs, pbackend)
-    from graphed_executors.common.http_plane import TransportDeliveryError  # noqa: PLC0415
-
     return TransportDeliveryError(
         "peer reduction completed with no captured root (a lost/withheld root must never default "
         "to "
@@ -562,15 +558,13 @@ def _reduce_failure(errs: dict[str, BaseException], pbackend: Any) -> BaseExcept
 
 def sorted_addrs_seen(driver_ep: EscalatingHttpTransport) -> list[str]:
     """Return the addresses the driver endpoint has registered, sorted."""
-    return sorted(a for a in driver_ep._registry)
+    return sorted(driver_ep.registered())
 
 
 # ---- inject-seam budget files (persisted across epochs so retry+restart compose) ----------------
 def _write_budget_files(inject: dict[str, dict[str, int]] | None) -> str | None:
     if not inject:
         return None
-    import tempfile  # noqa: PLC0415
-
     d = tempfile.mkdtemp(prefix="graphed-m47-inject-")
     for dest, srcs in inject.items():
         for src, budget in srcs.items():

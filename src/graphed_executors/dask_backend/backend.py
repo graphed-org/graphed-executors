@@ -54,6 +54,11 @@ class DaskBackend:
 
         self._shim = _dask_task_shim
 
+    @property
+    def client(self) -> Any:
+        """The ``distributed.Client`` this backend submits through."""
+        return self._client
+
     def n_workers(self) -> int:
         """Return the number of workers the scheduler knows now."""
         return len(self._client.scheduler_info()["workers"])

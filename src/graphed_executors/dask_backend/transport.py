@@ -37,6 +37,7 @@ import hashlib
 import os
 import pickle
 import queue
+import shutil
 import threading
 import uuid
 from collections.abc import Mapping, Sequence
@@ -49,6 +50,7 @@ from distributed.protocol import to_serialize
 from distributed.utils import sync
 
 from ._transport_run import DRIVER, PLUGIN_NAME  # dask-free constants (single source)
+from .plugin import GraphedWorkerPlugin
 
 # The §1.1 send policy (the local ``HttpTransport`` sender: _transport.py:275-306 — five
 # at-least-once attempts + backoff, 5 s per attempt). dask's base RPC retries nothing
@@ -206,6 +208,11 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
 
     name = PLUGIN_NAME
     idempotent = True
+
+    @property
+    def worker(self) -> Any:
+        """The ``distributed.Worker`` this plugin was set up on."""
+        return self._worker
 
     async def setup(self, worker: Any) -> None:
         """Install the transport handlers on ``worker`` and check the handler seam."""
@@ -405,8 +412,6 @@ class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
                     Path(path).unlink(missing_ok=True)
                 run.blocks.clear()
                 run.spilled.clear()
-            import shutil  # noqa: PLC0415  (teardown only)
-
             shutil.rmtree(run.spill_dir, ignore_errors=True)
 
 
@@ -474,7 +479,7 @@ class DaskWorkerTransport:
         """Attach to this worker's state for the run ``spec`` describes."""
         self._plugin = plugin
         self._spec = spec
-        self._worker = plugin._worker
+        self._worker = plugin.worker
         self.address = self._worker.address
         self._run = plugin.ensure_run(spec)
         # set when send("driver", ("root", v)) fires (the F3 fallback)
@@ -604,7 +609,7 @@ class DriverTransport:
 
     def __init__(self, backend: Any, spec: _TransportSpec) -> None:
         """Subscribe to the workers' events for the run ``spec`` describes."""
-        self._client = backend._client
+        self._client = backend.client
         self._spec = spec
         self._inbox: queue.Queue[tuple[str, object]] = queue.Queue()
         self._unsub = backend.subscribe_events(_driver_topic(spec.epoch), self._on_event)
@@ -668,8 +673,6 @@ def ensure_engine_plugins(client: Any) -> None:
     harness) so its instance — and any armed test injection seam on it — is never disturbed
     mid-run by a re-registration.
     """
-    from .plugin import GraphedWorkerPlugin  # noqa: PLC0415  (lazy: distributed extra)
-
     client.register_plugin(GraphedWorkerPlugin())
 
 
@@ -680,7 +683,5 @@ def dask_transport_setup(client: Any) -> None:
     entry point (the frozen suite calls it as ``install_transport_plugin`` for the transport
     half + relies on the engine's ``ensure_engine_plugins`` for the worker half).
     """
-    from .plugin import GraphedWorkerPlugin  # noqa: PLC0415  (lazy: distributed extra)
-
     client.register_plugin(GraphedWorkerPlugin())
     client.register_plugin(GraphedTransportPlugin())

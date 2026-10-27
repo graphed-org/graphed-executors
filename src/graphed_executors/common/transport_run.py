@@ -16,9 +16,12 @@ either backend (the §1.6 ``common/`` import rule; ``test_parsl_transport_import
 from __future__ import annotations
 
 import contextlib
+import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+from graphed.debug import SourceFrame, StageError
 
 
 @dataclass
@@ -130,8 +133,6 @@ def _with_frames(exc: BaseException) -> str:
     tb = getattr(exc, "__traceback__", None)
     if tb is None:
         return base
-    import traceback  # noqa: PLC0415  (error path only)
-
     with contextlib.suppress(Exception):
         frames = "".join(traceback.format_tb(tb)).rstrip()
         if frames:
@@ -147,9 +148,6 @@ def build_stage_error(exc: BaseException, backend: Any) -> Any:
     keeps its own type + message (with the wrapped traceback frames appended, so a CI-only
     crash names its site).
     """
-    # dask/parsl-free; error path only
-    from graphed.debug import SourceFrame, StageError  # noqa: PLC0415
-
     describe = getattr(backend, "describe_failure", None)
     info = describe(exc) if describe is not None else None
     if info is not None:

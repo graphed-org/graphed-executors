@@ -31,13 +31,15 @@ import pickle
 import queue
 import socket
 import socketserver
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from multiprocessing.reduction import ForkingPickler
+from typing import Any, cast
 
 from ._portable import PICKLE_ERRORS, Portable
 
@@ -105,19 +107,19 @@ def select_advertise_host(candidate: str | None = None) -> str:
 
 
 class PipeInbox:
-    """A cross-process inbox over ``multiprocessing.SimpleQueue``.
+    """A cross-process inbox over one ``multiprocessing`` pipe, written and read under locks.
 
     Adapted to the small ``queue.Queue`` API :class:`QueueTransport` uses (``put_nowait`` /
-    ``get_nowait`` /``get(timeout)``).
+    ``get_nowait`` /``get(timeout)``). It is ``multiprocessing.SimpleQueue`` built from the public
+    pipe API, so the timed receive can ``poll`` the read end.
 
     Why not ``multiprocessing.Queue``: that spawns a background **feeder thread per queue** in
     every process that puts to it, so a peer worker writing to its driver + reduction peers ends up
     with ~``log(N)`` extra threads. With workers ≈ cores (the normal HEP batch slot) those
     idle-but-scheduled threads add context-switch pressure that measurably slows the workers'
-    compute (py-spy: 5 threads/worker vs the hub's 1). ``SimpleQueue`` has **no feeder thread** —
+    compute (py-spy: 5 threads/worker vs the hub's 1). This inbox has **no feeder thread** —
     ``put`` writes the pipe synchronously under a lock — so a peer worker holds one extra thread,
-    not ``log(N)``. We wait/poll the reader side, which exposes ``poll(timeout)``, for the timed
-    receives.
+    not ``log(N)``.
 
     ``put_nowait`` therefore **blocks** whenever the message exceeds the OS pipe buffer (~64 KB)
     until the peer reads — a reduction partial (many histograms, or systematic universes) easily
@@ -127,27 +129,37 @@ class PipeInbox:
     """
 
     def __init__(self, ctx: Any) -> None:
-        self._q = ctx.SimpleQueue()
+        self._reader, self._writer = ctx.Pipe(duplex=False)
+        self._rlock = ctx.Lock()
+        # a message-oriented win32 pipe write is atomic, so Windows needs no write lock
+        self._wlock = None if sys.platform == "win32" else ctx.Lock()
 
     def put_nowait(self, item: object) -> None:
         try:
-            self._q.put(item)  # synchronous pipe write (no feeder): BLOCKS past the pipe buffer
-        except PICKLE_ERRORS:  # put pickles before it writes, so nothing reached the pipe
-            self._q.put(Portable(item))
+            payload = ForkingPickler.dumps(item)
+        except PICKLE_ERRORS:  # pickled before any write, so nothing reached the pipe
+            payload = ForkingPickler.dumps(Portable(item))
+        # synchronous pipe write (no feeder): BLOCKS past the pipe buffer
+        if self._wlock is None:
+            self._writer.send_bytes(payload)
+        else:
+            with self._wlock:
+                self._writer.send_bytes(payload)
 
     def get_nowait(self) -> Any:
-        if self._q._reader.poll():
-            return self._q.get()
-        raise queue.Empty
+        return self.get(0.0)
 
     def get(self, timeout: float | None = None) -> Any:
-        if self._q._reader.poll(timeout):
-            return self._q.get()
-        raise queue.Empty
+        if not self._reader.poll(timeout):
+            raise queue.Empty
+        with self._rlock:
+            payload = self._reader.recv_bytes()
+        return ForkingPickler.loads(payload)
 
     def close(self) -> None:
-        with contextlib.suppress(Exception):
-            self._q.close()
+        for end in (self._reader, self._writer):
+            with contextlib.suppress(Exception):
+                end.close()
 
 
 class QueueTransport:
@@ -232,7 +244,7 @@ class _Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         with contextlib.suppress(Exception):
             sender, message = pickle.loads(body)
-            self.server._deliver((sender, message))  # type: ignore[attr-defined]
+            cast(_InboxServer, self.server).deliver((sender, message))
         self.send_response(200)
         self.end_headers()
 
@@ -267,7 +279,7 @@ class _InboxServer(LookupFreeHTTPServer):
         self._inbox: deque[tuple[str, object]] = deque()
         self._lock = threading.Lock()
 
-    def _deliver(self, item: tuple[str, object]) -> None:
+    def deliver(self, item: tuple[str, object]) -> None:
         with self._lock:
             self._inbox.append(item)
 
@@ -321,6 +333,10 @@ class HttpTransport:
 
     def peers(self) -> tuple[str, ...]:
         return tuple(a for a in self._registry if a != self.address)
+
+    def registered(self) -> tuple[str, ...]:
+        """Every address in the registry, this endpoint's own included."""
+        return tuple(self._registry)
 
     def send(self, dest: str, message: object) -> bool:
         if dest not in self._registry or dest == self.address:
