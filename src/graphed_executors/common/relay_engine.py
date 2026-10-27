@@ -50,7 +50,7 @@ from graphed_executors.common.tasks_engine import (
     _result,
     _skey,
 )
-from graphed_executors.local.shuffle import ShuffleResult, _assign, _sha256_hex
+from graphed_executors.local._shuffle_kernels import ShuffleResult, assign, sha256_hex
 
 if TYPE_CHECKING:
     from graphed_executors.submit import SubmitRunner
@@ -100,7 +100,7 @@ def relay_run_repartition(
             salt,
             key=_skey(nonce, "map", i),
         )
-        for i, owned in enumerate(_assign(n_src, t))
+        for i, owned in enumerate(assign(n_src, t))
     ]
     map_outs = [cast("_MapOut", f.result()) for f in map_futs]
     driver_relay_bytes = sum(len(w) for mo in map_outs for w in mo.payload.values())
@@ -166,7 +166,7 @@ def relay_run_join(
     ``broadcast=None`` lets the pinned cost rule choose, keyed on ``parts`` (F6 — never the
     live worker count, so 1-vs-2-worker runs agree); ``True``/``False`` honour a plan-recorded
     choice. ``mem_budget_bytes`` bounds the gather-join working set via the reused
-    ``_join_with_budget`` spill.
+    ``join_with_budget`` spill.
     """
     build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
     probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
@@ -215,7 +215,7 @@ def _relay_shuffle_join(
                 salt,
                 key=_skey(nonce, "lmap", i),
             )
-            for i, owned in enumerate(_assign(n_left, t_l))
+            for i, owned in enumerate(assign(n_left, t_l))
         ]
         if t_l
         else []
@@ -230,7 +230,7 @@ def _relay_shuffle_join(
                 salt,
                 key=_skey(nonce, "rmap", i),
             )
-            for i, owned in enumerate(_assign(n_right, t_r))
+            for i, owned in enumerate(assign(n_right, t_r))
         ]
         if t_r
         else []
@@ -322,7 +322,7 @@ def _relay_broadcast_join(
     # scatter_broadcast=False backend) — head-node routing, tallied like the map barrier so the
     # witness is honest on this arm too.
     handle = runner.backend.broadcast(
-        build_wire, token=f"bjoin-{nonce}-{_sha256_hex(build_wire)[:12]}"
+        build_wire, token=f"bjoin-{nonce}-{sha256_hex(build_wire)[:12]}"
     )
     per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
     track_unmatched = how in ("left", "outer")

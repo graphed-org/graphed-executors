@@ -1,12 +1,12 @@
 """m44 extra witness (non-gating).
 
-The driver-side reader-plane SIZING REPLAY reproduces the real ``_stage2_gather`` byte accounting
+The driver-side reader-plane SIZING REPLAY reproduces the real ``stage2_gather`` byte accounting
 EXACTLY.
 
 The transport engine's reader/disk budget counters (``fetch_spill_count`` / ``peak_fetch_bytes`` /
 ``bulk_fetch_count`` / ``cross_node_fetches`` / ``bytes_transferred`` /
 ``disk_backpressure_events`` / ``per_node_disk_bytes``) are computed by REPLAYING the imported
-``_stage2_gather`` over block SIZES (``common.transport_tasks.replay_reader_plane`` since the m47
+``stage2_gather`` over block SIZES (``common.transport_tasks.replay_reader_plane`` since the m47
 factoring), never re-implementing the accounting. This test pins that the replay equals a REAL
 local ``run_repartition`` on the same inputs/budgets — the guarantee the frozen
 ``test_transport_budget_parity`` relies on, checked here WITHOUT a dask cluster.
@@ -26,13 +26,13 @@ import pytest
 from graphed.numpy import NumpyBackend
 
 from graphed_executors.common.transport_tasks import replay_reader_plane
-from graphed_executors.local.shuffle import (
+from graphed_executors.local._shuffle_kernels import (
     ShuffleWitness,
-    _assign,
-    _coalesce_task,
-    _sha256_hex,
-    run_repartition,
+    assign,
+    coalesce_task,
+    sha256_hex,
 )
+from graphed_executors.local.shuffle import run_repartition
 
 PARTS = 8
 K = 2
@@ -68,13 +68,13 @@ def _driver_manifests(
     """
     manifests: dict[int, dict[int, tuple[str, int]]] = {}
     size_of: dict[str, int] = {}
-    for t, owned in enumerate(_assign(len(src), n_tasks)):
-        per_dest, _peak = _coalesce_task(backend, [src[s] for s in owned], parts, 0)  # type: ignore[arg-type]
+    for t, owned in enumerate(assign(len(src), n_tasks)):
+        per_dest, _peak = coalesce_task(backend, [src[s] for s in owned], parts, 0)  # type: ignore[arg-type]
         holder = t % k
         manifests[t] = {}
         for dest in sorted(per_dest):
             wire = bytes(backend.to_wire(per_dest[dest]))  # type: ignore[attr-defined]
-            digest = _sha256_hex(wire)
+            digest = sha256_hex(wire)
             manifests[t][dest] = (digest, holder)
             size_of[digest] = len(wire)
     return manifests, size_of
@@ -122,7 +122,7 @@ def test_replay_matches_local_stage2_gather(
         disk_budget=disk_budget,
     )
     assert _reader_counters(replay) == _reader_counters(local.witness), (
-        f"replay diverged from the real _stage2_gather at fetch={fetch_budget}, disk={disk_budget}"
+        f"replay diverged from the real stage2_gather at fetch={fetch_budget}, disk={disk_budget}"
     )
     # the per-node disk map must be keyed by the passed (worker) addresses, never the local node-i
     # tags

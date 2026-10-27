@@ -24,7 +24,7 @@ Graph shape (plan §1.3.4)::
                  (ascending-producer-task concat = the deterministic merge; worker-side sha256)
     root:    the driver assembles the ShuffleResult (value, dest_block_hashes, DaskShuffleWitness)
 
-Determinism: ``_assign`` gives producer tasks contiguous ascending src ranges and gathers concat in
+Determinism: ``assign`` gives producer tasks contiguous ascending src ranges and gathers concat in
 ascending-task order, so a dest's rows assemble in ascending-src order regardless of worker count —
 ``dest_block_hashes`` are byte-identical across two dask runs AND equal to the local engine's on
 the same inputs (the headline cross-engine gate).
@@ -49,13 +49,13 @@ from graphed.core import ShuffleBackend
 from graphed.core.execution import JoinBackend
 from graphed.shuffle import broadcast_join_choice
 
-from graphed_executors.local.shuffle import (
+from graphed_executors.local._shuffle_kernels import (
     ShuffleResult,
     ShuffleWitness,
-    _assign,
-    _coalesce_task,
-    _join_with_budget,
-    _sha256_hex,
+    assign,
+    coalesce_task,
+    join_with_budget,
+    sha256_hex,
 )
 from graphed_executors.submit.engine import current_env
 
@@ -76,9 +76,9 @@ class DaskShuffleWitness:
     n_producer_tasks: int = 0  # T
     # task -> non-empty dests <= P
     blocks_per_producer_task: dict[int, int] = field(default_factory=dict)
-    peak_writer_buffer_bytes: int = 0  # the reused ``_coalesce_task`` streaming bound
+    peak_writer_buffer_bytes: int = 0  # the reused ``coalesce_task`` streaming bound
     broadcast_chosen: bool = False  # the honoured F6 plan choice
-    peak_join_bytes: int = 0  # reused ``_join_with_budget`` (B5)
+    peak_join_bytes: int = 0  # reused ``join_with_budget`` (B5)
     join_spilled_partitions: int = 0
     join_output_rows: int = 0
     # task -> (pid, address)
@@ -132,7 +132,7 @@ def _site() -> tuple[int, str]:
 
 
 class _WorkerStore:
-    """A minimal ``cluster`` stand-in for the reused ``_join_with_budget`` disk-spill.
+    """A minimal ``cluster`` stand-in for the reused ``join_with_budget`` disk-spill.
 
     Its only use of ``cluster`` is ``store_dir(node_i)``. The budgeted join's radix partitions
     spill to a worker-local temp dir and are read back (the kernel's F5 contract);
@@ -194,10 +194,10 @@ class _JoinOut:
 def _dask_map_write(backend: Any, owned_blocks: Sequence[Any], parts: int, salt: int) -> _MapOut:
     """Route + coalesce one producer task's owned src blocks into <= P dest blocks.
 
-    Then to_wire each (worker-side). Reuses ``_coalesce_task`` (ascending-src merge, O(P·rg) writer
+    Then to_wire each (worker-side). Reuses ``coalesce_task`` (ascending-src merge, O(P·rg) writer
     buffer) verbatim.
     """
-    per_dest, peak = _coalesce_task(backend, owned_blocks, parts, salt)
+    per_dest, peak = coalesce_task(backend, owned_blocks, parts, salt)
     payload = {dest: bytes(backend.to_wire(block)) for dest, block in per_dest.items()}
     return _MapOut(payload=payload, blocks=len(per_dest), peak=peak, site=_site())
 
@@ -221,7 +221,7 @@ def _dask_gather(backend: Any, dest: int, *picks: bytes | None) -> _GatherOut | 
     if not blocks:
         return None  # no producer wrote this dest
     gathered = backend.concat(blocks)
-    return _GatherOut(dest, gathered, _sha256_hex(backend.to_wire(gathered)), _site())
+    return _GatherOut(dest, gathered, sha256_hex(backend.to_wire(gathered)), _site())
 
 
 def _dask_gather_join(
@@ -237,7 +237,7 @@ def _dask_gather_join(
 ) -> _JoinOut | None:
     """Gather one dest's co-partitioned build/probe blocks (ascending-task order) and join them.
 
-    Spilling under ``mem_budget`` via the reused ``_join_with_budget``. F1 one-sided-dest handling
+    Spilling under ``mem_budget`` via the reused ``join_with_budget``. F1 one-sided-dest handling
     mirrors ``_run_shuffle_join``: a build-only dest under how=left/outer null-fills against the
     probe schema carrier (``right_carrier``), and vice versa; a partitionless absent side (carrier
     ``None``) keeps the present rows as-is.
@@ -257,20 +257,20 @@ def _dask_gather_join(
         if right_carrier is None:  # partitionless probe side -> keep the build rows (never drop)
             blk = backend.concat(build_side)
             return _JoinOut(
-                dest, [blk], [_sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
+                dest, [blk], [sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
             )
         build, probe, how_here = backend.concat(build_side), right_carrier, "left"
     else:
         if left_carrier is None:  # partitionless build side -> keep the probe rows (never drop)
             blk = backend.concat(probe_side)
             return _JoinOut(
-                dest, [blk], [_sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
+                dest, [blk], [sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
             )
         build, probe, how_here = left_carrier, backend.concat(probe_side), "right"
 
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, _read = _join_with_budget(
+        chunks, hashes, peak, spilled, rows, _read = join_with_budget(
             backend, build, probe, on, how_here, mem_budget, store, 0
         )
     finally:
@@ -304,7 +304,7 @@ def _dask_broadcast_join_part(
         matched = tuple(int(x) for x in b_idx)
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, _read = _join_with_budget(
+        chunks, hashes, peak, spilled, rows, _read = join_with_budget(
             backend, build, probe_block, on, how, mem_budget, store, 0
         )
     finally:
@@ -342,7 +342,7 @@ def dask_run_repartition(
             salt,
             key=_skey(nonce, "map", i),
         )
-        for i, owned in enumerate(_assign(n_src, t))
+        for i, owned in enumerate(assign(n_src, t))
     ]
     picks = {
         (i, dest): submit(_dask_pick, f, dest, key=_skey(nonce, "pick", i, dest))
@@ -409,7 +409,7 @@ def dask_run_join(
     ``broadcast=None`` lets the pinned cost rule choose, keyed on ``parts`` (F6 — never the
     live worker count); ``True``/``False`` honour a plan-recorded choice. ``mem_budget_bytes``
     bounds the gather-join working set by spilling duplicated OUTPUT partitions (the reused
-    ``_join_with_budget``).
+    ``join_with_budget``).
     """
     _require_peer(runner.backend)
     build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
@@ -456,7 +456,7 @@ def _shuffle_join(
                 salt,
                 key=_skey(nonce, "lmap", i),
             )
-            for i, owned in enumerate(_assign(n_left, t_l))
+            for i, owned in enumerate(assign(n_left, t_l))
         ]
         if t_l
         else []
@@ -471,7 +471,7 @@ def _shuffle_join(
                 salt,
                 key=_skey(nonce, "rmap", i),
             )
-            for i, owned in enumerate(_assign(n_right, t_r))
+            for i, owned in enumerate(assign(n_right, t_r))
         ]
         if t_r
         else []
@@ -560,7 +560,7 @@ def _broadcast_join(
     build_concat = backend.concat(list(left_blocks))
     build_wire = bytes(backend.to_wire(build_concat))
     handle = runner.backend.broadcast(
-        build_wire, token=f"bjoin-{nonce}-{_sha256_hex(build_wire)[:12]}"
+        build_wire, token=f"bjoin-{nonce}-{sha256_hex(build_wire)[:12]}"
     )
     per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
     track_unmatched = how in ("left", "outer")

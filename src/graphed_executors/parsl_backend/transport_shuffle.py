@@ -6,9 +6,9 @@ announces a manifest to the driver, awaits the driver's aggregated pull assignme
 owned dests' fragments peer→peer over ``/pull`` (coalesced one request per holder,
 evict-after-serve) and gathers/joins them. Bytes move peer↔peer over the block plane; only the
 final dest blocks + the counters ride the task return (once, like the m44 dask returns).
-Reader-plane fetch budgets are a driver-side replay of the imported ``_stage2_gather``
+Reader-plane fetch budgets are a driver-side replay of the imported ``stage2_gather``
 (``common.transport_tasks.replay_reader_plane``, the SAME code the dask job gates); join budgets
-are the real per-dest ``_join_with_budget``.
+are the real per-dest ``join_with_budget``.
 
 Reuses the driver primitives (barrier / registry / probe / restart) from ``transport_peer``;
 imports NOTHING from parsl or ``dask_backend`` (F13 / G9).
@@ -32,7 +32,7 @@ from graphed_executors.common.transport_tasks import (
     map_task_body,
     replay_reader_plane,
 )
-from graphed_executors.local.shuffle import ShuffleWitness, _assign, _sha256_hex
+from graphed_executors.local._shuffle_kernels import ShuffleWitness, assign, sha256_hex
 
 from .transport_peer import (
     DRIVER,
@@ -199,7 +199,7 @@ def _gather_repartition(
             continue
         gathered = backend.concat(blocks)
         value[dest] = gathered
-        hashes[dest] = _sha256_hex(bytes(backend.to_wire(gathered)))
+        hashes[dest] = sha256_hex(bytes(backend.to_wire(gathered)))
     return value, hashes, {}
 
 
@@ -541,7 +541,7 @@ def transport_run_repartition(
         nonce: str, driver_ep: Any, worker_addrs: tuple[str, ...], k: int, i: int, addr: str
     ) -> dict[str, Any]:
         t = min(k, n_src) if n_src else 0
-        owned = [src_blocks[s] for s in _assign(n_src, t)[i]] if (n_src and i < t) else []
+        owned = [src_blocks[s] for s in assign(n_src, t)[i]] if (n_src and i < t) else []
         return {
             "kind": "repartition",
             "addr": addr,
@@ -636,7 +636,7 @@ def transport_run_join(
 
     SHUFFLE join — the peer plane never head-node-routes a broadcast build side; ``broadcast``
     is accepted but the shuffle path is always taken. Rows == the local ``run_join``;
-    ``mem_budget_bytes`` bounds the per-dest ``_join_with_budget``.
+    ``mem_budget_bytes`` bounds the per-dest ``join_with_budget``.
     """
     n_left, n_right = len(left_blocks), len(right_blocks)
     left_carrier = left_blocks[0] if left_blocks else None
@@ -648,10 +648,10 @@ def transport_run_join(
         t_l = min(k, n_left) if n_left else 0
         t_r = min(k, n_right) if n_right else 0
         owned_left = (
-            [left_blocks[s] for s in _assign(n_left, t_l)[i]] if (n_left and i < t_l) else []
+            [left_blocks[s] for s in assign(n_left, t_l)[i]] if (n_left and i < t_l) else []
         )
         owned_right = (
-            [right_blocks[s] for s in _assign(n_right, t_r)[i]] if (n_right and i < t_r) else []
+            [right_blocks[s] for s in assign(n_right, t_r)[i]] if (n_right and i < t_r) else []
         )
         return {
             "kind": "join",
