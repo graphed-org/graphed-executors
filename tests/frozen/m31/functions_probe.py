@@ -9,7 +9,7 @@ from graphed.core import Partition, Plan, Task
 
 
 def _sum_proc(partition: Partition, resources: object) -> np.ndarray:
-    return np.asarray([partition.entry_start])
+    return cast("np.ndarray", np.asarray([partition.entry_start]))
 
 
 def _add(a: np.ndarray, b: np.ndarray) -> np.ndarray:

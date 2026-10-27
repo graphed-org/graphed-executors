@@ -26,7 +26,7 @@ def _count_calls(partition: Partition, resources: object) -> np.ndarray:
     """
     global _calls
     _calls += 1
-    return np.asarray([_calls], dtype=np.int64)
+    return cast("np.ndarray", np.asarray([_calls], dtype=np.int64))
 
 
 def _concat(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -34,7 +34,7 @@ def _concat(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def _empty() -> np.ndarray:
-    return np.asarray([], dtype=np.int64)
+    return cast("np.ndarray", np.asarray([], dtype=np.int64))
 
 
 def _plan(n: int = 4) -> Plan[np.ndarray]:

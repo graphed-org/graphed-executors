@@ -227,6 +227,19 @@ disallow_subclassing_any = false
 module = ["tests.frozen.m69a.data.make_hgg_fixture"]
 disable_error_code = ["misc", "no-untyped-call", "no-untyped-def"]
 
+# POSIX-only names (signal.SIGKILL, os.getsid) in tests that skip on Windows; mypy on the
+# Windows legs cannot see the skip, and a platform guard would change frozen runtime code.
+# m68d_harness's own `type: ignore[attr-defined]` is then unused, hence unused-ignore.
+[[tool.mypy.overrides]]
+module = [
+  "tests.frozen.m47.test_parsl_worker_death",
+  "tests.frozen.m68d.m68d_harness",
+  "tests.frozen.m68d.test_liveness_live",
+  "tests.frozen.m68d.test_service_restart",
+  "tests.frozen.m74.m74_harness",
+]
+disable_error_code = ["attr-defined", "unused-ignore"]
+
 # graphed_exec_local's submodules exist only as sys.modules aliases of graphed_executors.local's.
 [[tool.mypy.overrides]]
 module = ["graphed_exec_local.*"]
