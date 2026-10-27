@@ -18,8 +18,7 @@ from graphed.aggregate import aggregate_plan
 from graphed.awkward import AwkwardBackend, AwkwardForm, gak
 from graphed.core.execution import LocalResources, Partition
 
-import graphed_executors.local.executors as local_executors
-from graphed_executors.local import ProcessPoolExecutor
+from graphed_executors.local import ProcessPoolExecutor, _driver
 from graphed_executors.local._peer import make_bounds, process_and_reduce
 
 
@@ -27,7 +26,7 @@ from graphed_executors.local._peer import make_bounds, process_and_reduce
 def test_an_unpicklable_partial_surfaces_its_pickling_error_promptly(
     comms: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(local_executors, "_PEER_ROOT_TIMEOUT_S", 30.0)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 30.0)
     session = Session(AwkwardBackend())
     form = AwkwardForm(ak.Array(EVENTS.layout.to_typetracer(forget_length=True)))
     ev = session.source("events", form=form, data=Events(EVENTS))

@@ -10,7 +10,7 @@ import m65a_probe as mp
 import pytest
 from graphed.core import StopReason, TaskPhase
 
-from graphed_executors.local import executors
+from graphed_executors.local import _process_peer
 from graphed_executors.local._peer import http_driver_handshake
 
 ONES = (1,) * mp.N
@@ -42,7 +42,7 @@ def test_nodes_that_beat_a_workers_registry_still_form_the_root(
         driver_t.send = send
         http_driver_handshake(driver_t, addrs, **kw)
 
-    monkeypatch.setattr(executors, "http_driver_handshake", late_w0)
+    monkeypatch.setattr(_process_peer, "http_driver_handshake", late_w0)
     rec = mp.Recorder()
     real_on_task = rec.on_task
 

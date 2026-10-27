@@ -35,7 +35,7 @@ from graphed_executors.common.transport_tasks import (
     map_task_body,
     replay_reader_plane,
 )
-from graphed_executors.local.shuffle import ShuffleWitness, _assign, _sha256_hex
+from graphed_executors.local._shuffle_kernels import ShuffleWitness, assign, sha256_hex
 
 from ._transport_run import (
     TransportShuffleResult,
@@ -206,7 +206,7 @@ def transport_run_repartition(
     require_pin(dbackend)
     from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
 
-    ensure_engine_plugins(dbackend._client)  # the submit shim needs graphed-worker; idempotent
+    ensure_engine_plugins(dbackend.client)  # the submit shim needs graphed-worker; idempotent
     n_src = len(src_blocks)
 
     def _attempt(
@@ -225,7 +225,7 @@ def transport_run_repartition(
                 workers=[addresses[i % k]],
                 retries=0,
             )
-            for i, owned in enumerate(_assign(n_src, t))
+            for i, owned in enumerate(assign(n_src, t))
         ]
         manifests, size_of, blocks_per, peak_writer = _collect_maps(map_futs, k)
         witness = replay_reader_plane(
@@ -301,7 +301,7 @@ def transport_run_join(
     ``broadcast=None`` lets the pinned ``parts``-keyed cost rule choose (F6 — never the live
     worker count); ``True``/``False`` honour a plan-recorded choice. Shuffle path: two
     co-partitioned repartitions (same ``salt``) + P per-dest ``_transport_gather_join`` tasks
-    reusing ``_join_with_budget`` (spill counters match the local engine exactly). Broadcast
+    reusing ``join_with_budget`` (spill counters match the local engine exactly). Broadcast
     path: the build side ships once via ``dbackend.broadcast`` and each probe block is joined
     by a pinned ``_transport_broadcast_join_part`` — the large side never shuffles.
     ``holder_budget_bytes`` bounds BOTH sides' producer retention on the shuffle path (F12,
@@ -312,7 +312,7 @@ def transport_run_join(
     require_pin(dbackend)
     from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
 
-    ensure_engine_plugins(dbackend._client)
+    ensure_engine_plugins(dbackend.client)
     on_t = tuple(on)
     build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
     probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
@@ -404,7 +404,7 @@ def _shuffle_join_attempt(
             workers=[addresses[i % k]],
             retries=0,
         )
-        for i, owned in enumerate(_assign(n_left, t_l) if t_l else [])
+        for i, owned in enumerate(assign(n_left, t_l) if t_l else [])
     ]
     right_maps = [
         dbackend.submit(
@@ -419,7 +419,7 @@ def _shuffle_join_attempt(
             workers=[addresses[i % k]],
             retries=0,
         )
-        for i, owned in enumerate(_assign(n_right, t_r) if t_r else [])
+        for i, owned in enumerate(assign(n_right, t_r) if t_r else [])
     ]
     left_manifests, _lsz, _lbp, _lpw = _collect_maps(left_maps, k)
     right_manifests, _rsz, _rbp, _rpw = _collect_maps(right_maps, k)
@@ -516,7 +516,7 @@ def _broadcast_join_attempt(
     build_concat = backend.concat(list(left))
     build_wire = bytes(backend.to_wire(build_concat))
     handle = dbackend.broadcast(
-        build_wire, token=f"bjoin-{spec.epoch}-{_sha256_hex(build_wire)[:12]}"
+        build_wire, token=f"bjoin-{spec.epoch}-{sha256_hex(build_wire)[:12]}"
     )
     per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
     track_unmatched = how in ("left", "outer")
@@ -637,13 +637,13 @@ def _run_with_restarts(
         try:
             value, hashes, witness = attempt_fn(spec, addresses, k, t)
         except BaseException as exc:  # (classify: restart or attributed StageError)
-            collect_and_purge(dbackend._client, nonce, per_worker)
+            collect_and_purge(dbackend.client, nonce, per_worker)
             last_exc = exc
             if not is_restart_worthy(exc, dbackend) or attempt >= epoch_restarts_allowed:
                 transport.per_worker = per_worker
                 raise build_stage_error(exc, dbackend) from exc
             continue
-        collect_and_purge(dbackend._client, nonce, per_worker)
+        collect_and_purge(dbackend.client, nonce, per_worker)
         transport.epoch_restarts = attempt
         transport.per_worker = per_worker
         return TransportShuffleResult(

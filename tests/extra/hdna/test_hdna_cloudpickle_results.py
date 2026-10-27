@@ -39,7 +39,7 @@ from graphed_executors.htcondor_backend import (
     driver,
     pilot,
 )
-from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor
+from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor, _driver
 from graphed_executors.local._portable import Portable
 from graphed_executors.local._transport import PipeInbox, build_transports
 
@@ -83,7 +83,7 @@ def _run(route: str, plan: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
         backend = HTCondorBackend(LocalPilots(pythonpath=[HERE]), 2, host="127.0.0.1")
         with HTCondorRunner(backend) as runner:
             return runner.run(plan).value
-    monkeypatch.setattr(local_executors, "_PEER_ROOT_TIMEOUT_S", 60.0)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 60.0)
     cls, kwargs = ROUTES[route]
     return cls(max_workers=2, **kwargs).run(plan).value
 

@@ -25,12 +25,12 @@ from typing import Any
 
 # the m43 join-spill dir (dask-free)
 from graphed_executors.common.tasks_engine import _WorkerStore
-from graphed_executors.local.shuffle import (
+from graphed_executors.local._shuffle_kernels import (
     ShuffleWitness,
-    _coalesce_task,
-    _join_with_budget,
-    _sha256_hex,
-    _stage2_gather,
+    coalesce_task,
+    join_with_budget,
+    sha256_hex,
+    stage2_gather,
 )
 
 
@@ -79,20 +79,20 @@ def map_task_body(
 ) -> _MapFrag:
     """Stage-1 producer.
 
-    Coalesce this task's owned src blocks into <= P dest wires (reused ``_coalesce_task``:
+    Coalesce this task's owned src blocks into <= P dest wires (reused ``coalesce_task``:
     ascending-src merge, O(P*rg) writer buffer) and REGISTER each in the holder's block store
     via ``plane.store_block``. F12 holder plane: a dest wire that pushes producer-local RAM
     past ``holder_budget`` spills to disk (``holder_spill_count`` / ``peak_holder_bytes``).
     Returns only the manifest + sizes (bytes stay resident for the gather to pull).
     """
-    per_dest, peak_writer = _coalesce_task(backend, owned_blocks, parts, salt)
+    per_dest, peak_writer = coalesce_task(backend, owned_blocks, parts, salt)
     manifest: dict[int, tuple[str, int]] = {}
     resident = 0
     peak_holder = 0
     spills = 0
     for dest in sorted(per_dest):
         wire = bytes(backend.to_wire(per_dest[dest]))
-        digest = _sha256_hex(wire)
+        digest = sha256_hex(wire)
         resident += len(wire)
         peak_holder = max(peak_holder, resident)
         to_disk = holder_budget is not None and resident > holder_budget
@@ -114,7 +114,7 @@ def pull_ordered(
     One request per holder (the T2 bound); the fragments are then decoded back in the caller's
     ascending-task order (the deterministic merge). Byte-identical fragments (same digest from >1
     task) share one wire but are re-materialised per manifest entry (parity with
-    ``_stage2_gather``).
+    ``stage2_gather``).
     """
     by_holder: dict[str, list[str]] = {}
     for holder_addr, digest in pulls:
@@ -138,7 +138,7 @@ def gather_task_body(
     if not blocks:
         return None
     gathered = backend.concat(blocks)
-    return _GatherOut(dest, gathered, _sha256_hex(bytes(backend.to_wire(gathered))))
+    return _GatherOut(dest, gathered, sha256_hex(bytes(backend.to_wire(gathered))))
 
 
 def gather_join_body(
@@ -156,7 +156,7 @@ def gather_join_body(
 ) -> _JoinOut | None:
     """Gather one dest's co-partitioned build/probe fragments and join them.
 
-    Under ``mem_budget`` via the reused ``_join_with_budget``. F1 one-sided-dest handling mirrors
+    Under ``mem_budget`` via the reused ``join_with_budget``. F1 one-sided-dest handling mirrors
     ``_run_shuffle_join``: a build-only dest under how=left/outer null-fills against the probe
     carrier, and vice versa; a partitionless absent side (carrier ``None``) keeps the present rows
     as-is (never dropped).
@@ -176,20 +176,20 @@ def gather_join_body(
         if right_carrier is None:  # partitionless probe side -> keep the build rows (never drop)
             blk = backend.concat(build_side)
             return _JoinOut(
-                dest, [blk], [_sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0
+                dest, [blk], [sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0
             )
         build, probe, how_here = backend.concat(build_side), right_carrier, "left"
     else:
         if left_carrier is None:  # partitionless build side -> keep the probe rows (never drop)
             blk = backend.concat(probe_side)
             return _JoinOut(
-                dest, [blk], [_sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0
+                dest, [blk], [sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0
             )
         build, probe, how_here = left_carrier, backend.concat(probe_side), "right"
 
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, read = _join_with_budget(
+        chunks, hashes, peak, spilled, rows, read = join_with_budget(
             backend, build, probe, on, how_here, mem_budget, store, 0
         )
     finally:
@@ -222,7 +222,7 @@ def broadcast_join_part_body(
         matched = tuple(int(x) for x in b_idx)
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, read = _join_with_budget(
+        chunks, hashes, peak, spilled, rows, read = join_with_budget(
             backend, build, probe_block, on, how, mem_budget, store, 0
         )
     finally:
@@ -239,7 +239,7 @@ class _Sized:
 class _SizingBackend:
     """A size-only ``ShuffleBackend`` stand-in.
 
-    A block IS its wire length, so replaying ``_stage2_gather`` reproduces the reader-plane
+    A block IS its wire length, so replaying ``stage2_gather`` reproduces the reader-plane
     byte accounting WITHOUT moving or decoding data.
     """
 
@@ -300,14 +300,14 @@ def replay_reader_plane(
 ) -> ShuffleWitness:
     """Reproduce the reference reader/disk-plane counters.
 
-    By running the imported ``_stage2_gather`` over the fragment SIZES (size-only backend +
+    By running the imported ``stage2_gather`` over the fragment SIZES (size-only backend +
     worker-address-keyed size-only cluster) — byte-identical to the local engine on identical
     inputs/budgets because the kernel is reused verbatim.
     """
     witness = ShuffleWitness(n_producer_tasks=n_tasks)
     cluster = _SizingCluster(addresses, size_of)
     try:
-        _stage2_gather(
+        stage2_gather(
             _SizingBackend(),  # type: ignore[arg-type]
             parts,
             n_tasks,

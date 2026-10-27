@@ -6,9 +6,9 @@ announces a manifest to the driver, awaits the driver's aggregated pull assignme
 owned dests' fragments peer→peer over ``/pull`` (coalesced one request per holder,
 evict-after-serve) and gathers/joins them. Bytes move peer↔peer over the block plane; only the
 final dest blocks + the counters ride the task return (once, like the m44 dask returns).
-Reader-plane fetch budgets are a driver-side replay of the imported ``_stage2_gather``
+Reader-plane fetch budgets are a driver-side replay of the imported ``stage2_gather``
 (``common.transport_tasks.replay_reader_plane``, the SAME code the dask job gates); join budgets
-are the real per-dest ``_join_with_budget``.
+are the real per-dest ``join_with_budget``.
 
 Reuses the driver primitives (barrier / registry / probe / restart) from ``transport_peer``;
 imports NOTHING from parsl or ``dask_backend`` (F13 / G9).
@@ -19,6 +19,8 @@ from __future__ import annotations
 import time
 import uuid
 from typing import Any
+
+from graphed.debug import SourceFrame, StageError
 
 from graphed_executors.common.http_plane import PullTimeoutError
 from graphed_executors.common.transport_run import (
@@ -32,9 +34,10 @@ from graphed_executors.common.transport_tasks import (
     map_task_body,
     replay_reader_plane,
 )
-from graphed_executors.local.shuffle import ShuffleWitness, _assign, _sha256_hex
+from graphed_executors.local._shuffle_kernels import ShuffleWitness, assign, sha256_hex
 
 from .transport_peer import (
+    _BARRIER_DEFAULT_S,
     DRIVER,
     ProbeUnreachableError,
     _barrier_and_registry,
@@ -46,6 +49,7 @@ from .transport_peer import (
     _future_errored,
     _merge_peer,
     _open_driver_endpoint,
+    _parsl_peer_main,
     _release,
     _resolve_k,
     _sender_counters,
@@ -199,7 +203,7 @@ def _gather_repartition(
             continue
         gathered = backend.concat(blocks)
         value[dest] = gathered
-        hashes[dest] = _sha256_hex(bytes(backend.to_wire(gathered)))
+        hashes[dest] = sha256_hex(bytes(backend.to_wire(gathered)))
     return value, hashes, {}
 
 
@@ -352,8 +356,6 @@ def _run_shuffle(
     Seat k peers, rendezvous+probe, aggregate manifests, broadcast the pull assignment, collect
     results, and restart the whole run on a restart-worthy failure.
     """
-    from .transport_peer import _BARRIER_DEFAULT_S  # noqa: PLC0415
-
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
     transport = TransportWitness()
     per_worker: dict[str, dict[str, int]] = {}
@@ -372,8 +374,11 @@ def _run_shuffle(
         driver_counts: dict[str, int] = {}
         futures = {
             addr: pbackend.submit(
-                _parsl_peer_main_ref(),
-                make_peer_spec(nonce, driver_ep, worker_addrs, k, i, addr),
+                _parsl_peer_main,
+                {
+                    **make_peer_spec(nonce, driver_ep, worker_addrs, k, i, addr),
+                    "body": _peer_shuffle_body,
+                },
                 key=f"graphed-parsl-shuffle-{nonce}-{i}",
                 # ponytail: k persistent tasks gang-schedule by slot saturation
                 # (pin_to_worker=False)
@@ -437,9 +442,6 @@ def _shuffle_stage_error(exc: BaseException, pbackend: Any) -> Any:
     losing the parsl signal whose ``str`` never carries its class name), the m47 driver layers the
     victim-worker context on top of the named signal (backend.describe_failure's own note).
     """
-    # error path; dask/parsl-free
-    from graphed.debug import SourceFrame, StageError  # noqa: PLC0415
-
     describe = getattr(pbackend, "describe_failure", None)
     info = describe(exc) if describe is not None else None
     worker = f" (worker: {info[1]})" if info is not None else ""
@@ -508,12 +510,6 @@ def _drive_shuffle_attempt(
 _PROBE_COLLECT_S = 15.0
 
 
-def _parsl_peer_main_ref() -> Any:
-    from .transport_peer import _parsl_peer_main  # noqa: PLC0415
-
-    return _parsl_peer_main
-
-
 # ---- public entry points ------------------------------------------------------------------------
 def transport_run_repartition(
     backend: Any,
@@ -541,7 +537,7 @@ def transport_run_repartition(
         nonce: str, driver_ep: Any, worker_addrs: tuple[str, ...], k: int, i: int, addr: str
     ) -> dict[str, Any]:
         t = min(k, n_src) if n_src else 0
-        owned = [src_blocks[s] for s in _assign(n_src, t)[i]] if (n_src and i < t) else []
+        owned = [src_blocks[s] for s in assign(n_src, t)[i]] if (n_src and i < t) else []
         return {
             "kind": "repartition",
             "addr": addr,
@@ -636,7 +632,7 @@ def transport_run_join(
 
     SHUFFLE join — the peer plane never head-node-routes a broadcast build side; ``broadcast``
     is accepted but the shuffle path is always taken. Rows == the local ``run_join``;
-    ``mem_budget_bytes`` bounds the per-dest ``_join_with_budget``.
+    ``mem_budget_bytes`` bounds the per-dest ``join_with_budget``.
     """
     n_left, n_right = len(left_blocks), len(right_blocks)
     left_carrier = left_blocks[0] if left_blocks else None
@@ -648,10 +644,10 @@ def transport_run_join(
         t_l = min(k, n_left) if n_left else 0
         t_r = min(k, n_right) if n_right else 0
         owned_left = (
-            [left_blocks[s] for s in _assign(n_left, t_l)[i]] if (n_left and i < t_l) else []
+            [left_blocks[s] for s in assign(n_left, t_l)[i]] if (n_left and i < t_l) else []
         )
         owned_right = (
-            [right_blocks[s] for s in _assign(n_right, t_r)[i]] if (n_right and i < t_r) else []
+            [right_blocks[s] for s in assign(n_right, t_r)[i]] if (n_right and i < t_r) else []
         )
         return {
             "kind": "join",

@@ -21,6 +21,7 @@ This module imports NOTHING from parsl at load (the ``_lazy`` accessor + the par
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, InvalidStateError
 from contextlib import suppress
@@ -139,9 +140,7 @@ class ParslBackend:
         """Return the number of workers, waiting a bounded time for HTEX managers to register."""
         if not self._is_htex:
             return int(self._executor.max_threads)
-        # stdlib; the bounded manager-registration wait, not an assertion
-        import time  # noqa: PLC0415
-
+        # the bounded manager-registration wait, not an assertion
         deadline = time.monotonic() + _N_WORKERS_WAIT_S
         total = self._count_htex_workers()
         while total == 0 and time.monotonic() < deadline:

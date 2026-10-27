@@ -18,13 +18,10 @@ from pathlib import Path
 
 import pytest
 
-import graphed_executors.local.shuffle as shuffle_mod
+import graphed_executors.local._routable_store as routable_mod
+from graphed_executors.local._routable_store import _store_server_handler
 from graphed_executors.local._transport import LookupFreeHTTPServer
-from graphed_executors.local.shuffle import (
-    _make_block_handler,
-    _make_cluster,
-    _store_server_handler,
-)
+from graphed_executors.local.shuffle import _make_block_handler, _make_cluster
 
 
 def test_make_cluster_rejects_an_unknown_comms_kind() -> None:
@@ -81,11 +78,11 @@ def test_routable_store_child_serves_over_a_real_socket_and_announces_ready(
             super().__init__(*a, **k)  # type: ignore[arg-type]
             captured.append(self)
 
-    monkeypatch.setattr(shuffle_mod, "LookupFreeHTTPServer", _CapturingServer)
+    monkeypatch.setattr(routable_mod, "LookupFreeHTTPServer", _CapturingServer)
     # Fix the advertise host instead of letting the child auto-detect one: detection dials the
     # runner's real network (select_advertise_host(None)) and has no bound on a sandboxed/offline
     # CI host, which timed out the ready_q.get() below on macOS runners.
-    monkeypatch.setattr(shuffle_mod, "select_advertise_host", lambda _host: "127.0.0.1")
+    monkeypatch.setattr(routable_mod, "select_advertise_host", lambda _host: "127.0.0.1")
     ready_q: queue_mod.Queue[tuple[int, str, int, int]] = queue_mod.Queue()
     errors: list[BaseException] = []
 
@@ -93,7 +90,7 @@ def test_routable_store_child_serves_over_a_real_socket_and_announces_ready(
         try:
             # `advertise_host` is annotated `str` but select_advertise_host (monkeypatched above)
             # accepts None for auto-detect; real callers always pass a concrete host.
-            shuffle_mod._routable_store_child(0, tmp, None, ready_q)  # type: ignore[arg-type]
+            routable_mod._routable_store_child(0, tmp, None, ready_q)  # type: ignore[arg-type]
         except BaseException as exc:  # surfaced by the test instead of a silent hang on ready_q
             errors.append(exc)
 

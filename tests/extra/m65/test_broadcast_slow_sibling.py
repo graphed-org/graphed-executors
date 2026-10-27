@@ -60,6 +60,6 @@ def test_a_worker_still_booting_at_the_deadline_is_refused(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _late_sibling(monkeypatch, tmp_path, 3.0)
-    monkeypatch.setattr(executors, "_WORKER_START_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(executors.ProcessPoolExecutor, "_worker_start_timeout_s", 0.5)
     with pytest.raises(RuntimeError, match=r"broadcast reached only 1/2 workers in \d+\.\ds"):
         executors.ProcessPoolExecutor(max_workers=2, comms=None).run(mp.make_plan(mp.Probe()))

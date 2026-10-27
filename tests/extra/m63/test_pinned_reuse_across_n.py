@@ -15,7 +15,7 @@ import pytest
 from graphed.core import Partition, Plan, Task
 
 import graphed_executors.local._peer as _peer
-import graphed_executors.local.executors as executors
+from graphed_executors.local import _driver
 from graphed_executors.local._peer import DRIVER, make_bounds, worker_outbox_addresses
 from graphed_executors.local._pinned_pool import PinnedProcessPool
 from graphed_executors.local._reduce import tree_reduce
@@ -28,7 +28,7 @@ SPAWN_N = 9
 @pytest.fixture(autouse=True)
 def _bounded_root_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     # a lost node fails in a minute, not five
-    monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", 60.0)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 60.0)
 
 
 def _cat(a: str, b: str) -> str:

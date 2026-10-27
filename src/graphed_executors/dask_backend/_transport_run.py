@@ -81,7 +81,7 @@ def sorted_addresses(dbackend: Any) -> tuple[str, ...]:
     failure). A live cluster always has workers, so on empty we force the client to observe >= 1
     (clock-free: distributed's own bounded wait, no sleep here) and re-read.
     """
-    client = dbackend._client
+    client = dbackend.client
     workers = client.scheduler_info()["workers"]
     if not workers:
         with contextlib.suppress(Exception):

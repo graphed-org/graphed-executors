@@ -333,7 +333,7 @@ class _Client:
 
 class _Backend:
     def __init__(self) -> None:
-        self._client = _Client()
+        self.client = _Client()
         self.topics: list[str] = []
         self.unsubscribed = 0
 
@@ -355,7 +355,7 @@ def test_driver_endpoint_puts_to_targets_and_drains_what_workers_logged() -> Non
 
     driver.send(_PEER, "unicast")
     driver.broadcast("to-all")
-    assert [(msg, targets) for _epoch, msg, targets in backend._client.runs] == [
+    assert [(msg, targets) for _epoch, msg, targets in backend.client.runs] == [
         ("unicast", [_PEER]),
         ("to-all", [_ADDR, _PEER]),
     ]

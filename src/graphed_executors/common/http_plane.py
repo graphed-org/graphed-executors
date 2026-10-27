@@ -143,6 +143,7 @@ class _DualRouteServer(LookupFreeHTTPServer):
         """
         try:
             sender, epoch, message = pickle.loads(body)
+        # unpickling raises many types; a garbled body is dropped, never served
         except Exception:
             return 200
         if epoch != self._epoch:  # the run-nonce guard: never deliver dead-epoch traffic, count it
@@ -178,6 +179,7 @@ class _DualRouteServer(LookupFreeHTTPServer):
         """
         try:
             _epoch, digests = pickle.loads(body)
+        # unpickling raises many types; a garbled request pulls nothing
         except Exception:
             return pickle.dumps({})
         out: dict[str, bytes] = {}

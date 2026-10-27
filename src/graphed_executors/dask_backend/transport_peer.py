@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from graphed.core.execution import Plan
+from graphed.core.execution import LocalResources, Plan
 from graphed.services import require_bound
 
 from graphed_executors.common import refuse_staged
@@ -29,6 +29,7 @@ from graphed_executors.common.transport_run import finalized
 from graphed_executors.local._peer import (
     collect_peer_root,
     make_bounds,
+    process_and_reduce,
     slice_items,
     worker_outbox_addresses,
 )
@@ -97,9 +98,6 @@ def _dask_peer_main(
     driver over ``log_event``).
     """
     import distributed  # noqa: PLC0415  (worker-side only)
-    from graphed.core.execution import LocalResources  # noqa: PLC0415
-
-    from graphed_executors.local._peer import process_and_reduce  # noqa: PLC0415
 
     from .transport import open_endpoint  # noqa: PLC0415  (deferred: distributed-touching)
 
@@ -169,7 +167,7 @@ def transport_run_plan(
     )
 
     # the shim needs graphed-worker; idempotent for transport
-    ensure_engine_plugins(backend._client)
+    ensure_engine_plugins(backend.client)
     addresses = sorted_addresses(backend)
     k = max(1, min(len(addresses), n))
     worker_addrs = tuple(addresses[:k])
@@ -189,7 +187,7 @@ def transport_run_plan(
         # pre-create every worker's inbox so an early boundary-node send can never be
         # stale-rejected (hard constraint 8); the peer tasks then attach to the SAME per-epoch
         # state.
-        backend._client.run(_ensure_run_probe, spec, workers=list(worker_addrs))
+        backend.client.run(_ensure_run_probe, spec, workers=list(worker_addrs))
         futures = {
             addr: backend.submit(
                 _dask_peer_main,
@@ -222,7 +220,7 @@ def transport_run_plan(
                 results[addr] = fut.result()
             except BaseException as exc:  # harvest every peer's outcome for the restart decision
                 errs[addr] = exc
-        collect_and_purge(backend._client, nonce, per_worker)
+        collect_and_purge(backend.client, nonce, per_worker)
 
         if not errs:
             try:

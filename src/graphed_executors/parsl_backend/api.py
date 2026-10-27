@@ -34,6 +34,7 @@ from graphed_executors.common.facade import (
     _reject_transport_only_knobs,
     resolve_shuffle_method,
 )
+from graphed_executors.submit import SubmitRunner
 
 from .transport_peer import (
     _BARRIER_DEFAULT_S,
@@ -309,14 +310,11 @@ def _on_probe_failure(
 
 
 def _runner(pbackend: Any) -> Any:
-    from graphed_executors.submit import SubmitRunner  # noqa: PLC0415  (defer: keep api load lean)
-
     return SubmitRunner(pbackend)
 
 
 def _relay_repartition(backend: Any, src_blocks: Any, parts: int, runner: Any, salt: int) -> Any:
-    # G9: deferred
-    from graphed_executors.common.relay_engine import relay_run_repartition  # noqa: PLC0415
+    from graphed_executors.common.relay_engine import relay_run_repartition  # noqa: PLC0415  (G9: deferred)
 
     return relay_run_repartition(backend, src_blocks, parts, runner=runner, salt=salt)
 
@@ -333,8 +331,7 @@ def _relay_join(
     salt: int,
     mem_budget_bytes: int | None,
 ) -> Any:
-    # G9: deferred
-    from graphed_executors.common.relay_engine import relay_run_join  # noqa: PLC0415
+    from graphed_executors.common.relay_engine import relay_run_join  # noqa: PLC0415  (G9: deferred)
 
     return relay_run_join(
         backend,
