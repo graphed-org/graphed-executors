@@ -39,6 +39,7 @@ import contextlib
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pytest
@@ -50,7 +51,7 @@ Row = tuple[int, int, int]
 @dataclass
 class JoinAdapter:
     name: str
-    backend: object
+    backend: Any
     # (keys, value_field, values) -> a 2-column record block carrying __joinkey__ + value_field
     make_side: Callable[[Sequence[int], str, Sequence[int]], object]
     # a side block + its value field -> [(key, value), ...] (uses only pre-existing reads)
@@ -71,12 +72,12 @@ def _awkward_adapter() -> JoinAdapter:
             }
         )
 
-    def side_rows(block: object, field: str) -> list[tuple[int, int]]:
+    def side_rows(block: Any, field: str) -> list[tuple[int, int]]:
         ks = [int(k) for k in block["__joinkey__"].to_list()]
         vs = [int(v) for v in block[field].to_list()]
         return list(zip(ks, vs, strict=True))
 
-    def joined_rows(block: object) -> list[Row]:
+    def joined_rows(block: Any) -> list[Row]:
         ks = [int(k) for k in block["__joinkey__"].to_list()]
         lv = [int(v) for v in block["lval"].to_list()]
         rv = [int(v) for v in block["rval"].to_list()]
@@ -90,19 +91,19 @@ def _numpy_adapter() -> JoinAdapter:
 
     def make_side(keys: Sequence[int], field: str, values: Sequence[int]) -> object:
         dt = np.dtype([("__joinkey__", np.uint64), (field, np.int64)])
-        block = np.zeros(len(keys), dtype=dt)
+        block: Any = np.zeros(len(keys), dtype=dt)
         block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
         block[field] = np.array(list(values), dtype=np.int64)
         return block
 
-    def side_rows(block: object, field: str) -> list[tuple[int, int]]:
+    def side_rows(block: Any, field: str) -> list[tuple[int, int]]:
         return list(
             zip(
                 [int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True
             )
         )
 
-    def joined_rows(block: object) -> list[Row]:
+    def joined_rows(block: Any) -> list[Row]:
         return list(
             zip(
                 [int(k) for k in block["__joinkey__"]],

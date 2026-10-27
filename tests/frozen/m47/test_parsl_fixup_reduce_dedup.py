@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import sys
 import time
+from typing import cast
 
 import pytest
 from graphed.core.execution import Partition, Plan, Task
@@ -85,7 +86,7 @@ def p2p_leaf_value_w2_slow(partition: Partition, resources: object) -> int:
     """
     if int(partition.entry_start) >= _SLOW_LEAF_START:
         time.sleep(_SLOW_LEAF_S)
-    return p2p_leaf_value(partition, resources)
+    return cast("int", p2p_leaf_value(partition, resources))
 
 
 def make_gated_p2p_plan(n: int, tag: str) -> Plan[int]:

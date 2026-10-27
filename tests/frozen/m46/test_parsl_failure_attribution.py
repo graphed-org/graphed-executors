@@ -27,6 +27,7 @@ attributes everything (the unrelated-exception None arm).
 from __future__ import annotations
 
 import sys
+from typing import cast
 
 import pytest
 from graphed.debug import StageError
@@ -64,7 +65,7 @@ def tpe():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(params=["tpe", "htex"])
-def backend(request, tpe, htex):  # type: ignore[no-untyped-def]
+def backend(request: pytest.FixtureRequest, tpe, htex):  # type: ignore[no-untyped-def]
     return make_parsl_backend(tpe if request.param == "tpe" else htex)
 
 
@@ -88,7 +89,7 @@ def _synth(name: str, *args: object) -> BaseException:
     Deliberately not parsl's (the name-string contract: the classifier must match on chain
     class names, never on parsl identity).
     """
-    return type(name, (Exception,), {})(*args)
+    return cast("BaseException", type(name, (Exception,), {})(*args))
 
 
 def test_describe_failure_maps_synthetic_worker_lost_by_name(tpe) -> None:  # type: ignore[no-untyped-def]

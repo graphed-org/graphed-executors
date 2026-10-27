@@ -23,6 +23,8 @@ Witnesses:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from join_backends import (
     JoinAdapter,
@@ -34,6 +36,9 @@ from join_backends import (
 
 from graphed_exec_local.shuffle import run_join
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 _N_LEFT = 200
@@ -41,13 +46,13 @@ _N_RIGHT = 200  # -> 40_000 duplicated output rows in a single dest
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> JoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> JoinAdapter:
     return request.param
 
 
 def test_join_spills_and_streams_within_a_budget_smaller_than_the_output(
-    adapter: JoinAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     be = adapter.backend
     left, right = one_dest_sides(adapter, _N_LEFT, _N_RIGHT)
     parts = 4

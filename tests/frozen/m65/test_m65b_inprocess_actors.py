@@ -9,7 +9,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import m65b_probe as bp
 import pytest
@@ -128,17 +128,20 @@ def _ipc(n: int, w: int, mon: Any) -> str:
         n,
         driver_t,
         {
-            a: lambda a=a: ipc_peer_actor(
-                a,
-                inboxes[a],
-                {p: inboxes[p] for p in (DRIVER, *addrs) if p != a},
-                n,
-                bounds,
-                addrs,
-                _leaf_value,
-                _cat,
-                items[a],
-                **_kw(mon),
+            a: cast(
+                "Callable[[], Any]",
+                lambda a=a: ipc_peer_actor(
+                    a,
+                    inboxes[a],
+                    {p: inboxes[p] for p in (DRIVER, *addrs) if p != a},
+                    n,
+                    bounds,
+                    addrs,
+                    _leaf_value,
+                    _cat,
+                    items[a],
+                    **_kw(mon),
+                ),
             )
             for a in addrs
         },
@@ -155,17 +158,20 @@ def _http(n: int, w: int, mon: Any) -> str:
             n,
             driver_t,
             {
-                a: lambda a=a: http_peer_actor(
-                    a,
-                    driver_t.host,
-                    driver_t.port,
-                    n,
-                    bounds,
-                    addrs,
-                    _leaf_value,
-                    _cat,
-                    items[a],
-                    **_kw(mon),
+                a: cast(
+                    "Callable[[], Any]",
+                    lambda a=a: http_peer_actor(
+                        a,
+                        driver_t.host,
+                        driver_t.port,
+                        n,
+                        bounds,
+                        addrs,
+                        _leaf_value,
+                        _cat,
+                        items[a],
+                        **_kw(mon),
+                    ),
                 )
                 for a in addrs
             },
@@ -187,8 +193,11 @@ def _pooled(n: int, w: int, mon: Any) -> str:
             n,
             driver_t,
             {
-                a: lambda a=a: pooled_peer_actor(
-                    a, n, bounds, addrs, _leaf_value, _cat, items[a], **_kw(mon)
+                a: cast(
+                    "Callable[[], Any]",
+                    lambda a=a: pooled_peer_actor(
+                        a, n, bounds, addrs, _leaf_value, _cat, items[a], **_kw(mon)
+                    ),
                 )
                 for a in addrs
             },

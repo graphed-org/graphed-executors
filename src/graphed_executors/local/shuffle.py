@@ -33,6 +33,7 @@ cluster *simulation* of the transport seam — see ``CLAUDE.md`` for the cluster
 
 from __future__ import annotations
 
+import os
 import tempfile
 import threading
 import urllib.request
@@ -204,7 +205,9 @@ class _HttpCluster:
             node.close()
 
 
-def _make_cluster(comms: str, k: int, store_root: str | None, advertise_host: str | None) -> Any:
+def _make_cluster(
+    comms: str, k: int, store_root: str | os.PathLike[str] | None, advertise_host: str | None
+) -> Any:
     root = (
         Path(store_root)
         if store_root is not None
@@ -298,7 +301,7 @@ def run_repartition(
     *,
     workers: int = 1,
     comms: str = "ipc",
-    store_root: str | None = None,
+    store_root: str | os.PathLike[str] | None = None,
     steal: bool = False,
     faults: ShuffleFaults | None = None,
     advertise_host: str | None = None,
@@ -579,7 +582,7 @@ def run_join(
     how: str = "inner",
     workers: int = 1,
     comms: str = "ipc",
-    store_root: str | None = None,
+    store_root: str | os.PathLike[str] | None = None,
     broadcast: bool | None = None,
     salt: int = 0,
     mem_budget_bytes: int | None = None,
@@ -695,7 +698,7 @@ def run_repartition_by_size(
     *,
     target_bytes: int,
     workers: int = 1,
-    store_root: str | None = None,
+    store_root: str | os.PathLike[str] | None = None,
     row_group_bytes: int = ROW_GROUP_BYTES,
 ) -> ShuffleResult:
     """Coalesce/split ``src_blocks`` toward ``target_bytes`` by MEASURED bytes (§5.1).

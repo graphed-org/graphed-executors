@@ -361,8 +361,14 @@ class Chunks:
 
 
 N_ROWS = 16
-LEFT = {"k": [i % 5 for i in range(N_ROWS)], "x": [float(i) for i in range(N_ROWS)]}
-RIGHT = {"k": [i % 7 for i in range(N_ROWS)], "y": [100.0 + i for i in range(N_ROWS)]}
+LEFT: dict[str, list[Any]] = {
+    "k": [i % 5 for i in range(N_ROWS)],
+    "x": [float(i) for i in range(N_ROWS)],
+}
+RIGHT: dict[str, list[Any]] = {
+    "k": [i % 7 for i in range(N_ROWS)],
+    "y": [100.0 + i for i in range(N_ROWS)],
+}
 
 
 def _source(

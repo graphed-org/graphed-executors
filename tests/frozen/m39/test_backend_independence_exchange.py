@@ -18,7 +18,7 @@ _IDS = [a.name for a in ADAPTERS]
 
 
 @pytest.fixture(params=ADAPTERS, ids=_IDS)
-def adapter(request) -> BackendAdapter:
+def adapter(request: pytest.FixtureRequest) -> BackendAdapter:
     return request.param
 
 

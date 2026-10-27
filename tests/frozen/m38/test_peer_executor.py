@@ -7,6 +7,8 @@ identical fixed tree, so the only difference vs the hub is *where* combines run)
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from graphed.core import Partition, Plan, Task
 from graphed.core.execution import SequentialRunner
@@ -33,14 +35,14 @@ def _fval(partition: Partition, resources: object) -> float:
     return 1.0 / (partition.entry_start + 1)
 
 
-def _plan(process, n: int = 25, workers: int = 4):
+def _plan(process: Any, n: int = 25, workers: int = 4) -> Any:
     tasks = tuple(Task(k, Partition(f"f{k}.root", "Events", k, k + 1 + (k % 5))) for k in range(n))
     return Plan(process=process, combine=_add, empty=_zero, tasks=tasks)
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
 @pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
-def test_peer_matches_hub_through_executor(executor_cls, kind) -> None:
+def test_peer_matches_hub_through_executor(executor_cls: Any, kind: str) -> None:
     plan = _plan(_nentries)
     hub = ThreadExecutor(max_workers=4).run(plan)  # comms=None -> the driver-hub path
     seq = SequentialRunner().run(plan)
@@ -52,7 +54,7 @@ def test_peer_matches_hub_through_executor(executor_cls, kind) -> None:
 
 @pytest.mark.parametrize("kind", BACKENDS)
 @pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
-def test_peer_is_bit_for_bit_with_hub_on_floats(executor_cls, kind) -> None:
+def test_peer_is_bit_for_bit_with_hub_on_floats(executor_cls: Any, kind: str) -> None:
     # WITNESS that peer uses the SAME fixed tree grouping as the hub: with a non-associative float
     # combine, only an identical grouping gives an identical float down to the last ULP.
     plan = _plan(_fval, n=37)

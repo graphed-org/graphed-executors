@@ -15,6 +15,7 @@ against the peer-exchange engine.
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import pytest
 from parsl_transport_harness import (
@@ -54,13 +55,13 @@ def htex():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> P2PAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> P2PAdapter:
     return request.param
 
 
 def test_dest_hashes_byte_identical_to_local_and_relay_and_across_runs(
-    adapter: P2PAdapter, htex
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: P2PAdapter, htex: Any
+) -> None:
     src = repartition_blocks(adapter)
     local = run_repartition(adapter.backend, src, PARTS)
     backend = make_parsl_backend(htex)
@@ -88,10 +89,10 @@ def test_dest_hashes_byte_identical_to_local_and_relay_and_across_runs(
     )
 
     assert result_dest_keys(adapter, r1.value) == route_oracle_dest_keys(adapter, src, PARTS)
-    assert total_result_rows(r1.value) == sum(len(b) for b in src), "rows were lost or invented"  # type: ignore[arg-type]
+    assert total_result_rows(r1.value) == sum(len(b) for b in src), "rows were lost or invented"
 
 
-def test_salt_reroutes_deterministically(adapter: P2PAdapter, htex) -> None:  # type: ignore[no-untyped-def]
+def test_salt_reroutes_deterministically(adapter: P2PAdapter, htex: Any) -> None:
     src = repartition_blocks(adapter)
     backend = make_parsl_backend(htex)
     plain = run_bounded(
@@ -108,4 +109,4 @@ def test_salt_reroutes_deterministically(adapter: P2PAdapter, htex) -> None:  # 
     assert s1.dest_block_hashes != plain.dest_block_hashes, (
         "salt=3 produced the identical placement — salt never reached the pinned route"
     )
-    assert total_result_rows(s1.value) == sum(len(b) for b in src)  # type: ignore[arg-type]
+    assert total_result_rows(s1.value) == sum(len(b) for b in src)

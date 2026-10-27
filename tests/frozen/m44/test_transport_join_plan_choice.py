@@ -18,6 +18,8 @@ model.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from graphed.shuffle import broadcast_join_choice
 from transport_harness import (
@@ -35,6 +37,9 @@ from transport_harness import (
     transport_join,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = transport_adapters()
@@ -42,30 +47,30 @@ PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client1w():
+def client1w() -> Iterator[Any]:
     with transport_cluster(1, processes=False) as c:
         yield c
 
 
 @pytest.fixture(scope="module")
-def client2w():
+def client2w() -> Iterator[Any]:
     with transport_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> TransportAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> TransportAdapter:
     return request.param
 
 
-def _spy(client) -> SpyDaskBackend:  # type: ignore[no-untyped-def]
+def _spy(client: Any) -> SpyDaskBackend:
     install_transport_plugin(client)
     return SpyDaskBackend(build_dask_backend(client))
 
 
 def test_auto_choice_is_parts_keyed_and_worker_count_invariant(
-    adapter: TransportAdapter, client1w, client2w
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client1w: Any, client2w: Any
+) -> None:
     left, right = join_equal_sides(adapter)
     bb, pb = side_bytes(adapter, left), side_bytes(adapter, right)
     # scenario sanity: the DISCRIMINATION GAP is real for these measured bytes
@@ -89,7 +94,9 @@ def test_auto_choice_is_parts_keyed_and_worker_count_invariant(
     assert hashes[0] == hashes[1], "1-worker vs 2-worker runs must be bit-for-bit identical"
 
 
-def test_broadcast_path_never_shuffles_the_large_side(adapter: TransportAdapter, client2w) -> None:  # type: ignore[no-untyped-def]
+def test_broadcast_path_never_shuffles_the_large_side(
+    adapter: TransportAdapter, client2w: Any
+) -> None:
     left, right = join_small_build_sides(adapter)
     assert (
         broadcast_join_choice(side_bytes(adapter, left), side_bytes(adapter, right), PARTS) is True
@@ -115,7 +122,7 @@ def test_broadcast_path_never_shuffles_the_large_side(adapter: TransportAdapter,
     assert observed_join_all(adapter, r.value) == dup_join_all(adapter, left, right, PARTS)
 
 
-def test_forced_choice_is_honoured_both_ways(adapter: TransportAdapter, client2w) -> None:  # type: ignore[no-untyped-def]
+def test_forced_choice_is_honoured_both_ways(adapter: TransportAdapter, client2w: Any) -> None:
     # forced shuffle where the model prefers broadcast
     left, right = join_small_build_sides(adapter)
     spy = _spy(client2w)

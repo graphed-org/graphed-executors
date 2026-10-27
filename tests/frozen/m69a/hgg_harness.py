@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from importlib import resources
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -137,7 +137,7 @@ def _bits(column: pa.ChunkedArray | pa.Array) -> bytes:
     values = np.asarray(arr.drop_null().to_numpy(zero_copy_only=False))
     if values.dtype.kind == "f":
         values = values.view(f"u{values.dtype.itemsize}")
-    return values.tobytes()
+    return cast("bytes", values.tobytes())
 
 
 def compare_part(expected: Part, actual: Part) -> list[str]:

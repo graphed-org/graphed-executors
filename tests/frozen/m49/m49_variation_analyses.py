@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import cache
-from typing import Any
+from typing import Any, cast
 
 import awkward as ak
 import boost_histogram as bh
@@ -89,7 +89,7 @@ def _stable(values: Array) -> Array:
 
     `np.round`'s own lowering.
     """
-    return np.rint(values * 1e6) / 1e6
+    return cast("Array", np.rint(values * 1e6) / 1e6)
 
 
 # ---- the 15-reference matrix (§10/m49(ii)) ---------------------------------------------------
@@ -198,7 +198,7 @@ def poisoned_plan(where: str, *, steps_per_file: int = 2) -> Plan[Any]:
     varied, _poison_node = poisoned_program(where)
     h = gh.boost.Histogram(bh.axis.Regular(20, 0, 800), storage=bh.storage.Double())
     h.fill(varied)
-    return gh.plan({"ht": h}, steps_per_file=steps_per_file)
+    return cast("Plan[Any]", gh.plan({"ht": h}, steps_per_file=steps_per_file))
 
 
 def record_cone(array: Array) -> set[int]:
@@ -223,4 +223,4 @@ def healthy_plan(*, steps_per_file: int = 2) -> Plan[Any]:
     varied = graphed.vary(scalar_pt, "jes", up=scalar_pt * 1.05, down=scalar_pt * 0.95)
     h = gh.boost.Histogram(bh.axis.Regular(20, 0, 800), storage=bh.storage.Double())
     h.fill(varied)
-    return gh.plan({"ht": h}, steps_per_file=steps_per_file)
+    return cast("Plan[Any]", gh.plan({"ht": h}, steps_per_file=steps_per_file))

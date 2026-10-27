@@ -18,6 +18,7 @@ importorskips it loudly so it can never silently skip in CI.
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import pytest
 from parsl_transport_harness import (
@@ -70,14 +71,14 @@ def htex():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> P2PAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> P2PAdapter:
     return request.param
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 def test_join_rows_match_local_engine_with_option_typed_unmatched_rows(
-    adapter: P2PAdapter, htex, how: str
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: P2PAdapter, htex: Any, how: str
+) -> None:
     left, right = join_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how=how, broadcast=False)
     r = run_bounded(

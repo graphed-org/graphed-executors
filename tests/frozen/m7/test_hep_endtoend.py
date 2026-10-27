@@ -6,6 +6,8 @@ histogram bit-for-bit, invariant to partition count.
 
 from __future__ import annotations
 
+from typing import Any
+
 import analyses
 import numpy as np
 import pytest
@@ -14,7 +16,7 @@ from graphed.core import Plan
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
 
-def _met_plan(n_chunks: int) -> Plan:
+def _met_plan(n_chunks: int) -> Plan[Any]:
     return Plan(
         process=analyses.met_partial,
         combine=analyses.hist_add,

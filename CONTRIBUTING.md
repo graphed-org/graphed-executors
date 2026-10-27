@@ -5,18 +5,19 @@ gets you from a clone to a green local run of everything CI checks.
 
 ## Set up a development environment
 
-You need Python ≥ 3.11 and a Rust toolchain (`rustup` — https://rustup.rs). The `graphed`
+You need uv (https://docs.astral.sh/uv/), Python ≥ 3.11 and a Rust toolchain (`rustup` — https://rustup.rs). The `graphed`
 dependency is installed from git and compiles a Rust extension during install; without a
 toolchain the first `pip install` below fails.
 
 ```bash
 git clone https://github.com/graphed-org/graphed-executors
 cd graphed-executors
-python -m venv .venv && source .venv/bin/activate
+uv venv --seed .venv --python 3.12 && source .venv/bin/activate  # a uv-managed Python, as CI uses
 
 pip install "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@main"
 pip install "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus@main"
-pip install "graphed-histogram @ git+https://github.com/graphed-org/graphed-histogram@main"
+pip install "graphed-histogram[histserv] @ git+https://github.com/graphed-org/graphed-histogram@main"
+pip install grpcio-health-checking  # the histserv tests probe its health service
 pip install -e ".[dev,docs]"
 ```
 

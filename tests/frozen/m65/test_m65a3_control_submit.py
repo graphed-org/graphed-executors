@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import m65a3_bodies as b
 import m65a_probe as mp
@@ -110,7 +110,9 @@ def _gate(tmp_path: Path, name: str) -> dict[str, str]:
 
 
 def _finished_at(rec: mp.Recorder, key: int) -> float:
-    return min(e.t for e in rec.events if e.phase is TaskPhase.FINISHED and e.key == key)
+    return cast(
+        "float", min(e.t for e in rec.events if e.phase is TaskPhase.FINISHED and e.key == key)
+    )
 
 
 @pytest.mark.parametrize("leg", LEGS)

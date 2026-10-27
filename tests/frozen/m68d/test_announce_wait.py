@@ -15,7 +15,7 @@ import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from m68d_harness import (
@@ -85,7 +85,7 @@ def in_job_backend(
 def text_of(err: BaseException, *paths: Path) -> str:
     """Return an exception's text and ``legs`` (a ``ServiceUnavailableError``'s), tmp paths cut."""
     legs = getattr(err, "legs", None) or {}
-    return cut(" ".join([str(err), *map(str, legs.values())]), *paths)
+    return cast("str", cut(" ".join([str(err), *map(str, legs.values())]), *paths))
 
 
 def fast_polls(monkeypatch: pytest.MonkeyPatch) -> None:

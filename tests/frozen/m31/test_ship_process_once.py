@@ -9,6 +9,8 @@ optimization changed nothing about results, determinism, or the thread executor.
 
 from __future__ import annotations
 
+from typing import Any
+
 import functions_probe
 import shipping_probe
 from graphed.core import Partition, Plan, Task
@@ -16,7 +18,7 @@ from graphed.core import Partition, Plan, Task
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
 
-def _count_plan(n_tasks: int, payload_bytes: int = 0) -> Plan:
+def _count_plan(n_tasks: int, payload_bytes: int = 0) -> Plan[Any]:
     proc = shipping_probe.CountingProcess(payload_bytes)
     tasks = tuple(Task(i, Partition("p", "", i, i + 1)) for i in range(n_tasks))
     return Plan(

@@ -10,6 +10,7 @@ B4 discrimination lives in ``test_advertise_host.py`` so it is never silently lo
 from __future__ import annotations
 
 import socket
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from exchange_backends import (
@@ -22,6 +23,9 @@ from exchange_backends import (
 
 from graphed_exec_local._transport import is_routable_host
 from graphed_exec_local.shuffle import run_repartition
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 ADAPTERS = adapters()
 
@@ -47,18 +51,18 @@ def _routable_ip() -> str | None:
         finally:
             s.close()
         if is_routable_host(candidate):
-            return candidate
+            return cast("str | None", candidate)
     except OSError:
         pass
     return None
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> BackendAdapter:
+def adapter(request: pytest.FixtureRequest) -> BackendAdapter:
     return request.param
 
 
-def test_blocks_move_between_distinct_node_stores(adapter: BackendAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_blocks_move_between_distinct_node_stores(adapter: BackendAdapter, tmp_path: Path) -> None:
     ip = _routable_ip()
     if ip is None:
         pytest.skip(

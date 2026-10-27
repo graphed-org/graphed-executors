@@ -10,7 +10,7 @@ import queue
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import m65a_probe as mp
 import m65b_probe as bp
@@ -189,11 +189,11 @@ def test_inprocess_worker_push_and_lean(monkeypatch: pytest.MonkeyPatch, tmp_pat
         ex._proc_init()
         assert _drain_threads() == []
         labels: list[Partition] = []
-        real = ex.partition_label
+        real = cast(Any, ex).partition_label
 
         def counting(p: Partition) -> str:
             labels.append(p)
-            return real(p)
+            return cast("str", real(p))
 
         monkeypatch.setattr(ex, "partition_label", counting)
         assert ex._proc_task_shared(token, task) == 0

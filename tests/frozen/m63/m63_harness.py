@@ -16,7 +16,7 @@ from concurrent.futures import Future
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from graphed.core import Partition, Plan, Task, TaskEvent, TaskPhase
@@ -475,7 +475,9 @@ def check_monitor_parity(make: Callable[..., Any], *, exact: bool) -> None:
     _leg(make, via_submit, via_submit=True)
     if exact:
         for rec in (via_run, via_submit):
-            wait_for(lambda rec=rec: sum(rec.triples().values()) >= 3 * n)
+            wait_for(
+                cast("Callable[[], bool]", lambda rec=rec: sum(rec.triples().values()) >= 3 * n)
+            )
         time.sleep(0.2)  # a late duplicate would land here
         run_t, sub_t = via_run.triples(), via_submit.triples()
         assert run_t == sub_t
@@ -520,7 +522,10 @@ def check_close_drains(ex: Any, tmp: str) -> None:
     gate = new_gate(tmp, "drain")
     with opened_on_exit(gate):
         futs = [
-            Call(lambda i=i: ex.submit(fixed_plan(20 + i, gate_dir=gate))).get() for i in range(2)
+            Call(
+                cast("Callable[[], Any]", lambda i=i: ex.submit(fixed_plan(20 + i, gate_dir=gate)))
+            ).get()
+            for i in range(2)
         ]
         closing = Call(ex.close)
         assert not closing.returned_within(BLOCKED_JOIN_S), (

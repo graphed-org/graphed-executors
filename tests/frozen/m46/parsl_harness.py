@@ -580,7 +580,7 @@ _BLOCK_DT = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
 
 
 def make_block(keys: Sequence[int]) -> Any:
-    block = np.zeros(len(keys), dtype=_BLOCK_DT)
+    block: Any = np.zeros(len(keys), dtype=_BLOCK_DT)
     block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
     block["v"] = np.arange(len(keys), dtype=np.int64)
     return block
@@ -588,7 +588,7 @@ def make_block(keys: Sequence[int]) -> Any:
 
 def make_side(keys: Sequence[int], field: str, values: Sequence[int]) -> Any:
     dt = np.dtype([("__joinkey__", np.uint64), (field, np.int64)])
-    block = np.zeros(len(keys), dtype=dt)
+    block: Any = np.zeros(len(keys), dtype=dt)
     block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
     block[field] = np.array(list(values), dtype=np.int64)
     return block

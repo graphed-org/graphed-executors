@@ -32,14 +32,18 @@ form (skips with a reason where the runner exposes only loopback); the never-ski
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 from m41_backends import routable_ip, store_bytes_on_disk
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def test_mock_launcher_registers_cross_process_routable_addresses_and_fetch_hits_a_child(
-    tmp_path,
-) -> None:  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
     # imports INSIDE the test: on HEAD they ImportError (the seam is absent) -> ERROR for the right
     # reason, while the module still COLLECTS cleanly.
     from graphed.core.execution import AddressTable, ClusterExecutor, NodeStore  # noqa: F401, PLC0415

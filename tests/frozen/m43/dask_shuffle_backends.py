@@ -188,7 +188,7 @@ def task_site() -> tuple[int, str]:
 @dataclass
 class ShuffleJoinAdapter:
     name: str
-    backend: object
+    backend: Any
     # exchange half (m39 style): keys -> a block carrying __joinkey__ + a v payload column
     make_block: Callable[[Sequence[int]], object]
     keys_of: Callable[[object], list[int]]
@@ -210,7 +210,7 @@ def _awkward_shuffle_adapter() -> ShuffleJoinAdapter:
             }
         )
 
-    def keys_of(block: object) -> list[int]:
+    def keys_of(block: Any) -> list[int]:
         return [int(k) for k in block["__joinkey__"].to_list()]
 
     def make_side(keys: Sequence[int], field: str, values: Sequence[int]) -> object:
@@ -221,12 +221,12 @@ def _awkward_shuffle_adapter() -> ShuffleJoinAdapter:
             }
         )
 
-    def side_rows(block: object, field: str) -> list[tuple[int, int]]:
+    def side_rows(block: Any, field: str) -> list[tuple[int, int]]:
         ks = [int(k) for k in block["__joinkey__"].to_list()]
         vs = [int(v) for v in block[field].to_list()]
         return list(zip(ks, vs, strict=True))
 
-    def joined_rows(block: object) -> list[JRow]:
+    def joined_rows(block: Any) -> list[JRow]:
         ks = [int(k) for k in block["__joinkey__"].to_list()]
         lv = [int(v) for v in block["lval"].to_list()]
         rv = [int(v) for v in block["rval"].to_list()]
@@ -243,29 +243,29 @@ def _numpy_shuffle_adapter() -> ShuffleJoinAdapter:
     block_dt = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
 
     def make_block(keys: Sequence[int]) -> object:
-        block = np.zeros(len(keys), dtype=block_dt)
+        block: Any = np.zeros(len(keys), dtype=block_dt)
         block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
         block["v"] = np.arange(len(keys), dtype=np.int64)
         return block
 
-    def keys_of(block: object) -> list[int]:
+    def keys_of(block: Any) -> list[int]:
         return [int(k) for k in block["__joinkey__"]]
 
     def make_side(keys: Sequence[int], field: str, values: Sequence[int]) -> object:
         dt = np.dtype([("__joinkey__", np.uint64), (field, np.int64)])
-        block = np.zeros(len(keys), dtype=dt)
+        block: Any = np.zeros(len(keys), dtype=dt)
         block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
         block[field] = np.array(list(values), dtype=np.int64)
         return block
 
-    def side_rows(block: object, field: str) -> list[tuple[int, int]]:
+    def side_rows(block: Any, field: str) -> list[tuple[int, int]]:
         return list(
             zip(
                 [int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True
             )
         )
 
-    def joined_rows(block: object) -> list[JRow]:
+    def joined_rows(block: Any) -> list[JRow]:
         return list(
             zip(
                 [int(k) for k in block["__joinkey__"]],
@@ -414,8 +414,8 @@ def result_dest_keys(
     return {dest: adapter.keys_of(block) for dest, block in value.items()}
 
 
-def total_result_rows(value: Mapping[int, object]) -> int:
-    return sum(len(block) for block in value.values())  # type: ignore[arg-type]
+def total_result_rows(value: Mapping[int, Any]) -> int:
+    return sum(len(block) for block in value.values())
 
 
 def _per_dest_side(
@@ -493,7 +493,7 @@ def read_nullable_column(c: object) -> list[int | None]:
     to_list = getattr(c, "to_list", None)
     if to_list is not None:  # awkward option array -> [.., None, ..]
         return [None if v is None else int(v) for v in to_list()]
-    arr = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
+    arr: Any = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
     return [None if arr[i] is np.ma.masked else int(arr[i]) for i in range(len(arr))]
 
 

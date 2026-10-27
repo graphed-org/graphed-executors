@@ -25,9 +25,14 @@ Discrimination (rejects the three traps in decomposition §3(b)):
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from m41_backends import BACKEND, expected_dest_keys, make_block, observed_dest_keys
 
 from graphed_executors.local.shuffle import run_repartition
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _N_SRC = 48
 _PARTS = 12
@@ -36,13 +41,13 @@ _WORKERS = 4  # K nodes
 _HEAD_PER_BLOCK_FETCHES = 48
 
 
-def _dense_src() -> list:
+def _dense_src() -> list[Any]:
     # keys spread so every producer-task routes to (nearly) every dest -> the dense per-block-fetch
     # baseline (48 blocks) HEAD pays and T2 must coalesce; deterministic (no RNG).
     return [make_block([(i * 7 + j) % 60 for j in range(20)]) for i in range(_N_SRC)]
 
 
-def test_bulk_fetch_count_is_sub_linear_and_carries_few_large_streams(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_bulk_fetch_count_is_sub_linear_and_carries_few_large_streams(tmp_path: Path) -> None:
     src = _dense_src()
     res = run_repartition(
         BACKEND, src, parts=_PARTS, workers=_WORKERS, comms="ipc", store_root=tmp_path

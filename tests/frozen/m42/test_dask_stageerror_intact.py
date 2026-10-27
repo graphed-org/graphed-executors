@@ -12,22 +12,26 @@ name user_analysis.py:42 after the process boundary).
 from __future__ import annotations
 
 import pickle
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.debug import StageError, format_traceback
 from submit_backends import cluster_client, make_dask_runner, make_stage_error, stage_error_plan
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     # tier B: the error must cross a genuine process boundary (nanny workers, real pickling)
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_stage_error_crosses_the_worker_boundary_byte_equal(client) -> None:
+def test_stage_error_crosses_the_worker_boundary_byte_equal(client: Any) -> None:
     expected = make_stage_error()
     with make_dask_runner(client, retries=0) as runner, pytest.raises(StageError) as excinfo:
         runner.run(stage_error_plan(4, "sei"))

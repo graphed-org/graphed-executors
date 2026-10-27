@@ -12,6 +12,7 @@ cross-worker input movement (no (producer != combiner) move pair).
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from submit_backends import (
@@ -22,16 +23,19 @@ from submit_backends import (
     worker_pids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_combines_run_on_workers_with_cross_worker_inputs(client) -> None:
+def test_combines_run_on_workers_with_cross_worker_inputs(client: Any) -> None:
     driver_pid = os.getpid()
     wpids = set(worker_pids(client).values())
     assert driver_pid not in wpids  # tier-B precondition: workers are real separate processes

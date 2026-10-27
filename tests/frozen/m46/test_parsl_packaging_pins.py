@@ -25,11 +25,12 @@ from __future__ import annotations
 import configparser
 import re
 import tomllib
+from typing import Any, cast
 
 from parsl_harness import REPO_ROOT
 
 
-def _pyproject() -> dict:
+def _pyproject() -> dict[str, Any]:
     with open(REPO_ROOT / "pyproject.toml", "rb") as f:
         return tomllib.load(f)
 
@@ -120,7 +121,7 @@ def test_coveragerc_dask_gains_the_moved_tasks_engine() -> None:
 
 
 def _ci_text() -> str:
-    return (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    return cast("str", (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
 
 
 def _job_block(text: str, job: str) -> str:

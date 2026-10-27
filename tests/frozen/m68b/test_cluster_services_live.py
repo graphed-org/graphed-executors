@@ -26,7 +26,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from graphed.services import Launch, ServiceSpec
@@ -198,7 +198,7 @@ class _GateHandler(BaseHTTPRequestHandler):
 def http_server_spec() -> ServiceSpec:
     spec = recipes_api().http_server("web")
     assert spec.launch is not None and spec.launch.inputs == ()
-    return dataclasses.replace(spec, timeout_s=300.0)
+    return cast("ServiceSpec", dataclasses.replace(spec, timeout_s=300.0))
 
 
 def test_a_cluster_hosted_http_server_serves_its_run_and_leaves_with_it(

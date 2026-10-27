@@ -12,6 +12,8 @@ attribution that loses the partition or the worker identity.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from graphed.core.execution import Plan, Task
 from graphed.debug import StageError
@@ -24,17 +26,20 @@ from submit_backends import (
     mem_partitions,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 distributed = pytest.importorskip("distributed")
 
 
 @pytest.fixture()
-def client():
+def client() -> Iterator[Any]:
     # dedicated per-test cluster: worker deaths must not bleed into other modules' fixtures
     with cluster_client(2, processes=True, allowed_failures=1) as c:
         yield c
 
 
-def test_killed_worker_becomes_an_attributed_stage_error(client) -> None:
+def test_killed_worker_becomes_an_attributed_stage_error(client: Any) -> None:
     (partition,) = mem_partitions(1, "kw")
     # combine/empty are module-level picklables; the single leaf never completes so neither runs
     plan = Plan(

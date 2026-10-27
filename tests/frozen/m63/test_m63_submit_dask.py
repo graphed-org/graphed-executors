@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -54,7 +54,7 @@ def ex(client: Any) -> Iterator[Any]:
 
 @pytest.fixture
 def bounded(client: Any) -> Iterator[Any]:
-    runner = dask_runner(client, **{"max_in_flight": 2})
+    runner = dask_runner(client, **cast("dict[str, Any]", {"max_in_flight": 2}))
     try:
         yield runner
     finally:

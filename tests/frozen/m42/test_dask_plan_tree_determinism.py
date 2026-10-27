@@ -15,6 +15,7 @@ run's cached partials instead of re-executing (plan §1.2.3).
 from __future__ import annotations
 
 import pickle
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import SequentialRunner, StopReason
@@ -26,17 +27,20 @@ from submit_backends import (
     prov_plan,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     # tier B (plan §3): real processes, real pickling — the tier determinism must hold on
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_two_runs_are_bit_identical_and_equal_sequential(client) -> None:
+def test_two_runs_are_bit_identical_and_equal_sequential(client: Any) -> None:
     plan = concat_plan(16, "det", staggered=True)
     expected = SequentialRunner().run(plan)
     with make_dask_runner(client) as runner:
@@ -49,7 +53,7 @@ def test_two_runs_are_bit_identical_and_equal_sequential(client) -> None:
     assert r1.stopped is r2.stopped is StopReason.EXHAUSTED
 
 
-def test_result_is_invariant_to_worker_count(client) -> None:
+def test_result_is_invariant_to_worker_count(client: Any) -> None:
     """The same plan on 1-worker and 3-worker clusters equals the 2-worker and sequential value.
 
     The topology-invariance kill for arrival/batch-grouped reductions (grouping fixed by leaf
@@ -64,7 +68,7 @@ def test_result_is_invariant_to_worker_count(client) -> None:
             assert runner.run(plan).value == expected, f"diverged on n_workers={n_workers}"
 
 
-def test_second_run_reexecutes_instead_of_returning_cached_futures(client) -> None:
+def test_second_run_reexecutes_instead_of_returning_cached_futures(client: Any) -> None:
     """Two runs of a mark-carrying plan.
 
     Payloads identical, but the per-invocation nonce sets are DISJOINT — every leaf and combine

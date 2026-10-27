@@ -17,6 +17,8 @@ deterministic (no co-located task to blame unfairly).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from dask_shuffle_backends import (
     AlwaysDieProcess,
@@ -32,17 +34,20 @@ from dask_shuffle_backends import (
 from graphed.core.execution import Plan, Task
 from graphed.debug import StageError
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 distributed = pytest.importorskip("distributed")
 
 
 @pytest.fixture()
-def client():
+def client() -> Iterator[Any]:
     # dedicated per-test cluster: worker deaths must not bleed into other modules' fixtures
     with shuffle_cluster(2, processes=True, allowed_failures=1) as c:
         yield c
 
 
-def test_adaptive_worker_death_names_the_partition_not_the_dask_key(client) -> None:  # type: ignore[no-untyped-def]
+def test_adaptive_worker_death_names_the_partition_not_the_dask_key(client: Any) -> None:
     (partition,) = f2_partitions(1, "f2b")
     plan = Plan(
         process=AlwaysDieProcess(partition.uri),

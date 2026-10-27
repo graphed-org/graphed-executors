@@ -83,7 +83,7 @@ def part_path(out: Path, dataset: str, uri: Path, start: int, stop: int) -> Path
     return out / dataset / "nominal" / f"{uri.stem}_Events_{start}-{stop}.parquet"
 
 
-def direct(parts: Mapping[tuple[int, int], h.Part]) -> dict[str, bh.Histogram]:
+def direct(parts: Mapping[tuple[int, int], h.Part]) -> dict[str, bh.Histogram[Any]]:
     """Return each diagnostic as boost-histogram fills the oracle parts' columns.
 
     Each diagnostic as boost-histogram fills the oracle parts' columns, one histogram per part,
@@ -122,11 +122,11 @@ def totals(value: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
-def edges(hist: bh.Histogram) -> list[bytes]:
+def edges(hist: bh.Histogram[Any]) -> list[bytes]:
     return [np.asarray(axis.edges).tobytes() for axis in hist.axes]
 
 
-def bitwise(got: Any, want: bh.Histogram) -> bool:
+def bitwise(got: Any, want: bh.Histogram[Any]) -> bool:
     """Check for the same storage, edges and flow view, bit for bit."""
     return (
         isinstance(got, bh.Histogram)
@@ -136,7 +136,7 @@ def bitwise(got: Any, want: bh.Histogram) -> bool:
     )
 
 
-def close(got: Any, want: bh.Histogram, rtol: float = 1e-12) -> bool:
+def close(got: Any, want: bh.Histogram[Any], rtol: float = 1e-12) -> bool:
     """Check for the same storage and edges.
 
     Flow values and variances within ``rtol`` relative (no absolute slack).

@@ -20,6 +20,8 @@ and a witness that still names retired machinery.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from dask_shuffle_backends import (
     ShuffleJoinAdapter,
@@ -37,6 +39,9 @@ from dask_shuffle_backends import (
 
 from graphed_executors.local.shuffle import run_repartition
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = shuffle_adapters()
@@ -44,20 +49,20 @@ PARTS = 5
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     # tier B: real pickling of backends and blocks through worker processes
     with shuffle_cluster(2, processes=True) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
 def test_two_dask_runs_and_the_local_engine_agree_bit_for_bit(
-    adapter: ShuffleJoinAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client: Any
+) -> None:
     src = repartition_blocks(adapter)
     install_worker_plugin(client)
     runner = make_submit_runner(build_dask_backend(client))
@@ -76,10 +81,10 @@ def test_two_dask_runs_and_the_local_engine_agree_bit_for_bit(
     # content, not just hashes: assembled per-dest key sequences equal the partition-routed oracle
     assert result_dest_keys(adapter, r1.value) == route_oracle_dest_keys(adapter, src, PARTS)
     # row conservation
-    assert total_result_rows(r1.value) == sum(len(b) for b in src)  # type: ignore[arg-type]
+    assert total_result_rows(r1.value) == sum(len(b) for b in src)
 
 
-def test_salt_reroutes_deterministically(adapter: ShuffleJoinAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_salt_reroutes_deterministically(adapter: ShuffleJoinAdapter, client: Any) -> None:
     """`salt` must reach the pinned route.
 
     Two salted runs agree with each other and differ from the unsalted run (content-neutral
@@ -98,12 +103,12 @@ def test_salt_reroutes_deterministically(adapter: ShuffleJoinAdapter, client) ->
         "salt=3 produced the identical placement — salt never reached the route"
     )
     # content-neutral: the union of routed rows is conserved under the salt
-    assert total_result_rows(s1.value) == sum(len(b) for b in src)  # type: ignore[arg-type]
+    assert total_result_rows(s1.value) == sum(len(b) for b in src)
 
 
 def test_witness_names_dask_mechanisms_and_retires_local_ones(
-    adapter: ShuffleJoinAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client: Any
+) -> None:
     src = repartition_blocks(adapter)
     install_worker_plugin(client)
     runner = make_submit_runner(build_dask_backend(client))

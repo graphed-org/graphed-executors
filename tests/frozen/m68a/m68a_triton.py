@@ -21,7 +21,7 @@ import json
 import sys
 import threading
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import awkward as ak
 import numpy as np
@@ -155,7 +155,7 @@ def descriptor(tag: str, w: float = 0.45, b: float = -0.1) -> bytes:
 
 
 def expected(w: float, b: float) -> np.ndarray:
-    return np.asarray(1.0 / (1.0 + np.exp(-(w * X + b))))
+    return cast("np.ndarray", np.asarray(1.0 / (1.0 + np.exp(-(w * X + b)))))
 
 
 def score(ev: Any, payload: bytes, **where: str) -> Any:
