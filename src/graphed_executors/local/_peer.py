@@ -365,7 +365,7 @@ def collect_peer_root(
 # ---- executor-facing helpers: per-worker actor + cross-process transport setup --------------
 
 
-class _Outbox:
+class Outbox:
     """One daemon thread per endpoint that performs EVERY send on the caller's behalf.
 
     The IPC inbox write is **synchronous** (``PipeInbox`` over ``SimpleQueue``, no feeder thread),
@@ -400,6 +400,11 @@ class _Outbox:
         # outbox thread, so there is nothing truthful to hand back here.
         self._q.put((dest, message))
 
+    @property
+    def error(self) -> BaseException | None:
+        """The first send failure, once one happened."""
+        return self._error
+
     def _run(self) -> None:
         while True:
             item = self._q.get()
@@ -428,7 +433,7 @@ class _Outbox:
 def release_workers(transport: Any) -> None:
     """Deliver the reduction's ``done`` OFF the caller's thread, one thread per destination.
 
-    Same blocking-write hazard as :class:`_Outbox`, seen from the driver: a worker that crashed
+    Same blocking-write hazard as :class:`Outbox`, seen from the driver: a worker that crashed
     stops reading its inbox, a peer's parked partial still holds that inbox's cross-process write
     lock, and the driver's own ``done`` then waits on the lock forever — with the worker error
     already in hand and the pool teardown one line away. Per destination, not one broadcast thread,
@@ -462,7 +467,7 @@ _TAGS = {RunState.RUNNING: "resume", RunState.PAUSED: "pause", RunState.CANCELLE
 class PeerControl(Generic[R]):
     """The driver side of a controlled peer run (plan-A2 A2-2), used on every driver poll.
 
-    :meth:`relay` tells every worker a state change, through one :class:`_Outbox` per destination
+    :meth:`relay` tells every worker a state change, through one :class:`Outbox` per destination
     (a worker that stopped reading parks only its own sender; one thread keeps pause→resume in
     order), or inline on an :class:`HttpTransport`, whose sends are already off-thread.
     :meth:`take` collects the workers' cancel hand-ins and folds them once they cover every
@@ -484,7 +489,7 @@ class PeerControl(Generic[R]):
         self._combine = combine
         self._empty = empty
         self._told = RunState.RUNNING  # the workers start running
-        self._outboxes: dict[str, _Outbox] = {}
+        self._outboxes: dict[str, Outbox] = {}
         self._processed: dict[str, int] = {}  # per worker, from its `cancelled` hand-in
         self._items: dict[tuple[int, int], R] = {}  # one frontier item per node
         self._covered = 0
@@ -495,7 +500,7 @@ class PeerControl(Generic[R]):
         if state is not self._told and self._told is not RunState.CANCELLED:
             self._told = state
             if not self._outboxes and not isinstance(self._t, HttpTransport):
-                self._outboxes = {dest: _Outbox(self._t) for dest in self._workers}
+                self._outboxes = {dest: Outbox(self._t) for dest in self._workers}
             for dest in self._workers:
                 self._outboxes.get(dest, self._t).send(dest, (_TAGS[state],))
         return state is RunState.PAUSED
@@ -587,7 +592,7 @@ def process_and_reduce(
     settles it** into the reduction (a thief ships the computed partial back as a ``leaf``
     message), so the fixed tree and the result are **unchanged**: stealing moves *where* a leaf is
     computed, never *where* it reduces. The loop interleaves a non-blocking inbox drain between
-    leaves, so a busy worker answers steal requests; every send is handed to the :class:`_Outbox`
+    leaves, so a busy worker answers steal requests; every send is handed to the :class:`Outbox`
     thread, so the actor never blocks writing to a peer (the R20.7 rule) and its own inbox is
     always being drained — the property that makes a send cycle between peers impossible for
     partials larger than the OS pipe buffer. The actor also RETURNS in bounded time: a peer that
@@ -606,7 +611,7 @@ def process_and_reduce(
     events and profile trees that would otherwise ship to the driver. ``complete`` makes a failing
     actor wait, bounded, for its queued sends (its last event batch included) before it raises.
     """
-    outbox = _Outbox(transport)  # the reducer's node/root sends go through it too
+    outbox = Outbox(transport)  # the reducer's node/root sends go through it too
     reducer: PeerReducer[R] = PeerReducer(address, outbox, n, bounds, worker_addresses, combine)
     mine: deque[tuple[int, Partition]] = deque(items)  # leaves to PROCESS (own + stolen)
     # dedup settled nodes/leaves (a reliable transport may retry)
@@ -735,8 +740,8 @@ def process_and_reduce(
             if released(release):  # the driver's run ended, however it ended
                 break
             # a failed send (an unpicklable partial) never reaches the root
-            if outbox._error is not None:
-                raise outbox._error
+            if outbox.error is not None:
+                raise outbox.error
             while pending and not done:
                 handle(pending.pop(0))
             for _sender, payload in transport.poll():  # cheap non-blocking drain between leaves

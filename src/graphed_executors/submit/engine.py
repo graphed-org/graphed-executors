@@ -64,8 +64,8 @@ from graphed.debug import SourceFrame, StageError
 from graphed.shuffle import pick, split
 
 from graphed_executors._plan_queue import PlanQueue
+from graphed_executors._window import PAUSED_WAKE_S, Window, wait_until
 from graphed_executors.local._reduce import plan_tree, running_fold
-from graphed_executors.local.executors import _PAUSED_WAKE_S, _wait_until, _Window
 
 from .protocol import SubmitBackend, SubmitFuture
 from .services import (
@@ -609,7 +609,7 @@ class SubmitRunner:
             return ExecResult(value, n, len(combines), StopReason.EXHAUSTED)
         finally:
             if ctx.monitor_topic is not None:  # drain trailing worker events before unsubscribe
-                _wait_until(
+                wait_until(
                     lambda: events_seen[0] >= ctx.events_per_leaf * drained, _DRAIN_TIMEOUT_S
                 )
 
@@ -622,7 +622,7 @@ class SubmitRunner:
         events_seen: list[int],
         submits: _RunTasks,
     ) -> ExecResult[R]:
-        """``_run_fixed`` through a :class:`_Window`.
+        """``_run_fixed`` through a :class:`Window`.
 
         The same ``plan_tree``, with each combine submitted once both inputs completed, so
         a cancel leaves completed subtrees to fold by first leaf.
@@ -648,7 +648,7 @@ class SubmitRunner:
         if monitor is not None:
             for task in tasks:
                 emit_task(monitor, self._submitted_event(task))
-        window = _Window(control, self._task_slots(), enumerate(tasks))
+        window = Window(control, self._task_slots(), enumerate(tasks))
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         node_of: dict[SubmitFuture, int] = {}  # outstanding future -> its plan_tree node
         # completed node -> its future, until a combine takes it
@@ -680,7 +680,7 @@ class SubmitRunner:
                     control.wait()
                     continue
                 try:
-                    fut = done_q.get(timeout=_PAUSED_WAKE_S if window.held else None)
+                    fut = done_q.get(timeout=PAUSED_WAKE_S if window.held else None)
                 except queue.Empty:
                     continue
                 node = node_of.pop(fut)
@@ -719,7 +719,7 @@ class SubmitRunner:
             return ExecResult(value, done, n_combines + k, stopped)
         finally:
             if ctx.monitor_topic is not None:  # drain trailing worker events before unsubscribe
-                _wait_until(
+                wait_until(
                     lambda: events_seen[0] >= ctx.events_per_leaf * drained, _DRAIN_TIMEOUT_S
                 )
 
@@ -790,7 +790,7 @@ class SubmitRunner:
         finally:
             # F2a: drain trailing worker events of every consumed leaf
             if ctx.monitor_topic is not None:
-                _wait_until(
+                wait_until(
                     lambda: events_seen[0] >= ctx.events_per_leaf * exec_ctx.n_done,
                     _DRAIN_TIMEOUT_S,
                 )
@@ -804,7 +804,7 @@ class SubmitRunner:
         events_seen: list[int],
         submits: _RunTasks,
     ) -> ExecResult[R]:
-        """``_run_adaptive`` with each ``next_tasks`` batch held in a :class:`_Window`."""
+        """``_run_adaptive`` with each ``next_tasks`` batch held in a :class:`Window`."""
         assert plan.next_tasks is not None
         backend = self.backend
         next_tasks = plan.next_tasks
@@ -819,7 +819,7 @@ class SubmitRunner:
         results: list[tuple[int, R]] = []
         stopped: StopReason | None = None
         seq = 0
-        window: _Window[Task] = _Window(control, self._task_slots())
+        window: Window[Task] = Window(control, self._task_slots())
 
         def refill() -> None:
             batch = next_tasks(exec_ctx)  # DONE == None
@@ -853,7 +853,7 @@ class SubmitRunner:
                     control.wait()
                     continue
                 try:
-                    fut = done_q.get(timeout=_PAUSED_WAKE_S if window.held else None)
+                    fut = done_q.get(timeout=PAUSED_WAKE_S if window.held else None)
                 except queue.Empty:  # a timed wake only re-reads the slots and re-runs take
                     continue
                 if fut not in outstanding:  # a cancelled/duplicate callback
@@ -879,7 +879,7 @@ class SubmitRunner:
         finally:
             # F2a: drain trailing worker events of every consumed leaf
             if ctx.monitor_topic is not None:
-                _wait_until(
+                wait_until(
                     lambda: events_seen[0] >= ctx.events_per_leaf * exec_ctx.n_done,
                     _DRAIN_TIMEOUT_S,
                 )
@@ -980,7 +980,7 @@ class SubmitRunner:
         slots = task_slots() if task_slots is not None else self.backend.n_workers()
         return max(1, int(slots))
 
-    def _fill(self, window: _Window[T], in_flight: int, start: Callable[[T], None]) -> None:
+    def _fill(self, window: Window[T], in_flight: int, start: Callable[[T], None]) -> None:
         """Start the held work the window releases.
 
         A full window holding work re-reads the slots and resizes, so workers that joined

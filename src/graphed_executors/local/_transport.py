@@ -11,7 +11,7 @@ and the seam a future *distributed* executor reuses unchanged:
   (``multiprocessing.SimpleQueue``, **no feeder thread**) for the process pool (queue-type-agnostic
   — it only uses ``put_nowait`` / ``get_nowait`` / ``get``). A ``PipeInbox`` send is a synchronous
   pipe write, so it blocks above the OS pipe buffer: a caller that must keep reading (or keep
-  going) hands its sends to a separate thread — ``_peer._Outbox`` for a worker,
+  going) hands its sends to a separate thread — ``_peer.Outbox`` for a worker,
   ``_peer.release_workers`` for the driver's teardown broadcast.
 - :class:`HttpTransport` — **HTTP** over loopback. Each endpoint runs a tiny stdlib ``http.server``
   in a daemon thread; ``send`` enqueues to a local outbound buffer that a background sender thread
@@ -122,7 +122,7 @@ class PipeInbox:
     ``put_nowait`` therefore **blocks** whenever the message exceeds the OS pipe buffer (~64 KB)
     until the peer reads — a reduction partial (many histograms, or systematic universes) easily
     does, and a parked write holds this inbox's write lock against everyone else. Callers keep that
-    safe by never sending from the thread that has to keep reading: see ``_peer._Outbox`` /
+    safe by never sending from the thread that has to keep reading: see ``_peer.Outbox`` /
     ``_peer.release_workers``.
     """
 

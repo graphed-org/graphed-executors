@@ -28,8 +28,7 @@ from graphed.aggregate import aggregate_plan
 from graphed.awkward import AwkwardBackend, AwkwardForm, gak
 from graphed.core.execution import SequentialRunner
 
-import graphed_executors.local.executors as local_executors
-from graphed_executors.local import ProcessPoolExecutor
+from graphed_executors.local import ProcessPoolExecutor, _driver
 
 
 def _events(backend: AwkwardBackend | None = None) -> Any:
@@ -60,7 +59,7 @@ def _behavior_plan() -> Any:
 def test_a_closure_op_runs_on_the_process_pool(
     comms: str | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(local_executors, "_PEER_ROOT_TIMEOUT_S", 60.0)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 60.0)
     got = ProcessPoolExecutor(max_workers=2, comms=comms).run(_closure_plan()).value
     assert got == 3.0 * float(ak.sum(EVENTS.Jet.pt))
 
@@ -69,7 +68,7 @@ def test_a_closure_op_runs_on_the_process_pool(
 def test_a_lambda_behavior_partial_runs_on_the_process_pool(
     comms: str | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(local_executors, "_PEER_ROOT_TIMEOUT_S", 60.0)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 60.0)
     plan = _behavior_plan()
     got = ProcessPoolExecutor(max_workers=2, comms=comms).run(plan).value
     assert ak.to_list(got) == ak.to_list(SequentialRunner().run(plan).value)

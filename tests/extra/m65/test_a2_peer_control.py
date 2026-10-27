@@ -14,7 +14,7 @@ import pytest
 from graphed.core import Partition, RunControl, RunState, StopReason
 from graphed.core.execution import LocalResources
 
-from graphed_executors.local import ProcessPoolExecutor, _peer, executors
+from graphed_executors.local import ProcessPoolExecutor, _driver, _peer
 from graphed_executors.local._reduce import lazy_tree_reduce, running_fold
 
 ONES = (1,) * mp.N
@@ -25,7 +25,7 @@ ROOT_TIMEOUT_S = 10.0  # headroom for the unpaused work on a loaded runner
 def test_paused_time_does_not_count_toward_the_root_deadline(
     route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", ROOT_TIMEOUT_S)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", ROOT_TIMEOUT_S)
     ctl = RunControl()
     rec = mp.Recorder(on_first_finished=ctl.pause)
     ex = mp.ROUTES[route].make(rec, control=ctl)
@@ -41,7 +41,7 @@ def test_paused_time_does_not_count_toward_the_root_deadline(
 def test_the_root_timeout_message_follows_the_constant(
     route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.5)
     ex = mp.ROUTES[route].make()
     run = mp.Background(lambda: ex.run(mp.make_plan(mp.Probe(sleep_s=1.0))))
     with pytest.raises(TimeoutError, match=r"within 0\.5s"):
