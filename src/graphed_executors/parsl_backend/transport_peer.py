@@ -38,6 +38,7 @@ from graphed_executors.common.transport_run import (
     TransportExecResult,
     TransportWitness,
     build_stage_error,
+    finalized,
     is_restart_worthy,
     pick_attributable,
 )
@@ -416,7 +417,7 @@ def parsl_run_plan(
     witness = TransportWitness()
     if n == 0:
         witness.epoch_nonces.append(uuid.uuid4().hex)
-        return TransportExecResult(plan.empty(), 0, 0, witness)
+        return TransportExecResult(finalized(plan, plan.empty()), 0, 0, witness)
 
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
     idle_deadline_s = root_timeout_s + _IDLE_SLACK_S  # derived: always ≥ the root wait (§1.4)
@@ -467,7 +468,7 @@ def parsl_run_plan(
         if not errs and has_captured:
             witness.epoch_restarts = attempt
             witness.per_worker = per_worker
-            return TransportExecResult(root, n, max(0, n - 1), witness)
+            return TransportExecResult(finalized(plan, root), n, max(0, n - 1), witness)
 
         last_exc = _reduce_failure(errs, pbackend)
         if not is_restart_worthy(last_exc, pbackend) or attempt >= epoch_restarts_allowed:

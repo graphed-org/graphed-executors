@@ -35,6 +35,7 @@ from graphed.core.execution import (
     WorkerProfiler,
     complete_events,
     emit_task,
+    finalize_result,
     lean_events,
     partition_label,
     worker_monitor_factory,
@@ -361,19 +362,21 @@ class _BaseExecutor:
             control = self.control
             try:
                 if control is not None and control.state is RunState.CANCELLED:
-                    return ExecResult(plan.empty(), 0, 0, StopReason.CANCELLED)
-                if plan.next_tasks is not None:
-                    return self._run_adaptive(plan, control)
-                if self._comms is not None:
-                    return self._run_peer(plan, control)
-                if self._pooled_combines:
-                    return self._run_fixed_pooled(plan, control)
-                if control is not None:
-                    return self._run_fixed_windowed(plan, control)
-                return self._run_fixed(plan)
+                    result = ExecResult(plan.empty(), 0, 0, StopReason.CANCELLED)
+                elif plan.next_tasks is not None:
+                    result = self._run_adaptive(plan, control)
+                elif self._comms is not None:
+                    result = self._run_peer(plan, control)
+                elif self._pooled_combines:
+                    result = self._run_fixed_pooled(plan, control)
+                elif control is not None:
+                    result = self._run_fixed_windowed(plan, control)
+                else:
+                    result = self._run_fixed(plan)
             finally:
                 if control is not None and control.state is RunState.CANCELLED:
                     control.reset()  # a cancel ends this run only, whether or not a check saw it
+            return finalize_result(plan, result)
 
     def _run_peer(self, plan: Plan[R], control: RunControl | None = None) -> ExecResult[R]:
         """M38 peer reduction.

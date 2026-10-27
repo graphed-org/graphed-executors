@@ -168,6 +168,12 @@ holding its leftmost leaf. Because every node keeps its *global* position in the
 the merges around never changes the grouping — the answer is bit-for-bit what a driver-side
 merge would have produced, floats included. The driver waits only for the root.
 
+A plan's ``finalize`` (``graphed.core.Plan.finalize``) runs after that, once, on the driver,
+whichever runner or backend produced the value: the root of a peer merge, the driver's own fold,
+the ``empty()`` of a run with no tasks or one cancelled before it started. ``SubmitRunner`` calls
+it after the run's services are released. A partial can therefore stay in the form that merges
+and ships cheaply, while ``result.value`` is the final one.
+
 Two knobs shape this:
 
 * ``comms="ipc"`` (the default) runs the peer merges over per-worker inbox queues on one

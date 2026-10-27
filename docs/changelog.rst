@@ -4,6 +4,13 @@ What changed
 Unreleased
 ----------
 
+Requires ``graphed`` 0.0.10 or later.
+
+* Every runner applies the plan's ``finalize`` once, on the driver, to the value it returns:
+  ``ThreadExecutor``, ``ProcessPoolExecutor`` and ``PinnedPoolExecutor`` on every path (peer,
+  hub, pooled, windowed, adaptive), ``SubmitRunner`` on every backend (dask, parsl, HTCondor,
+  ``ThreadBackend``) and on a ``DurablePlanV2``, and the dask and parsl peer runs
+  ``transport_run_plan`` and ``parsl_run_plan``.
 * The exception classes end in ``Error`` (PEP 8): ``WorkerLost``, ``TaskTimedOut``,
   ``ServiceUnavailable``, ``ServiceUnreachable`` and ``ProbeUnreachable`` are now
   ``WorkerLostError``, ``TaskTimedOutError``, ``ServiceUnavailableError``,

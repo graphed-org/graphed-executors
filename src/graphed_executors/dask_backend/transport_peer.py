@@ -25,6 +25,7 @@ from graphed.core.execution import LocalResources, Plan
 from graphed.services import require_bound
 
 from graphed_executors.common import refuse_staged
+from graphed_executors.common.transport_run import finalized
 from graphed_executors.local._peer import (
     collect_peer_root,
     make_bounds,
@@ -156,7 +157,7 @@ def transport_run_plan(
     witness = TransportWitness()
     if n == 0:
         witness.epoch_nonces.append(uuid.uuid4().hex)
-        return TransportExecResult(plan.empty(), 0, 0, witness)
+        return TransportExecResult(finalized(plan, plan.empty()), 0, 0, witness)
 
     from .transport import (  # noqa: PLC0415  (deferred: distributed-touching)
         _ensure_run_probe,
@@ -229,7 +230,7 @@ def transport_run_plan(
             else:
                 witness.epoch_restarts = attempt
                 witness.per_worker = per_worker
-                return TransportExecResult(root, n, max(0, n - 1), witness)
+                return TransportExecResult(finalized(plan, root), n, max(0, n - 1), witness)
 
         last_exc = pick_attributable(errs, backend)
         if not is_restart_worthy(last_exc, backend) or attempt >= epoch_restarts_allowed:
