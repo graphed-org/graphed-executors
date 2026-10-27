@@ -479,7 +479,7 @@ def parsl_run_plan(
             raise build_stage_error(last_exc, pbackend) from last_exc
 
     witness.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise (
+    raise (  # pragma: no cover
         build_stage_error(last_exc, pbackend)
         if last_exc is not None
         else RuntimeError("no epochs run")
