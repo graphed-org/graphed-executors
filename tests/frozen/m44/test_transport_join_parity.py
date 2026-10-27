@@ -15,6 +15,8 @@ engages.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from transport_harness import (
     TransportAdapter,
@@ -34,6 +36,9 @@ from transport_harness import (
 
 from graphed_executors.local.shuffle import run_join
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 pytest.importorskip("pandas")
 
@@ -42,25 +47,25 @@ PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with transport_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> TransportAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> TransportAdapter:
     return request.param
 
 
-def _dbackend(client):  # type: ignore[no-untyped-def]
+def _dbackend(client: Any):  # type: ignore[no-untyped-def]
     install_transport_plugin(client)
     return build_dask_backend(client)
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "outer"])
 def test_join_rows_match_local_engine_and_pandas_oracle(
-    adapter: TransportAdapter, client, how: str
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client: Any, how: str
+) -> None:
     left, right = join_general_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how=how, broadcast=False)
     r = transport_join(
@@ -84,8 +89,8 @@ def test_join_rows_match_local_engine_and_pandas_oracle(
 
 
 def test_join_budget_spill_counters_engage_and_match_local(
-    adapter: TransportAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client: Any
+) -> None:
     n_left, n_right = 200, 200  # -> 40_000 duplicated output rows in a single hot dest
     left, right = join_hot_key_sides(adapter, n_left, n_right)
     be: object = adapter.backend

@@ -10,7 +10,7 @@ import dataclasses
 import os
 import sys
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -63,7 +63,7 @@ def _measured_run(htex: Any, tag: str, peer: bool | None) -> tuple[int, int]:
         ref = sequential(plan, {"sf": server.endpoint()})
     assert calls > 0, "no stage task called the server"
     assert got.value == ref.value and got.value, (got.value, ref.value)
-    return backend.measure()
+    return cast("tuple[int, int]", backend.measure())
 
 
 def test_parsl_htex_runs_a_service_join_moving_each_map_result_once(htex: Any) -> None:

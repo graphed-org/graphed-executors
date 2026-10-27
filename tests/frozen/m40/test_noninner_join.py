@@ -27,12 +27,16 @@ These tests FAIL against the pre-fix executor for the pinned reasons (each prove
 from __future__ import annotations
 
 from collections import Counter
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 from join_backends import JoinAdapter, adapters
 
 from graphed_exec_local.shuffle import run_join
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pd = pytest.importorskip("pandas")  # the independent relational oracle
 
@@ -43,7 +47,7 @@ NRow = tuple[int | None, int | None, int | None]
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> JoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> JoinAdapter:
     return request.param
 
 
@@ -58,11 +62,11 @@ def _col(c: object) -> list[int | None]:
     to_list = getattr(c, "to_list", None)
     if to_list is not None:  # awkward option array -> [.., None, ..]
         return [None if v is None else int(v) for v in to_list()]
-    arr = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
+    arr: Any = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
     return [None if arr[i] is np.ma.masked else int(arr[i]) for i in range(len(arr))]
 
 
-def observed_nullable(value: dict[int, object]) -> Counter[NRow]:
+def observed_nullable(value: dict[int, Any]) -> Counter[NRow]:
     """Return the whole relational result as one null-aware multiset over ALL blocks.
 
     Partitioning-independent — the join RESULT does not depend on how it is partitioned.
@@ -112,7 +116,9 @@ _RK, _RV = [2, 3, 3, 5], [200, 300, 301, 500]
 
 
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
-def test_shuffle_noninner_matches_pandas_oracle(adapter: JoinAdapter, how: str, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_shuffle_noninner_matches_pandas_oracle(
+    adapter: JoinAdapter, how: str, tmp_path: Path
+) -> None:
     """SHUFFLE path, non-inner.
 
     The whole result must equal the duplicating null-preserving pandas oracle. Catches F1 (a
@@ -167,8 +173,8 @@ _B_PROBE = [([2, 2], [200, 201]), ([2], [202]), ([2], [203])]  # 3 probe blocks,
 
 @pytest.mark.parametrize("how", ["left", "outer"])
 def test_broadcast_noninner_unmatched_build_emitted_once(
-    adapter: JoinAdapter, how: str, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: JoinAdapter, how: str, tmp_path: Path
+) -> None:
     """BROADCAST path, left/outer.
 
     An unmatched build row must appear EXACTLY ONCE across ALL probe blocks. Catches F2 — the

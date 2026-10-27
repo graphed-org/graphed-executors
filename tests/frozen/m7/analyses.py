@@ -7,6 +7,7 @@ awkward/corpus lazily.
 from __future__ import annotations
 
 import time
+from typing import Any, cast
 
 import numpy as np
 from graphed import Session
@@ -84,7 +85,7 @@ def _met_counts(events: object) -> np.ndarray:
     ev = from_awkward(s, "events", events)
     values = s.materialize(ev.MET.pt)  # ADL1-style: the MET pT spectrum
     h = hist1d(values, **HIST)  # integer counts -> exact under summation
-    return np.asarray(h.values(), dtype=np.int64)
+    return cast("np.ndarray", np.asarray(h.values(), dtype=np.int64))
 
 
 def met_partial(part: Partition, res: object) -> np.ndarray:
@@ -100,17 +101,17 @@ def met_full_counts() -> np.ndarray:
 
 
 def hist_add(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    return a + b
+    return cast("np.ndarray", a + b)
 
 
 def hist_zero() -> np.ndarray:
     return np.zeros(HIST["bins"], dtype=np.int64)
 
 
-def met_partitions(n_chunks: int) -> list:
+def met_partitions(n_chunks: int) -> list[Any]:
     from graphed.core import Task  # noqa: PLC0415
 
-    edges = np.linspace(0, N_EVENTS, n_chunks + 1, dtype=int)
+    edges: Any = np.linspace(0, N_EVENTS, n_chunks + 1, dtype=int)
     return [
         Task(i, Partition("events://corpus", "Events", int(edges[i]), int(edges[i + 1])))
         for i in range(n_chunks)
@@ -130,4 +131,4 @@ def raise_stage_error(part: Partition, res: object) -> int:
     events = gn.from_record(s, "events", pt=np.arange(1.0, 5.0))
     # out-of-range in the worker
     bad = (events["pt"] * 2.0).map(lambda a: a[100], name="worker_oob")
-    return gd.run(s, bad, opt_level=1)  # raises graphed.debug.StageError
+    return cast("int", gd.run(s, bad, opt_level=1))  # raises graphed.debug.StageError

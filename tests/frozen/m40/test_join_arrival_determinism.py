@@ -18,6 +18,8 @@ fails.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from join_backends import (
     JoinAdapter,
@@ -29,17 +31,20 @@ from join_backends import (
 
 from graphed_exec_local.shuffle import ShuffleFaults, run_join
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> JoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> JoinAdapter:
     return request.param
 
 
 def test_join_is_byte_identical_under_fuzzed_arrival_and_duplicates(
-    adapter: JoinAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     left, right = general_sides(adapter)
     parts = 4
     oracle = expected_join_per_dest(adapter, left, right, parts)
@@ -76,7 +81,9 @@ def test_join_is_byte_identical_under_fuzzed_arrival_and_duplicates(
     )
 
 
-def test_join_survives_a_stolen_producer_task_bit_for_bit(adapter: JoinAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_join_survives_a_stolen_producer_task_bit_for_bit(
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     left, right = general_sides(adapter)
     parts = 4
     oracle = expected_join_per_dest(adapter, left, right, parts)

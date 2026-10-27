@@ -13,6 +13,7 @@ lost futures, and one whose result changes when a leaf is recomputed elsewhere.
 from __future__ import annotations
 
 import pathlib
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import Plan, StopReason, Task
@@ -28,18 +29,21 @@ from submit_backends import (
     worker_pids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture()
-def client():
+def client() -> Iterator[Any]:
     # dedicated cluster, generous death budget: one death must reroute, never blame the task
     with cluster_client(2, processes=True, allowed_failures=10) as c:
         yield c
 
 
 def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(
-    client, tmp_path: pathlib.Path
+    client: Any, tmp_path: pathlib.Path
 ) -> None:
     n = 8
     parts = mem_partitions(n, "reroute")
@@ -69,7 +73,7 @@ def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(
     assert successful_pid in set(worker_pids(client).values())
 
 
-def test_clean_twin_matches_sequential(client) -> None:
+def test_clean_twin_matches_sequential(client: Any) -> None:
     """Control: the same compute without the poison equals the provenance run's payload.
 
     The reroute test's expected value is anchored, not self-referential.

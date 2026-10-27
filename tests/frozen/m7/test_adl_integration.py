@@ -11,6 +11,7 @@ selection, jet/lepton combinatorics, dilepton+MET, tri-jet, jet-lepton isolation
 from __future__ import annotations
 
 import functools
+from typing import Any
 
 import adl
 import numpy as np
@@ -20,7 +21,7 @@ from graphed.core import Plan
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
 
-def _plan(qname: str, n_chunks: int) -> Plan:
+def _plan(qname: str, n_chunks: int) -> Plan[Any]:
     bins, start, stop = adl.adl_axis(qname)
     return Plan(
         process=functools.partial(adl.adl_partial, qname, bins, start, stop),

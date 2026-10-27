@@ -18,6 +18,7 @@ identically on a second run (determinism). Counts, never clocks (R0.10a).
 from __future__ import annotations
 
 from collections import Counter
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from transport_harness import (
@@ -32,6 +33,9 @@ from transport_harness import (
     transport_repartition,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = transport_adapters()
@@ -40,19 +44,19 @@ LADDER_P = (4, 8, 16)
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with transport_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> TransportAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> TransportAdapter:
     return request.param
 
 
 def _spy_run(
-    adapter: TransportAdapter, client, parts: int, n_tasks: int, copies: int = 1
-) -> SpyDaskBackend:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client: Any, parts: int, n_tasks: int, copies: int = 1
+) -> SpyDaskBackend:
     install_transport_plugin(client)
     spy = SpyDaskBackend(build_dask_backend(client))
     transport_repartition(
@@ -62,8 +66,8 @@ def _spy_run(
 
 
 def test_graph_is_T_maps_P_gathers_and_a_constant_control_tail(
-    adapter: TransportAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client: Any
+) -> None:
     control_tails: set[int] = set()
     for n_tasks in LADDER_T:
         for parts in LADDER_P:
@@ -87,7 +91,7 @@ def test_graph_is_T_maps_P_gathers_and_a_constant_control_tail(
     )
 
 
-def test_counts_are_row_count_independent(adapter: TransportAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_counts_are_row_count_independent(adapter: TransportAdapter, client: Any) -> None:
     lean = _spy_run(adapter, client, 6, 2, copies=1).submitted_fn_names()
     fat = _spy_run(adapter, client, 6, 2, copies=8).submitted_fn_names()
     assert lean == fat, (
@@ -97,8 +101,8 @@ def test_counts_are_row_count_independent(adapter: TransportAdapter, client) -> 
 
 
 def test_map_and_gather_submits_are_strict_pinned_and_deterministic(
-    adapter: TransportAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client: Any
+) -> None:
     addrs = sorted_worker_addresses(client)
     spy = _spy_run(adapter, client, 8, 4)
 

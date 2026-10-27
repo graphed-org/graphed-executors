@@ -16,6 +16,7 @@ import pickle
 import sys
 import uuid
 from pathlib import Path
+from typing import cast
 
 import pytest
 from graphed.checkpoint import EnvironmentChanged, StoreUnavailable
@@ -54,7 +55,7 @@ def run_job(job: Path) -> int:
     proc = start_job_driver(job)
     code = finish(proc)
     kill_session(proc)
-    return code
+    return cast("int", code)
 
 
 @posix

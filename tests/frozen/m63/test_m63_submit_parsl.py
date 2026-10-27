@@ -6,7 +6,7 @@ import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -57,7 +57,7 @@ def ex(htex: Any) -> Iterator[Any]:
 
 @pytest.fixture
 def bounded(htex: Any) -> Iterator[Any]:
-    runner = parsl_runner(htex, **{"max_in_flight": 2})
+    runner = parsl_runner(htex, **cast("dict[str, Any]", {"max_in_flight": 2}))
     try:
         yield runner
     finally:

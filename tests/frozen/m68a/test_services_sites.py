@@ -60,7 +60,7 @@ from services_harness import (
 BOUND_S = 120.0
 MACHINE = "wn7.m68a.example"
 
-ROWS = {
+ROWS: dict[str, dict[str, Any]] = {
     "lpc": {
         "driver_ports": (10000, 10100),
         "service_ports": (10001, 10100),

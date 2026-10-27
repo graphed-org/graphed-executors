@@ -20,6 +20,7 @@ keying/merge-order divergence from the local engine.
 from __future__ import annotations
 
 from collections import Counter
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from dask_shuffle_backends import (
@@ -41,6 +42,9 @@ from dask_shuffle_backends import (
 
 from graphed_executors.local.shuffle import run_join
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 pytest.importorskip("pandas")  # the independent non-inner oracle
 
@@ -49,14 +53,14 @@ PARTS = 4
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     # tier A: fast in-process workers — the serialization path is pinned by the hashes module
     with shuffle_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
@@ -73,8 +77,8 @@ def _sides_rows(adapter: ShuffleJoinAdapter) -> tuple[list[int], list[int], list
 
 
 def test_inner_join_matches_the_duplicating_oracle_per_dest(
-    adapter: ShuffleJoinAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client: Any
+) -> None:
     left, right = join_general_sides(adapter)
     oracle = dup_join_per_dest(adapter, left, right, PARTS)
     assert oracle, "oracle degenerate — no matching rows"
@@ -100,8 +104,8 @@ def test_inner_join_matches_the_duplicating_oracle_per_dest(
 
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
 def test_noninner_matches_the_pandas_oracle_null_aware(
-    adapter: ShuffleJoinAdapter, how: str, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, how: str, client: Any
+) -> None:
     left, right = join_general_sides(adapter)
     lk, lv, rk, rv = _sides_rows(adapter)
     oracle = pandas_join_oracle(lk, lv, rk, rv, how)
@@ -130,8 +134,8 @@ def test_noninner_matches_the_pandas_oracle_null_aware(
 
 
 def test_salted_join_stays_co_partitioned_and_matches_local(
-    adapter: ShuffleJoinAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client: Any
+) -> None:
     """Both sides receive the SAME salt, so the join result is salt-invariant.
 
     Both sides must receive the SAME salt (co-partitioning preserved ⇒ the join RESULT is

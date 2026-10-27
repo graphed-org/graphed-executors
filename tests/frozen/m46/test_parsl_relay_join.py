@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 import pytest
 from parsl_harness import (
@@ -60,7 +61,7 @@ def htex():  # type: ignore[no-untyped-def]
         yield ex
 
 
-def _relay_join(htex, left, right, **kwargs):  # type: ignore[no-untyped-def]
+def _relay_join(htex: Any, left: Any, right: Any, **kwargs: Any) -> Any:
     spy = SpyParslBackend(make_parsl_backend(htex))
     res = run_bounded(
         lambda: relay_join(BACKEND, left, right, PARTS, runner=make_runner(spy), **kwargs)

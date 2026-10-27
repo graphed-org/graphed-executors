@@ -13,6 +13,7 @@ from __future__ import annotations
 import pickle
 import queue
 import threading
+from typing import Any
 
 from graphed.core import Partition, Plan, Task, TaskPhase
 from graphed.debug import StageError
@@ -47,7 +48,7 @@ def fake_factory() -> FakeProfiler:
 
 class ProfMonitor:
     def __init__(self) -> None:
-        self.events: list[object] = []
+        self.events: list[Any] = []
         self.profiles: list[tuple[str, bytes]] = []
         self._lock = threading.Lock()
 
@@ -83,7 +84,7 @@ def _reset_globals() -> None:
         ex._live_profilers.clear()
 
 
-def _drain_q(q: queue.Queue) -> list:
+def _drain_q(q: queue.Queue[Any]) -> list[Any]:
     items = []
     while True:
         try:
@@ -101,7 +102,7 @@ def test_thread_profiling_runs_profiler_in_process() -> None:
     assert result.value == sum((k + 1) * 3 for k in range(4))
     # the fake profiler flushed (first task is profile-due) -> on_profile fired
     assert mon.profiles
-    assert sum(1 for ev in mon.events if ev.phase is TaskPhase.FINISHED) == 4  # type: ignore[attr-defined]
+    assert sum(1 for ev in mon.events if ev.phase is TaskPhase.FINISHED) == 4
 
 
 def test_render_error_branches() -> None:
@@ -138,7 +139,7 @@ def test_emit_appends_to_local_buffer_not_ipc() -> None:
 
 def test_drain_batch_ships_one_batched_put() -> None:
     try:
-        q: queue.Queue = queue.Queue(maxsize=50)
+        q: queue.Queue[Any] = queue.Queue(maxsize=50)
         ex._proc_event_q = q
         ex._proc_buffer = ex.deque(maxlen=100)
         ex._proc_emit(("task", 1))
@@ -165,7 +166,7 @@ def test_profile_due_is_time_throttled() -> None:
 
 def test_proc_init_worker_entry_and_drain_thread() -> None:
     try:
-        q: queue.Queue = queue.Queue(maxsize=100)
+        q: queue.Queue[Any] = queue.Queue(maxsize=100)
         ex._proc_init(fake_factory, q)  # starts the per-worker buffer + drain thread + profiler
         assert ex._proc_resources is not None
         assert ex._proc_profiler is not None

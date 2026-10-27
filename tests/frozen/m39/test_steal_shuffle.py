@@ -16,6 +16,8 @@ is on structural counters, never a clock), so these tests are not flaky.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from exchange_backends import (
     BackendAdapter,
@@ -27,17 +29,20 @@ from exchange_backends import (
 
 from graphed_exec_local.shuffle import ShuffleFaults, run_repartition
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> BackendAdapter:
+def adapter(request: pytest.FixtureRequest) -> BackendAdapter:
     return request.param
 
 
 def test_gather_succeeds_after_a_producer_task_is_stolen(
-    adapter: BackendAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: BackendAdapter, tmp_path: Path
+) -> None:
     # (NB1): force a steal; the block stays on the thief, the manifest lives at owner(task).
     src = scenario_src_blocks(adapter)
     res = run_repartition(
@@ -64,7 +69,7 @@ def test_gather_succeeds_after_a_producer_task_is_stolen(
     assert observed_dest_keys(adapter, res.value) == expected_dest_keys(adapter, src, 4)
 
 
-def test_lossy_manifest_shipback_still_completes(adapter: BackendAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_lossy_manifest_shipback_still_completes(adapter: BackendAdapter, tmp_path: Path) -> None:
     # (NB2): drop the first 2 push attempts of each stolen manifest; retry-until-ack must
     # redeliver.
     src = scenario_src_blocks(adapter)

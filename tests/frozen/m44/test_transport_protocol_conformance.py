@@ -19,6 +19,7 @@ driver endpoint that fakes ``peers()``/``address``.
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import WorkerTransport
@@ -37,16 +38,19 @@ from transport_harness import (
     transport_cluster,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with transport_cluster(2, processes=True) as c:
         yield c
 
 
-def test_worker_endpoint_conforms_and_round_trips(client) -> None:  # type: ignore[no-untyped-def]
+def test_worker_endpoint_conforms_and_round_trips(client: Any) -> None:
     install_transport_plugin(client)
     a0, a1 = sorted_worker_addresses(client)
     spec = make_transport_spec(f"m44-conf-{uuid.uuid4().hex}", (a0, a1))
@@ -65,7 +69,7 @@ def test_worker_endpoint_conforms_and_round_trips(client) -> None:  # type: igno
     assert tuple(got) == (a1, ("hello", 1)), f"round-trip lost src or payload: {got!r}"
 
 
-def test_driver_endpoint_conforms_and_carries_both_channels(client) -> None:  # type: ignore[no-untyped-def]
+def test_driver_endpoint_conforms_and_carries_both_channels(client: Any) -> None:
     install_transport_plugin(client)
     a0, a1 = sorted_worker_addresses(client)
     spec = make_transport_spec(f"m44-conf-{uuid.uuid4().hex}", (a0, a1))
@@ -96,7 +100,7 @@ def test_driver_endpoint_conforms_and_carries_both_channels(client) -> None:  # 
         driver_ep.close()
 
 
-def test_full_inbox_drops_are_signalled_and_counted(client) -> None:  # type: ignore[no-untyped-def]
+def test_full_inbox_drops_are_signalled_and_counted(client: Any) -> None:
     install_transport_plugin(client)
     a0, a1 = sorted_worker_addresses(client)
     epoch = f"m44-conf-{uuid.uuid4().hex}"

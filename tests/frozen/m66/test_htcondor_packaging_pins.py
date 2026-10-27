@@ -12,7 +12,7 @@ import configparser
 import re
 import tomllib
 from fnmatch import fnmatch
-from typing import Any
+from typing import Any, cast
 
 from coverage.misc import substitute_variables
 from htcondor_harness import REPO_ROOT
@@ -72,7 +72,7 @@ def test_coveragerc_htcondor_gates_exactly_the_backend() -> None:
 
 
 def ci_text() -> str:
-    return (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    return cast("str", (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
 
 
 def job_block(text: str, job: str) -> str:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import analyses
 from graphed.core import ExecContext, Partition, Plan, StopCondition, StopReason, Task
 
@@ -12,12 +14,12 @@ def test_probe_driven_reshaping_processes_all_events_correctly() -> None:
     total = 1200
     state = {"emitted": 0, "batches": 0}
 
-    def next_tasks(ctx: ExecContext):
+    def next_tasks(ctx: ExecContext) -> Any:
         if state["emitted"] >= total:
             return None  # DONE
         # a small probe first; once we have observed a timing, size the next chunks larger
         size = 100 if not ctx.last_durations else 400
-        tasks = []
+        tasks: list[Any] = []
         while state["emitted"] < total and len(tasks) < 3:
             start = state["emitted"]
             stop = min(total, start + size)
@@ -41,7 +43,7 @@ def test_probe_driven_reshaping_processes_all_events_correctly() -> None:
 def test_stops_at_target_events() -> None:
     # an effectively-infinite supply of 100-event chunks; a target-events stop must end the run
     # early
-    def next_tasks(ctx: ExecContext):
+    def next_tasks(ctx: ExecContext) -> Any:
         base = ctx.n_done
         return [Task(base + k, Partition("f", "E", 0, 100)) for k in range(4)]
 

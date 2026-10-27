@@ -20,6 +20,8 @@ adds only the missing worker-count-invariance guard.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from join_backends import (
     JoinAdapter,
@@ -31,17 +33,20 @@ from join_backends import (
 
 from graphed_exec_local.shuffle import broadcast_join_choice, run_join
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> JoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> JoinAdapter:
     return request.param
 
 
 def test_auto_choice_is_invariant_to_the_runtime_worker_count(
-    adapter: JoinAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     be = adapter.backend
     left, right = broadcast_sides(adapter)
     parts = 4

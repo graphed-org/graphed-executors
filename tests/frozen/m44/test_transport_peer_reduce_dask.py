@@ -18,6 +18,8 @@ reduction traffic and still reports green.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from graphed.core.execution import SequentialRunner
 from transport_harness import (
@@ -33,18 +35,21 @@ from transport_harness import (
     tw_total,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 N_LEAVES = 12
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with transport_cluster(2, processes=True) as c:
         yield c
 
 
-def _run_once(client) -> tuple[SpyDaskBackend, object]:  # type: ignore[no-untyped-def]
+def _run_once(client: Any) -> tuple[SpyDaskBackend, Any]:
     install_transport_plugin(client)
     plan = make_peer_plan(N_LEAVES, "m44peer")
     spy = SpyDaskBackend(build_dask_backend(client))
@@ -53,7 +58,7 @@ def _run_once(client) -> tuple[SpyDaskBackend, object]:  # type: ignore[no-untyp
     return spy, outcome["result"]
 
 
-def test_peer_reduction_matches_sequential_twice_and_is_genuinely_distributed(client) -> None:  # type: ignore[no-untyped-def]
+def test_peer_reduction_matches_sequential_twice_and_is_genuinely_distributed(client: Any) -> None:
     a0, a1 = sorted_worker_addresses(client)
     oracle = SequentialRunner().run(make_peer_plan(N_LEAVES, "m44peer"))
 

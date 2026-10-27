@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import random
+from typing import cast
 
 import pytest
 
@@ -27,7 +28,7 @@ def _empty() -> str:
 
 def _ref(n: int) -> str:
     """Ground truth: the current tree_reduce, fed in leaf order."""
-    return tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0]
+    return cast("str", tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0])
 
 
 @pytest.mark.parametrize("n", [0, 1, 2, 3, 4, 5, 7, 8, 15, 16, 17, 31, 64, 100])

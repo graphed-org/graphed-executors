@@ -57,7 +57,7 @@ def test_fetch_budget_engages_and_never_changes_the_bytes(htex) -> None:  # type
     be = adapter.backend
     src = repartition_blocks(adapter, copies=4)
     base = run_repartition(be, src, PARTS, workers=2)
-    one_block = max(len(bytes(be.to_wire(b))) for b in base.value.values())  # type: ignore[attr-defined]
+    one_block = max(len(bytes(be.to_wire(b))) for b in base.value.values())
     budget = max(1, one_block // 2)
 
     local = run_repartition(be, src, PARTS, workers=2, fetch_budget_bytes=budget)
@@ -85,7 +85,7 @@ def test_join_budget_spill_counters_engage_with_f5_read_back_parity(htex) -> Non
     be = adapter.backend
     n = 64  # 64x64 -> 4096 duplicated output rows in one hot dest (the pre-validated B5 blowup)
     left, right = join_hot_key_sides(adapter, n, n)
-    row_bytes = be.estimated_bytes(left[0]) // n + be.estimated_bytes(right[0]) // n  # type: ignore[attr-defined]
+    row_bytes = be.estimated_bytes(left[0]) // n + be.estimated_bytes(right[0]) // n
     budget = (n * n * row_bytes) // 8
 
     local = run_join(be, left, right, PARTS, broadcast=False, mem_budget_bytes=budget)

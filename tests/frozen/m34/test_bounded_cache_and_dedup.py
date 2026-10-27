@@ -14,6 +14,8 @@ via ``comms=None``.
 
 from __future__ import annotations
 
+from typing import Any
+
 import cache_probe
 import graphed.core
 from graphed.core.execution import Partition, Plan, Task
@@ -23,7 +25,7 @@ from graphed_exec_local import ProcessExecutor
 from graphed_exec_local.executors import _SHARED_CACHE_CAP
 
 
-def _plan(process, n_tasks=2):  # type: ignore[no-untyped-def]
+def _plan(process: Any, n_tasks: int = 2) -> Plan[Any]:
     tasks = tuple(Task(i, Partition("p", "", i, i + 1)) for i in range(n_tasks))
     return Plan(process=process, combine=cache_probe.add, empty=cache_probe.zero, tasks=tasks)
 

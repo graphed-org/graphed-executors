@@ -31,7 +31,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from graphed import collate
@@ -307,7 +307,9 @@ class FaultCase:
         report, ports = children.report(name), free_range()
         self.reports.append(report)
         self.ranges.append(ports)
-        return child_spec(name, report, mode=mode, ports=ports, timeout_s=timeout_s)
+        return cast(
+            "ServiceSpec", child_spec(name, report, mode=mode, ports=ports, timeout_s=timeout_s)
+        )
 
     @staticmethod
     def _replace_timeout(spec: ServiceSpec, timeout_s: float) -> ServiceSpec:

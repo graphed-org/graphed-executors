@@ -5,13 +5,15 @@ Including under the free-threaded interpreter via the experimental CI job (plan 
 
 from __future__ import annotations
 
+from typing import Any
+
 import analyses
 from graphed.core import Partition, Plan, Task
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
 
-def _plan(n: int, process=analyses.sleep_then_one) -> Plan[int]:
+def _plan(n: int, process: Any = analyses.sleep_then_one) -> Plan[int]:
     tasks = [Task(i, Partition("f", "E", i, i + 1)) for i in range(n)]
     return Plan(process=process, combine=analyses.add_int, empty=analyses.zero_int, tasks=tasks)
 

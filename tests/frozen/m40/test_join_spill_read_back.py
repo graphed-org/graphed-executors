@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from join_backends import (
@@ -32,6 +33,9 @@ from join_backends import (
 
 from graphed_exec_local.shuffle import run_join
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 # a single hot key -> one dest of _N*_N duplicated output rows, far larger than the budget
@@ -39,7 +43,7 @@ _N = 120
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> JoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> JoinAdapter:
     return request.param
 
 
@@ -54,13 +58,13 @@ def _spill_files(res) -> dict[str, str]:  # type: ignore[no-untyped-def]
     return out
 
 
-def _reconstruct_from_spill(adapter: JoinAdapter, res) -> Counter:  # type: ignore[no-untyped-def]
+def _reconstruct_from_spill(adapter: JoinAdapter, res) -> Counter[Any]:  # type: ignore[no-untyped-def]
     """Return the join result rebuilt by reading ONLY the spilled dest files back off disk.
 
     Never ``res.value``.
     """
     on_disk = _spill_files(res)
-    total: Counter = Counter()
+    total: Counter[Any] = Counter()
     for digest in res.dest_block_hashes.values():
         with open(on_disk[digest], "rb") as fh:
             block = adapter.backend.from_wire(fh.read())
@@ -68,7 +72,9 @@ def _reconstruct_from_spill(adapter: JoinAdapter, res) -> Counter:  # type: igno
     return total
 
 
-def test_spilled_partitions_are_read_back_not_dead_io(adapter: JoinAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_spilled_partitions_are_read_back_not_dead_io(
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     be = adapter.backend
     left, right = one_dest_sides(adapter, _N, _N)
     parts = 4

@@ -212,7 +212,7 @@ def stage_error_plan(n: int, tag: str) -> Plan[str]:
     return Plan(process=raise_stage_error, combine=concat, empty=empty_text, tasks=tasks)
 
 
-def assert_intact_stage_error(err: BaseException) -> None:
+def assert_intact_stage_error(err: Any) -> None:
     assert type(err) is StageError, repr(err)
     assert err.op == "mul"
     assert err.user_frame is not None and err.user_frame.filename == "user_analysis.py"

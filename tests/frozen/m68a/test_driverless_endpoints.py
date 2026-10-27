@@ -30,7 +30,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from services_harness import (
@@ -108,7 +108,7 @@ def prepared_job(
     (entry,) = submits(fake.log)
     job = job_dir(entry[1], log_dir, tmp_path / "job")
     write_machine_ad(job / ".machine.ad")
-    return job
+    return cast("Path", job)
 
 
 def run_driver(job: Path) -> tuple[int, int, str]:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import random
 import threading
 import time
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -24,6 +25,9 @@ from graphed_exec_local._peer import (
 from graphed_exec_local._reduce import tree_reduce
 from graphed_exec_local._transport import build_transports
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 def _cat(a: str, b: str) -> str:
     return f"({a}+{b})"
@@ -34,7 +38,7 @@ def _empty() -> str:
 
 
 def _flat(n: int) -> str:
-    return tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0]
+    return cast("str", tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0])
 
 
 def _run(
@@ -65,7 +69,7 @@ def _run(
             src = items[addr]
             if jitter:
 
-                def gen():
+                def gen() -> Iterator[Any]:
                     for it in src:
                         time.sleep(random.random() * 0.001)
                         yield it

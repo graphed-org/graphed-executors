@@ -12,13 +12,16 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+from typing import Any, cast
 
 from m69b_harness import HARNESS_FILE, histserv_api, served_plan, unique
 
 
 def main(form: str, log_dir: str, server_mb: str, poll_s: str, pilot_mb: str) -> None:
     logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(name)s %(message)s")
-    importlib.import_module("graphed_executors.htcondor_backend.server").POLL_S = float(poll_s)
+    cast(Any, importlib.import_module("graphed_executors.htcondor_backend.server")).POLL_S = float(
+        poll_s
+    )
     backend = importlib.import_module("graphed_executors.htcondor_backend.backend")
     ctx = histserv_api().Context(
         memory_mb=int(server_mb), workers=1, name=unique("m69b-order-sigint")

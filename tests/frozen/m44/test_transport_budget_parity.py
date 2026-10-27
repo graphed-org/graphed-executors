@@ -21,6 +21,8 @@ the budget provably engages the mechanism there — then pins the transport engi
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from transport_harness import (
     TransportAdapter,
@@ -38,6 +40,9 @@ from transport_harness import (
 
 from graphed_executors.local.shuffle import run_repartition
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = transport_adapters()
@@ -45,13 +50,13 @@ PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with transport_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> TransportAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> TransportAdapter:
     return request.param
 
 
@@ -60,7 +65,7 @@ def _dest_wire_bytes(adapter: TransportAdapter, base: object) -> dict[int, int]:
     return {d: len(be.to_wire(b)) for d, b in base.value.items()}  # type: ignore[attr-defined]
 
 
-def test_fetch_budget_engages_and_matches_local(adapter: TransportAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_fetch_budget_engages_and_matches_local(adapter: TransportAdapter, client: Any) -> None:
     src = repartition_blocks(adapter, copies=4)
     base = run_repartition(adapter.backend, src, PARTS, workers=2)
     one_block = max(_dest_wire_bytes(adapter, base).values())  # no fragment exceeds a whole dest
@@ -97,7 +102,7 @@ def test_fetch_budget_engages_and_matches_local(adapter: TransportAdapter, clien
     )
 
 
-def test_disk_budget_backpressure_under_skew(adapter: TransportAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_disk_budget_backpressure_under_skew(adapter: TransportAdapter, client: Any) -> None:
     src = hot_key_blocks(adapter, 300)
     base = run_repartition(adapter.backend, src, PARTS, workers=2)
     total_bytes = sum(_dest_wire_bytes(adapter, base).values())
@@ -133,7 +138,7 @@ def test_disk_budget_backpressure_under_skew(adapter: TransportAdapter, client) 
     )
 
 
-def test_holder_budget_bounds_producer_retention(adapter: TransportAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_holder_budget_bounds_producer_retention(adapter: TransportAdapter, client: Any) -> None:
     src = repartition_blocks(adapter, copies=4)
     base = run_repartition(adapter.backend, src, PARTS, workers=2)
     dest_bytes = _dest_wire_bytes(adapter, base)

@@ -21,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import pathlib
+from typing import TYPE_CHECKING, Any, cast
 
 import awkward as ak
 import graphed.core
@@ -43,6 +44,11 @@ from submit_backends import (
     worker_pids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from graphed import Form
+
 pytest.importorskip("distributed")
 
 ROWS_PER_FILE = 12
@@ -50,7 +56,7 @@ N_FILES = 2
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with cluster_client(2, processes=True) as c:
         yield c
 
@@ -84,7 +90,7 @@ def _truth() -> tuple[float, float]:
 
 
 def test_parquet_aggregate_multi_output_matches_sequential_and_spreads(
-    client, parquet_paths
+    client: Any, parquet_paths: Any
 ) -> None:
     session = Session(AwkwardBackend())
     events = from_parquet(session, "events", parquet_paths, open_files=False, steps_per_file=4)
@@ -108,7 +114,7 @@ def test_parquet_aggregate_multi_output_matches_sequential_and_spreads(
     assert len({w for _, w in got.value.sites}) >= 2, "all aggregate work landed on one worker"
 
 
-def _toy_external_plan(*, bind_external: bool):
+def _toy_external_plan(*, bind_external: bool) -> Any:
     """Return a toy-backend aggregate whose graph holds ONE External (`map`) node.
 
     ``bind_external`` resolves it by content hash exactly as a deployment would (the m10
@@ -116,7 +122,7 @@ def _toy_external_plan(*, bind_external: bool):
     """
     session = Session(ToyListBackend())
     src = ToyListSource(tuple(range(1, 13)), n_parts=6)
-    x = session.source("x", form="num", data=src)
+    x = session.source("x", form=cast("Form", "num"), data=src)
     out = x.map(times10).reduce("sum")
     externals = None
     if bind_external:
@@ -132,11 +138,13 @@ def _toy_external_plan(*, bind_external: bool):
     if not bind_external:
         # aggregate_plan auto-wires evaluators from the recording session, so externals=None is not
         # an unbound plan; strip them to exercise a genuinely unbound External.
-        plan = dataclasses.replace(plan, process=dataclasses.replace(plan.process, externals=()))
+        plan = dataclasses.replace(
+            plan, process=dataclasses.replace(cast(Any, plan.process), externals=())
+        )
     return plan
 
 
-def test_external_payload_resolves_worker_side_by_content_hash(client) -> None:
+def test_external_payload_resolves_worker_side_by_content_hash(client: Any) -> None:
     plan = _toy_external_plan(bind_external=True)
     seq = SequentialRunner().run(plan)
     with make_dask_runner(client) as runner:
@@ -145,7 +153,7 @@ def test_external_payload_resolves_worker_side_by_content_hash(client) -> None:
     assert {pid for pid, _ in got.value.sites} <= set(worker_pids(client).values())
 
 
-def test_missing_external_fails_loudly_from_the_worker(client) -> None:
+def test_missing_external_fails_loudly_from_the_worker(client: Any) -> None:
     plan = _toy_external_plan(bind_external=False)
     with make_dask_runner(client, retries=0) as runner, pytest.raises(GraphedError) as excinfo:
         runner.run(plan)
@@ -154,9 +162,9 @@ def test_missing_external_fails_loudly_from_the_worker(client) -> None:
 
 
 def test_to_parquet_on_dask_matches_sequential(
-    client, parquet_paths, tmp_path: pathlib.Path
+    client: Any, parquet_paths: Any, tmp_path: pathlib.Path
 ) -> None:
-    def write(dest: pathlib.Path, executor) -> list[pathlib.Path]:
+    def write(dest: pathlib.Path, executor: Any) -> list[pathlib.Path]:
         session = Session(AwkwardBackend())
         events = from_parquet(session, "events", parquet_paths, open_files=False, steps_per_file=2)
         return [
@@ -179,7 +187,7 @@ def test_to_parquet_on_dask_matches_sequential(
         )
 
 
-def test_open_once_opens_each_uri_once_per_worker(client) -> None:
+def test_open_once_opens_each_uri_once_per_worker(client: Any) -> None:
     shared_uri = "shared://m42-parity-open-once"
     with make_dask_runner(client) as runner:
         records = runner.run(open_once_plan(8, "oo", shared_uri)).value
@@ -198,7 +206,7 @@ def test_open_once_opens_each_uri_once_per_worker(client) -> None:
         assert handle.startswith(f"{pid}:"), "the open happened in a different process (not local)"
 
 
-def test_worker_plugin_pins(client) -> None:
+def test_worker_plugin_pins(client: Any) -> None:
     """§1.3.3 pins: the plugin is a named, idempotent WorkerPlugin holding per-worker resources."""
     # deferred
     from graphed_executors.dask_backend.plugin import GraphedWorkerPlugin  # noqa: PLC0415

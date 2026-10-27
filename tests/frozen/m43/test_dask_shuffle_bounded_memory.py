@@ -14,6 +14,8 @@ Counters, never clocks/RSS (R0.10a — the m40 rationale carries over verbatim).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from dask_shuffle_backends import (
     ShuffleJoinAdapter,
@@ -28,6 +30,9 @@ from dask_shuffle_backends import (
     shuffle_cluster,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = shuffle_adapters()
@@ -38,19 +43,19 @@ _PARTS = 4
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with shuffle_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
 def test_join_spills_and_streams_within_a_budget_smaller_than_the_output(
-    adapter: ShuffleJoinAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client: Any
+) -> None:
     be = adapter.backend
     left, right = join_hot_key_sides(adapter, _N_LEFT, _N_RIGHT)
     oracle = dup_join_all(adapter, left, right, _PARTS)

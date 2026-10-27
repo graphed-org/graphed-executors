@@ -14,6 +14,7 @@ import math
 import multiprocessing
 import queue
 import threading
+from typing import Any, cast
 
 import pytest
 from graphed.core import Partition, Plan, Task
@@ -47,7 +48,7 @@ def _leaf_value(part: Partition, _resources: object) -> str:
 
 
 def _flat(n: int) -> str:
-    return tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0]
+    return cast("str", tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0])
 
 
 # ---- the bounded overlay: O(log N) degree (the sub-quadratic-inheritance witness) ---------------
@@ -127,9 +128,9 @@ def test_pinned_loop_serves_calls_then_shuts_down() -> None:
 
     Run the initializer once, serve ok + erroring calls, stop on the shutdown sentinel.
     """
-    call_q: queue.Queue = queue.Queue()
-    result_q: queue.Queue = queue.Queue()
-    inited: list = []
+    call_q: queue.Queue[Any] = queue.Queue()
+    result_q: queue.Queue[Any] = queue.Queue()
+    inited: list[Any] = []
     t = threading.Thread(
         target=_pinned_loop, args=(lambda *a: inited.append(a), ("tag",), call_q, result_q)
     )
@@ -152,7 +153,7 @@ def _pp_init(tag: str) -> None:
     _PP = tag
 
 
-def _pp_echo(x: int) -> tuple:
+def _pp_echo(x: int) -> tuple[Any, ...]:
     return (_PP, x)
 
 
