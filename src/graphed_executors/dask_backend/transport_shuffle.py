@@ -651,7 +651,7 @@ def _run_with_restarts(
         )
 
     transport.per_worker = per_worker  # pragma: no cover (the loop returns or raises)
-    raise (
+    raise (  # pragma: no cover
         build_stage_error(last_exc, dbackend)
         if last_exc is not None
         else RuntimeError("no epochs run")
