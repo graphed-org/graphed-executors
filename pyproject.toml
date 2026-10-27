@@ -142,19 +142,45 @@ files = ["src", "tests", "examples"]
 # the owner's original H->gg processor, kept byte-identical as the m69a oracle
 exclude = ['^tests/frozen/m69a/data/inclusive_processor\.py$']
 # The test tree has no __init__.py, so without explicit_package_bases every test file would be a
-# bare basename and `module = ["tests.frozen.*"]` below could not match it. The repo root as a
-# package base gives them dotted names instead (tests.frozen.m40.foo). The two tests/extra dirs with
-# sibling helper modules are bases as well, so `import _big_partial` resolves the way pytest's
-# prepend import mode resolves it; the frozen dirs must NOT be, since a base there would put their
-# files back on bare basenames and un-match the override.
+# bare basename and the conftest.py files would collide. The repo root as a package base gives
+# them dotted names instead (tests.frozen.m40.foo), which the per-module overrides below match.
+# The tests/extra dirs with sibling helper modules are bases as well, so `import _big_partial`
+# resolves the way pytest's prepend import mode resolves it; the frozen dirs must NOT be, since a
+# base there would put their files back on colliding bare basenames.
 mypy_path = ["src", ".", "tests/extra/hdna", "tests/extra/m41", "tests/extra/m54", "tests/extra/m68d", "examples/hgg"]
 explicit_package_bases = true
 
-# Read-only helpers under tests/frozen/{m44,m47,m63,m65,m68c,m68d,m74} that tests import by bare basename: pytest
-# puts them on sys.path, mypy knows them only as tests.frozen.mXX.<name>. They stay type-checked
-# under those dotted names; only the import site is Any.
+# Read-only helpers under tests/frozen/** that tests import by bare basename: pytest puts them on
+# sys.path, mypy knows them only as tests.frozen.mXX.<name>. They stay type-checked under those
+# dotted names; only the import site is Any.
 [[tool.mypy.overrides]]
 module = [
+  "adl",
+  "analyses",
+  "cache_probe",
+  "dask_shuffle_backends",
+  "driverless_harness",
+  "exchange_backends",
+  "functions_probe",
+  "golden_route",
+  "htcondor_harness",
+  "join_backends",
+  "m10_helpers",
+  "m41_backends",
+  "m49_variation_analyses",
+  "m68a_triton",
+  "m68b_dag_harness",
+  "m68b_harness",
+  "m69b_harness",
+  "m69b_hgg",
+  "m69b_order",
+  "parsl_harness",
+  "probe",
+  "services_harness",
+  "shipping_probe",
+  "shuffle_method_harness",
+  "submit_backends",
+  "test_inprocess_paths",
   "transport_harness",
   "parsl_transport_harness",
   "m63_harness",
@@ -186,9 +212,29 @@ follow_imports = "skip"
 module = ["coffea.*", "higgs_dna.*", "correctionlib.*", "pyarrow.*", "fsspec", "hgg_harness", "graphed_histogram.*"]
 ignore_missing_imports = true
 
-# cloudpickle ships no type information.
+# These frozen classes subclass a class imported by bare helper name, which mypy sees as Any.
 [[tool.mypy.overrides]]
-module = ["cloudpickle"]
+module = [
+  "tests.frozen.m65.m65b_probe",
+  "tests.frozen.m65.test_m65b_lean_push",
+  "tests.frozen.m69b.m69b_order",
+]
+disallow_subclassing_any = false
+
+# The frozen m69a fixture builder has no `from __future__ import annotations`, so annotating it
+# would add annotations evaluated at runtime.
+[[tool.mypy.overrides]]
+module = ["tests.frozen.m69a.data.make_hgg_fixture"]
+disable_error_code = ["misc", "no-untyped-call", "no-untyped-def"]
+
+# graphed_exec_local's submodules exist only as sys.modules aliases of graphed_executors.local's.
+[[tool.mypy.overrides]]
+module = ["graphed_exec_local.*"]
+ignore_missing_imports = true
+
+# cloudpickle, uproot and pandas (no pandas-stubs) ship no type information.
+[[tool.mypy.overrides]]
+module = ["cloudpickle", "uproot", "uproot.*", "pandas", "pandas.*"]
 ignore_missing_imports = true
 
 # dask/distributed ship no type information; the dask backend is optional and only imported lazily.
@@ -215,27 +261,3 @@ follow_imports = "skip"
 module = ["htcondor2", "htcondor2.*", "classad2"]
 ignore_missing_imports = true
 follow_imports = "skip"
-
-# tests/frozen/** is read-only under the §A.7 integrity rule, so the strict-mode diagnostics the
-# acceptance suites trip are disabled here rather than annotated away in place. This is NOT
-# ignore_errors: any code outside this list still fails the frozen tree. src/** and tests/extra/**
-# stay fully strict. To re-derive the list, comment this block out and re-run mypy.
-[[tool.mypy.overrides]]
-module = ["tests.frozen.*"]
-disable_error_code = [
-  "arg-type",
-  "assignment",
-  "attr-defined",
-  "import-not-found",
-  "import-untyped",
-  "index",
-  "misc",
-  "no-any-return",
-  "no-untyped-call",
-  "no-untyped-def",
-  "operator",
-  "type-arg",
-  "type-var",
-  "unused-ignore",
-  "var-annotated",
-]

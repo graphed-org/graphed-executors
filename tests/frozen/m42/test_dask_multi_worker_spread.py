@@ -12,6 +12,7 @@ workers must not all co-locate.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from submit_backends import (
@@ -22,16 +23,19 @@ from submit_backends import (
     worker_pids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_leaves_spread_across_workers_on_a_fixed_size_cluster(client) -> None:
+def test_leaves_spread_across_workers_on_a_fixed_size_cluster(client: Any) -> None:
     with make_dask_runner(client) as runner:
         result = runner.run(prov_plan(16, "spread"))
     prov = result.value

@@ -663,7 +663,7 @@ def p2p_seq_value(n: int, tag: str) -> int:
 @dataclass
 class P2PAdapter:
     name: str
-    backend: object
+    backend: Any
     make_block: Callable[[Sequence[int]], object]
     keys_of: Callable[[object], list[int]]
     make_side: Callable[[Sequence[int], str, Sequence[int]], object]
@@ -683,8 +683,8 @@ def _awkward_p2p_adapter() -> P2PAdapter:
             }
         )
 
-    def keys_of(block: object) -> list[int]:
-        return [int(k) for k in block["__joinkey__"].to_list()]  # type: ignore[index]
+    def keys_of(block: Any) -> list[int]:
+        return [int(k) for k in block["__joinkey__"].to_list()]
 
     def make_side(keys: Sequence[int], field: str, values: Sequence[int]) -> object:
         return ak.Array(
@@ -694,15 +694,15 @@ def _awkward_p2p_adapter() -> P2PAdapter:
             }
         )
 
-    def side_rows(block: object, field: str) -> list[tuple[int, int]]:
-        ks = [int(k) for k in block["__joinkey__"].to_list()]  # type: ignore[index]
-        vs = [int(v) for v in block[field].to_list()]  # type: ignore[index]
+    def side_rows(block: Any, field: str) -> list[tuple[int, int]]:
+        ks = [int(k) for k in block["__joinkey__"].to_list()]
+        vs = [int(v) for v in block[field].to_list()]
         return list(zip(ks, vs, strict=True))
 
-    def joined_rows(block: object) -> list[JRow]:
-        ks = [int(k) for k in block["__joinkey__"].to_list()]  # type: ignore[index]
-        lv = [int(v) for v in block["lval"].to_list()]  # type: ignore[index]
-        rv = [int(v) for v in block["rval"].to_list()]  # type: ignore[index]
+    def joined_rows(block: Any) -> list[JRow]:
+        ks = [int(k) for k in block["__joinkey__"].to_list()]
+        lv = [int(v) for v in block["lval"].to_list()]
+        rv = [int(v) for v in block["rval"].to_list()]
         return list(zip(ks, lv, rv, strict=True))
 
     return P2PAdapter(
@@ -716,34 +716,34 @@ def _numpy_p2p_adapter() -> P2PAdapter:
     block_dt = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
 
     def make_block(keys: Sequence[int]) -> object:
-        block = np.zeros(len(keys), dtype=block_dt)
+        block: Any = np.zeros(len(keys), dtype=block_dt)
         block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
         block["v"] = np.arange(len(keys), dtype=np.int64)
         return block
 
-    def keys_of(block: object) -> list[int]:
-        return [int(k) for k in block["__joinkey__"]]  # type: ignore[index]
+    def keys_of(block: Any) -> list[int]:
+        return [int(k) for k in block["__joinkey__"]]
 
     def make_side(keys: Sequence[int], field: str, values: Sequence[int]) -> object:
         dt = np.dtype([("__joinkey__", np.uint64), (field, np.int64)])
-        block = np.zeros(len(keys), dtype=dt)
+        block: Any = np.zeros(len(keys), dtype=dt)
         block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
         block[field] = np.array(list(values), dtype=np.int64)
         return block
 
-    def side_rows(block: object, field: str) -> list[tuple[int, int]]:
+    def side_rows(block: Any, field: str) -> list[tuple[int, int]]:
         return list(
             zip(
                 [int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True
-            )  # type: ignore[index]
+            )
         )
 
-    def joined_rows(block: object) -> list[JRow]:
+    def joined_rows(block: Any) -> list[JRow]:
         return list(
             zip(
-                [int(k) for k in block["__joinkey__"]],  # type: ignore[index]
-                [int(v) for v in block["lval"]],  # type: ignore[index]
-                [int(v) for v in block["rval"]],  # type: ignore[index]
+                [int(k) for k in block["__joinkey__"]],
+                [int(v) for v in block["lval"]],
+                [int(v) for v in block["rval"]],
                 strict=True,
             )
         )
@@ -854,8 +854,8 @@ def result_dest_keys(adapter: P2PAdapter, value: dict[int, object]) -> dict[int,
     return {dest: adapter.keys_of(block) for dest, block in value.items()}
 
 
-def total_result_rows(value: Mapping[int, object]) -> int:
-    return sum(len(block) for block in value.values())  # type: ignore[arg-type]
+def total_result_rows(value: Mapping[int, Any]) -> int:
+    return sum(len(block) for block in value.values())
 
 
 def contiguous_split(n_src: int, n_tasks: int) -> list[list[int]]:
@@ -956,7 +956,7 @@ def read_nullable_column(c: object) -> list[int | None]:
     to_list = getattr(c, "to_list", None)
     if to_list is not None:  # awkward option array -> [.., None, ..]
         return [None if v is None else int(v) for v in to_list()]
-    arr = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
+    arr: Any = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
     return [None if arr[i] is np.ma.masked else int(arr[i]) for i in range(len(arr))]
 
 

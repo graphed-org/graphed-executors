@@ -9,6 +9,8 @@ the DEFAULT remains a fresh pool per run (the existing suites pin that behavior 
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 from graphed.core import Partition, Plan, Task
 
@@ -28,7 +30,7 @@ def _count_calls(partition: Partition, resources: object) -> np.ndarray:
 
 
 def _concat(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    return np.concatenate([a, b])
+    return cast("np.ndarray", np.concatenate([a, b]))
 
 
 def _empty() -> np.ndarray:

@@ -10,6 +10,8 @@ impl silently loses a block.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from exchange_backends import (
     BackendAdapter,
@@ -21,17 +23,20 @@ from exchange_backends import (
 
 from graphed_exec_local.shuffle import ShuffleFaults, run_repartition
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> BackendAdapter:
+def adapter(request: pytest.FixtureRequest) -> BackendAdapter:
     return request.param
 
 
 def test_dropping_and_duplicating_every_announcement_is_correct(
-    adapter: BackendAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: BackendAdapter, tmp_path: Path
+) -> None:
     src = scenario_src_blocks(adapter)
     faults = ShuffleFaults(drop_all_announcements=True, duplicate_all_announcements=True)
     res = run_repartition(
@@ -44,8 +49,8 @@ def test_dropping_and_duplicating_every_announcement_is_correct(
 
 
 def test_every_nonempty_dest_is_produced_despite_lost_announcements(
-    adapter: BackendAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: BackendAdapter, tmp_path: Path
+) -> None:
     src = scenario_src_blocks(adapter)
     expected = expected_dest_keys(adapter, src, 8)
     res = run_repartition(

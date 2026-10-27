@@ -31,6 +31,7 @@ from __future__ import annotations
 import socket
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 from graphed.numpy import NumpyBackend
@@ -50,14 +51,14 @@ def make_block(keys: Sequence[int], values: Sequence[int] | None = None) -> np.n
     and the gathered content is checkable).
     """
     keys = list(keys)
-    block = np.zeros(len(keys), dtype=_DTYPE)
+    block: Any = np.zeros(len(keys), dtype=_DTYPE)
     block["__joinkey__"] = np.array(keys, dtype=np.uint64)
     block["v"] = (
         np.arange(len(keys), dtype=np.int64)
         if values is None
         else np.array(values, dtype=np.int64)
     )
-    return block
+    return cast("np.ndarray", block)
 
 
 def keys_of(block: np.ndarray) -> list[int]:
@@ -132,7 +133,7 @@ def routable_ip() -> str | None:
         finally:
             s.close()
         if is_routable_host(candidate):
-            return candidate
+            return cast("str | None", candidate)
     except OSError:
         pass
     return None

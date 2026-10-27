@@ -10,6 +10,8 @@ knob (``ROW_GROUP_BYTES``) — large-P repartitions otherwise eat RAM silently.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from exchange_backends import BackendAdapter, adapters
 
@@ -19,11 +21,14 @@ from graphed_exec_local.shuffle import (
     run_repartition_by_size,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> BackendAdapter:
+def adapter(request: pytest.FixtureRequest) -> BackendAdapter:
     return request.param
 
 
@@ -32,8 +37,8 @@ def test_row_group_bytes_is_a_documented_positive_knob() -> None:
 
 
 def test_coalesce_by_size_reduces_partition_count_and_preserves_content(
-    adapter: BackendAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: BackendAdapter, tmp_path: Path
+) -> None:
     be = adapter.backend
     # 12 tiny source partitions (2 rows each); coalesce toward ~3 partitions' worth of bytes.
     src = [adapter.make_block([i, i + 100]) for i in range(12)]
@@ -52,8 +57,8 @@ def test_coalesce_by_size_reduces_partition_count_and_preserves_content(
 
 
 def test_split_breaks_oversized_partitions_at_event_boundaries(
-    adapter: BackendAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: BackendAdapter, tmp_path: Path
+) -> None:
     be = adapter.backend
     big = adapter.make_block(list(range(64)))
     target = be.estimated_bytes(big) // 4
@@ -65,8 +70,8 @@ def test_split_breaks_oversized_partitions_at_event_boundaries(
 
 
 def test_hash_shuffle_writer_buffer_is_bounded_by_P_times_rg(
-    adapter: BackendAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: BackendAdapter, tmp_path: Path
+) -> None:
     # guidance 3: peak stage-1 writer-buffer memory is O(P * rg), not O(total shuffled bytes).
     be = adapter.backend
     src = [adapter.make_block(list(range(40))) for _ in range(4)]

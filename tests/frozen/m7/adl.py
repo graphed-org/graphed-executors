@@ -8,6 +8,8 @@ chunk and the per-chunk histograms are tree-reduced across workers/processes.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 from graphed import Array, Session
 from graphed.awkward import AwkwardBackend, from_awkward, gak
@@ -25,7 +27,7 @@ def _delta_phi(a: Array, b: Array) -> Array:
 
 
 def _delta_r(eta1: Array, phi1: Array, eta2: Array, phi2: Array) -> Array:
-    return np.hypot(eta1 - eta2, _delta_phi(phi1, phi2))
+    return cast("Array", np.hypot(eta1 - eta2, _delta_phi(phi1, phi2)))
 
 
 def _pair_mass(o1: Array, o2: Array) -> Array:
@@ -35,24 +37,24 @@ def _pair_mass(o1: Array, o2: Array) -> Array:
     e = np.sqrt(o1.pt**2 * np.cosh(o1.eta) ** 2 + o1.mass**2) + np.sqrt(
         o2.pt**2 * np.cosh(o2.eta) ** 2 + o2.mass**2
     )
-    return np.sqrt(np.maximum(e**2 - (px**2 + py**2 + pz**2), 0.0))
+    return cast("Array", np.sqrt(np.maximum(e**2 - (px**2 + py**2 + pz**2), 0.0)))
 
 
 def q1(events: Array) -> Array:
-    return events.MET.pt
+    return cast("Array", events.MET.pt)
 
 
 def q2(events: Array) -> Array:
-    return events.Jet.pt
+    return cast("Array", events.Jet.pt)
 
 
 def q3(events: Array) -> Array:
-    return events.Jet[abs(events.Jet.eta) < 1.0].pt
+    return cast("Array", events.Jet[abs(events.Jet.eta) < 1.0].pt)
 
 
 def q4(events: Array) -> Array:
     njet = gak.num(events.Jet[events.Jet.pt > 40], axis=1)
-    return events.MET.pt[njet >= 2]
+    return cast("Array", events.MET.pt[njet >= 2])
 
 
 def q5(events: Array) -> Array:
@@ -61,7 +63,7 @@ def q5(events: Array) -> Array:
     opp = pairs.a.charge != pairs.b.charge
     mass = _pair_mass(pairs.a, pairs.b)
     keep = gak.any((mass > 60) & (mass < 120) & opp, axis=1)
-    return events.MET.pt[keep]
+    return cast("Array", events.MET.pt[keep])
 
 
 def q6(events: Array) -> Array:
@@ -79,7 +81,7 @@ def q6(events: Array) -> Array:
     )
     mass = np.sqrt(np.maximum(e**2 - (px**2 + py**2 + pz**2), 0.0))
     best = gak.argmin(abs(mass - 172.5), axis=1, keepdims=True)
-    return gak.flatten(tri_pt[best])
+    return cast("Array", gak.flatten(tri_pt[best]))
 
 
 def q7(events: Array) -> Array:
@@ -91,7 +93,7 @@ def q7(events: Array) -> Array:
     j, lp = pair["0"], pair["1"]
     dr = _delta_r(j.eta, j.phi, lp.eta, lp.phi)
     isolated = gak.fill_none(gak.all(dr > 0.4, axis=2), True)
-    return gak.sum(jets[isolated].pt, axis=1)
+    return cast("Array", gak.sum(jets[isolated].pt, axis=1))
 
 
 def q8(events: Array) -> Array:
@@ -117,7 +119,7 @@ def q8(events: Array) -> Array:
     met_k = met[keep]
     lead_k = lead[keep]
     dphi = _delta_phi(lead_k.phi, met_k.phi)
-    return np.sqrt(2 * lead_k.pt * met_k.pt * (1 - np.cos(dphi)))
+    return cast("Array", np.sqrt(2 * lead_k.pt * met_k.pt * (1 - np.cos(dphi))))
 
 
 ADL = {"q1": q1, "q2": q2, "q3": q3, "q4": q4, "q5": q5, "q6": q6, "q7": q7, "q8": q8}
@@ -130,8 +132,11 @@ def _load_dataset(uri: str) -> object:
 
 
 def _counts(values: object, bins: int, start: float, stop: float, name: str) -> np.ndarray:
-    return np.asarray(
-        hist1d(values, bins=bins, start=start, stop=stop, name=name).values(), dtype=np.int64
+    return cast(
+        "np.ndarray",
+        np.asarray(
+            hist1d(values, bins=bins, start=start, stop=stop, name=name).values(), dtype=np.int64
+        ),
     )
 
 
@@ -156,7 +161,7 @@ def hist_zero_n(n: int) -> np.ndarray:
 
 
 def hist_add(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    return a + b
+    return cast("np.ndarray", a + b)
 
 
 def adl_axis(qname: str) -> tuple[int, float, float]:
@@ -167,7 +172,7 @@ def adl_axis(qname: str) -> tuple[int, float, float]:
 
 
 def adl_partitions(n_chunks: int) -> list[Task]:
-    edges = np.linspace(0, N_EVENTS, n_chunks + 1, dtype=int)
+    edges: Any = np.linspace(0, N_EVENTS, n_chunks + 1, dtype=int)
     return [
         Task(i, Partition("events://corpus", "Events", int(edges[i]), int(edges[i + 1])))
         for i in range(n_chunks)

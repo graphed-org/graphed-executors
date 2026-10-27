@@ -26,7 +26,7 @@ import pickle
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import pytest
@@ -81,7 +81,7 @@ def prepared_job(
     (entry,) = submits(fake.log)
     job = job_dir(entry[1], log_dir, tmp_path / "job")
     write_machine_ad(job / ".machine.ad")
-    return job
+    return cast("Path", job)
 
 
 def run_driver(job: Path, argv: list[str] | None = None) -> subprocess.CompletedProcess[str]:

@@ -20,6 +20,7 @@ pids genuinely differ from the driver's.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from dask_shuffle_backends import (
@@ -34,6 +35,9 @@ from dask_shuffle_backends import (
     shuffle_cluster,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = shuffle_adapters()
@@ -41,7 +45,7 @@ PARTS = 6
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     # tier B is REQUIRED here: processes=False would give every "worker" the driver's pid and
     # vacuously pass the driver-pid exclusion
     with shuffle_cluster(2, processes=True) as c:
@@ -49,13 +53,13 @@ def client():
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
 def test_stage1_and_gather_run_on_workers_and_blocks_cross_between_them(
-    adapter: ShuffleJoinAdapter, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client: Any
+) -> None:
     src = repartition_blocks(adapter)
     install_worker_plugin(client)
     addr_to_pid = live_worker_pids(client)

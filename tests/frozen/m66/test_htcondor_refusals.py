@@ -16,7 +16,7 @@ from __future__ import annotations
 import pickle
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from graphed.core.execution import Partition, Plan, Task
@@ -54,7 +54,7 @@ def plan_of(
 
 def main_function(monkeypatch: pytest.MonkeyPatch) -> Callable[[Partition, object], str]:
     def m66_main_process(partition: Partition, resources: object) -> str:
-        return concat_process(partition, resources)
+        return cast("str", concat_process(partition, resources))
 
     m66_main_process.__module__ = "__main__"
     m66_main_process.__qualname__ = "m66_main_process"

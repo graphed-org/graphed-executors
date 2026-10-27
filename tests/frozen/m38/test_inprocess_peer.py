@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from typing import cast
 
 import pytest
 from graphed.core import Partition
@@ -47,7 +48,7 @@ def _leaf_value(part: Partition, _resources: object) -> str:
 
 
 def _flat(n: int) -> str:
-    return tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0]
+    return cast("str", tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0])
 
 
 def _partitions(n: int) -> list[Partition]:

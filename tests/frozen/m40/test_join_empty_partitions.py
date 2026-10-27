@@ -31,12 +31,16 @@ numpy masked -> ``None``), so a dropped row is a real multiset difference, not a
 from __future__ import annotations
 
 from collections import Counter
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
 from join_backends import JoinAdapter, adapters
 
 from graphed_exec_local.shuffle import run_join
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pd = pytest.importorskip("pandas")  # the independent relational oracle
 
@@ -47,7 +51,7 @@ NRow = tuple[int | None, int | None, int | None]
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> JoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> JoinAdapter:
     return request.param
 
 
@@ -60,11 +64,11 @@ def _col(c: object) -> list[int | None]:
     to_list = getattr(c, "to_list", None)
     if to_list is not None:  # awkward option array -> [.., None, ..]
         return [None if v is None else int(v) for v in to_list()]
-    arr = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
+    arr: Any = np.ma.asanyarray(c)  # numpy masked (or plain) structured field
     return [None if arr[i] is np.ma.masked else int(arr[i]) for i in range(len(arr))]
 
 
-def observed_nullable(value: dict[int, object]) -> Counter[NRow]:
+def observed_nullable(value: dict[int, Any]) -> Counter[NRow]:
     """Return the whole relational result as one null-aware multiset over ALL blocks.
 
     Partitioning is irrelevant — the join RELATION does not depend on how it is partitioned.
@@ -77,7 +81,7 @@ def observed_nullable(value: dict[int, object]) -> Counter[NRow]:
     return total
 
 
-def observed_pairs(value: dict[int, object], field: str) -> Counter[tuple[int | None, int | None]]:
+def observed_pairs(value: dict[int, Any], field: str) -> Counter[tuple[int | None, int | None]]:
     """(key, ``field``) projection over ALL blocks.
 
     Used for the partitionless-side "no drop" check, which cannot read the (schema-less) absent
@@ -123,7 +127,7 @@ def _sides_with_empty_at(
 
 
 # ---- shuffle path: a zero-row LEADING block on the ABSENT side ----------------------------------
-def test_shuffle_left_zero_row_leading_right_block(adapter: JoinAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_shuffle_left_zero_row_leading_right_block(adapter: JoinAdapter, tmp_path: Path) -> None:
     """SHUFFLE, how=left.
 
     An unmatched build row must survive even when the RIGHT (probe/absent) side has a zero-row
@@ -161,7 +165,7 @@ def test_shuffle_left_zero_row_leading_right_block(adapter: JoinAdapter, tmp_pat
         assert observed == oracle, f"pos={pos} (0=leading): {_diff(observed, oracle)}"
 
 
-def test_shuffle_right_zero_row_leading_left_block(adapter: JoinAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_shuffle_right_zero_row_leading_left_block(adapter: JoinAdapter, tmp_path: Path) -> None:
     """SHUFFLE, how=right (probe-only survival).
 
     Every probe row must survive when the LEFT (build/absent) side has a zero-row LEADING
@@ -199,8 +203,8 @@ def test_shuffle_right_zero_row_leading_left_block(adapter: JoinAdapter, tmp_pat
 # ---- broadcast path: a zero-row LEADING probe block ---------------------------------------------
 @pytest.mark.parametrize("how", ["left", "outer"])
 def test_broadcast_noninner_zero_row_leading_probe_block(
-    adapter: JoinAdapter, how: str, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: JoinAdapter, how: str, tmp_path: Path
+) -> None:
     """BROADCAST, left/outer.
 
     A small build side replicated to every node, joined against probe blocks the FIRST of which
@@ -246,7 +250,9 @@ def test_broadcast_noninner_zero_row_leading_probe_block(
 
 
 # ---- entirely partitionless absent side: no present-side row may be dropped ---------------------
-def test_left_join_entirely_empty_right_keeps_all_build(adapter: JoinAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_left_join_entirely_empty_right_keeps_all_build(
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     """how=left with an ENTIRELY empty right side (``right_blocks == []``).
 
     A partitionless probe side has no schema to null-fill from, so the ONLY pinned contract is
@@ -265,7 +271,7 @@ def test_left_join_entirely_empty_right_keeps_all_build(adapter: JoinAdapter, tm
         workers=2,
         store_root=tmp_path,
     )
-    build = Counter(zip(lk, lv, strict=True))
+    build: Counter[tuple[int | None, int | None]] = Counter(zip(lk, lv, strict=True))
     observed = observed_pairs(res.value, "lval")
     assert build <= observed, (
         "how=left, empty right side: every build row must survive (SQL LEFT keeps all left "
@@ -275,7 +281,9 @@ def test_left_join_entirely_empty_right_keeps_all_build(adapter: JoinAdapter, tm
     )
 
 
-def test_right_join_entirely_empty_left_keeps_all_probe(adapter: JoinAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_right_join_entirely_empty_left_keeps_all_probe(
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     """how=right with an ENTIRELY empty left side (``left_blocks == []``): symmetric.
 
     Every probe row must survive. On HEAD the join silently returns zero rows.
@@ -291,7 +299,7 @@ def test_right_join_entirely_empty_left_keeps_all_probe(adapter: JoinAdapter, tm
         workers=2,
         store_root=tmp_path,
     )
-    probe = Counter(zip(rk, rv, strict=True))
+    probe: Counter[tuple[int | None, int | None]] = Counter(zip(rk, rv, strict=True))
     observed = observed_pairs(res.value, "rval")
     assert probe <= observed, (
         "how=right, empty left side: every probe row must survive (SQL RIGHT keeps all right "

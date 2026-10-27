@@ -26,6 +26,8 @@ StageError type pin.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from graphed.core.execution import SequentialRunner
 from graphed.debug import StageError
@@ -51,7 +53,7 @@ N_EXHAUST = 8
 
 
 def _oracle_value() -> int:
-    return SequentialRunner().run(make_peer_plan(N_LEAVES, "m44retry")).value
+    return cast("int", SequentialRunner().run(make_peer_plan(N_LEAVES, "m44retry")).value)
 
 
 def _mentions_transport_delivery_error(exc: BaseException | None) -> bool:

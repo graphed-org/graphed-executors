@@ -8,17 +8,21 @@ either.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import WorkerTransport
 
 from graphed_exec_local._transport import build_ipc_transports, build_transports
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 ADDRS = ("driver", "w0", "w1", "w2")
 
 
 @pytest.fixture(params=["ipc", "http"])
-def transports(request):
+def transports(request: pytest.FixtureRequest) -> Iterator[Any]:
     ts = build_transports(request.param, ADDRS)
     yield ts
     for t in ts.values():
@@ -36,14 +40,14 @@ def _wait_recv(t: WorkerTransport, timeout: float = 3.0) -> tuple[str, object] |
     return None
 
 
-def test_satisfies_the_protocol(transports) -> None:
+def test_satisfies_the_protocol(transports: Any) -> None:
     for addr, t in transports.items():
         assert isinstance(t, WorkerTransport)  # structural conformance (runtime_checkable)
         assert t.address == addr
         assert set(t.peers()) == set(ADDRS) - {addr}
 
 
-def test_directed_send_and_isolation(transports) -> None:
+def test_directed_send_and_isolation(transports: Any) -> None:
     assert transports["w0"].send("w1", ("hello", 1)) is True
     got = _wait_recv(transports["w1"])
     assert got == ("w0", ("hello", 1))  # sender is tagged, payload intact
@@ -52,7 +56,7 @@ def test_directed_send_and_isolation(transports) -> None:
     assert transports["driver"].poll() == []
 
 
-def test_recv_with_timeout(transports) -> None:
+def test_recv_with_timeout(transports: Any) -> None:
     assert transports["driver"].recv(timeout=0.05) is None  # nothing yet -> None, no hang
     transports["w2"].send("driver", "ready")
     msg = None
@@ -62,19 +66,19 @@ def test_recv_with_timeout(transports) -> None:
     assert msg == ("w2", "ready")
 
 
-def test_broadcast_reaches_every_peer_but_not_self(transports) -> None:
+def test_broadcast_reaches_every_peer_but_not_self(transports: Any) -> None:
     transports["driver"].broadcast("ping")
     for w in ("w0", "w1", "w2"):
         assert _wait_recv(transports[w]) == ("driver", "ping")
     assert transports["driver"].poll() == []  # never delivers to itself
 
 
-def test_unknown_destination_is_a_no_op(transports) -> None:
+def test_unknown_destination_is_a_no_op(transports: Any) -> None:
     assert transports["w0"].send("nobody", "x") is False
     assert transports["w0"].send("w0", "self") is False  # cannot send to self
 
 
-def test_close_is_safe_and_idempotent(transports) -> None:
+def test_close_is_safe_and_idempotent(transports: Any) -> None:
     transports["w0"].close()
     transports["w0"].close()  # idempotent
     # a send after the destination closed must not raise (best-effort)

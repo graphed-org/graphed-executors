@@ -13,6 +13,7 @@ workers, an un-namespaced or never-unsubscribed topic, and a run broken by a mon
 from __future__ import annotations
 
 import pickle
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import Plan, Task, TaskPhase
@@ -34,16 +35,19 @@ from submit_backends import (
     worker_addresses,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_exact_phase_contract_over_the_runs_namespaced_topic(client) -> None:
+def test_exact_phase_contract_over_the_runs_namespaced_topic(client: Any) -> None:
     n = 8
     monitor = RecordingMonitor()
     register_worker_plugin(client)
@@ -72,7 +76,7 @@ def test_exact_phase_contract_over_the_runs_namespaced_topic(client) -> None:
         assert finished.error is None
 
 
-def test_errored_phase_carries_the_failure(client) -> None:
+def test_errored_phase_carries_the_failure(client: Any) -> None:
     monitor = RecordingMonitor()
     (partition,) = mem_partitions(1, "monerr")
     plan = Plan(
@@ -91,7 +95,7 @@ def test_errored_phase_carries_the_failure(client) -> None:
     assert not any(ev.phase is TaskPhase.FINISHED for ev in monitor.events)
 
 
-def test_observation_is_passive_byte_identical_even_when_the_monitor_raises(client) -> None:
+def test_observation_is_passive_byte_identical_even_when_the_monitor_raises(client: Any) -> None:
     plan = concat_plan(8, "monpass")
     with make_runner(SpyBackend(make_dask_backend(client))) as runner:
         detached = runner.run(plan).value

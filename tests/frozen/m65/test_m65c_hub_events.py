@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import awkward as ak
 import graphed.debug as gd
@@ -213,7 +213,10 @@ def test_switch_in_run_holds_only_its_own_events(before: str) -> None:
         d = Dash()
         peer = before == "adaptive-peer"
         ex: Any = ProcessPoolExecutor(
-            2, persistent=True, monitor=d, **({} if peer else {"comms": None})
+            2,
+            persistent=True,
+            monitor=d,
+            **(cast("dict[str, Any]", {} if peer else {"comms": None})),
         )
         try:
             ex.run(_adaptive(_good, base=10) if peer else _plan(_good, base=10))

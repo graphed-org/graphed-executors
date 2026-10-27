@@ -31,6 +31,8 @@ that stops naming the emitted rows.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from transport_harness import (
     SpyDaskBackend,
@@ -48,6 +50,9 @@ from transport_harness import (
 )
 
 from graphed_executors.local.shuffle import run_join
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytest.importorskip("distributed")
 pytest.importorskip("pandas")
@@ -69,13 +74,13 @@ EXPECT_ROWS = {
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with transport_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> TransportAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> TransportAdapter:
     return request.param
 
 
@@ -102,8 +107,8 @@ def _full_side(adapter: TransportAdapter, field: str) -> list[object]:
 
 @pytest.mark.parametrize("how", ["left", "outer"])
 def test_broadcast_join_emits_the_null_filled_build_tail(
-    adapter: TransportAdapter, client, how: str
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client: Any, how: str
+) -> None:
     left, right = _bcast_tail_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how=how, broadcast=True)
 
@@ -154,8 +159,8 @@ def test_broadcast_join_emits_the_null_filled_build_tail(
 @pytest.mark.parametrize("empty_side", ["left", "right"])
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 def test_one_side_empty_matches_the_local_oracle(
-    adapter: TransportAdapter, client, how: str, empty_side: str, kind: str
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: TransportAdapter, client: Any, how: str, empty_side: str, kind: str
+) -> None:
     empty_field = "lval" if empty_side == "left" else "rval"
     empty: list[object] = [] if kind == "none" else [adapter.make_side([], empty_field, [])]
     if empty_side == "left":

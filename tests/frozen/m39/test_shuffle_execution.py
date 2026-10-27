@@ -14,6 +14,8 @@ executor cannot share a routing bug with the oracle.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from exchange_backends import (
     BackendAdapter,
@@ -25,15 +27,18 @@ from exchange_backends import (
 
 from graphed_exec_local.shuffle import ShuffleFaults, run_repartition
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> BackendAdapter:
+def adapter(request: pytest.FixtureRequest) -> BackendAdapter:
     return request.param
 
 
-def test_shuffle_matches_the_test_authored_oracle(adapter: BackendAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_shuffle_matches_the_test_authored_oracle(adapter: BackendAdapter, tmp_path: Path) -> None:
     src = scenario_src_blocks(adapter)
     res = run_repartition(
         adapter.backend, src, parts=4, workers=2, comms="ipc", store_root=tmp_path
@@ -43,7 +48,7 @@ def test_shuffle_matches_the_test_authored_oracle(adapter: BackendAdapter, tmp_p
     )
 
 
-def test_two_fuzzed_runs_are_byte_identical(adapter: BackendAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_two_fuzzed_runs_are_byte_identical(adapter: BackendAdapter, tmp_path: Path) -> None:
     # (a)/(d): racy arrival + duplicate deliveries must not change ANY gathered block's BYTES
     # (§7.1).
     src = scenario_src_blocks(adapter)
@@ -73,8 +78,8 @@ def test_two_fuzzed_runs_are_byte_identical(adapter: BackendAdapter, tmp_path) -
 
 
 def test_block_count_is_bounded_by_producer_tasks_times_P(
-    adapter: BackendAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: BackendAdapter, tmp_path: Path
+) -> None:
     # (b) THE anti-MxR witness. 6 src_pids, 2 workers -> 2 producer-tasks each coalescing 3
     # src_pids.
     src = scenario_src_blocks(adapter)  # 6 source partitions
@@ -95,7 +100,7 @@ def test_block_count_is_bounded_by_producer_tasks_times_P(
     assert total_blocks < len(src) * parts, "must NOT be the O(#src_pid * P) per-fragment blowup"
 
 
-def test_producer_task_set_is_enumerable_a_priori(adapter: BackendAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_producer_task_set_is_enumerable_a_priori(adapter: BackendAdapter, tmp_path: Path) -> None:
     # discovery is a pure function of the plan: every producer-task has a deterministic owner, and
     # the manifests cover the whole plan set (independent of any received message).
     src = scenario_src_blocks(adapter)

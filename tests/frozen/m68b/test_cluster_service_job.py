@@ -30,7 +30,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from m68b_harness import (
@@ -74,6 +74,9 @@ from m68b_harness import (
     write_job,
     write_machine_ad,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 BOUND_S = 120.0
 URL = "http://login.m68b.example:10007"  # the task server a ServiceJob announces to
@@ -217,7 +220,7 @@ def test_host_service_exists_iff_condor_pilots_and_a_cluster_host(
 ) -> None:
     record_bindings(monkeypatch, RecordingSchedd())
     launch, backend_mod, sites = launch_api(), backend_api(), htcondor_api().SITES
-    cases = [
+    cases: list[tuple[str, Callable[[], Any], dict[str, Any], bool]] = [
         (
             "condor generic",
             lambda: launch.CondorPilots(generic(), log_dir=tmp_path / "a"),
@@ -520,6 +523,7 @@ def test_construction_refuses_a_bad_input_naming_it(
     src = tmp_path / "src"
     (src / "real").mkdir(parents=True)
     (src / "real" / "f.txt").write_text("f")
+    inputs: tuple[str, ...]
     if case == "missing":
         inputs, named = (str(src / "absent.onnx"),), "absent.onnx"
     elif case == "shared-basename":
@@ -587,7 +591,7 @@ def test_announce_py_is_stdlib_only_python_3_9_and_the_job_runs_the_module_s_cod
     module_file = Path(announce_api().__file__)
     source = module_file.read_text()
     tree = ast.parse(source, feature_version=(3, 9))
-    imported = set()
+    imported: set[Any] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imported.update(alias.name.split(".")[0] for alias in node.names)
@@ -854,7 +858,7 @@ def test_host_service_returns_the_announced_endpoint_and_releases_in_order(
         close_backend(backend, schedd)
 
 
-FAILURES = {
+FAILURES: dict[str, tuple[Any, ...]] = {
     "gone": (
         [[]],
         [{"JobStatus": 4, "ExitCode": 3}],
@@ -913,7 +917,7 @@ def test_host_service_fails_a_gone_held_or_late_job_and_forgets_its_key(
         ads = answer(*args, **kwargs)
         if not running and any(ad.get("JobStatus") == 2 for ad in ads):
             running.append(time.monotonic())
-        return ads
+        return cast("list[Any]", ads)
 
     monkeypatch.setattr(schedd, "query", query)
     backend, _, _ = condor_backend(monkeypatch, tmp_path, schedd=schedd)
@@ -946,7 +950,7 @@ def test_host_service_fails_a_gone_held_or_late_job_and_forgets_its_key(
 
 @pytest.fixture
 def machine_ad(tmp_path: Path) -> Path:
-    return write_machine_ad(tmp_path / "machine.ad", "localhost")
+    return cast("Path", write_machine_ad(tmp_path / "machine.ad", "localhost"))
 
 
 @pytest.fixture

@@ -22,7 +22,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from graphed.core import SequentialRunner
@@ -71,7 +71,7 @@ STATUS_LINE = re.compile(r"service '([^']+)': managed leg \(driver\) at tcp://[^
 @pytest.fixture(scope="module")
 def size_mb() -> int:
     require_histserv()
-    return sized_memory_mb(BINS, WORKERS)
+    return cast("int", sized_memory_mb(BINS, WORKERS))
 
 
 @pytest.fixture(scope="module")
@@ -123,7 +123,9 @@ def test_given_endpoints_start_nothing_and_are_left_empty(
     names = sorted(s.name for s in plan.services)
     tag = unique("given")
     backend = ThreadBackend(WORKERS)
-    backend.driver_memory_mb = 64  # below either server: a given endpoint is never held to it
+    cast(
+        Any, backend
+    ).driver_memory_mb = 64  # below either server: a given endpoint is never held to it
     with user_servers(2) as endpoints:
         given = dict(zip(names, endpoints, strict=True))
         runner = SubmitRunner(backend, services=given)
@@ -248,7 +250,7 @@ def refused_start(backend: Any, size_mb: int) -> tuple[str, list[Any]]:
 
 def test_a_server_the_set_driver_memory_cannot_hold_is_refused_before_it_starts() -> None:
     backend = ThreadBackend(WORKERS)
-    backend.driver_memory_mb = 64
+    cast(Any, backend).driver_memory_mb = 64
     managed, started = refused_start(backend, 1024)
     assert named(1024, managed) and named(64, managed), managed
     assert [p.args for p in started if "histserv" in str(p.args)] == []
@@ -265,7 +267,7 @@ def test_the_driver_check_sums_the_servers_beside_the_driver(size_mb: int) -> No
     _ctx, plan = two_server_plan(size_mb)
     backend = ThreadBackend(WORKERS)
     limit = size_mb + size_mb // 2  # one server fits, the two do not
-    backend.driver_memory_mb = limit
+    cast(Any, backend).driver_memory_mb = limit
     runner = SubmitRunner(backend)
     try:
         with popen_backstop() as started, pytest.raises(ServiceUnavailableError) as err:

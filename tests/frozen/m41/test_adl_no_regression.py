@@ -23,6 +23,8 @@ repartition, so a divergence after repartition can only come from the fetch plan
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, cast
+
 import adl
 import awkward as ak
 import numpy as np
@@ -34,13 +36,16 @@ from graphed_corpus.histograms import hist1d
 
 from graphed_executors.local.shuffle import run_repartition
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 _N_SRC = 8
 _WORKERS = 4
 _FETCH_BUDGET = 16_000  # << any dense query's single-dest gather -> the reader plane must spill
 _QUERIES = ["q1", "q2", "q3", "q7"]
 
 
-def _numpy_backend():  # type: ignore[no-untyped-def]
+def _numpy_backend() -> Any:
     from graphed.numpy import NumpyBackend  # noqa: PLC0415
 
     return NumpyBackend()
@@ -50,7 +55,9 @@ def _flat_values(qname: str) -> np.ndarray:
     s = Session(AwkwardBackend())
     ev = from_awkward(s, "events", make_events(n_events=adl.N_EVENTS, seed=adl.SEED))
     vals = s.materialize(adl.ADL[qname](ev))
-    return np.asarray(ak.to_numpy(ak.flatten(vals, axis=None)), dtype=np.float64)
+    return cast(
+        "np.ndarray", np.asarray(ak.to_numpy(ak.flatten(vals, axis=None)), dtype=np.float64)
+    )
 
 
 def _value_blocks(values: np.ndarray, n_src: int) -> list[np.ndarray]:
@@ -59,7 +66,7 @@ def _value_blocks(values: np.ndarray, n_src: int) -> list[np.ndarray]:
     dt = np.dtype([("__joinkey__", np.uint64), ("val", np.float64)])
     out: list[np.ndarray] = []
     for chunk in np.array_split(values, n_src):
-        block = np.zeros(len(chunk), dtype=dt)
+        block: Any = np.zeros(len(chunk), dtype=dt)
         block["val"] = chunk
         out.append(block)
     return out
@@ -67,8 +74,8 @@ def _value_blocks(values: np.ndarray, n_src: int) -> list[np.ndarray]:
 
 @pytest.mark.parametrize("qname", _QUERIES)
 def test_adl_histogram_is_bit_for_bit_after_routing_through_the_spilling_fetch_plane(
-    qname, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    qname: str, tmp_path: Path
+) -> None:
     bins, start, stop = adl.adl_axis(qname)
     golden = np.asarray(adl.adl_full_counts(qname, bins, start, stop), dtype=np.int64)
 

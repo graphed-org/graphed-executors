@@ -13,6 +13,7 @@ tasks per pid), driver-side per-task pickling loops, content-only keys without a
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import Partition, Plan, SequentialRunner, Task
@@ -33,16 +34,19 @@ from submit_backends import (
     sum_plan_over,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_process_payload_deserializes_once_per_worker(client) -> None:
+def test_process_payload_deserializes_once_per_worker(client: Any) -> None:
     before = dict(client.run(counts_snapshot))
     driver_before = counts_snapshot().get("process_unpickle", 0)
     with make_dask_runner(client) as runner:
@@ -72,7 +76,7 @@ def test_process_payload_deserializes_once_per_worker(client) -> None:
     assert counts_snapshot().get("process_unpickle", 0) == driver_before  # driver never unpickles
 
 
-def test_keys_are_namespaced_unique_and_nonced_across_runs(client) -> None:
+def test_keys_are_namespaced_unique_and_nonced_across_runs(client: Any) -> None:
     register_worker_plugin(client)
     spy = SpyBackend(make_dask_backend(client))
     plan = sum_plan_over(8, "bkeys")
@@ -93,7 +97,7 @@ def test_keys_are_namespaced_unique_and_nonced_across_runs(client) -> None:
     assert len(first_bcasts) == len(second_bcasts) == 2  # process + combine, broadcast once each
 
 
-def test_key_shaped_string_args_are_not_substituted(client) -> None:
+def test_key_shaped_string_args_are_not_substituted(client: Any) -> None:
     """dask/dask#9969: an argument string equal to a live key becomes that key's Future.
 
     The namespaced+nonced scheme makes user-string collision impossible — a partition uri
@@ -111,7 +115,7 @@ def test_key_shaped_string_args_are_not_substituted(client) -> None:
     assert key_shaped in value
 
 
-def test_replicate_broadcast_knob_is_wired_and_harmless(client) -> None:
+def test_replicate_broadcast_knob_is_wired_and_harmless(client: Any) -> None:
     """The coffea#1490 escape hatch (§1.2.2 mitigation 2).
 
     `replicate_broadcast=True` constructs and still produces the sequential value.

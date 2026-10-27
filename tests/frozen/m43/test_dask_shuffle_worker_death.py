@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from dask_shuffle_backends import (
@@ -42,6 +43,9 @@ from dask_shuffle_backends import (
 
 from graphed_executors.local.shuffle import run_repartition
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = shuffle_adapters()
@@ -49,7 +53,7 @@ PARTS = 8
 
 
 @pytest.fixture()
-def client():
+def client() -> Iterator[Any]:
     # dedicated per-test cluster: deaths must not bleed into other modules; a generous
     # allowed-failures budget so the innocent recomputed tasks are never blamed
     with shuffle_cluster(2, processes=True, allowed_failures=100) as c:
@@ -57,13 +61,13 @@ def client():
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
 def test_lost_stage1_blocks_are_recomputed_and_the_result_is_bit_for_bit(
-    adapter: ShuffleJoinAdapter, client, tmp_path: Path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client: Any, tmp_path: Path
+) -> None:
     from dask_shuffle_backends import shuffle_api  # noqa: PLC0415  (deferred: module under test)
 
     shuffle_api()  # right-reason gate: fail HERE pre-implementation, before the scenario spins up

@@ -19,6 +19,7 @@ skips teardown leaves its epoch resident and fails the purge probe.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from transport_harness import (
@@ -36,18 +37,21 @@ from transport_harness import (
 
 from graphed_executors.local.shuffle import run_repartition
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with transport_cluster(2, processes=True) as c:
         yield c
 
 
-def test_block_bytes_are_served_worker_to_worker_and_state_is_purged(client) -> None:  # type: ignore[no-untyped-def]
+def test_block_bytes_are_served_worker_to_worker_and_state_is_purged(client: Any) -> None:
     adapter = numpy_adapter()
     src = repartition_blocks(adapter, copies=2)
     local = run_repartition(adapter.backend, src, PARTS)

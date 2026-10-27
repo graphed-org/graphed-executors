@@ -18,6 +18,7 @@ IndexError regression the review found.
 from __future__ import annotations
 
 from collections import Counter
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from dask_shuffle_backends import (
@@ -33,6 +34,9 @@ from dask_shuffle_backends import (
 )
 
 from graphed_executors.local.shuffle import run_join
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytest.importorskip("distributed")
 pytest.importorskip("pandas")
@@ -52,17 +56,17 @@ _B_RIGHT = [([0, 1, 5, 18], [900, 901, 905, 918]), ([4, 12, 14], [904, 912, 914]
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with shuffle_cluster(2, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
-def _runner(client):  # type: ignore[no-untyped-def]
+def _runner(client: Any):  # type: ignore[no-untyped-def]
     install_worker_plugin(client)
     return make_submit_runner(build_dask_backend(client))
 
@@ -73,14 +77,14 @@ def _sides(adapter: ShuffleJoinAdapter, spec_l, spec_r):  # type: ignore[no-unty
     return left, right
 
 
-def _flat(spec):  # type: ignore[no-untyped-def]
+def _flat(spec: Any) -> tuple[list[Any], list[Any]]:
     return [k for ks, _ in spec for k in ks], [v for _, vs in spec for v in vs]
 
 
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
 def test_broadcast_never_matched_build_tail_appears_exactly_once(
-    adapter: ShuffleJoinAdapter, how: str, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, how: str, client: Any
+) -> None:
     left, right = _sides(adapter, [(_A_LK, _A_LV)], _A_PROBE)
     rk, rv = _flat(_A_PROBE)
     assert not set(_A_LK) & set(rk), "scenario: the build side must match NOTHING"
@@ -108,8 +112,8 @@ def test_broadcast_never_matched_build_tail_appears_exactly_once(
 
 @pytest.mark.parametrize("how", ["left", "right", "outer"])
 def test_shuffle_one_sided_dests_null_fill_and_match_local(
-    adapter: ShuffleJoinAdapter, how: str, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, how: str, client: Any
+) -> None:
     left, right = _sides(adapter, _B_LEFT, _B_RIGHT)
     be = adapter.backend
     # non-vacuity via the golden-pinned route: build-only AND probe-only dests really exist
@@ -145,8 +149,8 @@ def test_shuffle_one_sided_dests_null_fill_and_match_local(
 
 @pytest.mark.parametrize("how", ["left", "outer"])
 def test_shuffle_partitionless_probe_side_keeps_build_rows(
-    adapter: ShuffleJoinAdapter, how: str, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, how: str, client: Any
+) -> None:
     """right=[] on the shuffle path.
 
     The local contract emits the build rows (schema-carrierless — as-is, no null columns to
@@ -170,8 +174,8 @@ def test_shuffle_partitionless_probe_side_keeps_build_rows(
 
 @pytest.mark.parametrize("how", ["inner", "outer"])
 def test_broadcast_empty_build_side_returns_gracefully(
-    adapter: ShuffleJoinAdapter, how: str, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, how: str, client: Any
+) -> None:
     _, right = _sides(adapter, [], _A_PROBE)
     res = dask_join(
         adapter.backend, [], right, PARTS, how=how, runner=_runner(client), broadcast=True
@@ -186,8 +190,8 @@ def test_broadcast_empty_build_side_returns_gracefully(
 
 @pytest.mark.parametrize("how", ["left", "outer"])
 def test_broadcast_empty_probe_side_no_crash_equals_local(
-    adapter: ShuffleJoinAdapter, how: str, client
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, how: str, client: Any
+) -> None:
     """broadcast=True with right=[] and a NON-empty build.
 
     Must not crash (the reviewed IndexError regression) and must equal local — which documents

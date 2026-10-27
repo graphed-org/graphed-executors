@@ -20,6 +20,8 @@ choice, and a broadcast that secretly routes the large side through map-write.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from dask_shuffle_backends import (
     ShuffleJoinAdapter,
@@ -38,6 +40,9 @@ from dask_shuffle_backends import (
 )
 from graphed.shuffle import broadcast_join_choice
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = shuffle_adapters()
@@ -45,23 +50,23 @@ PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client1():
+def client1() -> Iterator[Any]:
     with shuffle_cluster(1, processes=False) as c:
         yield c
 
 
 @pytest.fixture(scope="module")
-def client3():
+def client3() -> Iterator[Any]:
     with shuffle_cluster(3, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
-def _run_auto(adapter: ShuffleJoinAdapter, client) -> tuple[SpySubmitBackend, object]:  # type: ignore[no-untyped-def]
+def _run_auto(adapter: ShuffleJoinAdapter, client: Any) -> tuple[SpySubmitBackend, Any]:
     left, right = join_equal_sides(adapter)
     install_worker_plugin(client)
     spy = SpySubmitBackend(build_dask_backend(client))
@@ -70,8 +75,8 @@ def _run_auto(adapter: ShuffleJoinAdapter, client) -> tuple[SpySubmitBackend, ob
 
 
 def test_auto_choice_is_parts_keyed_and_worker_count_invariant(
-    adapter: ShuffleJoinAdapter, client1, client3
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client1: Any, client3: Any
+) -> None:
     left, right = join_equal_sides(adapter)
     bb, pb = side_bytes(adapter, left), side_bytes(adapter, right)
     # scenario sanity: the DISCRIMINATION GAP is real for these measured bytes
@@ -99,8 +104,8 @@ def test_auto_choice_is_parts_keyed_and_worker_count_invariant(
 
 
 def test_forced_broadcast_is_honoured_and_never_shuffles_the_large_side(
-    adapter: ShuffleJoinAdapter, client3
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client3: Any
+) -> None:
     left, right = join_equal_sides(adapter)
     bb, pb = side_bytes(adapter, left), side_bytes(adapter, right)
     # the model would shuffle: the force is real
@@ -129,8 +134,8 @@ def test_forced_broadcast_is_honoured_and_never_shuffles_the_large_side(
 
 
 def test_forced_shuffle_is_honoured_against_the_cost_model(
-    adapter: ShuffleJoinAdapter, client3
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: ShuffleJoinAdapter, client3: Any
+) -> None:
     parts = 4  # at 4 parts (measured: probe = 6x build bytes) the pinned rule says BROADCAST
     left, right = join_small_build_sides(adapter)
     bb, pb = side_bytes(adapter, left), side_bytes(adapter, right)

@@ -51,7 +51,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from graphed.core.execution import Partition, Plan, Task
 from graphed.debug import SourceFrame, StageError
@@ -347,11 +347,11 @@ def popen_backstop() -> Iterator[list[subprocess.Popen[Any]]]:
     """
     real = subprocess.Popen
     _RecordingPopen.started = []
-    subprocess.Popen = _RecordingPopen  # the stdlib class, patched for the block
+    cast(Any, subprocess).Popen = _RecordingPopen  # the stdlib class, patched for the block
     try:
         yield _RecordingPopen.started
     finally:
-        subprocess.Popen = real
+        cast(Any, subprocess).Popen = real
         for proc in _RecordingPopen.started:
             if proc.poll() is None:
                 proc.kill()
@@ -634,7 +634,10 @@ def spy_plan(
     process: Any, n: int, specs: Sequence[ServiceSpec], tag: str | None = None
 ) -> Plan[Any]:
     tasks = tuple(
-        Task(i, p) for i, p in enumerate(mem_partitions(n, tag or getattr(process, "tag", "m68a")))
+        Task(i, p)
+        for i, p in enumerate(
+            mem_partitions(n, cast("str", tag or getattr(process, "tag", "m68a")))
+        )
     )
     return Plan(
         process=process, combine=concat, empty=empty_tuple, tasks=tasks, services=tuple(specs)

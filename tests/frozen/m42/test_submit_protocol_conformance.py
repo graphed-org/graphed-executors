@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import pickle
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import Plan, SequentialRunner, StopReason, Task
@@ -44,6 +45,9 @@ from submit_backends import (
     submit_api,
     wait_for,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 HAS_DISTRIBUTED = importlib.util.find_spec("distributed") is not None
 BACKENDS = [
@@ -85,7 +89,7 @@ DASK_FLAGS = {
 
 
 @pytest.fixture(scope="module")
-def dask_client():
+def dask_client() -> Iterator[Any]:
     if not HAS_DISTRIBUTED:
         yield None
         return
@@ -94,11 +98,11 @@ def dask_client():
         yield client
 
 
-def runner_for(kind: str, client) -> object:
+def runner_for(kind: str, client: Any) -> Any:
     return make_runner(make_thread_backend(2)) if kind == "thread" else make_dask_runner(client)
 
 
-def backend_for(kind: str, client) -> object:
+def backend_for(kind: str, client: Any) -> Any:
     if kind == "thread":
         return make_thread_backend(2)
     register_worker_plugin(client)  # dask_runner registers it itself; direct backends need it here
@@ -107,7 +111,7 @@ def backend_for(kind: str, client) -> object:
 
 @pytest.mark.parametrize("kind", BACKENDS)
 @pytest.mark.parametrize("n", [0, 1, 2, 5, 16])
-def test_fixed_plan_matches_sequential_bit_for_bit(kind: str, n: int, dask_client) -> None:
+def test_fixed_plan_matches_sequential_bit_for_bit(kind: str, n: int, dask_client: Any) -> None:
     """Every fixed shape matches SequentialRunner, with exact counts and EXHAUSTED.
 
     Every fixed shape == SequentialRunner (value via pickle bytes), n_partitions == n, n_combines
@@ -126,7 +130,7 @@ def test_fixed_plan_matches_sequential_bit_for_bit(kind: str, n: int, dask_clien
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
-def test_tasks_are_reduced_in_key_order_not_submission_order(kind: str, dask_client) -> None:
+def test_tasks_are_reduced_in_key_order_not_submission_order(kind: str, dask_client: Any) -> None:
     """Tasks handed over in REVERSED key order still concat in key order.
 
     The engine sorts by ``Task.key``. Discriminates a submission-order fold.
@@ -137,7 +141,7 @@ def test_tasks_are_reduced_in_key_order_not_submission_order(kind: str, dask_cli
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
-def test_adaptive_exhaustion_folds_everything(kind: str, dask_client) -> None:
+def test_adaptive_exhaustion_folds_everything(kind: str, dask_client: Any) -> None:
     """next_tasks batches -> None (DONE): all 12 leaves consumed, fold == oracle, EXHAUSTED.
 
     Discriminates an engine that ignores ``next_tasks`` or drops late batches.
@@ -155,7 +159,7 @@ def test_adaptive_exhaustion_folds_everything(kind: str, dask_client) -> None:
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
-def test_worker_error_surfaces_as_intact_stage_error(kind: str, dask_client) -> None:
+def test_worker_error_surfaces_as_intact_stage_error(kind: str, dask_client: Any) -> None:
     """The M6 obligation on the seam itself.
 
     A StageError raised in ``process`` reaches the driver as a StageError (never a string /
@@ -169,7 +173,7 @@ def test_worker_error_surfaces_as_intact_stage_error(kind: str, dask_client) -> 
 
 @pytest.mark.parametrize("kind", BACKENDS)
 def test_direct_submit_seam_resolves_future_args_and_broadcast_bytes(
-    kind: str, dask_client
+    kind: str, dask_client: Any
 ) -> None:
     """The portable protocol intersection, exercised directly.
 
@@ -207,7 +211,7 @@ def test_direct_submit_seam_resolves_future_args_and_broadcast_bytes(
             backend.close()  # a DaskBackend close must not close the shared module client
 
 
-def test_capability_flags_are_pinned_and_honestly_differ(dask_client) -> None:
+def test_capability_flags_are_pinned_and_honestly_differ(dask_client: Any) -> None:
     """The two instances' flag sets equal the plan's pins and differ on five of seven flags.
 
     The two instances' flag sets equal the plan's pins (§1.2.5 / §1.3.2) and differ on five of
@@ -235,7 +239,7 @@ def test_capability_flags_are_pinned_and_honestly_differ(dask_client) -> None:
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
-def test_monitored_run_emits_exact_phases_on_both_backends(kind: str, dask_client) -> None:
+def test_monitored_run_emits_exact_phases_on_both_backends(kind: str, dask_client: Any) -> None:
     """M37 through the seam on BOTH backends.
 
     Per leaf exactly one SUBMITTED + STARTED + FINISHED, no other keys, and the value unchanged

@@ -12,6 +12,8 @@ output, budget = output_bytes // 8).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from shuffle_method_harness import (
     BACKEND,
@@ -29,19 +31,22 @@ from shuffle_method_harness import (
 from graphed_executors.dask_backend.shuffle import dask_run_join
 from graphed_executors.dask_backend.transport_shuffle import transport_run_join
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with facade_cluster(2) as c:
         yield c
 
 
 @pytest.mark.parametrize("how", ["inner", "outer"])
-def test_join_parity_with_both_engines(client, how: str) -> None:  # type: ignore[no-untyped-def]
+def test_join_parity_with_both_engines(client: Any, how: str) -> None:
     install_transport_plugin(client)
     left, right = join_sides()
     dbackend = build_dask_backend(client)
@@ -87,7 +92,7 @@ def test_join_parity_with_both_engines(client, how: str) -> None:  # type: ignor
     assert hasattr(res_k, "partitions")
 
 
-def test_tasks_join_accepts_mem_budget_and_the_spill_engages(client) -> None:  # type: ignore[no-untyped-def]
+def test_tasks_join_accepts_mem_budget_and_the_spill_engages(client: Any) -> None:
     n = 200  # -> 40_000 duplicated output rows in one hot dest (the m43 sizing idiom)
     left, right = hot_key_sides(n)
     row_bytes = BACKEND.estimated_bytes(left[0]) // n + BACKEND.estimated_bytes(right[0]) // n

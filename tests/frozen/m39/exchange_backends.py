@@ -27,6 +27,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pytest
@@ -35,7 +36,7 @@ import pytest
 @dataclass
 class BackendAdapter:
     name: str
-    backend: object
+    backend: Any
     make_block: Callable[[Sequence[int]], object]
     keys_of: Callable[[object], list[int]]
 
@@ -52,7 +53,7 @@ def _awkward_adapter() -> BackendAdapter:
             }
         )
 
-    def keys_of(block: object) -> list[int]:
+    def keys_of(block: Any) -> list[int]:
         return [int(k) for k in block["__joinkey__"].to_list()]
 
     return BackendAdapter("awkward", AwkwardBackend(), make, keys_of)
@@ -64,12 +65,12 @@ def _numpy_adapter() -> BackendAdapter:
     dtype = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
 
     def make(keys: Sequence[int]) -> object:
-        block = np.zeros(len(keys), dtype=dtype)
+        block: Any = np.zeros(len(keys), dtype=dtype)
         block["__joinkey__"] = np.array(list(keys), dtype=np.uint64)
         block["v"] = np.arange(len(keys), dtype=np.int64)
         return block
 
-    def keys_of(block: object) -> list[int]:
+    def keys_of(block: Any) -> list[int]:
         return [int(k) for k in block["__joinkey__"]]
 
     return BackendAdapter("numpy", NumpyBackend(), make, keys_of)

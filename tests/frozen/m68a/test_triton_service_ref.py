@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -108,4 +108,4 @@ def _payload(tag: str, w: float = 0.45, b: float = -0.1) -> bytes:
 
     The fake server at an endpoint computes with these weights.
     """
-    return descriptor(tag, w, b)
+    return cast("bytes", descriptor(tag, w, b))

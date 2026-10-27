@@ -12,6 +12,8 @@ engine markers disappear).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 from shuffle_method_harness import (
     BACKEND,
@@ -30,13 +32,16 @@ from shuffle_method_harness import (
 from graphed_executors.dask_backend.shuffle import dask_run_repartition
 from graphed_executors.dask_backend.transport_shuffle import transport_run_repartition
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with facade_cluster(2) as c:
         yield c
 
@@ -46,7 +51,7 @@ def _common_triple(res) -> None:  # type: ignore[no-untyped-def]
         assert hasattr(res, attr), f"union contract broken: result lacks .{attr}"
 
 
-def test_auto_dispatches_to_the_transport_engine(client) -> None:  # type: ignore[no-untyped-def]
+def test_auto_dispatches_to_the_transport_engine(client: Any) -> None:
     install_transport_plugin(client)
     src = repartition_blocks()
     dbackend = build_dask_backend(client)
@@ -79,7 +84,7 @@ def test_auto_dispatches_to_the_transport_engine(client) -> None:  # type: ignor
     assert res2.dest_block_hashes == res.dest_block_hashes
 
 
-def test_explicit_tasks_dispatches_to_the_m43_engine(client) -> None:  # type: ignore[no-untyped-def]
+def test_explicit_tasks_dispatches_to_the_m43_engine(client: Any) -> None:
     src = repartition_blocks()
     dbackend = build_dask_backend(client)
     oracle = dask_run_repartition(BACKEND, src, PARTS, runner=make_runner(dbackend))
@@ -118,7 +123,7 @@ def test_explicit_tasks_dispatches_to_the_m43_engine(client) -> None:  # type: i
     )
 
 
-def test_auto_on_a_pinless_backend_degrades_to_tasks_and_runs(client) -> None:  # type: ignore[no-untyped-def]
+def test_auto_on_a_pinless_backend_degrades_to_tasks_and_runs(client: Any) -> None:
     src = repartition_blocks()
     dbackend = build_dask_backend(client)
     oracle = dask_run_repartition(BACKEND, src, PARTS, runner=make_runner(dbackend))

@@ -18,6 +18,8 @@ choice, it does not re-observe sizes at run time. Three witnesses:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from join_backends import (
     JoinAdapter,
@@ -29,11 +31,14 @@ from join_backends import (
 
 from graphed_exec_local.shuffle import broadcast_join_choice, run_join
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 ADAPTERS = adapters()
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> JoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> JoinAdapter:
     return request.param
 
 
@@ -55,8 +60,8 @@ def test_cost_rule_is_the_pinned_inequality_at_the_crossover() -> None:
 
 
 def test_executor_honours_the_recorded_choice_not_a_runtime_recompute(
-    adapter: JoinAdapter, tmp_path
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     # E5: the plan records the choice; the executor honours it. Force broadcast=True on a scenario
     # a runtime cost model MIGHT recompute the other way — the honoured choice must still be
     # recorded True and the join must stay correct. A recompute-at-runtime impl overrides the
@@ -84,7 +89,9 @@ def test_executor_honours_the_recorded_choice_not_a_runtime_recompute(
     assert observed_join_all(adapter, forced_shuf.value) == oracle
 
 
-def test_auto_choice_is_deterministic_across_two_runs(adapter: JoinAdapter, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_auto_choice_is_deterministic_across_two_runs(
+    adapter: JoinAdapter, tmp_path: Path
+) -> None:
     # broadcast=None: the model chooses from form sizes; the choice + the bytes must be identical
     # twice (a racy runtime observation would drift). The chosen value must equal the pinned rule
     # on the input byte sizes — so the executor used THE rule, not an ad-hoc heuristic.

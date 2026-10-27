@@ -27,7 +27,7 @@ import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import pytest
@@ -499,7 +499,7 @@ def in_job_site(monkeypatch: pytest.MonkeyPatch) -> tuple[int, int]:
     """Return a generic row whose ``worker_ports`` is a free range apart from ``driver_ports``."""
     ports = free_range(3)
     site_copy(monkeypatch, "m68b-injob", "generic", name="m68b-injob", worker_ports=ports)
-    return ports
+    return cast("tuple[int, int]", ports)
 
 
 def test_the_driver_job_publishes_an_announce_secret_then_its_url(
