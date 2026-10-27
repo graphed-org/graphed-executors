@@ -1,5 +1,7 @@
-"""m43 carried follow-up F2b (m42 review, wf_20cb8bd3-42f APPROVE): a worker death on an ADAPTIVE
-leaf must surface as a `StageError` naming the PARTITION, not the raw dask key.
+"""m43 carried follow-up F2b (m42 review, wf_20cb8bd3-42f APPROVE).
+
+A worker death on an ADAPTIVE leaf must surface as a `StageError` naming the PARTITION, not the raw
+dask key.
 
 `_run_adaptive` currently resolves futures via `self._result(fut, {})` (engine.py:352) — an EMPTY
 key→Task map — so the KilledWorker translation (which the fixed path performs correctly, frozen by
@@ -10,7 +12,8 @@ assertion (a behavioral right-reason failure — the StageError itself already a
 
 The m42 blame discipline is copied verbatim: a dedicated cluster, `allowed-failures: 1` (not the
 quirk-prone 0 — gh#6078), retries=0, and a SINGLE-task batch so the scheduler's blame is
-deterministic (no co-located task to blame unfairly)."""
+deterministic (no co-located task to blame unfairly).
+"""
 
 from __future__ import annotations
 
@@ -60,7 +63,9 @@ def test_adaptive_worker_death_names_the_partition_not_the_dask_key(client) -> N
         f"the adaptive path must attribute a worker death to the user's chunk; got partition "
         f"{err.partition!r} — the raw dask key (empty key_to_task at engine.py _run_adaptive)"
     )
-    assert "graphed-" not in err.partition, "the scheduler key must not leak as the partition label"
+    assert "graphed-" not in err.partition, (
+        "the scheduler key must not leak as the partition label"
+    )
     text = f"{err.cause_type} {err.cause_message} {err}"
     assert "KilledWorker" in text  # the cause is named for the user (fixed-path parity)
     assert "tcp://" in text  # ...and so is the last worker that held the task

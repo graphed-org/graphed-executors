@@ -1,18 +1,20 @@
 """The driver-side task server pilots pull from.
 
 Every request is a POST of a pickle signed with the run's secret (``X-Graphed-Sig``, the hex
-HMAC-SHA256 of the body); a missing or wrong signature is answered 403 before anything is unpickled.
-Routes: ``/hello`` registers a pilot, ``/next`` long-polls a task lease, ``/beat`` keeps the pilot's
-leases alive, ``/result`` settles a task's future.
+HMAC-SHA256 of the body); a missing or wrong signature is answered 403 before anything is
+unpickled. Routes: ``/hello`` registers a pilot, ``/next`` long-polls a task lease, ``/beat`` keeps
+the pilot's leases alive, ``/result`` settles a task's future.
 
-``/announce`` is the one plain-text route: a cluster-hosted service's job posts ``key host:port identity``,
-signed with a per-call announce secret (:meth:`TaskServer.announce_secret`) that is valid for that key
-only and signs no pickle, so a service job never holds the secret that runs code here.
+``/announce`` is the one plain-text route: a cluster-hosted service's job posts ``key host:port
+identity``, signed with a per-call announce secret (:meth:`TaskServer.announce_secret`) that is
+valid for that key only and signs no pickle, so a service job never holds the secret that runs code
+here.
 
-A task waits in PENDING until its future arguments are done, then queues. Its first lease moves it to
-RUNNING. A pilot silent for ``LEASE_S`` is lost: each task it held is re-queued once, and a second loss
-fails it with :class:`WorkerLost`. A task leased longer than ``task_timeout_s`` fails with
-:class:`TaskTimedOut` and its pilot is lost. When no pilot is left and none can come, queued tasks fail too.
+A task waits in PENDING until its future arguments are done, then queues. Its first lease moves it
+to RUNNING. A pilot silent for ``LEASE_S`` is lost: each task it held is re-queued once, and a
+second loss fails it with :class:`WorkerLostError`. A task leased longer than ``task_timeout_s``
+fails with :class:`TaskTimedOutError` and its pilot is lost. When no pilot is left and none can
+come, queued tasks fail too.
 """
 
 from __future__ import annotations
@@ -41,8 +43,9 @@ from graphed_executors.local._transport import LookupFreeHTTPServer
 from graphed_executors.parsl_backend._shim import _parsl_task_shim
 from graphed_executors.parsl_backend.backend import _ParslFuture
 
-# A pilot beats every LEASE_S / 6, so it is lost after six missed beats: that rides out a task holding
-# the GIL and a transient network drop. Read at call time, never copied, so a test can shorten it.
+# A pilot beats every LEASE_S / 6, so it is lost after six missed beats: that rides out a task
+# holding the GIL and a transient network drop. Read at call time, never copied, so a test can
+# shorten it.
 LEASE_S = 30.0
 POLL_S = 10.0  # the /next long-poll bound
 
@@ -51,16 +54,21 @@ TASK_HEADER = "X-Graphed-Task"
 _HOSTPORT = re.compile(r".+:[0-9]+")
 
 
-class WorkerLost(Exception):
-    """A task's pilot was lost twice (``pilot`` names the last one), or no pilot is left to run it."""
+class WorkerLostError(Exception):
+    """A task's pilot was lost twice (``pilot`` names the last one).
+
+    Also raised when no pilot is left to run it.
+    """
 
     def __init__(self, key: str, pilot: str) -> None:
+        """Record the task ``key`` and the ``pilot`` that lost it."""
         super().__init__(key, pilot)
         self.key = key
         self.pilot = pilot
 
 
 def sign(secret: bytes, body: bytes) -> str:
+    """Return the hex HMAC-SHA256 of ``body`` under ``secret``."""
     return hmac.new(secret, body, hashlib.sha256).hexdigest()
 
 
@@ -73,17 +81,21 @@ def settle(fut: Future[Any], value: object = None, exc: BaseException | None = N
             fut.set_result(value)
 
 
-class TaskTimedOut(TimeoutError):
+class TaskTimedOutError(TimeoutError):
     """Task ``key`` ran on ``pilot`` longer than ``seconds``, the backend's ``task_timeout_s``."""
 
     def __init__(self, key: str, pilot: str, seconds: float) -> None:
+        """Record the task ``key``, its ``pilot`` and the limit it passed."""
         super().__init__(key, pilot, seconds)
         self.key = key
         self.pilot = pilot
         self.seconds = seconds
 
     def __str__(self) -> str:
-        return f"task {self.key} ran on pilot {self.pilot} longer than task_timeout_s={self.seconds}"
+        """Name the task, its pilot and the limit."""
+        return (
+            f"task {self.key} ran on pilot {self.pilot} longer than task_timeout_s={self.seconds}"
+        )
 
 
 @dataclass
@@ -114,13 +126,21 @@ def _bind(port_range: tuple[int, int]) -> _Http:
 
 
 class TaskServer:
-    """Binds the first free port of ``port_range`` (inclusive) on all interfaces and advertises
-    ``http://{host}:{port}``. ``launcher`` is asked how many pilots can still come, and its
-    ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit) bounds a lease."""
+    """Binds the first free port of ``port_range`` (inclusive) on all interfaces.
+
+    It advertises ``http://{host}:{port}``. ``launcher`` is asked how many pilots can still come,
+    and its ``log_dir`` (if any) is named when none can. ``task_timeout_s`` (``None``: no limit)
+    bounds a lease.
+    """
 
     def __init__(
-        self, host: str, port_range: tuple[int, int], launcher: Any, task_timeout_s: float | None = None
+        self,
+        host: str,
+        port_range: tuple[int, int],
+        launcher: Any,
+        task_timeout_s: float | None = None,
     ) -> None:
+        """Serve tasks on the first free port of ``port_range``."""
         self._task_timeout_s = task_timeout_s
         self.secret = secrets.token_bytes(32)
         self._launcher = launcher
@@ -131,21 +151,29 @@ class TaskServer:
         self._beats: dict[str, float] = {}
         self._lost: set[str] = set()
         self._closed = False
-        # announces wait on their own condition: a notify meant for a leasing pilot is never taken here
+        # announces wait on their own condition: a notify meant for a leasing pilot is never taken
+        # here
         self._announced = threading.Condition()
         self._announce_secrets: dict[str, bytes] = {}
         self._announces: dict[str, tuple[str, str]] = {}
         self._http = _bind(port_range)
         self._http.tasks = self
         self.url = f"http://{host}:{self._http.server_address[1]}"
-        threading.Thread(target=self._http.serve_forever, daemon=True, name="graphed-task-server").start()
+        threading.Thread(
+            target=self._http.serve_forever, daemon=True, name="graphed-task-server"
+        ).start()
         threading.Thread(target=self._reap, daemon=True, name="graphed-task-reaper").start()
 
     # ---- driver side ----
 
-    def add(self, key: str, fn: Callable[..., object], args: tuple[object, ...], fut: Future[Any]) -> None:
-        """Queue ``fn(*args)`` once every future argument is done; a failed one fails ``fut`` with its
-        exception, so a lost pilot reaches the dependents of any arity unchanged."""
+    def add(
+        self, key: str, fn: Callable[..., object], args: tuple[object, ...], fut: Future[Any]
+    ) -> None:
+        """Queue ``fn(*args)`` once every future argument is done.
+
+        A failed one fails ``fut`` with its exception, so a lost pilot reaches the
+        dependents of any arity unchanged.
+        """
         deps = [a for a in args if isinstance(a, _ParslFuture)]
         remaining = [len(deps)]
         count_lock = threading.Lock()
@@ -162,7 +190,8 @@ class TaskServer:
                     payload = pickle.dumps((_parsl_task_shim, fn, resolved))
                 except PICKLE_ERRORS:  # an upstream result only cloudpickle carries
                     payload = pickle.dumps((_parsl_task_shim, fn, Portable(resolved)))
-            except Exception as exc:  # raised in a done-callback it would be logged and the task would hang
+            # raised in a done-callback it would be logged and the task would hang
+            except Exception as exc:
                 settle(fut, exc=exc)
                 return
             with self._cond:
@@ -184,6 +213,7 @@ class TaskServer:
             dep.add_done_callback(dep_done)
 
     def live_pilots(self) -> int:
+        """Return the number of pilots that beat within the lease."""
         now = time.monotonic()
         with self._cond:
             return sum(p not in self._lost and now - t <= LEASE_S for p, t in self._beats.items())
@@ -197,16 +227,20 @@ class TaskServer:
             self._queue.clear()
             self._cond.notify_all()
         for task in held:
-            settle(task.fut, exc=RuntimeError(f"task {task.key} unfinished when the HTCondor backend closed"))
+            settle(
+                task.fut,
+                exc=RuntimeError(f"task {task.key} unfinished when the HTCondor backend closed"),
+            )
 
     def shutdown(self) -> None:
+        """Stop serving and close the socket."""
         self._http.shutdown()
         self._http.server_close()
 
     # ---- cluster-hosted services ----
 
     def announce_secret(self, keys: list[str]) -> bytes:
-        """A fresh secret that signs ``/announce`` for ``keys`` only."""
+        """Return a fresh secret that signs ``/announce`` for ``keys`` only."""
         secret = secrets.token_bytes(32)
         with self._announced:
             for key in keys:
@@ -227,7 +261,10 @@ class TaskServer:
             return self._announces.pop(key, None)
 
     def announce(self, body: bytes, sig: bytes) -> HTTPStatus:
-        """Record ``key host:port identity`` when ``sig`` verifies against ``key``'s announce secret."""
+        """Record ``key host:port identity``.
+
+        When ``sig`` verifies against ``key``'s announce secret.
+        """
         try:
             fields = body.decode().split()
         except UnicodeDecodeError:
@@ -246,6 +283,7 @@ class TaskServer:
     # ---- pilot side, called from the request handlers ----
 
     def hello(self, pilot: str) -> dict[str, float]:
+        """Register ``pilot`` and return its beat and lease intervals."""
         self.beat(pilot)
         return {"beat_s": LEASE_S / 6, "lease_s": LEASE_S}
 
@@ -257,7 +295,7 @@ class TaskServer:
             return not (self._closed or pilot in self._lost)
 
     def lease(self, pilot: str) -> tuple[int, bytes] | None:
-        """The next task for ``pilot``, or None after ``POLL_S`` or once it should stop."""
+        """Return the next task for ``pilot``, or None after ``POLL_S`` or once it should stop."""
         deadline = time.monotonic() + POLL_S
         with self._cond:
             while self.beat(pilot):
@@ -276,7 +314,10 @@ class TaskServer:
             return None
 
     def result(self, pilot: str, tid: int, ok: bool, blob: bytes) -> None:
-        """Settle task ``tid`` from ``pilot``; a result from a pilot that no longer holds the lease is dropped."""
+        """Settle task ``tid`` from ``pilot``.
+
+        A result from a pilot that no longer holds the lease is dropped.
+        """
         self.beat(pilot)
         with self._cond:
             task = self._tasks.get(tid)
@@ -286,7 +327,10 @@ class TaskServer:
         try:
             value = pickle.loads(blob)
         except Exception as exc:  # a hang otherwise: the future would never settle
-            ok, value = False, RuntimeError(f"task {task.key}: its result does not unpickle here: {exc!r}")
+            ok, value = (
+                False,
+                RuntimeError(f"task {task.key}: its result does not unpickle here: {exc!r}"),
+            )
         if ok:
             settle(task.fut, value)
         else:
@@ -300,15 +344,21 @@ class TaskServer:
             self.reap_once()
 
     def reap_once(self) -> None:
+        """Fail tasks past the timeout and requeue the tasks of lost pilots, once."""
         failed: list[tuple[Future[Any], BaseException]] = []
         now = time.monotonic()
         limit = self._task_timeout_s
         with self._cond:
             for tid, task in list(self._tasks.items()):
-                if limit is not None and task.leased_to is not None and now - task.leased_at > limit:
+                if (
+                    limit is not None
+                    and task.leased_to is not None
+                    and now - task.leased_at > limit
+                ):
                     del self._tasks[tid]  # its pilot's late result is dropped
-                    self._lost.add(task.leased_to)  # a pilot runs one task: it stops at its next beat
-                    failed.append((task.fut, TaskTimedOut(task.key, task.leased_to, limit)))
+                    # a pilot runs one task: it stops at its next beat
+                    self._lost.add(task.leased_to)
+                    failed.append((task.fut, TaskTimedOutError(task.key, task.leased_to, limit)))
             for pilot, beat in self._beats.items():
                 if pilot in self._lost or now - beat <= LEASE_S:
                     continue
@@ -318,7 +368,7 @@ class TaskServer:
                         continue
                     if task.requeued:
                         del self._tasks[tid]
-                        failed.append((task.fut, WorkerLost(task.key, pilot)))
+                        failed.append((task.fut, WorkerLostError(task.key, pilot)))
                     else:
                         task.requeued, task.leased_to = True, None
                         self._queue.appendleft(tid)
@@ -326,11 +376,14 @@ class TaskServer:
             starving = bool(self._queue) and set(self._beats) <= self._lost
         # the launcher is asked only when work waits with no pilot: a schedd query is not free
         if starving and self._launcher.alive() == 0:
-            where = f"no pilots left; see {getattr(self._launcher, 'log_dir', None) or 'the launcher logs'}"
+            where = (
+                "no pilots left; see "
+                f"{getattr(self._launcher, 'log_dir', None) or 'the launcher logs'}"
+            )
             with self._cond:
                 for tid in self._queue:
                     task = self._tasks.pop(tid)
-                    failed.append((task.fut, WorkerLost(task.key, where)))
+                    failed.append((task.fut, WorkerLostError(task.key, where)))
                 self._queue.clear()
         for fut, exc in failed:
             settle(fut, exc=exc)
@@ -342,7 +395,9 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return None  # one line per long poll would drown the driver's stderr
 
-    def _reply(self, status: HTTPStatus, body: bytes = b"", headers: dict[str, str] | None = None) -> None:
+    def _reply(
+        self, status: HTTPStatus, body: bytes = b"", headers: dict[str, str] | None = None
+    ) -> None:
         self.send_response(status)
         for name, value in (headers or {}).items():
             self.send_header(name, value)

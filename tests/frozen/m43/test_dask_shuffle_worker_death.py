@@ -1,6 +1,8 @@
-"""m43 recompute-on-loss — a worker holding stage-1 blocks dies MID-SHUFFLE and the result is
-still bit-for-bit: dask recomputes the lost producer from the future graph (plan §1.3.4 point 2 —
-completeness IS the graph; blueprint §3 `test_dask_shuffle_worker_death`).
+"""m43 recompute-on-loss.
+
+A worker holding stage-1 blocks dies MID-SHUFFLE and the result is still bit-for-bit: dask
+recomputes the lost producer from the future graph (plan §1.3.4 point 2 — completeness IS the
+graph; blueprint §3 `test_dask_shuffle_worker_death`).
 
 Deterministic mid-run kill, no timing races (R0.10a — every step gates on observed FILE marks):
 the GatedShuffleBackend (1) drops a `pmark` file per stage-1 `partition` call and (2) makes every
@@ -12,7 +14,8 @@ re-run the producer task elsewhere — witnessed by `pmark` count STRICTLY excee
 the final `dest_block_hashes` equal a plain-backend LOCAL oracle run bit-for-bit.
 
 Discriminates: an engine that memoizes stage-1 output OUTSIDE dask's graph (loses the recompute →
-error or divergent bytes), and one whose merge order depends on which worker recomputed."""
+error or divergent bytes), and one whose merge order depends on which worker recomputed.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +61,9 @@ def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
     return request.param
 
 
-def test_lost_stage1_blocks_are_recomputed_and_the_result_is_bit_for_bit(adapter: ShuffleJoinAdapter, client, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_lost_stage1_blocks_are_recomputed_and_the_result_is_bit_for_bit(
+    adapter: ShuffleJoinAdapter, client, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     from dask_shuffle_backends import shuffle_api  # noqa: PLC0415  (deferred: module under test)
 
     shuffle_api()  # right-reason gate: fail HERE pre-implementation, before the scenario spins up
@@ -88,13 +93,18 @@ def test_lost_stage1_blocks_are_recomputed_and_the_result_is_bit_for_bit(adapter
     def victim_ready() -> bool:
         if len(mark_files(str(mark_dir), "pmark")) < n_src:
             return False
-        return bool(set(mark_addresses(str(mark_dir), "pmark")) & set(mark_addresses(str(mark_dir), "gstart")))
+        return bool(
+            set(mark_addresses(str(mark_dir), "pmark"))
+            & set(mark_addresses(str(mark_dir), "gstart"))
+        )
 
     poll_until(lambda: victim_ready() or not thread.is_alive(), timeout_s=120.0)
     assert "error" not in outcome, f"shuffle raised before the kill: {outcome.get('error')!r}"
     assert victim_ready(), "scenario misfired: stage 1 or a blocked gather never materialised"
 
-    victims = set(mark_addresses(str(mark_dir), "pmark")) & set(mark_addresses(str(mark_dir), "gstart"))
+    victims = set(mark_addresses(str(mark_dir), "pmark")) & set(
+        mark_addresses(str(mark_dir), "gstart")
+    )
     victim = sorted(victims)[0]
     pids_before = live_worker_pids(client)
     assert victim in pids_before, "victim address is not a live worker"

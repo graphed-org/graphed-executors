@@ -1,11 +1,15 @@
-"""m66 D4: ``HTCondorRunner.run`` refuses a ``process``/``combine`` a pilot cannot import by name, with a
-``ValueError`` naming ``user_modules``, before any task is submitted.
+"""m66 D4: ``HTCondorRunner.run`` refuses a process or combine a pilot cannot import.
 
-A ``__main__`` function pickles fine (about 35 B, by reference) and only fails to unpickle in another
-interpreter, so a refusal that relies on ``pickle.dumps`` failing catches the lambda and misses it.
+m66 D4: ``HTCondorRunner.run`` refuses a ``process``/``combine`` a pilot cannot import by name,
+with a ``ValueError`` naming ``user_modules``, before any task is submitted.
 
-Discriminates letting the engine's ``PicklingError`` through, a refusal that only catches lambdas, and
-a refusal that comes after work was submitted."""
+A ``__main__`` function pickles fine (about 35 B, by reference) and only fails to unpickle in
+another interpreter, so a refusal that relies on ``pickle.dumps`` failing catches the lambda and
+misses it.
+
+Discriminates letting the engine's ``PicklingError`` through, a refusal that only catches lambdas,
+and a refusal that comes after work was submitted.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +45,9 @@ def counting_submit(backend: Any) -> list[str]:
     return keys
 
 
-def plan_of(process: Callable[[Partition, object], str], combine: Callable[[str, str], str]) -> Plan[str]:
+def plan_of(
+    process: Callable[[Partition, object], str], combine: Callable[[str, str], str]
+) -> Plan[str]:
     tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(3, "m66refuse")))
     return Plan(process=process, combine=combine, empty=empty_text, tasks=tasks)
 
@@ -52,7 +58,9 @@ def main_function(monkeypatch: pytest.MonkeyPatch) -> Callable[[Partition, objec
 
     m66_main_process.__module__ = "__main__"
     m66_main_process.__qualname__ = "m66_main_process"
-    monkeypatch.setattr(sys.modules["__main__"], "m66_main_process", m66_main_process, raising=False)
+    monkeypatch.setattr(
+        sys.modules["__main__"], "m66_main_process", m66_main_process, raising=False
+    )
     return m66_main_process
 
 
@@ -82,12 +90,16 @@ def refused(plan: Plan[str], role: str) -> None:
 
 
 def test_a_lambda_process_is_refused() -> None:
-    refused(plan_of(lambda partition, resources: concat_process(partition, resources), concat), "process")
+    refused(
+        plan_of(lambda partition, resources: concat_process(partition, resources), concat),
+        "process",
+    )
 
 
 def test_a_main_module_process_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     process = main_function(monkeypatch)
-    assert len(pickle.dumps(process)) < 100  # pickles by reference; only an unpickle elsewhere fails
+    # pickles by reference; only an unpickle elsewhere fails
+    assert len(pickle.dumps(process)) < 100
     refused(plan_of(process, concat), "process")
 
 
@@ -101,7 +113,9 @@ def test_importable_process_and_combine_run() -> None:
     backend = local_backend(1)
     try:
         keys = counting_submit(backend)
-        value = run_bounded(lambda: make_runner(backend).run(plan_of(concat_process, concat))).value
+        value = run_bounded(
+            lambda: make_runner(backend).run(plan_of(concat_process, concat))
+        ).value
     finally:
         backend.close()
     assert value == expected_concat(3, "m66refuse")

@@ -11,7 +11,10 @@ GATE_S = 60.0
 
 
 def gated_leaf(partition: Partition, resources: object) -> tuple[int, ...]:
-    """Leaf ``i`` returns ``(i,)``; from leaf 2 on it first waits for the file ``partition.tree`` names."""
+    """Leaf ``i`` returns ``(i,)``.
+
+    From leaf 2 on it first waits for the file ``partition.tree`` names.
+    """
     i = partition.entry_start
     deadline = time.monotonic() + GATE_S
     while i >= 2 and not Path(partition.tree).exists() and time.monotonic() < deadline:

@@ -1,12 +1,15 @@
-"""m68a §3.1 engine: the per-run wrapper holds only futures not yet done, because a held dask future pins
-its result in cluster memory. Runs in the ``test-dask`` job (``importorskip("distributed")``, in the fixture, so collecting the file
-imports nothing: ``distributed`` installs a process-wide exception pickler).
+"""m68a §3.1 engine.
 
-One batch of 40 leaves through ``SubmitRunner(DaskBackend(LocalCluster 2x1), control=RunControl())``,
-the windowed adaptive path, which bounds outstanding leaves by ``task_slots()``. At each ``next_tasks``
-call the plan counts this run's ``-leaf-`` keys that ``client.who_has()`` lists with a non-empty holder
-list (a queued or processing key has an empty one): the count never exceeds ``backend.task_slots()``.
-A wrapper that records every future it submits keeps all 40 results held.
+The per-run wrapper holds only futures not yet done, because a held dask future pins its result in
+cluster memory. Runs in the ``test-dask`` job (``importorskip("distributed")``, in the fixture, so
+collecting the file imports nothing: ``distributed`` installs a process-wide exception pickler).
+
+One batch of 40 leaves through ``SubmitRunner(DaskBackend(LocalCluster 2x1),
+control=RunControl())``, the windowed adaptive path, which bounds outstanding leaves by
+``task_slots()``. At each ``next_tasks`` call the plan counts this run's ``-leaf-`` keys that
+``client.who_has()`` lists with a non-empty holder list (a queued or processing key has an empty
+one): the count never exceeds ``backend.task_slots()``. A wrapper that records every future it
+submits keeps all 40 results held.
 
 Discriminates: a consumed result held until the run ends.
 """
@@ -29,7 +32,7 @@ SETTLE_S = 0.1  # >> distributed's batched-send interval (2 ms); a held future i
 
 
 def leaf_payload(partition: Partition, resources: object) -> bytes:
-    """A leaf result worth holding: 64 kB tagged by its partition."""
+    """Return a leaf result worth holding: 64 kB tagged by its partition."""
     return partition.uri.encode().ljust(1 << 16, b".")
 
 
@@ -55,9 +58,12 @@ class HeldCounter:
         self._lock = threading.Lock()
 
     def __call__(self, ctx: ExecContext) -> list[Task] | None:
-        time.sleep(SETTLE_S)  # a dropped future's release reaches the scheduler on a batched stream
+        # a dropped future's release reaches the scheduler on a batched stream
+        time.sleep(SETTLE_S)
         who_has = self.client.who_has()
-        held = sum(1 for key, holders in who_has.items() if "-leaf-" in str(key) and len(holders) > 0)
+        held = sum(
+            1 for key, holders in who_has.items() if "-leaf-" in str(key) and len(holders) > 0
+        )
         with self._lock:
             self.held.append(held)
             if self._sent:
@@ -93,6 +99,7 @@ def test_at_most_task_slots_leaf_results_are_held(client: Any) -> None:
     slots = backend.task_slots()
     assert slots == 2
     assert result.n_partitions == N_LEAVES and result.value == N_LEAVES * (1 << 16)
-    assert len(counter.held) >= N_LEAVES, counter.held  # one count per consumed leaf, plus the first call
+    # one count per consumed leaf, plus the first call
+    assert len(counter.held) >= N_LEAVES, counter.held
     assert max(counter.held) >= 1, "the count never saw a held leaf result: the witness is blind"
     assert max(counter.held) <= slots, counter.held

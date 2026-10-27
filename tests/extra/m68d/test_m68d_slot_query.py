@@ -1,5 +1,8 @@
-"""The pool's slot ads (A2's match): the collector drops the dynamic slots and returns whole ads, so a pool
-whose dynamic slots outnumber the rest is never pulled through the driver."""
+"""The pool's slot ads (A2's match).
+
+The collector drops the dynamic slots and returns whole ads, so a pool whose dynamic slots
+outnumber the rest is never pulled through the driver.
+"""
 
 from __future__ import annotations
 
@@ -47,7 +50,9 @@ def test_the_slot_constraint_keeps_every_slot_but_a_dynamic_one(
         return []
 
     collector = SimpleNamespace(query=query)
-    monkeypatch.setattr(launch, "_htcondor", lambda: SimpleNamespace(Collector=lambda *pool: collector))
+    monkeypatch.setattr(
+        launch, "_htcondor", lambda: SimpleNamespace(Collector=lambda *pool: collector)
+    )
     machine_ads(None)
     ad = classad2.ClassAd({"MyType": "Machine", **({"SlotType": slot} if slot else {})})
     assert len(asked) == 1 and classad2.ExprTree(asked[0]).eval(ad) is kept, (asked, slot)

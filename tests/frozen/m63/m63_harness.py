@@ -29,7 +29,7 @@ OVERLAP_TIMEOUT_S = 10.0
 BLOCKED_JOIN_S = 1.0
 N_LEAVES = 6
 
-# ---- plan callables ------------------------------------------------------------------------------
+# ---- plan callables -----------------------------------------------------------------------------
 
 
 def leaf_value(plan_id: int, k: int) -> float:
@@ -73,7 +73,10 @@ def clear_intervals() -> None:
 
 @dataclass(frozen=True)
 class GatedLeaf:
-    """Blocks until ``<partition.uri>/open`` exists, then returns its value; records its interval."""
+    """Blocks until ``<partition.uri>/open`` exists, then returns its value.
+
+    Records its interval.
+    """
 
     plan_id: int
 
@@ -106,8 +109,14 @@ class SleepyLeaf:
 
 
 def sleepy_plan(plan_id: int) -> Plan[float]:
-    """Plan ``plan_id`` has ``9 + plan_id`` slow leaves, so concurrent plans differ in shape and value."""
-    tasks = tuple(Task(k, Partition(f"mem://m63/sleepy/{plan_id}", "t", k, k + 1)) for k in range(9 + plan_id))
+    """Plan ``plan_id`` has ``9 + plan_id`` slow leaves.
+
+    Concurrent plans thus differ in shape and value.
+    """
+    tasks = tuple(
+        Task(k, Partition(f"mem://m63/sleepy/{plan_id}", "t", k, k + 1))
+        for k in range(9 + plan_id)
+    )
     return Plan(process=SleepyLeaf(plan_id), combine=add, empty=zero, tasks=tasks)
 
 
@@ -153,7 +162,9 @@ def adaptive_plan() -> Plan[float]:
     )
 
 
-USER_FRAME = SourceFrame(filename="user_analysis_m63.py", lineno=63, function="my_cut", source="pt > 63")
+USER_FRAME = SourceFrame(
+    filename="user_analysis_m63.py", lineno=63, function="my_cut", source="pt > 63"
+)
 
 
 def make_stage_error() -> StageError:
@@ -194,7 +205,7 @@ def flaky_plan(marker: str) -> Plan[float]:
 
 
 def overlap_a(partition: Partition, resources: object) -> float:
-    """Marks its start, then returns 1.0 iff plan B's leaf opens the gate while this one waits."""
+    """Mark its start, then return 1.0 iff plan B's leaf opens the gate while this one waits."""
     d = partition.uri
     with open(os.path.join(d, "a_started"), "w"):
         pass
@@ -213,10 +224,12 @@ def overlap_b(partition: Partition, resources: object) -> float:
 
 
 def overlap_plan(process: Callable[[Partition, object], float], d: str) -> Plan[float]:
-    return Plan(process=process, combine=add, empty=zero, tasks=(Task(0, Partition(d, "t", 0, 1)),))
+    return Plan(
+        process=process, combine=add, empty=zero, tasks=(Task(0, Partition(d, "t", 0, 1)),)
+    )
 
 
-# ---- driver-side helpers -------------------------------------------------------------------------
+# ---- driver-side helpers ------------------------------------------------------------------------
 
 
 class RecordingMonitor:
@@ -280,7 +293,7 @@ def fingerprint(r: ExecResult[float]) -> tuple[bytes, int, int, StopReason | Non
 
 @contextmanager
 def opened_on_exit(*gates: str) -> Iterator[None]:
-    """Opens every gate on the way out so a failed assertion never leaves workers blocked."""
+    """Open every gate on the way out so a failed assertion never leaves workers blocked."""
     try:
         yield
     finally:
@@ -289,7 +302,7 @@ def opened_on_exit(*gates: str) -> Iterator[None]:
                 open_gate(g)
 
 
-# ---- scenario checks -----------------------------------------------------------------------------
+# ---- scenario checks ----------------------------------------------------------------------------
 
 
 def check_max_in_flight_ctor(make: Callable[..., Any]) -> None:
@@ -341,7 +354,9 @@ def check_asynchronous(ex: Any, tmp: str) -> None:
         fut = call.get()
         assert not fut.done()
         open_gate(gate)
-        assert fbytes(fut.result(timeout=GATE_TIMEOUT_S).value) == fbytes(ex.run(fixed_plan(2)).value)
+        assert fbytes(fut.result(timeout=GATE_TIMEOUT_S).value) == fbytes(
+            ex.run(fixed_plan(2)).value
+        )
 
 
 def check_bound(ex: Any, tmp: str) -> None:
@@ -362,7 +377,10 @@ def check_bound(ex: Any, tmp: str) -> None:
 
 
 def check_cancel_frees_slot(ex: Any, tmp: str) -> None:
-    """``ex`` has ``max_in_flight=2``: one plan runs, one queues; cancelling the queued one frees its slot."""
+    """``ex`` has ``max_in_flight=2``: one plan runs, one queues.
+
+    Cancelling the queued one frees its slot.
+    """
     g1, g2, g3 = (new_gate(tmp, f"cancel{i}") for i in range(3))
     with opened_on_exit(g1, g2, g3):
         f1 = Call(lambda: ex.submit(fixed_plan(1, gate_dir=g1))).get()
@@ -381,8 +399,10 @@ def check_cancel_frees_slot(ex: Any, tmp: str) -> None:
 
 
 def check_order(ex: Any, tmp: str, *, in_process: bool) -> None:
-    """A long (gated) plan submitted first completes before a short one submitted after it; in
-    process, no leaf of the second plan starts before every leaf of the first has finished."""
+    """Check that a gated long plan submitted first completes before a later short one.
+
+    In process, no leaf of the second plan starts before every leaf of the first has finished.
+    """
     long_gate, short_gate = new_gate(tmp, "order_long"), new_gate(tmp, "order_short")
     open_gate(short_gate)
     clear_intervals()
@@ -427,7 +447,9 @@ def check_errors(ex: Any) -> None:
     assert type(via_submit.value) is type(via_run.value)
     assert str(via_submit.value) == str(via_run.value)
     assert via_submit.value.__dict__ == via_run.value.__dict__
-    assert [(f.filename, f.lineno) for f in via_submit.value.frames] == [("user_analysis_m63.py", 63)]
+    assert [(f.filename, f.lineno) for f in via_submit.value.frames] == [
+        ("user_analysis_m63.py", 63)
+    ]
     assert fbytes(good.result(timeout=GATE_TIMEOUT_S).value) == fbytes(ex.run(fixed_plan(4)).value)
 
 
@@ -443,8 +465,10 @@ def _leg(make: Callable[..., Any], monitor: RecordingMonitor, via_submit: bool) 
 
 
 def check_monitor_parity(make: Callable[..., Any], *, exact: bool) -> None:
-    """``make(monitor=m)`` builds a fresh executor per leg (a kept pool's collector would leak
-    one leg's trailing events into the next)."""
+    """``make(monitor=m)`` builds a fresh executor per leg.
+
+    A kept pool's collector would leak one leg's trailing events into the next.
+    """
     n = N_LEAVES
     via_run, via_submit = RecordingMonitor(), RecordingMonitor()
     _leg(make, via_run, via_submit=False)
@@ -478,7 +502,7 @@ def _submitted(rec: RecordingMonitor) -> int:
 
 
 def check_monitor_attach(ex: Any) -> None:
-    """Assigning ``ex.monitor`` after construction reaches the next plan, for run and for submit."""
+    """Check that ``ex.monitor`` set after construction reaches the next plan, run or submit."""
     first, second = RecordingMonitor(), RecordingMonitor()
     ex.monitor = first
     ex.run(fixed_plan(7))
@@ -495,9 +519,13 @@ def check_close_drains(ex: Any, tmp: str) -> None:
     ref = [fbytes(ex.run(fixed_plan(20 + i)).value) for i in range(2)]
     gate = new_gate(tmp, "drain")
     with opened_on_exit(gate):
-        futs = [Call(lambda i=i: ex.submit(fixed_plan(20 + i, gate_dir=gate))).get() for i in range(2)]
+        futs = [
+            Call(lambda i=i: ex.submit(fixed_plan(20 + i, gate_dir=gate))).get() for i in range(2)
+        ]
         closing = Call(ex.close)
-        assert not closing.returned_within(BLOCKED_JOIN_S), "close returned while a plan was running"
+        assert not closing.returned_within(BLOCKED_JOIN_S), (
+            "close returned while a plan was running"
+        )
         open_gate(gate)
         closing.get()
     assert all(f.done() and not f.cancelled() for f in futs)

@@ -35,7 +35,9 @@ def htex(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
     # HTEX workers start from the process_worker_pool script: they need the venv on PATH and this
     # directory on PYTHONPATH to import the harness.
     with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
+        mp.setenv(
+            "PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+        )
         mp.setenv("PYTHONPATH", HARNESS_DIR + os.pathsep + os.environ.get("PYTHONPATH", ""))
         executor = start_htex(workers=2, run_dir=str(tmp_path_factory.mktemp("htex")))
         try:

@@ -1,5 +1,8 @@
-"""A behavior registered on the BACKEND only, importable by a spawned worker through the
-``backend="module:factory"`` import reference of ``aggregate_plan``."""
+"""A behavior registered on the BACKEND only.
+
+Importable by a spawned worker through the ``backend="module:factory"`` import reference of
+``aggregate_plan``.
+"""
 
 from __future__ import annotations
 
@@ -29,7 +32,12 @@ def events(n: int = 400, seed: int = 7) -> ak.Array:
     total = int(counts.sum())
     # integer-valued pt: every partial sum is exact, so partition order cannot move a bit
     jets = ak.unflatten(
-        ak.Array({"pt": rng.integers(20, 100, total).astype(float), "eta": rng.uniform(-2.4, 2.4, total)}),
+        ak.Array(
+            {
+                "pt": rng.integers(20, 100, total).astype(float),
+                "eta": rng.uniform(-2.4, 2.4, total),
+            }
+        ),
         counts,
     )
     return ak.Array({"Jet": jets})
@@ -46,9 +54,14 @@ class CorpusEvents:
         return self.data
 
     def partitions(self, steps_per_file: int = 1) -> tuple[Partition, ...]:
-        return tuple(Partition.blind("corpus://events", "", s, steps_per_file) for s in range(steps_per_file))
+        return tuple(
+            Partition.blind("corpus://events", "", s, steps_per_file)
+            for s in range(steps_per_file)
+        )
 
-    def read_partition(self, partition: Partition, columns: Any, resources: WorkerResources) -> ak.Array:
+    def read_partition(
+        self, partition: Partition, columns: Any, resources: WorkerResources
+    ) -> ak.Array:
         part = partition.resolve(len(self.data))
         return self.data[part.entry_start : part.entry_stop]
 

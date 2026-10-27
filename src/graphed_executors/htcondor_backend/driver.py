@@ -1,36 +1,39 @@
-"""The driverless entry: ``python -m graphed_executors.htcondor_backend.driver <dir>``, run inside ONE job.
+"""The driverless entry.
 
-``<dir>`` (the job's scratch dir, its cwd) holds ``plan.pkl`` (a stdlib-pickled runtime ``Plan``) and
-``run.json``. The driver runs the plan with :class:`HTCondorRunner` over :class:`LocalPilots` in its own
-slot (``pilots="local"``) or over pilot jobs it submits itself (``pilots="condor"``, to the schedd named
-by ``run.json["schedd_locate"]``), and on every exit writes ``result.pkl`` = ``(ok, ExecResult |
-exception)`` and ``driver.log`` for the output transfer (``driver.sh`` writes a placeholder of both first).
+``python -m graphed_executors.htcondor_backend.driver <dir>``, run inside ONE job.
+
+``<dir>`` (the job's scratch dir, its cwd) holds ``plan.pkl`` (a stdlib-pickled runtime ``Plan``)
+and ``run.json``. The driver runs the plan with :class:`HTCondorRunner` over :class:`LocalPilots`
+in its own slot (``pilots="local"``) or over pilot jobs it submits itself (``pilots="condor"``, to
+the schedd named by ``run.json["schedd_locate"]``), and on every exit writes ``result.pkl`` =
+``(ok, ExecResult | exception)`` and ``driver.log`` for the output transfer (``driver.sh`` writes a
+placeholder of both first).
 
 The plan's services are resolved here, in the driver job, by the engine's three legs: the
 ``run.json["endpoints"]`` the submitter gave (leg 1), the job's own site row (leg 2), or a managed
-start (leg 3), beside the driver or, for a name in ``run.json["announce_only"]``, by the announce of
-the run's DAG SERVICE node, to which the driver publishes its url and an announce secret in
+start (leg 3), beside the driver or, for a name in ``run.json["announce_only"]``, by the announce
+of the run's DAG SERVICE node, to which the driver publishes its url and an announce secret in
 ``run.json["dag_dir"]``; the run then re-checks and probes them as leg-1 endpoints inside
-``runner.run`` and resolves its value while they are still up. A run that raises ``ServiceUnreachable``
-for a SERVICE node's service is run again (``rerun: <error>`` in ``driver.log``) under a new set, which
-waits for that node's next announce; every rerun needs a fresh announce, so the loop is bounded by the
-node's restarts.
+``runner.run`` and resolves its value while they are still up. A run that raises
+``ServiceUnreachableError`` for a SERVICE node's service is run again (``rerun: <error>`` in
+``driver.log``) under a new set, which waits for that node's next announce; every rerun needs a
+fresh announce, so the loop is bounded by the node's restarts.
 
 ``main`` classifies an exit by phase, and only inside ``runner.run(plan)`` by type:
 
 - 0: done.
 - 1: environment, which the job's retries may get past. Anything raised before or after
   ``runner.run(plan)``: reading ``run.json`` or the plan, starting the pilots, and the driver's own
-  service set (its endpoints and placement are environment; *this plan's decision*, plan-services D6).
-  Inside ``runner.run``: a run whose workers were lost (a ``KilledWorker`` ``StageError``, e.g. every
-  pilot preempted; *owner ruling 2026-09-25*), a ``StoreUnavailable``, and the run's own service phase
-  or a failed task's re-check of its services (``ServiceUnavailable``, ``ServiceUnreachable`` and a
-  probe's raw ``WorkerLost``; *this plan's decision*).
+  service set (its endpoints and placement are environment; *this plan's decision*, plan-services
+  D6). Inside ``runner.run``: a run whose workers were lost (a ``KilledWorker`` ``StageError``,
+  e.g. every pilot preempted; *owner ruling 2026-09-25*), a ``StoreUnavailable``, and the run's own
+  service phase or a failed task's re-check of its services (``ServiceUnavailableError``,
+  ``ServiceUnreachableError`` and a probe's raw ``WorkerLostError``; *this plan's decision*).
 - 3: an ``EnvironmentChanged`` from making the plan resumable on ``run.json["store"]``, and every
   other exception from ``runner.run(plan)``: the plan's own error, deterministic, so the job's
   ``retry_until`` (a DAG's ``RETRY driver 2 UNLESS-EXIT 3``) stops retrying it. A ``StageError``
-  (*owner ruling 2026-09-25*) or a task's exception re-raised intact, such as a ``ValueError`` (*this
-  plan's decision*).
+  (*owner ruling 2026-09-25*) or a task's exception re-raised intact, such as a ``ValueError``
+  (*this plan's decision*).
 """
 
 from __future__ import annotations
@@ -52,8 +55,8 @@ from graphed.debug import StageError
 from graphed_executors.local._portable import PICKLE_ERRORS, Portable
 from graphed_executors.submit.services import (
     ServiceSet,
-    ServiceUnavailable,
-    ServiceUnreachable,
+    ServiceUnavailableError,
+    ServiceUnreachableError,
     host_identity,
     release_quietly,
 )
@@ -70,14 +73,17 @@ from .launch import (
     LocalPilots,
     publish,
 )
-from .server import WorkerLost
+from .server import WorkerLostError
 from .sites import SITES
 
 EXIT_DONE, EXIT_FAILED, EXIT_PLAN_ERROR = 0, 1, 3
 
 
 def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
-    """The job's runner over its pilots; the backend is released if anything after it fails."""
+    """Return the job's runner over its pilots.
+
+    The backend is released if anything after it fails.
+    """
     profile = SITES[run["site"]]
     n = int(run["n_pilots"])
     announced: dict[str, str] = run.get("announce_only") or {}
@@ -94,11 +100,13 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
         )
     else:
         launcher = LocalPilots(python=sys.executable, pythonpath=[job])
-    if run["pilots"] == "condor" or announced:  # dialled from other nodes: pilot jobs, SERVICE nodes
+    # dialled from other nodes: pilot jobs, SERVICE nodes
+    if run["pilots"] == "condor" or announced:
         host, ports = host_identity(), profile.worker_ports
     else:  # the slot's own pilots dial loopback; any free port serves them
         host, ports = "127.0.0.1", profile.worker_ports or (0, 0)
-    with ExitStack() as on_error:  # held until the runner exists: a failure after the pilots stops them
+    # held until the runner exists: a failure after the pilots stops them
+    with ExitStack() as on_error:
         backend = HTCondorBackend(
             launcher,
             n,
@@ -137,9 +145,11 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
 
 
 def _result_blob(ok: bool, payload: object) -> bytes:
-    """``pickle.dumps((ok, payload))``, returned only once it loads again: an outcome that does not
-    round-trip (unpicklable, or an exception whose constructor differs from its ``args``) reaches the
-    submitter as a ``RuntimeError`` carrying its text."""
+    """``pickle.dumps((ok, payload))``, returned only once it loads again.
+
+    An outcome that does not round-trip (unpicklable, or an exception whose constructor differs
+    from its ``args``) reaches the submitter as a ``RuntimeError`` carrying its text.
+    """
     try:
         try:
             blob = pickle.dumps((ok, payload))
@@ -148,22 +158,33 @@ def _result_blob(ok: bool, payload: object) -> bytes:
         pickle.loads(blob)
         return blob
     except Exception as exc:
-        text = f"{type(payload).__name__} did not round-trip through pickle ({type(exc).__name__}: {exc})"
+        text = (
+            f"{type(payload).__name__} did not round-trip through pickle "
+            f"({type(exc).__name__}: {exc})"
+        )
         return pickle.dumps((False, RuntimeError(f"{text}: {payload}")))
 
 
 def _exit_code(exc: Exception) -> int:
-    """The exit of an exception from inside ``runner.run(plan)``: 1 (retried) for lost workers and for
-    the run's service phase and the checkpoint store, 3 (not retried) for everything else, the plan's own error."""
+    """Return the exit of an exception from inside ``runner.run(plan)``.
+
+    1 (retried) for lost workers and for the run's service phase and the checkpoint store, 3
+    (not retried) for everything else, the plan's own error.
+    """
     lost = isinstance(exc, StageError) and exc.cause_type == "KilledWorker"
-    environment = isinstance(exc, ServiceUnavailable | ServiceUnreachable | WorkerLost | StoreUnavailable)
+    environment = isinstance(
+        exc, ServiceUnavailableError | ServiceUnreachableError | WorkerLostError | StoreUnavailable
+    )
     return EXIT_FAILED if lost or environment else EXIT_PLAN_ERROR
 
 
 def _attempt(
     plan: Any, runner: HTCondorRunner, given: dict[str, str], log: TextIO, start: float
 ) -> tuple[object, Exception | None, int]:
-    """One ``runner.run(plan)`` under the driver job's own service set: ``(result, error, exit code)``."""
+    """One ``runner.run(plan)`` under the driver job's own service set.
+
+    ``(result, error, exit code)``.
+    """
     # the driver job's own set: its failures are environment (exit 1) whatever their type
     with ServiceSet(plan.services, runner.backend, endpoints=given) as endpoints:
         live = runner.wait_for_pilots()  # after the SERVICE nodes' announces; a failure exits 1
@@ -176,6 +197,7 @@ def _attempt(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the job's plan and write its result; return the exit status."""
     args = sys.argv[1:] if argv is None else argv
     job = Path(args[0] if args else ".").resolve()
     if str(job) not in sys.path:
@@ -200,7 +222,10 @@ def main(argv: list[str] | None = None) -> int:
                 loaded = pickle.load(f)
 
             def wrapped() -> Any:
-                """``loaded`` resumable on ``run.json["store"]``; ``resumable`` reads the done tasks as it wraps."""
+                """Return ``loaded`` resumable on ``run.json["store"]``.
+
+                ``resumable`` reads the done tasks as it wraps.
+                """
                 if not run.get("store"):
                     return loaded
                 return resumable(
@@ -216,9 +241,13 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 announced = run.get("announce_only") or {}
                 while True:
-                    result, error, code = _attempt(plan, runner, run.get("endpoints") or {}, log, start)
+                    result, error, code = _attempt(
+                        plan, runner, run.get("endpoints") or {}, log, start
+                    )
                     # a run binds its endpoints once: a SERVICE node's new one takes a new run
-                    if not (isinstance(error, ServiceUnreachable) and error.name in announced):
+                    if not (
+                        isinstance(error, ServiceUnreachableError) and error.name in announced
+                    ):
                         break
                     print(f"rerun: {error}", file=log, flush=True)
                     plan = wrapped()

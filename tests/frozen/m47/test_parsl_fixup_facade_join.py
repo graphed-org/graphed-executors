@@ -1,8 +1,9 @@
-"""m47 FIXUP — the parsl facade's ``run_join`` dispatch body, arm by arm (plan §1.5; the
-adversarial-review dark-block ruling: the only pre-fixup frozen ``run_join`` facade call used an
-invalid ``shuffle_method``, so the entire valid-method join dispatch — engine selection, the
-many-positional-argument pass-through of ``on``/``how``/``broadcast``, and the per-arm result
-shapes — ran unwitnessed).
+"""m47 FIXUP — the parsl facade's ``run_join`` dispatch body, arm by arm.
+
+Plan §1.5; the adversarial-review dark-block ruling: the only pre-fixup frozen ``run_join`` facade
+call used an invalid ``shuffle_method``, so the entire valid-method join dispatch — engine
+selection, the many-positional-argument pass-through of ``on``/``how``/``broadcast``, and the
+per-arm result shapes — ran unwitnessed.
 
 Witnesses: explicit ``"transport"`` → exactly k ``_parsl_peer_main`` submits with ZERO relay/tasks
 names, ``.transport`` present with the peer rows and the block-plane counters live
@@ -22,7 +23,8 @@ appear where the relay Counter is pinned); a transport arm that routes join frag
 driver (peer ``bytes_served``/``pull_requests_served`` stay 0).
 
 pyarrow: the ``how="left"`` arms wire MASKED numpy blocks over Arrow (the m46 measured fact) —
-importorskip'd loudly so CI can never silently skip them."""
+importorskip'd loudly so CI can never silently skip them.
+"""
 
 from __future__ import annotations
 
@@ -74,9 +76,12 @@ def htex():  # type: ignore[no-untyped-def]
 
 
 def test_facade_transport_join_dispatches_the_p2p_engine_with_parity(htex) -> None:  # type: ignore[no-untyped-def]
-    """Kills: a facade transport-join branch that reruns the relay/local engine driver-side (spy
-    shape + missing ``.transport``); a driver-relayed 'peer' join (block-plane counters stay 0);
-    a dispatch that corrupts the argument hand-off (hash/oracle parity)."""
+    """A facade transport join runs the p2p engine, with parity against the local engine.
+
+    Kills: a facade transport-join branch that reruns the relay/local engine driver-side (spy shape
+    + missing ``.transport``); a driver-relayed 'peer' join (block-plane counters stay 0); a
+    dispatch that corrupts the argument hand-off (hash/oracle parity).
+    """
     adapter = numpy_p2p_adapter()
     left, right = join_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how="inner", broadcast=False)
@@ -113,11 +118,15 @@ def test_facade_transport_join_dispatches_the_p2p_engine_with_parity(htex) -> No
         "facade transport join rows diverged from the independent duplicating oracle (m40 §3.3)"
     )
 
-    assert hasattr(res, "transport"), "the transport-arm result must carry .transport (m45 observability)"
+    assert hasattr(res, "transport"), (
+        "the transport-arm result must carry .transport (m45 observability)"
+    )
     assert res.transport.epoch_restarts == 0
     assert len(list(res.transport.epoch_nonces)) == 1
     rows = peer_rows(res)
-    assert set(rows) == {W0, W1}, f"expected exactly the k={K} pinned peer rows, got {sorted(rows)}"
+    assert set(rows) == {W0, W1}, (
+        f"expected exactly the k={K} pinned peer rows, got {sorted(rows)}"
+    )
     assert sum(int(c.get("pull_requests_served", 0)) for c in rows.values()) >= 1, (
         "no /pull request served on any peer — join fragments did not move over the block plane "
         "under the facade arm (a driver-relayed join)"
@@ -132,9 +141,12 @@ def test_facade_transport_join_dispatches_the_p2p_engine_with_parity(htex) -> No
 
 
 def test_facade_transport_join_left_rows_are_exact(htex) -> None:  # type: ignore[no-untyped-def]
-    """Kills: a run_join dispatch that drops/transposes ``how`` (or ``broadcast``) on the
-    transport branch — the many-positional-argument hazard: left-join parity vs the local engine
-    diverges the null-aware multiset and the hashes; a sentinel-null carrier lands here too."""
+    """A transport-branch left join keeps ``how`` and matches the local engine's rows.
+
+    Kills: a run_join dispatch that drops/transposes ``how`` (or ``broadcast``) on the transport
+    branch — the many-positional-argument hazard: left-join parity vs the local engine diverges the
+    null-aware multiset and the hashes; a sentinel-null carrier lands here too.
+    """
     adapter = numpy_p2p_adapter()
     left, right = join_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how="left", broadcast=False)
@@ -167,10 +179,13 @@ def test_facade_transport_join_left_rows_are_exact(htex) -> None:  # type: ignor
 
 @pytest.mark.parametrize("method", ["tasks", "auto"])
 def test_facade_join_tasks_and_auto_resolve_to_the_relay_shape(htex, method: str) -> None:  # type: ignore[no-untyped-def]
-    """Kills: an ``auto`` that resolves join to the p2p engine on parsl (the m45 predicate:
-    auto→tasks on EVERY parsl instance — no vector has pin AND peer); a tasks-arm join that
-    hardcodes the m43 pick tier; a relay result missing the head-node witness or leaking
-    ``.transport``; a tasks dispatch that drops ``how`` (left-join parity vs local)."""
+    """On parsl, ``auto`` and ``tasks`` joins resolve to the relay engine's shape.
+
+    Kills: an ``auto`` that resolves join to the p2p engine on parsl (the m45 predicate: auto→tasks
+    on EVERY parsl instance — no vector has pin AND peer); a tasks-arm join that hardcodes the m43
+    pick tier; a relay result missing the head-node witness or leaking ``.transport``; a tasks
+    dispatch that drops ``how`` (left-join parity vs local).
+    """
     adapter = numpy_p2p_adapter()
     left, right = join_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how="left", broadcast=False)
@@ -195,10 +210,15 @@ def test_facade_join_tasks_and_auto_resolve_to_the_relay_shape(htex, method: str
         f"{method} on the all-False HTEX floor must run the RELAY join shape: {dict(names)}"
     )
     assert names["_parsl_peer_main"] == 0 and names["_dask_pick"] == 0, (
-        f"{method}: neither the p2p engine nor the m43 pick tier may engage on a join: {dict(names)}"
+        f"{method}: neither the p2p engine nor the m43 pick tier may engage on a join: "
+        f"{dict(names)}"
     )
-    assert res.witness.head_node_routed is True, "a tasks-resolution join must carry the head-node witness"
-    assert not hasattr(res, "transport"), "a tasks-resolution join result must not carry .transport"
+    assert res.witness.head_node_routed is True, (
+        "a tasks-resolution join must carry the head-node witness"
+    )
+    assert not hasattr(res, "transport"), (
+        "a tasks-resolution join result must not carry .transport"
+    )
     assert nullable_join_multiset(res.value) == nullable_join_multiset(local.value), (
         f"{method}: relay join rows diverged from the local engine at how='left'"
     )

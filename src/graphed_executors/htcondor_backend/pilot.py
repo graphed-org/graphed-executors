@@ -1,10 +1,10 @@
 """A pilot: ``python -m graphed_executors.htcondor_backend.pilot <url> <secret file>``.
 
-It registers with the driver's task server, beats from a daemon thread, and runs leased tasks one at a
-time until the server answers 410. It exits 0 when the driver is done with it and 2 when the driver
-refuses its signature. When the driver has been unreachable for a lease it sends itself SIGTERM, even in
-the middle of a task, so an orphan frees its batch slot; so does any beat answered 410 mid-task (a
-timed-out task, or the driver closing).
+It registers with the driver's task server, beats from a daemon thread, and runs leased tasks one
+at a time until the server answers 410. It exits 0 when the driver is done with it and 2 when the
+driver refuses its signature. When the driver has been unreachable for a lease it sends itself
+SIGTERM, even in the middle of a task, so an orphan frees its batch slot; so does any beat answered
+410 mid-task (a timed-out task, or the driver closing).
 """
 
 from __future__ import annotations
@@ -40,7 +40,9 @@ class _Driver:
         body = pickle.dumps(obj)
         headers = {server.SIG_HEADER: server.sign(self.key, body)}
         while True:
-            request = urllib.request.Request(self.url + route, data=body, method="POST", headers=headers)
+            request = urllib.request.Request(
+                self.url + route, data=body, method="POST", headers=headers
+            )
             try:
                 with urllib.request.urlopen(request, timeout=3 * server.POLL_S) as response:
                     status, data, tid = (
@@ -53,7 +55,8 @@ class _Driver:
             except OSError as exc:
                 if time.monotonic() - self.last_ok > self.lease_s:
                     print(f"driver {self.url} unreachable for {self.lease_s}s: {exc}", flush=True)
-                    # from either thread, mid-task too; a signal (not os._exit) lets coverage save its data
+                    # from either thread, mid-task too; a signal (not os._exit) lets coverage save
+                    # its data
                     os.kill(os.getpid(), signal.SIGTERM)
                 time.sleep(1.0)
                 continue
@@ -77,7 +80,9 @@ def _run(data: bytes) -> tuple[bool, bytes]:
         try:
             return False, pickle.dumps(exc)
         except Exception:
-            return False, pickle.dumps(RuntimeError(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"))
+            return False, pickle.dumps(
+                RuntimeError(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
+            )
 
 
 def _beat(driver: _Driver, me: str, beat_s: float) -> None:
@@ -90,6 +95,7 @@ def _beat(driver: _Driver, me: str, beat_s: float) -> None:
 
 
 def main(argv: list[str]) -> int:
+    """Serve tasks from the driver at ``argv[0]`` until it says stop; return the exit status."""
     url, secret_path = argv
     driver = _Driver(url, bytes.fromhex(Path(secret_path).read_text().strip()))
     # hostname:pid alone collides when containers number their own pids

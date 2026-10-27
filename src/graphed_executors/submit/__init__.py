@@ -1,8 +1,10 @@
-"""The common submit-backend seam (plan §1.1-§1.2): the :class:`SubmitBackend` protocol, the generic
-:class:`SubmitRunner` Plan engine, the worker seam (:class:`RunContext`/:class:`WorkerEnv`), and the
-stdlib :class:`ThreadBackend` conformance backend. Pure stdlib + ``graphed`` — imports no dask, so it
-installs and runs with the base package. The first real backend lives in
-``graphed_executors.dask_backend`` behind the ``[dask]`` extra.
+"""The common submit-backend seam (plan §1.1-§1.2).
+
+The :class:`SubmitBackend` protocol, the generic :class:`SubmitRunner` Plan engine, the worker seam
+(:class:`RunContext`/:class:`WorkerEnv`), and the stdlib :class:`ThreadBackend` conformance
+backend. Pure stdlib + ``graphed`` — imports no dask, so it installs and runs with the base
+package. The first real backend lives in ``graphed_executors.dask_backend`` behind the ``[dask]``
+extra.
 """
 
 from __future__ import annotations

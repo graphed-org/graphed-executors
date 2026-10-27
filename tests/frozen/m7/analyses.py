@@ -1,5 +1,8 @@
-"""Shared, PICKLABLE process functions for the M7 executor suite (module-level so a spawned process
-pool can import them). Non-HEP fns are light; HEP fns import awkward/corpus lazily."""
+"""Shared, PICKLABLE process functions for the M7 executor suite.
+
+Module-level so a spawned process pool can import them. Non-HEP fns are light; HEP fns import
+awkward/corpus lazily.
+"""
 
 from __future__ import annotations
 
@@ -116,12 +119,15 @@ def met_partitions(n_chunks: int) -> list:
 
 # ---- remote StageError (must round-trip from a worker PROCESS intact, plan A.3 #8) -------------
 def raise_stage_error(part: Partition, res: object) -> int:
-    """Build + run a deliberately-failing analysis IN THE WORKER; the StageError must reach the
-    driver picklable (never an opaque string)."""
+    """Build + run a deliberately-failing analysis IN THE WORKER.
+
+    The StageError must reach the driver picklable (never an opaque string).
+    """
     import graphed.debug as gd  # noqa: PLC0415
     import graphed.numpy as gn  # noqa: PLC0415
 
     s = Session(gn.NumpyBackend())
     events = gn.from_record(s, "events", pt=np.arange(1.0, 5.0))
-    bad = (events["pt"] * 2.0).map(lambda a: a[100], name="worker_oob")  # out-of-range in the worker
+    # out-of-range in the worker
+    bad = (events["pt"] * 2.0).map(lambda a: a[100], name="worker_oob")
     return gd.run(s, bad, opt_level=1)  # raises graphed.debug.StageError

@@ -17,7 +17,9 @@ ONES = (1,) * mp.N
 W0_REGISTRY_DELAY_S = 0.3
 
 
-def test_nodes_that_beat_a_workers_registry_still_form_the_root(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_nodes_that_beat_a_workers_registry_still_form_the_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # w1 gets its registry at once and settles its whole subtree (three ``node`` hand-offs to w0)
     # while w0 is still waiting for its own registry.
     w0_registry_sent_at: list[float] = []

@@ -1,6 +1,8 @@
-"""Shared harness for the m45 frozen suite: the unified shuffle facade
-``graphed_executors.dask_backend.api`` with ``shuffle_method="auto"|"transport"|"tasks"`` over the
-frozen m43 (as-tasks) and m44 (transport) engines (m45-facade-plan §1/§2, final r2).
+"""Shared harness for the m45 frozen suite.
+
+The unified shuffle facade ``graphed_executors.dask_backend.api`` with
+``shuffle_method="auto"|"transport"|"tasks"`` over the frozen m43 (as-tasks) and m44 (transport)
+engines (m45-facade-plan §1/§2, final r2).
 
 Pinned facade contract under test (plan §1, test-author restatement):
 
@@ -29,7 +31,8 @@ Repo convention (plan §2 r2): this harness REPLICATES its fixtures — zero cro
 harness is collection-order-fragile). The two engine modules ARE imported directly: they are the
 frozen-verified substrate the parity oracles call. All witnesses are counters/hashes/fn-name
 shapes, never clocks; every cluster call runs under a hard-timeout thread join. Pre-implementation
-every test fails in-body with ``ModuleNotFoundError: ...dask_backend.api`` via ``api()``."""
+every test fails in-body with ``ModuleNotFoundError: ...dask_backend.api`` via ``api()``.
+"""
 
 from __future__ import annotations
 
@@ -46,13 +49,16 @@ from graphed.numpy import NumpyBackend
 from graphed_executors.submit import SubmitRunner
 from graphed_executors.submit.protocol import SubmitCapabilities
 
-# ---- deferred accessor: the module under test ----------------------------------------------------
+# ---- deferred accessor: the module under test ---------------------------------------------------
 
 
 def api() -> Any:
-    """``graphed_executors.dask_backend.api`` — absent pre-implementation: every test's
-    right-reason ``ModuleNotFoundError`` lands here."""
-    import graphed_executors.dask_backend.api as mod  # noqa: PLC0415  (deferred: module under test)
+    """``graphed_executors.dask_backend.api`` — absent pre-implementation.
+
+    Every test's right-reason ``ModuleNotFoundError`` lands here.
+    """
+    # deferred: module under test
+    import graphed_executors.dask_backend.api as mod  # noqa: PLC0415
 
     return mod
 
@@ -65,7 +71,7 @@ def facade_join(*args: Any, **kwargs: Any) -> Any:
     return api().run_join(*args, **kwargs)
 
 
-# ---- capability sets (the frozen 7-flag SubmitCapabilities; no new fields) -----------------------
+# ---- capability sets (the frozen 7-flag SubmitCapabilities; no new fields) ----------------------
 
 
 def make_caps(*, peer: bool, pin: bool) -> SubmitCapabilities:
@@ -86,8 +92,11 @@ ALLFALSE_CAPS = make_caps(peer=False, pin=False)
 
 
 class RefusingBackend:
-    """Protocol-shaped stub with the given capabilities: any facade path that raises BEFORE work
-    must leave it untouched — ``submit``/``broadcast`` count and refuse (the m43/m44 gate idiom)."""
+    """Protocol-shaped stub with the given capabilities.
+
+    Any facade path that raises BEFORE work must leave it untouched — ``submit``/``broadcast``
+    count and refuse (the m43/m44 gate idiom).
+    """
 
     def __init__(self, capabilities: SubmitCapabilities) -> None:
         self.capabilities = capabilities
@@ -119,8 +128,11 @@ class RefusingBackend:
 
 
 class PinlessView:
-    """A REAL backend seen through pin_to_worker=False capabilities: ``auto`` must degrade to the
-    tasks engine and the run must genuinely execute (blueprint test 3 — degrade, not refuse)."""
+    """A REAL backend seen through pin_to_worker=False capabilities.
+
+    ``auto`` must degrade to the tasks engine and the run must genuinely execute (blueprint
+    test 3 — degrade, not refuse).
+    """
 
     def __init__(self, inner: Any) -> None:
         self.inner = inner
@@ -143,11 +155,13 @@ def _fn_name(fn: Any) -> str:
 
 
 class SpyDaskBackend:
-    """Delegating wrapper recording every submit's fn name (and forwarding ``workers=`` pins);
-    everything else delegates via ``__getattr__`` so both engines run unchanged. The m43 shape is
-    ``_dask_map_write``/``_dask_pick``/``_dask_gather``; the m44 shape is
+    """Delegating wrapper recording every submit's fn name (and forwarding ``workers=`` pins).
+
+    Everything else delegates via ``__getattr__`` so both engines run unchanged. The m43 shape
+    is ``_dask_map_write``/``_dask_pick``/``_dask_gather``; the m44 shape is
     ``_transport_map_task``/``_transport_gather_task`` — the engines stay structurally
-    distinguishable at this seam."""
+    distinguishable at this seam.
+    """
 
     def __init__(self, inner: Any) -> None:
         self.inner = inner
@@ -157,7 +171,9 @@ class SpyDaskBackend:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
 
-    def submit(self, fn: Any, /, *args: Any, key: str, workers: Sequence[str] | None = None, **kwargs: Any) -> Any:
+    def submit(
+        self, fn: Any, /, *args: Any, key: str, workers: Sequence[str] | None = None, **kwargs: Any
+    ) -> Any:
         self.submitted.append(_fn_name(fn))
         extra: dict[str, Any] = {} if workers is None else {"workers": workers}
         return self.inner.submit(fn, *args, key=key, **extra, **kwargs)
@@ -170,7 +186,7 @@ class SpyDaskBackend:
         return Counter(self.submitted)
 
 
-# ---- numpy scenario builders (adapter economy: numpy suffices for every m45 theme) ---------------
+# ---- numpy scenario builders (adapter economy: numpy suffices for every m45 theme) --------------
 
 BACKEND = NumpyBackend()
 _BLOCK_DT = np.dtype([("__joinkey__", np.uint64), ("v", np.int64)])
@@ -192,8 +208,10 @@ def make_side(keys: Sequence[int], field: str, values: Sequence[int]) -> Any:
 
 
 def repartition_blocks() -> list[Any]:
-    """The m39-lineage multi-src overlapping-key scenario (several dests per task, several tasks
-    per dest)."""
+    """Return the m39-lineage multi-src overlapping-key scenario.
+
+    Several dests per task, several tasks per dest.
+    """
     key_lists = [
         [0, 1, 2, 3, 4, 5, 6, 7],
         [7, 6, 5, 4, 3, 2, 1, 0],
@@ -206,8 +224,10 @@ def repartition_blocks() -> list[Any]:
 
 
 def join_sides() -> tuple[list[Any], list[Any]]:
-    """Overlapping keys plus a left-only (13) and right-only (17) key: the outer arm has real
-    null-filled rows on both sides."""
+    """Overlapping keys plus a left-only (13) and right-only (17) key.
+
+    The outer arm has real null-filled rows on both sides.
+    """
     left = [
         make_side([0, 1, 2, 3, 4, 5], "lval", [10, 11, 12, 13, 14, 15]),
         make_side([1, 1, 2, 2, 13, 13], "lval", [22, 23, 24, 25, 32, 33]),
@@ -230,7 +250,7 @@ def total_result_rows(value: Mapping[int, Any]) -> int:
     return sum(len(block) for block in value.values())
 
 
-# ---- cluster + hang guards (replicated m44 discipline) -------------------------------------------
+# ---- cluster + hang guards (replicated m44 discipline) ------------------------------------------
 
 
 @contextmanager
@@ -253,7 +273,7 @@ def build_dask_backend(client: Any) -> Any:
 
 
 def install_transport_plugin(client: Any) -> None:
-    """The m44 engine's established precondition (idempotent), replicated verbatim."""
+    """Install the m44 engine's established precondition (idempotent), replicated verbatim."""
     from graphed_executors.dask_backend.transport import GraphedTransportPlugin  # noqa: PLC0415
 
     client.register_plugin(GraphedTransportPlugin())

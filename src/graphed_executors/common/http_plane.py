@@ -1,22 +1,23 @@
 """The parsl worker-transport HTTP plane (plan §1.4; stdlib-only, importable with no parsl/dask).
 
-``EscalatingHttpTransport`` is a :class:`graphed.core.execution.WorkerTransport` built ON the frozen
-``local/_transport.py`` substrate (``local/*`` is NEVER edited — this subclasses it) with the two
-behaviors the m47 contract needs that the local sender cannot provide:
+``EscalatingHttpTransport`` is a :class:`graphed.core.execution.WorkerTransport` built ON the
+frozen ``local/_transport.py`` substrate (``local/*`` is NEVER edited — this subclasses it) with
+the two behaviors the m47 contract needs that the local sender cannot provide:
 
-- **Send-exhaustion escalation (the drop->raise bridge).** The base ``HttpTransport`` counts ``drops``
-  from a background sender thread and never raises — a silently dropped reduction/shuffle node is a
-  lost partial. This subclass sends **inline in the caller's thread** with the frozen 5-attempt
-  policy: 200->True; unknown/self dest->False; a destination **503** (full-inbox reject) ->
-  ``False`` + ``sends_rejected`` with **NO retry** (special-cased BEFORE the generic retry — review
-  N2; retrying into a full inbox only defers the verdict); a comm-class failure exhausting the
-  retries -> **raise** ``TransportDeliveryError`` + ``send_failures`` (never a silent ``drops += 1``).
+- **Send-exhaustion escalation (the drop->raise bridge).** The base ``HttpTransport`` counts
+  ``drops`` from a background sender thread and never raises — a silently dropped reduction/shuffle
+  node is a lost partial. This subclass sends **inline in the caller's thread** with the frozen
+  5-attempt policy: 200->True; unknown/self dest->False; a destination **503** (full-inbox reject)
+  -> ``False`` + ``sends_rejected`` with **NO retry** (special-cased BEFORE the generic retry —
+  review N2; retrying into a full inbox only defers the verdict); a comm-class failure exhausting
+  the retries -> **raise** ``TransportDeliveryError`` + ``send_failures`` (never a silent ``drops
+  += 1``).
 - **A dual-route server.** The local ``_InboxServer``/``_Handler`` is path-blind. This plane serves
   ``POST /msg`` (inbox delivery, epoch-guarded, optional bounded ``inbox_maxsize`` -> 503) and
   ``POST /pull`` (block-store reads, coalesced, evict-after-serve) on one bound port.
 
-``recv`` also honors an optional ``idle_deadline_s`` (design-A backstop): once that long passes with
-no delivered traffic it RAISES ``TransportDeliveryError`` so a reduce peer's drain loop always
+``recv`` also honors an optional ``idle_deadline_s`` (design-A backstop): once that long passes
+with no delivered traffic it RAISES ``TransportDeliveryError`` so a reduce peer's drain loop always
 terminates even if the driver's ``("done",)`` release is lost. ``broadcast`` attempts EVERY peer
 then raises the aggregate (never the base stop-at-first loop), so one dead peer cannot strand the
 live ones.
@@ -39,27 +40,37 @@ from typing import Any
 
 from graphed_executors.local._transport import HttpTransport, LookupFreeHTTPServer
 
-#: the frozen local sender policy (``local/_transport.py:293``), restated so the retry arms budget it.
+#: the frozen local sender policy (``local/_transport.py:293``), restated so the retry arms budget
+#: it.
 SEND_RETRIES = 5
 
 
 class TransportDeliveryError(Exception):
-    """A send exhausted its retries, or a peer drain deadline passed — a run-fatal, restart-worthy
-    loss. Same NAME as the dask-side class so the reused classifier (``is_restart_worthy``) matches."""
+    """A send exhausted its retries, or a peer drain deadline passed.
+
+    A run-fatal, restart-worthy loss. Same NAME as the dask-side class so the reused classifier
+    (``is_restart_worthy``) matches.
+    """
 
 
 class PullTimeoutError(Exception):
-    """A block ``/pull`` from a dead/slow holder timed out — restart-worthy (never a partial result)."""
+    """A block ``/pull`` from a dead/slow holder timed out.
+
+    Restart-worthy (never a partial result).
+    """
 
 
-# ---- test/inject seam: a file-backed per-(dest,src) failure budget, PERSISTED across epochs -------
+# ---- test/inject seam: a file-backed per-(dest,src) failure budget, PERSISTED across epochs -----
 _BUDGET_LOCK = threading.Lock()
 
 
 def _consume_budget(path: str) -> bool:
-    """Atomically decrement the countdown file at ``path``; return True iff it was > 0 (a failure is
-    injected). Persisted on disk so an epoch restart resumes the LEFTOVER budget (retry+restart
-    compose — the m44 F10 seam analog; production callers never wire it)."""
+    """Atomically decrement the countdown file at ``path``.
+
+    Return True iff it was > 0 (a failure is injected). Persisted on disk so an epoch restart
+    resumes the LEFTOVER budget (retry+restart compose — the m44 F10 seam analog; production
+    callers never wire it).
+    """
     with _BUDGET_LOCK:
         try:
             n = int(Path(path).read_text())
@@ -71,7 +82,7 @@ def _consume_budget(path: str) -> bool:
         return True
 
 
-# ---- the dual-route server (subclass of the frozen inbox server; no edit to local/*) --------------
+# ---- the dual-route server (subclass of the frozen inbox server; no edit to local/*) ------------
 class _DualRouteHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # stdlib handler name
         length = int(self.headers.get("Content-Length", 0))
@@ -110,7 +121,8 @@ class _DualRouteServer(LookupFreeHTTPServer):
         self._recv_failures = recv_failures or {}
         self._inbox: deque[tuple[str, object]] = deque()
         self._lock = threading.Lock()
-        self._seen_digests: set[str] = set()  # per-epoch content digests (at-least-once dedup witness)
+        # per-epoch content digests (at-least-once dedup witness)
+        self._seen_digests: set[str] = set()
         # block store (the /pull plane)
         self._blocks: dict[str, bytes] = {}
         self._store_lock = threading.Lock()
@@ -124,8 +136,11 @@ class _DualRouteServer(LookupFreeHTTPServer):
         self.last_delivery = time.monotonic()
 
     def deliver_msg(self, body: bytes) -> int:
-        """Handle ``POST /msg``. Returns the HTTP status: 200 delivered/rejected-stale, 503 full inbox,
-        500 to inject a comm-class failure (the deliver-then-fail seam — delivered THEN failed)."""
+        """Handle ``POST /msg``.
+
+        Returns the HTTP status: 200 delivered/rejected-stale, 503 full inbox, 500 to
+        inject a comm-class failure (the deliver-then-fail seam — delivered THEN failed).
+        """
         try:
             sender, epoch, message = pickle.loads(body)
         except Exception:
@@ -137,31 +152,38 @@ class _DualRouteServer(LookupFreeHTTPServer):
         with self._lock:
             if self._inbox_maxsize is not None and len(self._inbox) >= self._inbox_maxsize:
                 self.recv_rejects += 1
-                return 503  # the destination's VERDICT — the sender maps it to False + sends_rejected
+                # the destination's VERDICT — the sender maps it to False + sends_rejected
+                return 503
             digest = hashlib.sha256(body).hexdigest()
             if digest in self._seen_digests:
-                self.recv_duplicate_deliveries += 1  # at-least-once: a retried identical send re-landed
+                # at-least-once: a retried identical send re-landed
+                self.recv_duplicate_deliveries += 1
             else:
                 self._seen_digests.add(digest)
             self._inbox.append((sender, message))
             self.last_delivery = time.monotonic()
         # deliver-then-fail injection (armed only in tests): the message IS in the inbox; fail the
-        # HTTP response so the sender's REAL inline retry re-sends a genuine at-least-once duplicate.
+        # HTTP response so the sender's REAL inline retry re-sends a genuine at-least-once
+        # duplicate.
         fail_path = self._recv_failures.get(sender)
         if fail_path is not None and _consume_budget(fail_path):
             return 500
         return 200
 
     def serve_pull(self, body: bytes) -> bytes:
-        """Handle ``POST /pull`` (``pickle((epoch, [digest, ...]))``): return ``pickle({digest: wire})``
-        for the present digests, counting served bytes/requests and EVICTING each after serve (F5)."""
+        """Handle ``POST /pull`` (``pickle((epoch, [digest, ...]))``).
+
+        Return ``pickle({digest: wire})`` for the present digests, counting served
+        bytes/requests and EVICTING each after serve (F5).
+        """
         try:
             _epoch, digests = pickle.loads(body)
         except Exception:
             return pickle.dumps({})
         out: dict[str, bytes] = {}
         with self._store_lock:
-            self.pull_requests_served += 1  # one request per (puller, holder) batch — the <= k*k bound
+            # one request per (puller, holder) batch — the <= k*k bound
+            self.pull_requests_served += 1
             self.serve_pid = os.getpid()
             for digest in digests:
                 wire = self._blocks.pop(digest, None)  # evict-after-serve
@@ -187,8 +209,11 @@ class _DualRouteServer(LookupFreeHTTPServer):
             self._blocks[digest] = wire
 
     def take_local(self, digest: str) -> bytes | None:
-        """Read + evict a SELF-owned fragment locally (never over HTTP, so it is not billed to
-        ``bytes_served`` — the block-plane oracle counts only cross-peer pulls)."""
+        """Read + evict a SELF-owned fragment locally.
+
+        Never over HTTP, so it is not billed to ``bytes_served`` — the block-plane oracle
+        counts only cross-peer pulls.
+        """
         with self._store_lock:
             return self._blocks.pop(digest, None)
 
@@ -198,10 +223,13 @@ class _DualRouteServer(LookupFreeHTTPServer):
 
 
 class EscalatingHttpTransport(HttpTransport):
-    """A :class:`graphed.core.execution.WorkerTransport` on the dual-route plane (plan §1.4). Reuses
-    the base ``set_registry``/``peers`` (registry-only); overrides ``__init__``/``send``/``recv``/
-    ``poll``/``broadcast``/``close`` for the inline raising send, the ``/msg``+``/pull`` server, and
-    the idle-deadline backstop. The base's background sender thread is NOT started."""
+    """A :class:`graphed.core.execution.WorkerTransport` on the dual-route plane (plan §1.4).
+
+    Reuses the base ``set_registry``/``peers`` (registry-only); overrides
+    ``__init__``/``send``/``recv``/``poll``/``broadcast``/``close`` for the inline raising
+    send, the ``/msg``+``/pull`` server, and the idle-deadline backstop. The base's background
+    sender thread is NOT started.
+    """
 
     def __init__(
         self,
@@ -213,10 +241,12 @@ class EscalatingHttpTransport(HttpTransport):
         idle_deadline_s: float | None = None,
         recv_failures: dict[str, str] | None = None,
     ) -> None:
+        """Bind the dual-route server on ``host`` and serve it for run epoch ``epoch``."""
         self.address = address
         self._epoch = epoch
-        # a distinct attribute (not the base's ``_server: _InboxServer``): the dual-route server is a
-        # different type, and the inherited set_registry/peers use only ``_registry`` (set below).
+        # a distinct attribute (not the base's ``_server: _InboxServer``): the dual-route server is
+        # a different type, and the inherited set_registry/peers use only ``_registry`` (set
+        # below).
         self._dual: _DualRouteServer = _DualRouteServer(
             (host, 0), epoch=epoch, inbox_maxsize=inbox_maxsize, recv_failures=recv_failures
         )
@@ -237,29 +267,40 @@ class EscalatingHttpTransport(HttpTransport):
     # receiver + block counters live on the server; surface them on the transport for the witnesses
     @property
     def recv_rejects(self) -> int:
+        """The number of messages the inbox refused because it was full."""
         return self._dual.recv_rejects
 
     @property
     def stale_epoch_rejects(self) -> int:
+        """The number of messages refused for carrying a stale epoch."""
         return self._dual.stale_epoch_rejects
 
     @property
     def recv_duplicate_deliveries(self) -> int:
+        """The number of messages delivered more than once."""
         return self._dual.recv_duplicate_deliveries
 
     @property
     def bytes_served(self) -> int:
+        """The block bytes this endpoint served over ``/pull``."""
         return self._dual.bytes_served
 
     @property
     def pull_requests_served(self) -> int:
+        """The number of ``/pull`` requests this endpoint served."""
         return self._dual.pull_requests_served
 
     @property
     def serve_pid(self) -> int:
+        """The pid of the process serving this endpoint."""
         return self._dual.serve_pid
 
     def send(self, dest: str, message: object) -> bool:
+        """Send ``message`` to ``dest``, retrying; raise once the retries are spent.
+
+        Return ``False`` without sending when ``dest`` is unknown or is this endpoint, and without
+        retrying when ``dest`` answers 503 (its inbox is full).
+        """
         if dest not in self._registry or dest == self.address:
             return False
         host, port = self._registry[dest]
@@ -284,11 +325,16 @@ class EscalatingHttpTransport(HttpTransport):
                 break
             time.sleep(0.01 * (attempt + 1))
         self.send_failures += 1
-        raise TransportDeliveryError(f"send to {dest!r} exhausted {SEND_RETRIES} attempts: {last_exc}")
+        raise TransportDeliveryError(
+            f"send to {dest!r} exhausted {SEND_RETRIES} attempts: {last_exc}"
+        )
 
     def broadcast(self, message: object) -> None:
-        """Attempt EVERY registered peer, THEN raise the aggregated failure — one dead peer cannot
-        strand the live ones (design-A release netting; never the base stop-at-first loop)."""
+        """Attempt EVERY registered peer, THEN raise the aggregated failure.
+
+        One dead peer cannot strand the live ones (design-A release netting; never the base
+        stop-at-first loop).
+        """
         failed: list[tuple[str, BaseException]] = []
         for dest in self.peers():
             try:
@@ -300,11 +346,14 @@ class EscalatingHttpTransport(HttpTransport):
             raise TransportDeliveryError(f"broadcast exhausted for {names}")
 
     def poll(self) -> list[tuple[str, object]]:
+        """Return every message waiting in the inbox, without blocking."""
         return self._dual.drain()
 
     def recv(self, timeout: float | None = None) -> tuple[str, Any] | None:
-        # ``Any`` message (not ``object``): callers immediately destructure the pinned message tuples
-        # (("hello", …)/("node", …)/…); ``Any`` is LSP-compatible with the base's ``object`` return.
+        # ``Any`` message (not ``object``): callers immediately destructure the pinned message
+        # tuples (("hello", …)/("node", …)/…); ``Any`` is LSP-compatible with the base's ``object``
+        # return.
+        """Return the next message, waiting at most ``timeout``; raise past the idle deadline."""
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             item = self._dual.pop_one()
@@ -325,17 +374,22 @@ class EscalatingHttpTransport(HttpTransport):
 
     # ---- block plane (holder + puller) ----
     def put_block(self, digest: str, wire: bytes) -> None:
+        """Hold ``wire`` under ``digest`` for peers to pull."""
         self._dual.put_block(digest, wire)
 
     def take_local(self, digest: str) -> bytes | None:
+        """Remove and return the block held under ``digest``, or ``None``."""
         return self._dual.take_local(digest)
 
     def store_blocks_count(self) -> int:
+        """Return the number of blocks this endpoint holds."""
         return self._dual.store_blocks_count()
 
     def pull(self, holder_addr: str, digests: list[str], *, timeout_s: float) -> dict[str, bytes]:
-        """Pull ``digests`` from ``holder_addr`` over ``/pull`` — ONE coalesced request. Raises
-        ``PullTimeoutError`` on a dead/slow holder (never a partial/empty result)."""
+        """Pull ``digests`` from ``holder_addr`` over ``/pull`` — ONE coalesced request.
+
+        Raises ``PullTimeoutError`` on a dead/slow holder (never a partial/empty result).
+        """
         target = self._registry.get(holder_addr)
         if target is None:
             raise PullTimeoutError(f"pull holder {holder_addr!r} not in the registry")
@@ -349,10 +403,13 @@ class EscalatingHttpTransport(HttpTransport):
             raise PullTimeoutError(f"pull from {holder_addr!r} failed/timed out: {exc}") from exc
         missing = [d for d in digests if d not in got]
         if missing:
-            raise PullTimeoutError(f"holder {holder_addr!r} served no bytes for {len(missing)} digest(s)")
+            raise PullTimeoutError(
+                f"holder {holder_addr!r} served no bytes for {len(missing)} digest(s)"
+            )
         return got
 
     def close(self) -> None:
+        """Stop serving and close the server."""
         self._stop.set()
         with contextlib.suppress(Exception):
             self._dual.shutdown()

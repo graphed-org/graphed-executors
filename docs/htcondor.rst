@@ -406,12 +406,12 @@ nodes, so before the plan's first task the runner submits a small probe task tha
 checks from a pilot: one task checks every service the run needs, and the runner waits for its
 answer up to the largest ``timeout_s`` among those services. A service the runner started must also
 answer a pilot on another host than its own, unless that host is the driver's (a run on one
-machine). A service no pilot can reach fails the run with ``ServiceUnreachable`` naming the endpoint, the worker and the reason; ``"no worker
+machine). A service no pilot can reach fails the run with ``ServiceUnreachableError`` naming the endpoint, the worker and the reason; ``"no worker
 answered"`` means no pilot ran the probe within that wait, and ``"only same-host
 workers answered"`` that none on another host did.
 
 **Checked again when a task fails.** A task that raises runs the same checks on its pilot. A service
-that no longer answers turns the failure into ``ServiceUnreachable``, whose reason ends with the task's
+that no longer answers turns the failure into ``ServiceUnreachableError``, whose reason ends with the task's
 own exception; with every service answering, the task's exception is raised as it was. Either way
 the run ends at its first failed task and cancels the tasks still queued.
 
@@ -486,7 +486,7 @@ try's exit; a DAG whose driver never returned a result raises ``RuntimeError`` n
 
 A service node restarts a command that dies, up to three times, each on a port none of its
 earlier ones served, and announces the new endpoint. A task that then finds the service gone ends the
-run with ``ServiceUnreachable``, and the driver runs the plan again in the same job, against the new
+run with ``ServiceUnreachableError``, and the driver runs the plan again in the same job, against the new
 announce and on the same pilots (``driver.log`` says ``rerun:``); the tasks that had finished run
 again, unless the run has a ``store``, which serves them back.
 
@@ -574,15 +574,15 @@ and state every 30 seconds. The runner's queued pilots never take that room:
   backend sets it, else the driver host's physical memory. Inside a driver job,
   ``HTCondorBackend.driver_memory_mb`` is the slot's ``Memory``, since the services share the job's
   slot. A service that does not fit goes to the cluster, its status ``detail`` naming the sizes; a
-  backend with no cluster host refuses it with ``ServiceUnavailable``, whose ``legs["managed"]`` names
+  backend with no cluster host refuses it with ``ServiceUnavailableError``, whose ``legs["managed"]`` names
   the sizes and the limit.
 * **On the cluster, a slot must match.** After the service job is submitted, its ad is matched against
   every slot of the pool, busy or not, with a partitionable slot counted whole (its total memory, CPUs,
   GPUs and disk) less what the runner's running pilots and the run's earlier servers hold there: the
   pilots keep their slots until the runner closes, the servers until the run ends. A server that would
-  fit only where they sit is removed before it runs, and the run raises ``ServiceUnavailable`` naming
+  fit only where they sit is removed before it runs, and the run raises ``ServiceUnavailableError`` naming
   their clusters. A job no slot matches (too much memory, a requirement no machine meets) is removed
-  before it ever runs, and the run raises ``ServiceUnavailable`` naming ``RequestMemory``,
+  before it ever runs, and the run raises ``ServiceUnavailableError`` naming ``RequestMemory``,
   ``RequestCpus``, ``RequestGPUs`` and the largest slot's memory. A job that matches a busy slot waits
   for it, as above. A collector that lists no slot at all is not asked: the job is submitted and waits.
 
@@ -696,7 +696,7 @@ The arguments you will change
      - Has no effect here. The only retry is the one re-run of a task whose pilot was lost.
    * - ``task_timeout_s``
      - How long one task may run on a pilot; ``None`` (the default) sets no limit. A task past it
-       fails with a ``StageError`` naming its partition, caused by ``TaskTimedOut``, and its pilot
+       fails with a ``StageError`` naming its partition, caused by ``TaskTimedOutError``, and its pilot
        stops and frees its slot. ``submit_driverless`` takes it too. Under ``resumable`` a rerun runs
        only that task.
    * - ``service_hosts``

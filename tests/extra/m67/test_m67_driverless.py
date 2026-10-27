@@ -1,5 +1,8 @@
-"""m67 ``RunHandle`` and ``submit_driverless`` paths the frozen suite does not reach: collector failover,
-a job the schedd has forgotten, other job states, an unbounded wait, the logs a run returns."""
+"""m67 ``RunHandle`` and ``submit_driverless`` paths the frozen suite does not reach.
+
+Collector failover, a job the schedd has forgotten, other job states, an unbounded wait, the logs a
+run returns.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +12,13 @@ from typing import Any, cast
 
 import pytest
 
-from graphed_executors.htcondor_backend import SITES, RunHandle, SiteProfile, launch, submit_driverless
+from graphed_executors.htcondor_backend import (
+    SITES,
+    RunHandle,
+    SiteProfile,
+    launch,
+    submit_driverless,
+)
 
 
 class Schedd:
@@ -81,12 +90,16 @@ def test_a_job_neither_queued_nor_in_history_is_an_error(
 ) -> None:
     fake = fake_htcondor("up", [], [])
     monkeypatch.setattr(launch, "_htcondor", lambda: fake)
-    with pytest.raises(RuntimeError, match="cluster 7 is neither in the queue of s1 nor its history"):
+    with pytest.raises(
+        RuntimeError, match="cluster 7 is neither in the queue of s1 nor its history"
+    ):
         handle(tmp_path).status()
     assert [call[2] for call in fake.schedds[-1].history_calls] == [1]
 
 
-@pytest.mark.parametrize(("ad", "status"), [({"JobStatus": 6}, "running"), ({"JobStatus": 4}, "failed")])
+@pytest.mark.parametrize(
+    ("ad", "status"), [({"JobStatus": 6}, "running"), ({"JobStatus": 4}, "failed")]
+)
 def test_other_job_states(
     ad: dict[str, int], status: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -120,7 +133,11 @@ def test_condor_pilots_are_refused_where_jobs_cannot_submit(
 ) -> None:
     monkeypatch.setattr(launch, "_htcondor", lambda: pytest.fail("a bindings call"))
     with pytest.raises(ValueError, match="site 'lpc' does not let a job submit jobs"):
-        submit_driverless(cast(Any, None), site="lpc", pilots="condor", request_memory_mb=1, log_dir=tmp_path)
+        submit_driverless(
+            cast(Any, None), site="lpc", pilots="condor", request_memory_mb=1, log_dir=tmp_path
+        )
     assert [name for name, row in SITES.items() if not row.jobs_can_submit] == ["lpc"]
-    six = SiteProfile(name="s", submit={}, spool=False, ship_env=False, sandbox_root=None, schedd_query=None)
+    six = SiteProfile(
+        name="s", submit={}, spool=False, ship_env=False, sandbox_root=None, schedd_query=None
+    )
     assert six.jobs_can_submit is True

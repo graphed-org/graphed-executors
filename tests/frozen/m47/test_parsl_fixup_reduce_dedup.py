@@ -1,7 +1,8 @@
-"""m47 FIXUP — the ``(level,pos)`` dedup MECHANISM witnessed, not just survived (plan §1.4
-at-least-once + dedup; the adversarial-review ruling on the pre-fixup dedup test: ONE duplicated
-hand-off can be absorbed by slot-keyed consumption without a value change, so value-parity alone
-cannot distinguish 'dedup works' from 'the topology absorbed it').
+"""m47 FIXUP — the ``(level,pos)`` dedup MECHANISM witnessed, not just survived.
+
+Plan §1.4 at-least-once + dedup; the adversarial-review ruling on the pre-fixup dedup test: ONE
+duplicated hand-off can be absorbed by slot-keyed consumption without a value change, so
+value-parity alone cannot distinguish 'dedup works' from 'the topology absorbed it'.
 
 Scenario: k=3 over 12 leaves. BOTH duplicates ride ONE edge — the deliver-then-fail seam is armed
 for the first TWO deliveries from w1 at w0 (``{w0: {w1: 2}}``, budget 2 < SEND_RETRIES=5), so w1's
@@ -32,7 +33,8 @@ double-combine variant inflates ``n_combines`` past the pinned clean-run counts 
 value (accumulate-style); a wire-level digest dedup that suppresses duplicates before delivery
 (breaks at-least-once): ``recv_duplicate_deliveries`` reads < 2; an unwired injection seam:
 ``sends_retried`` stays 0 on w1; a re-execution 'recovery' masquerading as dedup: Σ ``processed``
-inflates past N; an escalation instead of a retry: ``epoch_restarts`` reads > 0."""
+inflates past N; an escalation instead of a retry: ``epoch_restarts`` reads > 0.
+"""
 
 from __future__ import annotations
 
@@ -76,8 +78,11 @@ _SLOW_LEAF_S = 0.12
 
 
 def p2p_leaf_value_w2_slow(partition: Partition, resources: object) -> int:
-    """Same value as ``p2p_leaf_value`` (the oracle stays valid); w2-owned leaves sleep so the
-    root's LAST needed hand-off arrives long after the injected edge's retries settled."""
+    """Return the same value as ``p2p_leaf_value`` (the oracle stays valid).
+
+    w2-owned leaves sleep so the root's LAST needed hand-off arrives long after the injected
+    edge's retries settled.
+    """
     if int(partition.entry_start) >= _SLOW_LEAF_START:
         time.sleep(_SLOW_LEAF_S)
     return p2p_leaf_value(partition, resources)

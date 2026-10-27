@@ -19,7 +19,9 @@ from graphed_exec_local import ProcessExecutor, ThreadExecutor
 def _count_plan(n_tasks: int, payload_bytes: int = 0) -> Plan:
     proc = shipping_probe.CountingProcess(payload_bytes)
     tasks = tuple(Task(i, Partition("p", "", i, i + 1)) for i in range(n_tasks))
-    return Plan(process=proc, combine=shipping_probe.union, empty=shipping_probe.empty, tasks=tasks)
+    return Plan(
+        process=proc, combine=shipping_probe.union, empty=shipping_probe.empty, tasks=tasks
+    )
 
 
 def test_process_is_unpickled_once_per_worker_not_once_per_task() -> None:

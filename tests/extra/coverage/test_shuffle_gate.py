@@ -1,6 +1,9 @@
-"""Coverage-policy rollout (ci/per-file-coverage-policy): closes `local/shuffle.py` toward the
-per-file >=90% gate (the node-local block/object HTTP handlers + the routable store-child launcher).
-Not frozen; may be extended or replaced by later coverage work."""
+"""Coverage-policy rollout (ci/per-file-coverage-policy).
+
+Closes `local/shuffle.py` toward the per-file >=90% gate (the node-local block/object HTTP handlers
++ the routable store-child launcher). Not frozen; may be extended or replaced by later coverage
+work.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +20,11 @@ import pytest
 
 import graphed_executors.local.shuffle as shuffle_mod
 from graphed_executors.local._transport import LookupFreeHTTPServer
-from graphed_executors.local.shuffle import _make_block_handler, _make_cluster, _store_server_handler
+from graphed_executors.local.shuffle import (
+    _make_block_handler,
+    _make_cluster,
+    _store_server_handler,
+)
 
 
 def test_make_cluster_rejects_an_unknown_comms_kind() -> None:
@@ -101,7 +108,8 @@ def test_routable_store_child_serves_over_a_real_socket_and_announces_ready(
                 if errors:
                     raise errors[0] from None
                 pytest.fail(
-                    f"_routable_store_child never announced readiness (thread alive={thread.is_alive()})"
+                    "_routable_store_child never announced readiness (thread "
+                    f"alive={thread.is_alive()})"
                 )
             assert (node_id, pid) == (0, os.getpid())  # threaded (not spawned), same PID
             with pytest.raises(urllib.error.HTTPError) as exc_info:

@@ -1,19 +1,23 @@
-"""m67 D6: driverless runs on a real HTCondor pool (the personal pool of the ``test-htcondor`` CI job).
+"""m67 D6: driverless runs on a real HTCondor pool.
+
+The personal pool of the ``test-htcondor`` CI job.
 
 The module needs the ``htcondor2`` bindings and is skipped with that reason where they are not
 installed. Where they are installed, each test first requires a schedd in the collector within a
 bound and fails with the reason when there is none: a missing pool is reported, never passed over.
 
-(a) ``pilots="local"`` on the generic profile, two pilots: ``wait()`` then ``result()`` is bit-for-bit,
-the leaves ran on two pids inside the driver job, ``driver.log`` came back to ``log_dir``, the queue
-is empty and the history row has ``ExitCode 0``; (c) that row carries ``JobMaxRetries == 2`` and an
-``OnExitRemove`` that ends retries on exit code 3. (b) ``pilots="condor"``: the driver job submitted
-its own pilot cluster, the leaves ran in jobs of that cluster (not the driver's), and the history
-holds at least three rows. (d) a plan error: ``result()`` re-raises the ``StageError``, the status is
-failed, and the history row has ``ExitCode 3`` after exactly one start.
+(a) ``pilots="local"`` on the generic profile, two pilots: ``wait()`` then ``result()`` is
+bit-for-bit, the leaves ran on two pids inside the driver job, ``driver.log`` came back to
+``log_dir``, the queue is empty and the history row has ``ExitCode 0``; (c) that row carries
+``JobMaxRetries == 2`` and an ``OnExitRemove`` that ends retries on exit code 3. (b)
+``pilots="condor"``: the driver job submitted its own pilot cluster, the leaves ran in jobs of that
+cluster (not the driver's), and the history holds at least three rows. (d) a plan error:
+``result()`` re-raises the ``StageError``, the status is failed, and the history row has ``ExitCode
+3`` after exactly one start.
 
 Discriminates a driver that never runs pilots, a result that never comes back, a driver job that
-cannot self-submit, a retried plan error, and a lost exception."""
+cannot self-submit, a retried plan error, and a lost exception.
+"""
 
 from __future__ import annotations
 
@@ -34,21 +38,32 @@ from driverless_harness import (
 )
 
 htcondor2: Any = pytest.importorskip(
-    "htcondor2", reason="the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)"
+    "htcondor2",
+    reason="the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)",
 )
 
 POOL_PROBE_S = 30.0
 LIVE_WAIT_S = 300.0
 PILOTS_BATCH = 'regexp("^graphed-pilots-", JobBatchName)'
-HISTORY_ATTRS = ["ClusterId", "ProcId", "ExitCode", "JobMaxRetries", "OnExitRemove", "NumJobStarts"]
+HISTORY_ATTRS = [
+    "ClusterId",
+    "ProcId",
+    "ExitCode",
+    "JobMaxRetries",
+    "OnExitRemove",
+    "NumJobStarts",
+]
 
 
 def require_pool() -> Any:
-    """The schedd of a reachable pool, or a failure naming what is missing."""
+    """Return the schedd of a reachable pool, or a failure naming what is missing."""
     ads = run_bounded(
-        lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]), POOL_PROBE_S
+        lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]),
+        POOL_PROBE_S,
     )
-    assert ads, "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+    assert ads, (
+        "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+    )
     return htcondor2.Schedd()
 
 
@@ -72,7 +87,12 @@ def submit_and_wait(tmp_path: Path, plan: Any, **kwargs: Any) -> tuple[Any, Path
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
     handle = htcondor_api().submit_driverless(
-        plan, site="generic", request_memory_mb=1024, log_dir=log_dir, user_modules=[HARNESS_FILE], **kwargs
+        plan,
+        site="generic",
+        request_memory_mb=1024,
+        log_dir=log_dir,
+        user_modules=[HARNESS_FILE],
+        **kwargs,
     )
     run_bounded(lambda: handle.wait(timeout=LIVE_WAIT_S, poll_s=2), LIVE_WAIT_S + 60)
     return handle, log_dir
@@ -91,27 +111,35 @@ def test_fat_slot_run_and_its_retry_policy(tmp_path: Path) -> None:
     row = driver_row(schedd, handle.cluster)
     assert row["ExitCode"] == 0
     assert row["JobMaxRetries"] == 2
-    assert re.search(r"ExitCode\s*(==|=\?=|is)\s*3\b", str(row["OnExitRemove"])), row["OnExitRemove"]
+    assert re.search(r"ExitCode\s*(==|=\?=|is)\s*3\b", str(row["OnExitRemove"])), row[
+        "OnExitRemove"
+    ]
 
 
 def test_driver_job_submits_its_own_pilots(tmp_path: Path) -> None:
     schedd = require_pool()
-    handle, _ = submit_and_wait(tmp_path, job_plan(8, "m67liveb"), n_pilots=2, pilots="condor", min_pilots=2)
+    handle, _ = submit_and_wait(
+        tmp_path, job_plan(8, "m67liveb"), n_pilots=2, pilots="condor", min_pilots=2
+    )
     value = handle.result().value
     assert value.text == expected_concat(8, "m67liveb")
     assert len({pid for pid, _cluster, _url in value.sites}) >= 2, value.sites
     pilot_clusters = {cluster for _pid, cluster, _url in value.sites}
-    assert pilot_clusters and "" not in pilot_clusters and str(handle.cluster) not in pilot_clusters, (
-        value.sites
-    )
+    assert (
+        pilot_clusters and "" not in pilot_clusters and str(handle.cluster) not in pilot_clusters
+    ), value.sites
     assert driver_row(schedd, handle.cluster)["ExitCode"] == 0
-    rows = [row for row in history(schedd, PILOTS_BATCH) if str(row["ClusterId"]) in pilot_clusters]
+    rows = [
+        row for row in history(schedd, PILOTS_BATCH) if str(row["ClusterId"]) in pilot_clusters
+    ]
     assert len(rows) + 1 >= 3, rows
 
 
 def test_a_plan_error_is_not_retried(tmp_path: Path) -> None:
     schedd = require_pool()
-    handle, _ = submit_and_wait(tmp_path, stage_error_plan(4, "m67lived"), n_pilots=1, pilots="local")
+    handle, _ = submit_and_wait(
+        tmp_path, stage_error_plan(4, "m67lived"), n_pilots=1, pilots="local"
+    )
     assert handle.status() == "failed"
     with pytest.raises(BaseException) as excinfo:
         handle.result()

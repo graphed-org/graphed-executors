@@ -1,10 +1,11 @@
-"""m47 review remediation (findings 2/3/4, non-gating): the reduce-seam knobs that were accepted
-but never reached the peers.
+"""m47 review remediation (findings 2/3/4, non-gating).
 
-- **Finding 2** — ``parsl_run_plan(inbox_maxsize=…)`` was accepted but never forwarded into the peer
-  spec, so a caller got a silently unbounded inbox. Proven wired by spying the peer endpoint
-  constructor over an in-process TPE (peers run as driver threads, so the driver-side spy sees their
-  construction). The endpoint-level 503/``sends_rejected`` MECHANISM is already frozen-tested
+The reduce-seam knobs that were accepted but never reached the peers.
+
+- **Finding 2** — ``parsl_run_plan(inbox_maxsize=…)`` was accepted but never forwarded into the
+  peer spec, so a caller got a silently unbounded inbox. Proven wired by spying the peer endpoint
+  constructor over an in-process TPE (peers run as driver threads, so the driver-side spy sees
+  their construction). The endpoint-level 503/``sends_rejected`` MECHANISM is already frozen-tested
   (test_parsl_transport_conformance); this pins the run_plan-level WIRING that was the gap.
 - **Finding 4** — the reduce-seam bounds were hard-coded (``root_timeout_s`` had no knob; the peer
   ``idle_deadline_s`` was a bare 90.0). Now ``root_timeout_s`` is a parameter and the idle deadline
@@ -39,9 +40,11 @@ from graphed_executors.parsl_backend.transport_peer import _resolve_k
 
 
 def _spy_endpoint_ctor(monkeypatch: Any) -> dict[str, dict[str, Any]]:
-    """Record ``(inbox_maxsize, idle_deadline_s)`` per address the peer/driver endpoints are built
-    with — patching the method on the class so the ``from … import EscalatingHttpTransport`` name in
-    transport_peer (the SAME class object) is covered too."""
+    """Record ``(inbox_maxsize, idle_deadline_s)`` per address.
+
+    The peer/driver endpoints are built with — patching the method on the class so the ``from …
+    import EscalatingHttpTransport`` name in transport_peer (the SAME class object) is covered too.
+    """
     import graphed_executors.common.http_plane as hp  # noqa: PLC0415
 
     recorded: dict[str, dict[str, Any]] = {}
@@ -98,11 +101,14 @@ def test_inbox_maxsize_and_root_timeout_reach_the_peers(monkeypatch: Any) -> Non
     assert peers, "no peer endpoints were constructed"
     for addr, seen in peers.items():
         # finding 2: the inbox bound must reach every peer (pre-fix it stayed None — unbounded)
-        assert seen["inbox_maxsize"] == 7, f"{addr}: inbox_maxsize not forwarded ({seen['inbox_maxsize']})"
-        # finding 4: the peer idle deadline is derived from root_timeout_s (pre-fix it was a bare 90.0
-        # regardless of root_timeout_s, which did not even exist as a parameter)
+        assert seen["inbox_maxsize"] == 7, (
+            f"{addr}: inbox_maxsize not forwarded ({seen['inbox_maxsize']})"
+        )
+        # finding 4: the peer idle deadline is derived from root_timeout_s (pre-fix it was a bare
+        # 90.0 regardless of root_timeout_s, which did not even exist as a parameter)
         assert seen["idle_deadline_s"] == expected_idle, (
-            f"{addr}: idle_deadline_s={seen['idle_deadline_s']} not derived as root_timeout_s+slack="
+            f"{addr}: idle_deadline_s={seen['idle_deadline_s']} not derived as "
+            "root_timeout_s+slack="
             f"{expected_idle}"
         )
 
@@ -121,8 +127,8 @@ def test_resolve_k_first_attempt_honors_the_explicit_ask() -> None:
 
 
 def test_resolve_k_restart_recomputes_over_a_shrunken_cluster() -> None:
-    # finding 3: a restart after a worker death must NOT re-ask for the original 5 (a doomed barrier);
-    # it degrades to min(5, fresh n_workers()=2) == 2. Pre-fix this returned 5.
+    # finding 3: a restart after a worker death must NOT re-ask for the original 5 (a doomed
+    # barrier); it degrades to min(5, fresh n_workers()=2) == 2. Pre-fix this returned 5.
     assert _resolve_k(_FakeBackend(2), 5, restart=True) == 2
 
 

@@ -1,7 +1,9 @@
-"""m47 block plane — shuffle bytes travel peer-to-peer over the REAL ``/pull`` route, never
-through the driver, coalesced within the ``<= k*k`` incast bound, and evicted after serve (plan
-§1.4 block plane, tests-M2/tests-M-c; blueprint §3 `test_parsl_block_plane` — this module carries
-the IN-TASK half of the reshaped anti-super-linear guard).
+"""m47 block plane.
+
+Shuffle bytes travel peer-to-peer over the REAL ``/pull`` route, never through the driver,
+coalesced within the ``<= k*k`` incast bound, and evicted after serve (plan §1.4 block plane,
+tests-M2/tests-M-c; blueprint §3 `test_parsl_block_plane` — this module carries the IN-TASK half of
+the reshaped anti-super-linear guard).
 
 Witnesses: Σ holder ``bytes_served`` == the INDEPENDENT cross-fragment byte oracle (the pinned
 ownership rules — producer t = contiguous ascending split, dest owner = d % k over sorted
@@ -17,7 +19,8 @@ with the task); result hashes byte-identical to the local engine.
 
 Discriminates: a driver-relay plane (bytes_served == 0 / oracle mismatch / driver-pid
 provenance); a per-fragment (uncoalesced) puller (7 requests > 4 at this scenario); a plane
-piggybacking blocks on /msg (the /pull-route counters stay 0); a store that never evicts."""
+piggybacking blocks on /msg (the /pull-route counters stay 0); a store that never evicts.
+"""
 
 from __future__ import annotations
 

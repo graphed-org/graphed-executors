@@ -1,17 +1,19 @@
-"""Thousands of tiny tasks complete with no deadlock, no stall (monotonic progress), no race —
-including under the free-threaded interpreter via the experimental CI job (plan M7)."""
+"""Thousands of tiny tasks complete with no deadlock, no stall (monotonic progress), no race.
+
+Including under the free-threaded interpreter via the experimental CI job (plan M7).
+"""
 
 from __future__ import annotations
 
-import analyses as A
+import analyses
 from graphed.core import Partition, Plan, Task
 
 from graphed_exec_local import ProcessExecutor, ThreadExecutor
 
 
-def _plan(n: int, process=A.sleep_then_one) -> Plan[int]:
+def _plan(n: int, process=analyses.sleep_then_one) -> Plan[int]:
     tasks = [Task(i, Partition("f", "E", i, i + 1)) for i in range(n)]
-    return Plan(process=process, combine=A.add_int, empty=A.zero_int, tasks=tasks)
+    return Plan(process=process, combine=analyses.add_int, empty=analyses.zero_int, tasks=tasks)
 
 
 def test_thousands_of_tiny_tasks_complete_without_deadlock_thread() -> None:
@@ -20,7 +22,8 @@ def test_thousands_of_tiny_tasks_complete_without_deadlock_thread() -> None:
     r = ex.run(_plan(2000))
     assert r.value == 2000  # nothing lost or double-counted
     assert r.n_combines == 1999
-    # monotonic progress: each on_combine sees a non-decreasing #leaves-delivered (no regression/stall)
+    # monotonic progress: each on_combine sees a non-decreasing #leaves-delivered (no
+    # regression/stall)
     assert combines == sorted(combines)
     assert len(combines) == 1999
 
@@ -32,5 +35,5 @@ def test_repeated_runs_are_race_free_thread() -> None:
 
 
 def test_many_tasks_process_pool() -> None:
-    r = ProcessExecutor(max_workers=4).run(_plan(200, A.one))
+    r = ProcessExecutor(max_workers=4).run(_plan(200, analyses.one))
     assert r.value == 200 and r.n_combines == 199

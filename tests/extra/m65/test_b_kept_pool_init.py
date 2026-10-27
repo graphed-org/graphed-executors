@@ -1,4 +1,4 @@
-"""m65 B: a kept hub pool built for an unmonitored run is respawned when a later run needs events."""
+"""m65 B: a kept hub pool built for an unmonitored run respawns when a later run needs events."""
 
 from __future__ import annotations
 

@@ -1,8 +1,9 @@
-"""m66 D1: the m42 ``SubmitBackend`` conformance bodies over ``HTCondorBackend`` with two local pilots.
+"""m66 D1: m42 ``SubmitBackend`` conformance over ``HTCondorBackend`` with two local pilots.
 
 Discriminates a driver-side compute stub (the pid witness), unresolved future args (the task fn
-crashes on a future), a non-bytes broadcast, a stringified ``StageError``, lost monitor events, and a
-capability vector that is not the all-False floor."""
+crashes on a future), a non-bytes broadcast, a stringified ``StageError``, lost monitor events, and
+a capability vector that is not the all-False floor.
+"""
 
 from __future__ import annotations
 
@@ -97,7 +98,12 @@ def test_direct_submit_seam_resolves_future_args_and_broadcast_bytes() -> None:
         assert f1.result(timeout=120) == 42
         assert f1.done() and f1.exception(timeout=120) is None
         f2 = backend.submit(
-            double, f1, key="graphed-m66conf-direct-2", retries=2, priority=5, resources={"GPU": 1.0}
+            double,
+            f1,
+            key="graphed-m66conf-direct-2",
+            retries=2,
+            priority=5,
+            resources={"GPU": 1.0},
         )
         assert f2.result(timeout=120) == 84  # the future arg was resolved before fn ran
         backend.cancel([])

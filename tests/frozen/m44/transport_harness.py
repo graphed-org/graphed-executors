@@ -1,6 +1,8 @@
-"""Shared harness for the m44 frozen suite: graphed's M38 ``WorkerTransport`` implemented ATOP
-dask's worker-to-worker comm layer (m44-transport-plan §1), hosting the M38 peer reduction and the
-M39-M41 shuffle/join engine on dask workers with an O(T+P) scheduler graph (no T*P pick tier).
+"""Shared harness for the m44 frozen suite.
+
+Graphed's M38 ``WorkerTransport`` implemented ATOP dask's worker-to-worker comm layer
+(m44-transport-plan §1), hosting the M38 peer reduction and the M39-M41 shuffle/join engine on dask
+workers with an O(T+P) scheduler graph (no T*P pick tier).
 
 Pinned execution contract (test-author decision — the implementer builds these surfaces; see the
 m44 README for the clause-by-clause traceability):
@@ -135,35 +137,46 @@ NJRow = tuple[int | None, int | None, int | None]
 
 
 def transport_api() -> Any:
-    """``graphed_executors.dask_backend.transport`` — absent pre-implementation: the right-reason
-    ``ModuleNotFoundError`` for every transport-level test lands here."""
-    import graphed_executors.dask_backend.transport as mod  # noqa: PLC0415  (deferred: module under test)
+    """``graphed_executors.dask_backend.transport`` — absent pre-implementation.
+
+    The right-reason ``ModuleNotFoundError`` for every transport-level test lands here.
+    """
+    # deferred: module under test
+    import graphed_executors.dask_backend.transport as mod  # noqa: PLC0415
 
     return mod
 
 
 def peer_api() -> Any:
     """``graphed_executors.dask_backend.transport_peer`` (Impl Target 2)."""
-    import graphed_executors.dask_backend.transport_peer as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.dask_backend.transport_peer as mod  # noqa: PLC0415
 
     return mod
 
 
 def shuffle44_api() -> Any:
     """``graphed_executors.dask_backend.transport_shuffle`` (Impl Target 5)."""
-    import graphed_executors.dask_backend.transport_shuffle as mod  # noqa: PLC0415  (deferred: module under test)
+    # deferred: module under test
+    import graphed_executors.dask_backend.transport_shuffle as mod  # noqa: PLC0415
 
     return mod
 
 
 def transport_plan_run(*args: Any, **kwargs: Any) -> Any:
-    """``transport_run_plan(plan, backend, *, monitor=None, inbox_maxsize=None,
-    epoch_restarts_allowed=1)`` (contract pin above)."""
+    """Call ``transport_run_plan`` with its pinned signature.
+
+    ``transport_run_plan(plan, backend, *, monitor=None, inbox_maxsize=None,
+    epoch_restarts_allowed=1)`` (contract pin above).
+    """
     return peer_api().transport_run_plan(*args, **kwargs)
 
 
 def transport_repartition(*args: Any, **kwargs: Any) -> Any:
-    """``transport_run_repartition(backend, src_blocks, parts, *, dbackend, ...)`` (contract pin)."""
+    """``transport_run_repartition(backend, src_blocks, parts, *, dbackend, ...)``.
+
+    Contract pin.
+    """
     return shuffle44_api().transport_run_repartition(*args, **kwargs)
 
 
@@ -181,20 +194,26 @@ def open_driver_endpoint(backend: Any, spec: Any) -> Any:
 
 
 def build_dask_backend(client: Any) -> Any:
-    """A plain ``DaskBackend`` over a ready client (constructor already frozen by the m42 suite)."""
+    """Return a plain ``DaskBackend`` over a ready client.
+
+    Constructor already frozen by the m42 suite.
+    """
     from graphed_executors.dask_backend import DaskBackend  # noqa: PLC0415  (deferred: dask extra)
 
     return DaskBackend(client)
 
 
 def install_transport_plugin(client: Any) -> None:
-    """Register ``GraphedTransportPlugin`` (name='graphed-transport', idempotent) BEFORE a run so
+    """Register ``GraphedTransportPlugin`` idempotently before a run.
+
+    Register ``GraphedTransportPlugin`` (name='graphed-transport', idempotent) BEFORE a run so
     pinned micro-tasks can reach the plugin seam; the engine's own registration must then be the
-    idempotent no-op that keeps this same instance alive (contract pin)."""
+    idempotent no-op that keeps this same instance alive (contract pin).
+    """
     client.register_plugin(transport_api().GraphedTransportPlugin())
 
 
-# ---- LocalCluster fixture discipline (plan §3: tier A processes=False, tier B processes=True) ----
+# ---- LocalCluster fixture discipline (plan §3: tier A processes=False, tier B processes=True)
 
 
 @contextmanager
@@ -202,9 +221,11 @@ def transport_cluster(
     n_workers: int = 2, *, processes: bool = True, allowed_failures: int | None = None
 ) -> Iterator[Any]:
     """Context-managed LocalCluster + Client, 1 thread per worker, random dashboard port.
-    ``allowed_failures`` is set BEFORE the scheduler is built; the worker-death module pins it to 0
-    (the F2-measured config under which a strict-pinned task on a dead worker errors PROMPTLY
-    instead of hanging forever in no-worker state)."""
+
+    ``allowed_failures`` is set BEFORE the scheduler is built; the worker-death module pins it
+    to 0 (the F2-measured config under which a strict-pinned task on a dead worker errors
+    PROMPTLY instead of hanging forever in no-worker state).
+    """
     import dask  # noqa: PLC0415  (dask-touching modules call this after their importorskip)
     import distributed  # noqa: PLC0415
 
@@ -225,12 +246,12 @@ def transport_cluster(
 
 
 def sorted_worker_addresses(client: Any) -> tuple[str, ...]:
-    """The F8 deterministic worker-address order every m44 ownership/pin decision is keyed on."""
+    """Return the deterministic F8 worker order that m44 ownership/pin decisions key on."""
     return tuple(sorted(client.scheduler_info()["workers"]))
 
 
 def live_worker_pids(client: Any) -> dict[str, int]:
-    """worker address -> pid for every live worker (the driver-vs-worker discrimination map)."""
+    """Worker address -> pid for every live worker (the driver-vs-worker discrimination map)."""
     return dict(client.run(os.getpid))
 
 
@@ -241,16 +262,21 @@ def kill_worker(client: Any, address: str) -> None:
 
 
 def poll_until(predicate: Callable[[], bool], timeout_s: float = 90.0) -> None:
-    """Bounded driver-side poll; assertions on the state happen AFTER (never an assertion —
-    R0.10a)."""
+    """Bounded driver-side poll.
+
+    Assertions on the state happen AFTER (never an assertion — R0.10a).
+    """
     deadline = time.monotonic() + timeout_s
     while not predicate() and time.monotonic() < deadline:
         time.sleep(0.05)
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = 240.0) -> dict[str, Any]:
-    """Run ``fn`` on a daemon thread with a HARD join timeout (F2): a hang surfaces as an
-    AssertionError here, never as a hung test. Returns ``{"result": ...}`` or ``{"error": exc}``."""
+    """Run ``fn`` on a daemon thread with a HARD join timeout (F2).
+
+    A hang surfaces as an AssertionError here, never as a hung test. Returns ``{"result":
+    ...}`` or ``{"error": exc}``.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -273,9 +299,13 @@ def run_bounded(fn: Callable[[], Any], timeout_s: float = 240.0) -> dict[str, An
 # ---- pinned micro-tasks + client.run probes (the plugin seam) -----------------------------------
 
 
-def pinned_call(client: Any, fn: Callable[..., Any], *args: Any, worker: str, timeout_s: float = 180.0) -> Any:
-    """Run a module-level fn as a strict-pinned one-off task on ``worker`` and return its result
-    (bounded — a hang surfaces as a TimeoutError, F2)."""
+def pinned_call(
+    client: Any, fn: Callable[..., Any], *args: Any, worker: str, timeout_s: float = 180.0
+) -> Any:
+    """Run a module-level fn as a strict-pinned one-off task on ``worker`` and return its result.
+
+    Bounded — a hang surfaces as a TimeoutError, F2.
+    """
     future = client.submit(
         fn,
         *args,
@@ -323,15 +353,21 @@ def probe_epoch_counters(epoch: str, dask_worker: Any = None) -> dict[str, int]:
 
 
 def freeze_worker_handlers(dask_worker: Any = None) -> bool:
-    """The §1.7 drift scenario: make ``worker.handlers`` reject writes so the plugin's setup canary
-    must fail LOUDLY at register time (scenario construction, run before registration)."""
+    """Return the §1.7 drift scenario.
+
+    Make ``worker.handlers`` reject writes so the plugin's setup canary must fail LOUDLY at
+    register time (scenario construction, run before registration).
+    """
     dask_worker.handlers = types.MappingProxyType(dict(dask_worker.handlers))
     return True
 
 
 def fire_raw_recv(dest: str, epoch: str, payload: bytes) -> dict[str, Any]:
-    """Worker-task-side: fire ONE raw ``graphed_transport_recv`` RPC at ``dest`` with an arbitrary
-    epoch (the stale-guard probe) and return the handler's reply dict."""
+    """Worker-task-side.
+
+    Fire ONE raw ``graphed_transport_recv`` RPC at ``dest`` with an arbitrary epoch (the
+    stale-guard probe) and return the handler's reply dict.
+    """
     from distributed import get_worker  # noqa: PLC0415  (worker-side only)
     from distributed.utils import sync  # noqa: PLC0415
 
@@ -349,7 +385,8 @@ def fire_raw_recv(dest: str, epoch: str, payload: bytes) -> dict[str, Any]:
 
 
 def _ep(spec: Any) -> Any:
-    from graphed_executors.dask_backend.transport import open_endpoint  # noqa: PLC0415  (worker-side)
+    # worker-side
+    from graphed_executors.dask_backend.transport import open_endpoint  # noqa: PLC0415
 
     return open_endpoint(spec)
 
@@ -405,7 +442,7 @@ def tw_total(res: Any, key: str) -> int:
     return sum(int(counters.get(key, 0)) for counters in tw_per_worker(res).values())
 
 
-# ---- real-backend adapters (the m39/m40 a2 discipline: BOTH backends, this suite's names) --------
+# ---- real-backend adapters (the m39/m40 a2 discipline: BOTH backends, this suite's names) -------
 
 
 @dataclass
@@ -481,7 +518,9 @@ def _numpy_transport_adapter() -> TransportAdapter:
 
     def side_rows(block: object, field: str) -> list[tuple[int, int]]:
         return list(
-            zip([int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True)  # type: ignore[index]
+            zip(
+                [int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True
+            )  # type: ignore[index]
         )
 
     def joined_rows(block: object) -> list[JRow]:
@@ -502,14 +541,18 @@ def _numpy_transport_adapter() -> TransportAdapter:
 def transport_adapters() -> list[TransportAdapter]:
     out: list[TransportAdapter] = []
     for factory in (_awkward_transport_adapter, _numpy_transport_adapter):
-        with contextlib.suppress(Exception):  # a backend not installed drops from the parametrization
+        # a backend not installed drops from the parametrization
+        with contextlib.suppress(Exception):
             out.append(factory())
     return out
 
 
 def numpy_adapter() -> TransportAdapter:
-    """The always-installed adapter, for transport-plane tests where the adapter is not the
-    variable under test (death/epoch/block-plane themes — engine-plane, adapter-agnostic)."""
+    """Return the always-installed adapter for transport-plane tests.
+
+    Return the always-installed adapter, for transport-plane tests where the adapter is not the
+    variable under test (death/epoch/block-plane themes — engine-plane, adapter-agnostic).
+    """
     return _numpy_transport_adapter()
 
 
@@ -517,8 +560,10 @@ def numpy_adapter() -> TransportAdapter:
 
 
 def repartition_blocks(adapter: TransportAdapter, copies: int = 1) -> list[object]:
-    """6 source blocks with overlapping key populations (multi-src multi-dest coalescing);
-    ``copies`` multiplies ROWS, never block count (the row-independence knob)."""
+    """6 source blocks with overlapping key populations (multi-src multi-dest coalescing).
+
+    ``copies`` multiplies ROWS, never block count (the row-independence knob).
+    """
     key_lists = [
         [0, 1, 2, 3, 4, 5, 6, 7],
         [7, 6, 5, 4, 3, 2, 1, 0],
@@ -531,8 +576,10 @@ def repartition_blocks(adapter: TransportAdapter, copies: int = 1) -> list[objec
 
 
 def hot_key_blocks(adapter: TransportAdapter, hot_rows: int) -> list[object]:
-    """A skewed scenario: nearly every row carries key 7 (one hot dest), plus a thin spread —
-    the T3 disk-budget arbitration trigger."""
+    """Return a skewed scenario: nearly every row carries key 7 (one hot dest), plus a thin spread.
+
+    The T3 disk-budget arbitration trigger.
+    """
     return [
         adapter.make_block([7] * hot_rows),
         adapter.make_block([7] * hot_rows),
@@ -541,8 +588,11 @@ def hot_key_blocks(adapter: TransportAdapter, hot_rows: int) -> list[object]:
 
 
 def join_general_sides(adapter: TransportAdapter) -> tuple[list[object], list[object]]:
-    """Multi-block both-large sides with overlapping keys PLUS a left-only key (13) and a
-    right-only key (17) — real unmatched rows on BOTH sides for the non-inner arms."""
+    """Return multi-block, both-large sides with overlapping and one-sided keys.
+
+    Multi-block both-large sides with overlapping keys PLUS a left-only key (13) and a right-only
+    key (17) — real unmatched rows on BOTH sides for the non-inner arms.
+    """
     left = [
         adapter.make_side([0, 1, 2, 3, 4, 5], "lval", [10, 11, 12, 13, 14, 15]),
         adapter.make_side([5, 4, 3, 2, 1, 0], "lval", [16, 17, 18, 19, 20, 21]),
@@ -558,23 +608,33 @@ def join_general_sides(adapter: TransportAdapter) -> tuple[list[object], list[ob
 
 
 def join_equal_sides(adapter: TransportAdapter) -> tuple[list[object], list[object]]:
-    """Byte-comparable sides: at ``parts=8`` the pinned rule says SHUFFLE while a live
-    ``n_workers()==1`` recompute says BROADCAST — the F6 discrimination gap."""
+    """Byte-comparable sides.
+
+    At ``parts=8`` the pinned rule says SHUFFLE while a live ``n_workers()==1`` recompute says
+    BROADCAST — the F6 discrimination gap.
+    """
     left = [
         adapter.make_side([0, 1, 2, 3, 4, 5, 6, 7], "lval", [10, 11, 12, 13, 14, 15, 16, 17]),
         adapter.make_side([8, 9, 10, 11, 0, 1, 2, 3], "lval", [18, 19, 20, 21, 22, 23, 24, 25]),
     ]
     right = [
-        adapter.make_side([0, 2, 4, 6, 8, 10, 1, 3], "rval", [100, 101, 102, 103, 104, 105, 106, 107]),
-        adapter.make_side([5, 7, 9, 11, 0, 2, 4, 6], "rval", [108, 109, 110, 111, 112, 113, 114, 115]),
+        adapter.make_side(
+            [0, 2, 4, 6, 8, 10, 1, 3], "rval", [100, 101, 102, 103, 104, 105, 106, 107]
+        ),
+        adapter.make_side(
+            [5, 7, 9, 11, 0, 2, 4, 6], "rval", [108, 109, 110, 111, 112, 113, 114, 115]
+        ),
     ]
     return left, right
 
 
 def join_small_build_sides(adapter: TransportAdapter) -> tuple[list[object], list[object]]:
-    """A tiny build side + a much larger multi-block probe side: the pinned rule
-    (``build*parts < build+probe``, measured bytes) prefers BROADCAST at the tested ``parts=8`` —
-    sized so ``48*8 = 384 < 48 + 864`` holds for both real backends' 16 B/row wire shape."""
+    """Return a tiny build side + a much larger multi-block probe side.
+
+    The pinned rule (``build*parts < build+probe``, measured bytes) prefers BROADCAST at the
+    tested ``parts=8`` — sized so ``48*8 = 384 < 48 + 864`` holds for both real backends' 16
+    B/row wire shape.
+    """
     left = [adapter.make_side([1, 2, 3], "lval", [10, 20, 30])]
     probe_keys = [1, 1, 2, 3, 3, 3, 2, 2, 1, 3, 1, 2, 3, 1, 2, 3, 2, 1]
     right = [
@@ -587,8 +647,10 @@ def join_small_build_sides(adapter: TransportAdapter) -> tuple[list[object], lis
 def join_hot_key_sides(
     adapter: TransportAdapter, n_left: int, n_right: int
 ) -> tuple[list[object], list[object]]:
-    """A single hot key: the inner join emits ``n_left*n_right`` output rows in one dest — the
-    B5 output-side blowup the join budget must cover."""
+    """Return a single hot key: the inner join emits ``n_left*n_right`` output rows in one dest.
+
+    The B5 output-side blowup the join budget must cover.
+    """
     left = [adapter.make_side([7] * n_left, "lval", list(range(n_left)))]
     right = [adapter.make_side([7] * n_right, "rval", list(range(100, 100 + n_right)))]
     return left, right
@@ -599,14 +661,16 @@ def side_bytes(adapter: TransportAdapter, blocks: Sequence[object]) -> int:
     return sum(int(be.estimated_bytes(b)) for b in blocks)
 
 
-# ---- test-authored oracles (route via the golden-pinned ``partition``, never the join kernel) ----
+# ---- test-authored oracles (route via the golden-pinned ``partition``, never the join kernel)
 
 
 def route_oracle_dest_keys(
     adapter: TransportAdapter, src_blocks: Sequence[object], parts: int
 ) -> dict[int, list[int]]:
-    """Per dest, the ``__joinkey__`` values routed there in ascending-src, within-src order — from
-    the backend's own golden-pinned ``partition`` (routing is NOT re-implemented here)."""
+    """Per dest, the ``__joinkey__`` values routed there in ascending-src, within-src order.
+
+    From the backend's own golden-pinned ``partition`` (routing is NOT re-implemented here).
+    """
     be: Any = adapter.backend
     per_dest: dict[int, list[int]] = {}
     for src in src_blocks:  # ascending src index
@@ -641,8 +705,11 @@ def _per_dest_side(
 def dup_join_all(
     adapter: TransportAdapter, left: Sequence[object], right: Sequence[object], parts: int
 ) -> Counter[JRow]:
-    """DUPLICATING relational inner join as one multiset (the m40 §3.3 pin): a probe row with k
-    build matches ⇒ k rows. Routes each side with the backend's ``partition`` only."""
+    """DUPLICATING relational inner join as one multiset (the m40 §3.3 pin).
+
+    A probe row with k build matches ⇒ k rows. Routes each side with the backend's
+    ``partition`` only.
+    """
     left_by_dest = _per_dest_side(adapter, left, "lval", parts)
     right_by_dest = _per_dest_side(adapter, right, "rval", parts)
     total: Counter[JRow] = Counter()
@@ -662,8 +729,11 @@ def observed_join_all(adapter: TransportAdapter, value: dict[int, object]) -> Co
 
 
 def read_nullable_column(c: object) -> list[int | None]:
-    """One joined column to Python ints with ``None`` for a null/masked entry (the m40 option-type
-    pin: a ``-1``-sentinel impl fails the multiset, a plain ``int()`` reader would crash)."""
+    """One joined column to Python ints with ``None`` for a null/masked entry.
+
+    The m40 option-type pin: a ``-1``-sentinel impl fails the multiset, a plain ``int()``
+    reader would crash.
+    """
     to_list = getattr(c, "to_list", None)
     if to_list is not None:  # awkward option array -> [.., None, ..]
         return [None if v is None else int(v) for v in to_list()]
@@ -672,8 +742,10 @@ def read_nullable_column(c: object) -> list[int | None]:
 
 
 def nullable_join_multiset(value: dict[int, object]) -> Counter[NJRow]:
-    """The whole relational result as one null-aware multiset over ALL blocks (partitioning-
-    independent)."""
+    """Return the whole relational result as one null-aware multiset over ALL blocks.
+
+    Partitioning-independent.
+    """
     total: Counter[NJRow] = Counter()
     for block in value.values():
         ks = read_nullable_column(block["__joinkey__"])  # type: ignore[index]
@@ -686,9 +758,12 @@ def nullable_join_multiset(value: dict[int, object]) -> Counter[NJRow]:
 def pandas_join_oracle(
     lk: list[int], lv: list[int], rk: list[int], rv: list[int], how: str
 ) -> Counter[NJRow]:
-    """``pandas.merge`` on ``__joinkey__``: duplicating, null-preserving, key-coalescing — a wholly
-    independent relational engine (no shared code with the kernels under test)."""
-    import pandas as pd  # noqa: PLC0415  (optional oracle dep: only the join-parity module needs it)
+    """``pandas.merge`` on ``__joinkey__``: duplicating, null-preserving, key-coalescing.
+
+    A wholly independent relational engine (no shared code with the kernels under test).
+    """
+    # optional oracle dep: only the join-parity module needs it
+    import pandas as pd  # noqa: PLC0415
 
     left = pd.DataFrame({"__joinkey__": lk, "lval": lv})
     right = pd.DataFrame({"__joinkey__": rk, "rval": rv})
@@ -724,10 +799,13 @@ def _fn_name(fn: Any) -> str:
 
 
 class SpyDaskBackend:
-    """A delegating wrapper over a real ``DaskBackend`` recording every ``submit`` (fn name, key,
+    """A delegating ``DaskBackend`` wrapper that records every submit and broadcast.
+
+    A delegating wrapper over a real ``DaskBackend`` recording every ``submit`` (fn name, key,
     ``workers=`` pin) and every ``broadcast`` token; everything else (capabilities, ``_client``,
     accessors) delegates via ``__getattr__`` so BOTH sanctioned F1 worker-address paths keep
-    working. The complexity/plan-choice gates read these records (counts, never clocks)."""
+    working. The complexity/plan-choice gates read these records (counts, never clocks).
+    """
 
     def __init__(self, inner: Any) -> None:
         self.inner = inner
@@ -737,7 +815,9 @@ class SpyDaskBackend:
     def __getattr__(self, name: str) -> Any:  # delegate the non-tapped surface
         return getattr(self.inner, name)
 
-    def submit(self, fn: Any, /, *args: Any, key: str, workers: Sequence[str] | None = None, **kwargs: Any) -> Any:
+    def submit(
+        self, fn: Any, /, *args: Any, key: str, workers: Sequence[str] | None = None, **kwargs: Any
+    ) -> Any:
         self.submitted.append((_fn_name(fn), key, None if workers is None else tuple(workers)))
         extra: dict[str, Any] = {} if workers is None else {"workers": workers}
         return self.inner.submit(fn, *args, key=key, **extra, **kwargs)
@@ -790,9 +870,12 @@ class _RefusingBackendBase:
 
 
 class PinlessBackend(_RefusingBackendBase):
-    """The FU2 discriminator: ``peer_data_movement=True`` but ``pin_to_worker=False`` — exactly
-    the frozen-m42 ``ThreadBackend`` flag shape, alive in the dask-free main matrix. The NEW m44
-    gate (strict pinning) must fire on this stub even though the m43 gate (peer movement) passes."""
+    """The FU2 discriminator: ``peer_data_movement=True`` but ``pin_to_worker=False``.
+
+    Exactly the frozen-m42 ``ThreadBackend`` flag shape, alive in the dask-free main matrix.
+    The NEW m44 gate (strict pinning) must fire on this stub even though the m43 gate (peer
+    movement) passes.
+    """
 
     capabilities = SubmitCapabilities(
         peer_data_movement=True,
@@ -833,13 +916,16 @@ def task_site() -> tuple[int, str]:
 
 
 class GatedTransportBackend:
-    """A delegating ``ShuffleBackend`` for the worker-death theme (the m43 gated-kill mechanism,
+    r"""A delegating ``ShuffleBackend`` holding a gather open for the worker-death theme.
+
+    A delegating ``ShuffleBackend`` for the worker-death theme (the m43 gated-kill mechanism,
     F9/F18): ``partition`` (stage-1 only) drops a ``pmark`` file per call recording
-    ``pid\\naddress``; ``from_wire`` (gather-side only under repartition) drops a ``gstart`` mark
+    ``pid\naddress``; ``from_wire`` (gather-side only under repartition) drops a ``gstart`` mark
     then BLOCKS until ``gate_path`` exists — holding a gather open so the driver can kill a
     block-holding worker mid-run deterministically. Scenario construction only; every assertion is
     a file count, counter, or content hash (R0.10a). Data is delegated UNTOUCHED, so hashes stay
-    comparable with a plain-backend local oracle run."""
+    comparable with a plain-backend local oracle run.
+    """
 
     def __init__(self, inner: Any, mark_dir: str, gate_path: str | None) -> None:
         self.inner = inner

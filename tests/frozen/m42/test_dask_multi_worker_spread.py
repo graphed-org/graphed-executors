@@ -1,10 +1,13 @@
-"""m42 coffea#1490 guard: on a fixed-size 2-worker cluster, the leaves of one run spread across
-BOTH workers (plan §1.2.2 mitigation 1; blueprint §3 `test_dask_multi_worker_spread`).
+"""m42 coffea#1490 guard.
+
+On a fixed-size 2-worker cluster, the leaves of one run spread across BOTH workers (plan §1.2.2
+mitigation 1; blueprint §3 `test_dask_multi_worker_spread`).
 
 The open upstream suspicion (scikit-hep/coffea#1490): the broadcast identity-future pins scheduling
 locality so every task lands on the single worker holding the payload. This frozen witness fails CI
 if the engine's broadcast pattern regresses to single-worker pinning — 16 leaves on 2 one-thread
-workers must not all co-locate."""
+workers must not all co-locate.
+"""
 
 from __future__ import annotations
 

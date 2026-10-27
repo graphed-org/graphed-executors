@@ -83,7 +83,7 @@ coverage gate is what measures `announce.py`.
 | `…::test_an_orphaned_service_is_reaped_and_exits_0[no-200-ever,another-secret,server-gone]` | row 2 orphan rule; FoN orphaned before its first announce |
 | `…::test_watch_mode_announces_each_new_url_and_secret` | row 2 watch mode, SIGTERM reaps the child |
 | `test_cluster_services_live.py::test_a_cluster_hosted_http_server_serves_its_run_and_leaves_with_it` | row 3 (a): `Machine` identity in the status and every probe answer, task GET, `/service.json` 404, removal polled, `forget_announce` before `stop`, per-run clusters, overlap removes only its own, history ordering against `t`; FoN service outliving its run, run releasing another run's service |
-| `…::test_a_late_or_dead_service_job_is_removed_and_its_key_forgotten` | row 3 (b): `gpus=2` refused before it ran (`ServiceUnavailable` naming `RequestGPUs 2` and the largest slot memory, history `NumJobStarts 0`; §5.2 "Schedulability", `freeze-m68b-fixup3`); exit-at-once `RuntimeError` naming JobStatus 4 before `timeout_s`; both gone (polled) and forgotten |
+| `…::test_a_late_or_dead_service_job_is_removed_and_its_key_forgotten` | row 3 (b): `gpus=2` refused before it ran (`ServiceUnavailableError` naming `RequestGPUs 2` and the largest slot memory, history `NumJobStarts 0`; §5.2 "Schedulability", `freeze-m68b-fixup3`); exit-at-once `RuntimeError` naming JobStatus 4 before `timeout_s`; both gone (polled) and forgotten |
 
 Not a test: "`announce.py` passes `test-htcondor`'s per-file gate (≥ 90%) with these legs executing
 it" and FoN "an `announce.py` the frozen suite does not measure" are CI's per-file coverage gate over

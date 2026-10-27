@@ -1,4 +1,6 @@
-"""m66 D3: the backend against a real HTCondor pool (the personal pool of the ``test-htcondor`` CI job).
+"""m66 D3: the backend against a real HTCondor pool.
+
+The personal pool of the ``test-htcondor`` CI job.
 
 The module needs the ``htcondor2`` bindings and is skipped with that reason where they are not
 installed. Where they are installed, each test first requires a schedd in the collector within a
@@ -10,8 +12,10 @@ secret, and ``close()`` removes the jobs, leaves two history rows and keeps ``pi
 (b) a spooled profile shipping a venv the test builds: the pilot's ``sys.prefix`` is under its
 scratch dir, and ``close()`` retrieves ``pilot.0.out`` and empties the queue.
 
-Discriminates a launcher that never submits, a missing bookkeeping, retrieve or remove step, a secret
-leaking into the job ad, a shipped env that is ignored, and dead transfer of ``user_modules``."""
+Discriminates a launcher that never submits, a missing bookkeeping, retrieve or remove step, a
+secret leaking into the job ad, a shipped env that is ignored, and dead transfer of
+``user_modules``.
+"""
 
 from __future__ import annotations
 
@@ -38,7 +42,8 @@ from htcondor_harness import (
 )
 
 htcondor2: Any = pytest.importorskip(
-    "htcondor2", reason="the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)"
+    "htcondor2",
+    reason="the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)",
 )
 
 POOL_PROBE_S = 30.0
@@ -46,16 +51,21 @@ BATCH = 'regexp("^graphed-pilots-", JobBatchName)'
 
 
 def require_pool() -> Any:
-    """The schedd of a reachable pool, or a failure naming what is missing."""
+    """Return the schedd of a reachable pool, or a failure naming what is missing."""
     ads = run_bounded(
-        lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]), POOL_PROBE_S
+        lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]),
+        POOL_PROBE_S,
     )
-    assert ads, "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+    assert ads, (
+        "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+    )
     return htcondor2.Schedd()
 
 
 def graphed_clusters(schedd: Any) -> set[int]:
-    return {int(ad["ClusterId"]) for ad in schedd.query(constraint=BATCH, projection=["ClusterId"])}
+    return {
+        int(ad["ClusterId"]) for ad in schedd.query(constraint=BATCH, projection=["ClusterId"])
+    }
 
 
 def in_queue(schedd: Any, cluster: int) -> list[Any]:
@@ -76,8 +86,12 @@ def test_generic_pool_run(tmp_path: Path) -> None:
     )
     try:
         seq = run_bounded(lambda: runner.run(concat_plan(8, "m66live"))).value
-        prov = run_bounded(lambda: runner.run(prov_plan(8, "m66livep", process=paced_prov_process))).value
-        origin = runner.backend.submit(harness_origin, key="graphed-m66live-origin").result(timeout=120)
+        prov = run_bounded(
+            lambda: runner.run(prov_plan(8, "m66livep", process=paced_prov_process))
+        ).value
+        origin = runner.backend.submit(harness_origin, key="graphed-m66live-origin").result(
+            timeout=120
+        )
         secret = (log_dir / "graphed-secret").read_bytes().strip()
         (cluster,) = graphed_clusters(schedd) - before
         ads_text = "\n".join(str(ad) for ad in schedd.query(constraint=f"ClusterId == {cluster}"))
@@ -101,8 +115,11 @@ def test_generic_pool_run(tmp_path: Path) -> None:
 
 
 def build_env(root: Path) -> Path:
-    """A non-editable venv over the driver's site-packages: ``venv --system-site-packages`` plus
-    ``pip install --no-deps <repo>``; a driver running in a venv also lends its site-packages."""
+    """Return a non-editable venv over the driver's site-packages.
+
+    ``venv --system-site-packages`` plus ``pip install --no-deps <repo>``; a driver running in
+    a venv also lends its site-packages.
+    """
     env = root / "env"
     subprocess.run(
         [sys.executable, "-m", "venv", "--system-site-packages", str(env)], check=True, timeout=300
@@ -114,7 +131,9 @@ def build_env(root: Path) -> Path:
         (purelib / "graphed_m66_driver_site.pth").write_text("\n".join(sorted(lent)) + "\n")
     py = env / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run(
-        [str(py), "-m", "pip", "install", "-q", "--no-deps", str(REPO_ROOT)], check=True, timeout=600
+        [str(py), "-m", "pip", "install", "-q", "--no-deps", str(REPO_ROOT)],
+        check=True,
+        timeout=600,
     )
     return env
 
@@ -134,17 +153,22 @@ def test_spooled_site_ships_the_env_and_retrieves_logs(tmp_path: Path) -> None:
         submit={},
         schedd_query=("COLLECTOR_HOST", "true"),
     )
-    runner = api.htcondor_runner(n_pilots=1, site=site, env=env, log_dir=log_dir, user_modules=[HARNESS_FILE])
+    runner = api.htcondor_runner(
+        n_pilots=1, site=site, env=env, log_dir=log_dir, user_modules=[HARNESS_FILE]
+    )
     try:
         value = run_bounded(lambda: runner.run(concat_plan(4, "m66spool"))).value
-        prefix, scratch = runner.backend.submit(pilot_prefix, key="graphed-m66spool-prefix").result(
-            timeout=120
-        )
+        prefix, scratch = runner.backend.submit(
+            pilot_prefix, key="graphed-m66spool-prefix"
+        ).result(timeout=120)
         clusters = graphed_clusters(schedd) - before
     finally:
         runner.close()
     assert value == expected_concat(4, "m66spool")
-    assert scratch and Path(prefix).resolve().is_relative_to(Path(scratch).resolve()), (prefix, scratch)
+    assert scratch and Path(prefix).resolve().is_relative_to(Path(scratch).resolve()), (
+        prefix,
+        scratch,
+    )
     assert Path(prefix).resolve() != Path(sys.prefix).resolve()
     (cluster,) = clusters
     wait_for(lambda: not in_queue(schedd, cluster), 60.0)

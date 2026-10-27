@@ -1,6 +1,7 @@
-"""m46 failure attribution — §A.3 #8 on the parsl seam (plan §1.2 `describe_failure`; §3 m46
-`test_parsl_failure_attribution`; the m42 `test_dask_stageerror_intact` shape + the r3 synthetic
-classifier freeze, tests-lens (d)).
+"""m46 failure attribution.
+
+§A.3 #8 on the parsl seam (plan §1.2 `describe_failure`; §3 m46 `test_parsl_failure_attribution`;
+the m42 `test_dask_stageerror_intact` shape + the r3 synthetic classifier freeze, tests-lens (d)).
 
 Two obligations:
 
@@ -20,7 +21,8 @@ Two obligations:
 
 Discriminates: an exception path that re-wraps or stringifies StageError, a classifier keyed on
 parsl class identity instead of chain names, one that ignores `__cause__` chains, and one that
-attributes everything (the unrelated-exception None arm)."""
+attributes everything (the unrelated-exception None arm).
+"""
 
 from __future__ import annotations
 
@@ -67,8 +69,11 @@ def backend(request, tpe, htex):  # type: ignore[no-untyped-def]
 
 
 def test_worker_error_surfaces_as_intact_stage_error(backend) -> None:  # type: ignore[no-untyped-def]
-    """A StageError raised in `process` reaches the driver as a StageError pointing at the USER'S
-    line — over the real HTEX process boundary this is the M6 picklability obligation executed."""
+    """A StageError raised in ``process`` reaches the driver pointing at the user's line.
+
+    A StageError raised in `process` reaches the driver as a StageError pointing at the USER'S line
+    — over the real HTEX process boundary this is the M6 picklability obligation executed.
+    """
     runner = make_runner(backend)
     with pytest.raises(StageError) as excinfo:
         run_bounded(lambda: runner.run(stage_error_plan(4, "m46err")))
@@ -78,8 +83,11 @@ def test_worker_error_surfaces_as_intact_stage_error(backend) -> None:  # type: 
 
 
 def _synth(name: str, *args: object) -> BaseException:
-    """An exception class synthesized BY NAME — deliberately not parsl's (the name-string
-    contract: the classifier must match on chain class names, never on parsl identity)."""
+    """Return an exception class synthesized BY NAME.
+
+    Deliberately not parsl's (the name-string contract: the classifier must match on chain
+    class names, never on parsl identity).
+    """
     return type(name, (Exception,), {})(*args)
 
 
@@ -90,7 +98,8 @@ def test_describe_failure_maps_synthetic_worker_lost_by_name(tpe) -> None:  # ty
     assert direct is not None, "a WorkerLost-named exception must map to an attribution tuple"
     assert isinstance(direct, tuple) and len(direct) == 2
     assert all(isinstance(part, str) for part in direct), (
-        f"the attribution must be the engine's (failing_key, last_worker) 2-tuple of strings, got {direct!r}"
+        "the attribution must be the engine's (failing_key, last_worker) 2-tuple of strings, got "
+        f"{direct!r}"
     )
 
     manager = backend.describe_failure(_synth("ManagerLost", "manager gone"))

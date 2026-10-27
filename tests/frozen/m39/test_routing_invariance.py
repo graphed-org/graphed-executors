@@ -1,11 +1,12 @@
 """M39 (B2) — cross-process routing invariance under different PYTHONHASHSEED (plan §4).
 
 The single hardest determinism obligation: output-partition assignment must be a pure, process-
-independent function of the key. Python's built-in ``hash()`` is per-process salted (PYTHONHASHSEED)
-for bytes/str, so if it leaked into routing, two producer processes would route the SAME key to
-DIFFERENT dests and the shuffle would silently lose matches. This test routes a fixed key set in TWO
-separate OS processes with DIFFERENT seeds and asserts the dests are identical AND equal to the pinned
-golden vectors (so it catches both a leaked ``hash()`` and any non-conforming hash).
+independent function of the key. Python's built-in ``hash()`` is per-process salted
+(PYTHONHASHSEED) for bytes/str, so if it leaked into routing, two producer processes would route
+the SAME key to DIFFERENT dests and the shuffle would silently lose matches. This test routes a
+fixed key set in TWO separate OS processes with DIFFERENT seeds and asserts the dests are identical
+AND equal to the pinned golden vectors (so it catches both a leaked ``hash()`` and any
+non-conforming hash).
 """
 
 from __future__ import annotations
@@ -15,7 +16,8 @@ import sys
 
 from golden_route import GOLDEN
 
-# the numpy backend is the lighter one to spin up in a child; the routing rule is shared with awkward.
+# the numpy backend is the lighter one to spin up in a child; the routing rule is shared with
+# awkward.
 _CHILD = r"""
 import sys
 import numpy as np
@@ -52,5 +54,9 @@ def _route_in_child(seed: str) -> list[str]:
 def test_same_key_routes_identically_across_processes_and_seeds() -> None:
     a = _route_in_child("0")
     b = _route_in_child("1")
-    assert a == b, "routing must be independent of PYTHONHASHSEED (no Python hash() in the route path)"
-    assert a == _EXPECTED, "and it must match the pinned §4 golden dests, not merely be self-consistent"
+    assert a == b, (
+        "routing must be independent of PYTHONHASHSEED (no Python hash() in the route path)"
+    )
+    assert a == _EXPECTED, (
+        "and it must match the pinned §4 golden dests, not merely be self-consistent"
+    )

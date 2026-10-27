@@ -1,7 +1,9 @@
-"""m44 block plane — bulk bytes travel worker→worker over ``graphed_block_pull``, NEVER through
-the driver, and no per-epoch state survives a run (plan §1.4 pull-model data plane, §1.2
-teardown; blueprint §3 `test_transport_block_plane`). Tier B: worker processes have pids distinct
-from the driver, so serving provenance is unfakeable by construction.
+"""m44 block plane.
+
+Bulk bytes travel worker→worker over ``graphed_block_pull``, NEVER through the driver, and no
+per-epoch state survives a run (plan §1.4 pull-model data plane, §1.2 teardown; blueprint §3
+`test_transport_block_plane`). Tier B: worker processes have pids distinct from the driver, so
+serving provenance is unfakeable by construction.
 
 Witnesses: every worker's plugin served block bytes (``bytes_served > 0`` on BOTH workers — the
 interleaved-key scenario guarantees each holder owns fragments some REMOTE gather needs);
@@ -11,7 +13,8 @@ active on any worker (evict + purge — the unmanaged-memory guarantee).
 
 Discriminates: a driver-relay implementation (blocks riding task returns/futures through the
 client process) has ``bytes_served == 0`` and no worker-pid serving provenance; an engine that
-skips teardown leaves its epoch resident and fails the purge probe."""
+skips teardown leaves its epoch resident and fails the purge probe.
+"""
 
 from __future__ import annotations
 

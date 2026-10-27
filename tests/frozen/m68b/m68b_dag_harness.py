@@ -1,19 +1,22 @@
-"""Harness for the m68b part B2 frozen tests (plan-services.md §3.3 "B2 — DAG driverless, `job_root`,
+"""Harness for the m68b part B2 frozen tests: driverless runs submitted as a DAG.
+
+Harness for the m68b part B2 frozen tests (plan-services.md §3.3 "B2 — DAG driverless, `job_root`,
 lxplus"): a driverless plan whose services need SERVICE nodes is submitted as a DAG, and
 ``RunHandle(dag=True)`` tracks the DAGMan cluster and its ``driver`` node.
 
-Frozen suites never import across directories, and B1's ``m68b_harness`` is its own, so what this part
-needs is copied here: the accessors (looked up inside test bodies, so the suite collects before the
-implementation exists), the bounds, the m67 bindings recorder, a fake venv, a machine ad, HMAC signing
-and the m66 ``MarkerBomb``. What is new:
+Frozen suites never import across directories, and B1's ``m68b_harness`` is its own, so what this
+part needs is copied here: the accessors (looked up inside test bodies, so the suite collects
+before the implementation exists), the bounds, the m67 bindings recorder, a fake venv, a machine
+ad, HMAC signing and the m66 ``MarkerBomb``. What is new:
 
-- ``DagSchedd``: ``query``/``history`` answer by constraint (one naming ``DAGNodeName`` is the driver
-  node's, any other the DAGMan cluster's) and ``history`` logs its ``match``.
-- ``FakeHTCondor.Submit``: called, it returns a ``FakeSubmit`` (a dict that prints as a submit file);
-  its ``from_dag`` is logged and, given real bindings, delegated to them.
+- ``DagSchedd``: ``query``/``history`` answer by constraint (one naming ``DAGNodeName`` is the
+  driver node's, any other the DAGMan cluster's) and ``history`` logs its ``match``.
+- ``FakeHTCondor.Submit``: called, it returns a ``FakeSubmit`` (a dict that prints as a submit
+  file); its ``from_dag`` is logged and, given real bindings, delegated to them.
 - ``read_sub``/``dag_statements``: what the submitter wrote, parsed.
 - The live file's plan parts (``BodyGet``, ``kill_driver``). This file is shipped to the job as a
-  ``user_modules`` entry, so it imports only the stdlib, graphed and graphed_executors at module level.
+  ``user_modules`` entry, so it imports only the stdlib, graphed and graphed_executors at module
+  level.
 """
 
 from __future__ import annotations
@@ -61,7 +64,10 @@ FAKE_CLUSTER = 4242
 # the only options the DAG is submitted with (§3.3 B2 "DAG")
 DAG_OPTIONS = {"UseDagDir": True, "AddToEnv": "_CONDOR_DAGMAN_USE_STRICT=0"}
 PLACEHOLDER_TEXT = "exited before writing a result"
-IMAGE = "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/coffea-almalinux9-noml:2026.9.0-py3.12"
+IMAGE = (
+    "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/"
+    "coffea-almalinux9-noml:2026.9.0-py3.12"
+)
 TRITON_IMAGE = "/cvmfs/unpacked.cern.ch/nvcr.io/nvidia/tritonserver:24.11-py3"
 
 # ---- deferred accessors for the implementation under test ---------------------------------------
@@ -82,7 +88,10 @@ def driver_api() -> Any:
 
 
 def launch_api() -> Any:
-    """``graphed_executors.htcondor_backend.launch``: every bindings call goes through ``_htcondor()``."""
+    """``graphed_executors.htcondor_backend.launch``.
+
+    Every bindings call goes through ``_htcondor()``.
+    """
     return importlib.import_module("graphed_executors.htcondor_backend.launch")
 
 
@@ -95,12 +104,15 @@ def recipes_api() -> Any:
     return importlib.import_module("graphed_executors.submit.recipes")
 
 
-# ---- bounds --------------------------------------------------------------------------------------
+# ---- bounds -------------------------------------------------------------------------------------
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
-    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``: a hang is a
-    failure, never a wedged CI job. Returns the value or re-raises the call's exception."""
+    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``.
+
+    A hang is a failure, never a wedged CI job. Returns the value or re-raises the call's
+    exception.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -128,7 +140,7 @@ def wait_for(predicate: Callable[[], bool], timeout_s: float = 30.0, poll_s: flo
     return True
 
 
-# ---- ports, HTTP, signing --------------------------------------------------------------------------
+# ---- ports, HTTP, signing -----------------------------------------------------------------------
 
 
 def _bindable(port: int) -> bool:
@@ -141,7 +153,7 @@ def _bindable(port: int) -> bool:
 
 
 def free_range(n: int = 3) -> tuple[int, int]:
-    """An inclusive range of ``n`` consecutive free ports, outside the 10000-10100 band of the site rows."""
+    """Return an inclusive range of ``n`` free ports outside the site rows' 10000-10100 band."""
     for low in range(20000 + os.getpid() % 1000 * 20, 60000, 20):
         if all(_bindable(p) for p in range(low, low + n)):
             return (low, low + n - 1)
@@ -149,12 +161,12 @@ def free_range(n: int = 3) -> tuple[int, int]:
 
 
 def sign(secret: bytes, body: bytes) -> str:
-    """The hex HMAC-SHA256 pilots and ``announce.py`` put in ``X-Graphed-Sig``."""
+    """Return the hex HMAC-SHA256 pilots and ``announce.py`` put in ``X-Graphed-Sig``."""
     return hmac.new(secret, body, hashlib.sha256).hexdigest()
 
 
 def post(url: str, body: bytes, secret: bytes, timeout: float = 30.0) -> int:
-    """The status of a POST of ``body`` signed with ``secret``."""
+    """Return the status of a POST of ``body`` signed with ``secret``."""
     request = urllib.request.Request(url, data=body, method="POST")
     request.add_header(SIG_HEADER, sign(secret, body))
     try:
@@ -165,7 +177,10 @@ def post(url: str, body: bytes, secret: bytes, timeout: float = 30.0) -> int:
 
 
 def http_body(endpoint: str, timeout_s: float = 10.0) -> str:
-    """The body a GET of ``/`` answers on an ``http://`` endpoint (anything but a 2xx raises)."""
+    """Return the body a GET of ``/`` answers on an ``http://`` endpoint.
+
+    Anything but a 2xx raises.
+    """
     scheme, _, rest = endpoint.partition("://")
     assert scheme == "http", endpoint
     with urllib.request.urlopen(f"http://{rest}/", timeout=timeout_s) as resp:
@@ -174,7 +189,10 @@ def http_body(endpoint: str, timeout_s: float = 10.0) -> str:
 
 @contextmanager
 def ok_server() -> Iterator[int]:
-    """A lookup-free HTTP server on ``127.0.0.1`` answering every GET 200 ``text/plain``; yields its port."""
+    """Run a lookup-free HTTP server on ``127.0.0.1`` answering every GET 200 ``text/plain``.
+
+    Yields its port.
+    """
 
     class _Ok(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -213,37 +231,44 @@ class MarkerBomb:
         return touch_marker, (self.path,)
 
 
-# ---- site data ----------------------------------------------------------------------------------------
+# ---- site data ----------------------------------------------------------------------------------
 
 
 def fake_venv(root: Path) -> Path:
-    """A directory shaped like a non-editable venv with one dist-info (no interpreter in it)."""
+    """Return a directory shaped like a non-editable venv with one dist-info.
+
+    No interpreter in it.
+    """
     root.mkdir(parents=True)
     (root / "pyvenv.cfg").write_text("home = /usr/bin\ninclude-system-site-packages = false\n")
     purelib = Path(
-        sysconfig.get_path("purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)})
+        sysconfig.get_path(
+            "purelib", scheme="venv", vars={"base": str(root), "platbase": str(root)}
+        )
     )
     dist = purelib / "probedist-0.1.dist-info"
     dist.mkdir(parents=True)
-    (dist / "direct_url.json").write_text(json.dumps({"url": "file:///src/probedist", "dir_info": {}}))
+    (dist / "direct_url.json").write_text(
+        json.dumps({"url": "file:///src/probedist", "dir_info": {}})
+    )
     return root
 
 
 def write_machine_ad(path: Path, host: str = "localhost") -> Path:
-    """A machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
+    """Return a machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
     path.write_text(f'Machine = "{host}"\nName = "slot1@{host}"\nCpus = 2\n')
     return path
 
 
 def site_copy(monkeypatch: pytest.MonkeyPatch, key: str, base: str, **changes: Any) -> Any:
-    """``dataclasses.replace(SITES[base], **changes)`` registered as ``SITES[key]`` for this test."""
+    """Register ``dataclasses.replace(SITES[base], **changes)`` as ``SITES[key]`` for a test."""
     api = htcondor_api()
     profile = replace(api.SITES[base], **changes)
     monkeypatch.setitem(api.SITES, key, profile)
     return profile
 
 
-# ---- recorded bindings ---------------------------------------------------------------------------------
+# ---- recorded bindings --------------------------------------------------------------------------
 
 
 class SubmitResult:
@@ -255,7 +280,10 @@ class SubmitResult:
 
 
 class FakeSubmit(dict[str, Any]):
-    """What the fake ``htcondor2.Submit(...)`` returns: a dict that prints as a submit file does."""
+    """What the fake ``htcondor2.Submit(...)`` returns.
+
+    A dict that prints as a submit file does.
+    """
 
     def __str__(self) -> str:
         return "".join(f"{k} = {v}\n" for k, v in self.items()) + "queue\n"
@@ -266,9 +294,12 @@ def is_node_constraint(constraint: str) -> bool:
 
 
 class DagSchedd:
-    """A stand-in ``htcondor2.Schedd`` that appends every call to ``log``. ``query`` and ``history`` answer
-    the driver node's constraint (one naming ``DAGNodeName``) from ``node``/``node_history`` and every
-    other from ``dagman``/``dagman_history``; ``history`` logs its ``match``. ``retrieve`` writes nothing."""
+    """A stand-in ``htcondor2.Schedd`` that appends every call to ``log``.
+
+    ``query`` and ``history`` answer the driver node's constraint (one naming ``DAGNodeName``)
+    from ``node``/``node_history`` and every other from ``dagman``/``dagman_history``;
+    ``history`` logs its ``match``. ``retrieve`` writes nothing.
+    """
 
     def __init__(
         self,
@@ -283,18 +314,27 @@ class DagSchedd:
         self.node = list(node or [])
         self.node_history = list(node_history or [])
 
-    def query(self, constraint: Any = "true", projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def query(
+        self, constraint: Any = "true", projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         text = str(constraint)
         self.log.append(("query", text, tuple(projection or ())))
         return [dict(ad) for ad in (self.node if is_node_constraint(text) else self.dagman)]
 
-    def history(self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def history(
+        self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         text = str(constraint)
         match = kwargs.get("match", args[0] if args else None)
         self.log.append(("history", text, tuple(projection or ()), match))
-        return [dict(ad) for ad in (self.node_history if is_node_constraint(text) else self.dagman_history)]
+        return [
+            dict(ad)
+            for ad in (self.node_history if is_node_constraint(text) else self.dagman_history)
+        ]
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         self.log.append(("submit", dict(description), count, spool))
         return SubmitResult(FAKE_CLUSTER)
 
@@ -313,7 +353,9 @@ class _Collector:
         self.fake = fake
         self.pool = pool
 
-    def locate(self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def locate(
+        self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         self.fake.log.append(("locate", self.pool, str(daemon_type), name))
         return {"Name": name or FAKE_SCHEDD, "MyAddress": "<127.0.0.1:9618>", "located": True}
 
@@ -333,8 +375,11 @@ class _Collector:
 
 
 class _SubmitType:
-    """``htcondor2.Submit``: a call builds a description, ``from_dag`` is logged (and delegated to real
-    bindings when the fake has them)."""
+    """``htcondor2.Submit``.
+
+    A call builds a description, ``from_dag`` is logged (and delegated to real bindings when
+    the fake has them).
+    """
 
     def __init__(self, fake: FakeHTCondor) -> None:
         self.fake = fake
@@ -358,8 +403,10 @@ class _Credd:
 
 
 class FakeHTCondor:
-    """What ``launch._htcondor()`` returns under the recorder: ``param``, ``Collector``, ``Schedd``,
-    ``Submit`` and the enums the backend names."""
+    """What ``launch._htcondor()`` returns under the recorder.
+
+    ``param``, ``Collector``, ``Schedd``, ``Submit`` and the enums the backend names.
+    """
 
     class DaemonType:
         Schedd = "Schedd"
@@ -389,7 +436,7 @@ class FakeHTCondor:
         return _Credd()
 
     def RemoteParam(self, location: Any) -> dict[str, str]:
-        """The located schedd's config: the CI pool's RPM layout."""
+        """Return the located schedd's config: the CI pool's RPM layout."""
         return {"BIN": "/usr/bin"}
 
     def Collector(self, pool: str | None = None, *args: Any, **kwargs: Any) -> _Collector:
@@ -401,9 +448,14 @@ class FakeHTCondor:
         return self.schedd
 
 
-def record_bindings(monkeypatch: pytest.MonkeyPatch, schedd: DagSchedd, real: Any = None) -> FakeHTCondor:
-    """Patch ``launch._htcondor`` (logging ``("_htcondor",)``) and ``sys.modules["htcondor2"]`` to a
-    ``FakeHTCondor`` over ``schedd``; ``real`` is the bindings module ``from_dag`` delegates to."""
+def record_bindings(
+    monkeypatch: pytest.MonkeyPatch, schedd: DagSchedd, real: Any = None
+) -> FakeHTCondor:
+    """Patch the bindings to a ``FakeHTCondor`` over ``schedd``.
+
+    Patch ``launch._htcondor`` (logging ``("_htcondor",)``) and ``sys.modules["htcondor2"]`` to a
+    ``FakeHTCondor`` over ``schedd``; ``real`` is the bindings module ``from_dag`` delegates to.
+    """
     fake = FakeHTCondor(schedd, real)
 
     def _htcondor() -> FakeHTCondor:
@@ -420,15 +472,18 @@ def logged(log: list[tuple[Any, ...]], kind: str) -> list[tuple[Any, ...]]:
 
 
 def submitted(log: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
-    """The description of every ``schedd.submit`` in ``log``, in order."""
+    """Return the description of every ``schedd.submit`` in ``log``, in order."""
     return [entry[1] for entry in logged(log, "submit")]
 
 
-# ---- what the submitter wrote --------------------------------------------------------------------
+# ---- what the submitter wrote -------------------------------------------------------------------
 
 
 def read_sub(path: Path) -> dict[str, str]:
-    """A submit file's ``key = value`` statements, keys lower-cased (condor's keys are case-insensitive)."""
+    """Return a submit file's ``key = value`` statements, keys lower-cased.
+
+    Condor's keys are case-insensitive.
+    """
     out: dict[str, str] = {}
     for line in path.read_text().splitlines():
         text = line.strip()
@@ -441,7 +496,7 @@ def read_sub(path: Path) -> dict[str, str]:
 
 
 def job_attr(sub: Mapping[str, str], name: str) -> str | None:
-    """A job ad attribute set in a submit file as ``MY.<name>`` or ``+<name>``."""
+    """Return a job ad attribute set in a submit file as ``MY.<name>`` or ``+<name>``."""
     return sub.get(f"my.{name.lower()}", sub.get(f"+{name.lower()}"))
 
 
@@ -450,7 +505,10 @@ def squashed(value: str | None) -> str | None:
 
 
 def dag_statements(path: Path) -> list[tuple[str, ...]]:
-    """``run.dag``'s statements as token tuples, the keyword upper-cased (DAGMan's are case-insensitive)."""
+    """``run.dag``'s statements as token tuples, the keyword upper-cased.
+
+    DAGMan's are case-insensitive.
+    """
     rows: list[tuple[str, ...]] = []
     for line in path.read_text().splitlines():
         words = line.split()
@@ -460,11 +518,16 @@ def dag_statements(path: Path) -> list[tuple[str, ...]]:
 
 
 def tree_bytes(root: Path) -> dict[str, bytes]:
-    """Every file under ``root`` (links not followed into directories) by relative path: its bytes, or
-    its link target for a symlink."""
+    """Every file under ``root`` (links not followed into directories) by relative path.
+
+    Its bytes, or its link target for a symlink.
+    """
     out: dict[str, bytes] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        for name in [*filenames, *(d for d in dirnames if os.path.islink(os.path.join(dirpath, d)))]:
+        for name in [
+            *filenames,
+            *(d for d in dirnames if os.path.islink(os.path.join(dirpath, d))),
+        ]:
             path = Path(dirpath, name)
             rel = str(path.relative_to(root))
             out[rel] = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
@@ -475,8 +538,10 @@ def tree_bytes(root: Path) -> dict[str, bytes]:
 
 
 def http_spec(name: str, *, timeout_s: float = 60.0, **launch: Any) -> ServiceSpec:
-    """An ``http:/``-checked requirement whose recipe runs ``http.server`` (``launch`` fields: image,
-    inputs, env, resources)."""
+    """Return an ``http:/``-checked requirement whose recipe runs ``http.server``.
+
+    ``launch`` fields: image, inputs, env, resources.
+    """
     argv = ("{python}", "-m", "http.server", "{port}")
     return ServiceSpec(
         name,
@@ -519,17 +584,24 @@ def empty_tuple() -> tuple[Any, ...]:
     return ()
 
 
-def service_plan(specs: Sequence[ServiceSpec], process: Any = text_process, n: int = 2) -> Plan[Any]:
+def service_plan(
+    specs: Sequence[ServiceSpec], process: Any = text_process, n: int = 2
+) -> Plan[Any]:
     tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(n, "m68b-b2")))
-    return Plan(process=process, combine=pair_concat, empty=empty_tuple, tasks=tasks, services=tuple(specs))
+    return Plan(
+        process=process, combine=pair_concat, empty=empty_tuple, tasks=tasks, services=tuple(specs)
+    )
 
 
-# ---- the live file's plan parts (the job imports them from this file by name) ----------------------
+# ---- the live file's plan parts (the job imports them from this file by name) -------------------
 
 
 @dataclass(frozen=True)
 class DagResolved:
-    """A run's value after the driver resolved it: the leaves and the body the service answered then."""
+    """A run's value after the driver resolved it.
+
+    The leaves and the body the service answered then.
+    """
 
     leaves: Any
     body: str
@@ -537,7 +609,10 @@ class DagResolved:
 
 @dataclass(frozen=True)
 class BodyGet:
-    """Each pilot task GETs ``/`` on the bound service; ``resolve_services`` GETs it again in the driver."""
+    """Each pilot task GETs ``/`` on the bound service.
+
+    ``resolve_services`` GETs it again in the driver.
+    """
 
     service: str = "web"
     endpoint: str | None = None

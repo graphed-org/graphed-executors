@@ -1,18 +1,22 @@
-"""m44 extra witness (non-gating): the driver-side reader-plane SIZING REPLAY reproduces the real
-``_stage2_gather`` byte accounting EXACTLY.
+"""m44 extra witness (non-gating).
+
+The driver-side reader-plane SIZING REPLAY reproduces the real ``_stage2_gather`` byte accounting
+EXACTLY.
 
 The transport engine's reader/disk budget counters (``fetch_spill_count`` / ``peak_fetch_bytes`` /
-``bulk_fetch_count`` / ``cross_node_fetches`` / ``bytes_transferred`` / ``disk_backpressure_events`` /
-``per_node_disk_bytes``) are computed by REPLAYING the imported ``_stage2_gather`` over block SIZES
-(``common.transport_tasks.replay_reader_plane`` since the m47 factoring), never re-implementing the accounting. This test pins that
-the replay equals a REAL local ``run_repartition`` on the same inputs/budgets — the guarantee the
-frozen ``test_transport_budget_parity`` relies on, checked here WITHOUT a dask cluster.
+``bulk_fetch_count`` / ``cross_node_fetches`` / ``bytes_transferred`` /
+``disk_backpressure_events`` / ``per_node_disk_bytes``) are computed by REPLAYING the imported
+``_stage2_gather`` over block SIZES (``common.transport_tasks.replay_reader_plane`` since the m47
+factoring), never re-implementing the accounting. This test pins that the replay equals a REAL
+local ``run_repartition`` on the same inputs/budgets — the guarantee the frozen
+``test_transport_budget_parity`` relies on, checked here WITHOUT a dask cluster.
 
 Non-vacuity / discrimination: the local run is an independent engine over a real backend and real
-``_IpcCluster`` bytes; the replay uses only sizes. Any drift in the sizing shims (a wrong ``concat``
-size, a mis-keyed spill node, a dropped fetch) diverges a counter. The ``test_replay_detects_*``
-cases MUTATE the sizes and assert the replay NOTICES — proving the equality above is a real check,
-not a tautology (an all-zero or size-blind replay would pass the mutated cases too, and fails here).
+``_IpcCluster`` bytes; the replay uses only sizes. Any drift in the sizing shims (a wrong
+``concat`` size, a mis-keyed spill node, a dropped fetch) diverges a counter. The
+``test_replay_detects_*`` cases MUTATE the sizes and assert the replay NOTICES — proving the
+equality above is a real check, not a tautology (an all-zero or size-blind replay would pass the
+mutated cases too, and fails here).
 """
 
 from __future__ import annotations
@@ -57,8 +61,11 @@ def _blocks(copies: int = 4) -> list[object]:
 def _driver_manifests(
     backend: object, src: list[object], parts: int, k: int, n_tasks: int
 ) -> tuple[dict[int, dict[int, tuple[str, int]]], dict[str, int]]:
-    """Reproduce exactly what the transport map tasks register: per producer task, coalesce its owned
-    src blocks, ``to_wire`` each dest, and record ``(sha256, len)`` keyed to holder ``t % k``."""
+    """Reproduce exactly what the transport map tasks register.
+
+    Per producer task, coalesce its owned src blocks, ``to_wire`` each dest, and record
+    ``(sha256, len)`` keyed to holder ``t % k``.
+    """
     manifests: dict[int, dict[int, tuple[str, int]]] = {}
     size_of: dict[str, int] = {}
     for t, owned in enumerate(_assign(len(src), n_tasks)):
@@ -92,7 +99,9 @@ def _reader_counters(w: ShuffleWitness) -> dict[str, object]:
     ("fetch_budget", "disk_budget"),
     [(None, None), (400, None), (200, None), (1, 4000)],
 )
-def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budget: int | None) -> None:
+def test_replay_matches_local_stage2_gather(
+    fetch_budget: int | None, disk_budget: int | None
+) -> None:
     be = NumpyBackend()
     src = _blocks()
     n_tasks = min(K, len(src))
@@ -103,18 +112,29 @@ def test_replay_matches_local_stage2_gather(fetch_budget: int | None, disk_budge
     manifests, size_of = _driver_manifests(be, src, PARTS, K, n_tasks)
     addrs = tuple(f"tcp://w{i}" for i in range(K))
     replay = replay_reader_plane(
-        manifests, PARTS, n_tasks, K, addrs, size_of, fetch_budget=fetch_budget, disk_budget=disk_budget
+        manifests,
+        PARTS,
+        n_tasks,
+        K,
+        addrs,
+        size_of,
+        fetch_budget=fetch_budget,
+        disk_budget=disk_budget,
     )
     assert _reader_counters(replay) == _reader_counters(local.witness), (
         f"replay diverged from the real _stage2_gather at fetch={fetch_budget}, disk={disk_budget}"
     )
-    # the per-node disk map must be keyed by the passed (worker) addresses, never the local node-i tags
+    # the per-node disk map must be keyed by the passed (worker) addresses, never the local node-i
+    # tags
     assert set(replay.per_node_disk_bytes) <= set(addrs)
 
 
 def test_replay_detects_wrong_sizes() -> None:
-    """Discrimination guard: halving every fetched block's size MUST change the reader counters — a
-    size-blind replay (the failure mode) would not, and would silently pass the parity test above."""
+    """Discrimination guard: halving every fetched block's size MUST change the reader counters.
+
+    A size-blind replay (the failure mode) would not, and would silently pass the parity test
+    above.
+    """
     be = NumpyBackend()
     src = _blocks()
     n_tasks = min(K, len(src))

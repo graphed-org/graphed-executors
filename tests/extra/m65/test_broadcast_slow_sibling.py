@@ -1,4 +1,4 @@
-"""The hub broadcast waits for a pool worker that boots long after its sibling, up to a deadline."""
+"""The hub broadcast waits, up to a deadline, for a worker that boots long after its sibling."""
 
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ from graphed.core import StopReason
 from graphed_executors.local import executors
 
 
-def _second_boots_late(marker: str, late_s: float, init: Callable[..., None] | None, *initargs: Any) -> None:
+def _second_boots_late(
+    marker: str, late_s: float, init: Callable[..., None] | None, *initargs: Any
+) -> None:
     try:
         os.close(os.open(marker, os.O_CREAT | os.O_EXCL))
     except FileExistsError:

@@ -20,7 +20,9 @@ HERE = Path(__file__).parent
 
 def _alive(pid: int) -> bool:
     if sys.platform == "win32":  # os.kill(pid, 0) would terminate the process there
-        listing = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True)
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True
+        )
         return str(pid) in listing.stdout.split()
     try:
         os.kill(pid, 0)
@@ -37,14 +39,18 @@ route = sys.argv[2]
 if route == "pinned":
     ex = PinnedPoolExecutor(max_workers=2, steal=False, monitor=None)
 else:
-    ex = ProcessPoolExecutor(max_workers=2, steal=False, monitor=None, comms=None if route == "hub" else route)
+    comms = None if route == "hub" else route
+    ex = ProcessPoolExecutor(max_workers=2, steal=False, monitor=None, comms=comms)
 ex.run(pid_plan(sys.argv[1], (200, 3000)))
 """
 
 
 @pytest.mark.parametrize("route", ["ipc", "http", "pinned", "hub"])
 def test_workers_of_a_killed_driver_leave(route: str, tmp_path: Path) -> None:
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(HERE), os.environ.get("PYTHONPATH", "")])}
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([str(HERE), os.environ.get("PYTHONPATH", "")]),
+    }
     driver = subprocess.Popen([sys.executable, "-c", DRIVER, str(tmp_path), route], env=env)
     pids: list[int] = []
     try:

@@ -2,10 +2,11 @@
 
 Each query is recorded through graphed + executed per partition, and the per-chunk histograms are
 tree-reduced across workers/processes to a single histogram that must match the single-pass result
-BIT-FOR-BIT. This is a fundamentally deeper integration than the graphed-awkward (M3) per-`materialize`
-tests: it exercises the full record -> chunked execute -> tree-reduce path under real concurrency, for
-the whole ADL functional ladder (column histogram, MET cuts, object selection, jet/lepton
-combinatorics, dilepton+MET, tri-jet, jet-lepton isolation, 3-lepton mT)."""
+BIT-FOR-BIT. This is a fundamentally deeper integration than the graphed-awkward (M3)
+per-`materialize` tests: it exercises the full record -> chunked execute -> tree-reduce path under
+real concurrency, for the whole ADL functional ladder (column histogram, MET cuts, object
+selection, jet/lepton combinatorics, dilepton+MET, tri-jet, jet-lepton isolation, 3-lepton mT).
+"""
 
 from __future__ import annotations
 
@@ -29,13 +30,15 @@ def _plan(qname: str, n_chunks: int) -> Plan:
     )
 
 
-@pytest.mark.parametrize("Ex", [ThreadExecutor, ProcessExecutor])
+@pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
 @pytest.mark.parametrize("qname", adl.ADL_NAMES)
-def test_adl_query_via_executor_matches_single_pass(Ex: type, qname: str) -> None:
+def test_adl_query_via_executor_matches_single_pass(executor_cls: type, qname: str) -> None:
     bins, start, stop = adl.adl_axis(qname)
     full = adl.adl_full_counts(qname, bins, start, stop)
-    r = Ex(max_workers=4).run(_plan(qname, n_chunks=6))
-    assert np.array_equal(r.value, full), f"{qname} via {Ex.__name__}: chunked != single pass"
+    r = executor_cls(max_workers=4).run(_plan(qname, n_chunks=6))
+    assert np.array_equal(r.value, full), (
+        f"{qname} via {executor_cls.__name__}: chunked != single pass"
+    )
     assert r.n_combines == 5  # 6 chunks -> 5 tree combines
 
 
@@ -46,7 +49,9 @@ def test_adl_result_is_invariant_to_partition_count() -> None:
         full = adl.adl_full_counts(qname, bins, start, stop)
         for n_chunks in (1, 4, 13):
             r = ThreadExecutor(max_workers=4).run(_plan(qname, n_chunks))
-            assert np.array_equal(r.value, full), f"{qname}: {n_chunks} chunks changed the histogram"
+            assert np.array_equal(r.value, full), (
+                f"{qname}: {n_chunks} chunks changed the histogram"
+            )
 
 
 def test_the_adl_ladder_is_non_vacuous() -> None:

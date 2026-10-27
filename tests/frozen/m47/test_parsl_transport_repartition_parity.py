@@ -1,14 +1,16 @@
-"""m47 behavioral golden (m39 carried) — ``transport_run_repartition`` reproduces the LOCAL
-engine's ``dest_block_hashes`` BYTE-IDENTICALLY, and the RELAY engine's too, on both real
-backends, across two consecutive p2p runs under fresh epochs (plan §1.4/§2 m47; blueprint §3
-`test_parsl_transport_repartition_parity`).
+"""m47 behavioral golden (m39 carried).
+
+``transport_run_repartition`` reproduces the LOCAL engine's ``dest_block_hashes`` BYTE-IDENTICALLY,
+and the RELAY engine's too, on both real backends, across two consecutive p2p runs under fresh
+epochs (plan §1.4/§2 m47; blueprint §3 `test_parsl_transport_repartition_parity`).
 
 Witnesses: sha256 dest hashes equal to ``graphed_executors.local.shuffle.run_repartition`` AND to
 the m46 relay engine on identical inputs (cross-ENGINE content addressing — the three engines
 share the frozen route/merge/wire contract); per-dest key routing equals the golden-pinned
 ``partition`` oracle; row conservation; fresh epoch nonce per run. Any routing drift, merge-order
 drift, or wire-format drift fails byte equality — the m39/m43 hash-gate discrimination, now
-against the peer-exchange engine."""
+against the peer-exchange engine.
+"""
 
 from __future__ import annotations
 
@@ -56,14 +58,18 @@ def adapter(request) -> P2PAdapter:  # type: ignore[no-untyped-def]
     return request.param
 
 
-def test_dest_hashes_byte_identical_to_local_and_relay_and_across_runs(adapter: P2PAdapter, htex) -> None:  # type: ignore[no-untyped-def]
+def test_dest_hashes_byte_identical_to_local_and_relay_and_across_runs(
+    adapter: P2PAdapter, htex
+) -> None:  # type: ignore[no-untyped-def]
     src = repartition_blocks(adapter)
     local = run_repartition(adapter.backend, src, PARTS)
     backend = make_parsl_backend(htex)
 
     r1 = run_bounded(lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend))
     r2 = run_bounded(lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend))
-    relay = run_bounded(lambda: relay_repartition(adapter.backend, src, PARTS, runner=make_runner(backend)))
+    relay = run_bounded(
+        lambda: relay_repartition(adapter.backend, src, PARTS, runner=make_runner(backend))
+    )
 
     assert r1.dest_block_hashes, "no dest blocks produced — scenario degenerate"
     assert r1.dest_block_hashes == local.dest_block_hashes, (
@@ -74,7 +80,9 @@ def test_dest_hashes_byte_identical_to_local_and_relay_and_across_runs(adapter: 
         "p2p and relay engines disagree on identical inputs — the two parsl engines must be "
         "interchangeable in content (the §1.5 fallback depends on it)"
     )
-    assert r2.dest_block_hashes == r1.dest_block_hashes, "second p2p run diverged (determinism gate)"
+    assert r2.dest_block_hashes == r1.dest_block_hashes, (
+        "second p2p run diverged (determinism gate)"
+    )
     assert list(r1.transport.epoch_nonces) != list(r2.transport.epoch_nonces), (
         "every run must mint a fresh epoch nonce"
     )
@@ -86,9 +94,15 @@ def test_dest_hashes_byte_identical_to_local_and_relay_and_across_runs(adapter: 
 def test_salt_reroutes_deterministically(adapter: P2PAdapter, htex) -> None:  # type: ignore[no-untyped-def]
     src = repartition_blocks(adapter)
     backend = make_parsl_backend(htex)
-    plain = run_bounded(lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend))
-    s1 = run_bounded(lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend, salt=3))
-    s2 = run_bounded(lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend, salt=3))
+    plain = run_bounded(
+        lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend)
+    )
+    s1 = run_bounded(
+        lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend, salt=3)
+    )
+    s2 = run_bounded(
+        lambda: transport_repartition(adapter.backend, src, PARTS, pbackend=backend, salt=3)
+    )
 
     assert s1.dest_block_hashes == s2.dest_block_hashes, "salted runs diverged (nondeterminism)"
     assert s1.dest_block_hashes != plain.dest_block_hashes, (

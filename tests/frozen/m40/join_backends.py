@@ -1,15 +1,18 @@
-"""Shared harness for the M40 exec-local distributed-JOIN suite: BOTH real backends + the pinned
-``run_join`` contract + a TEST-AUTHORED relational oracle.
+"""Shared harness for the M40 exec-local distributed-JOIN suite.
 
-M40 extends the M39 two-phase exchange into a distributed hash JOIN. The same a2 backend-independence
-discipline applies: the generic join kernel deals only in the opaque ``ShuffleBackend`` primitives
-(the M39 exchange half + the M40 ``match_indices``/``take``/``merge_records`` half), so its correctness
-is witnessed by EXECUTION over the REAL ``AwkwardBackend`` AND ``NumpyBackend`` — an awkward-shaped
-join primitive fails on numpy.
+BOTH real backends + the pinned ``run_join`` contract + a TEST-AUTHORED relational oracle.
 
-Pinned execution contract (test-author decision — the implementer builds ``graphed_exec_local.shuffle``
-to this; see the m40 README). ``run_join`` mirrors M39 ``run_repartition`` field-for-field, with two
-inputs (``left_blocks`` = build side, ``right_blocks`` = probe side):
+M40 extends the M39 two-phase exchange into a distributed hash JOIN. The same a2
+backend-independence discipline applies: the generic join kernel deals only in the opaque
+``ShuffleBackend`` primitives (the M39 exchange half + the M40
+``match_indices``/``take``/``merge_records`` half), so its correctness is witnessed by EXECUTION
+over the REAL ``AwkwardBackend`` AND ``NumpyBackend`` — an awkward-shaped join primitive fails on
+numpy.
+
+Pinned execution contract (test-author decision — the implementer builds
+``graphed_exec_local.shuffle`` to this; see the m40 README). ``run_join`` mirrors M39
+``run_repartition`` field-for-field, with two inputs (``left_blocks`` = build side,
+``right_blocks`` = probe side):
 
     run_join(backend, left_blocks, right_blocks, parts, *, on=("__joinkey__",), how="inner",
              workers=1, comms="ipc", store_root=None, broadcast=None, salt=0,
@@ -17,17 +20,17 @@ inputs (``left_blocks`` = build side, ``right_blocks`` = probe side):
 
     broadcast_join_choice(build_bytes, probe_bytes, n_nodes) -> bool   # the pinned cost-model rule
 
-``broadcast=None`` = the cost model chooses (recorded, deterministic); ``broadcast=True/False`` = the
-executor HONOURS a plan-recorded choice (E5). ``ShuffleResult.value`` is ``{part -> joined block}``
-(``part`` = dest under shuffle, probe-partition index under broadcast — so the JOIN RESULT is the union
-over blocks, while the partitioning differs). ``dest_block_hashes`` is the content-addressed
-determinism key. ``ShuffleWitness`` gains the join counters (see the README).
+``broadcast=None`` = the cost model chooses (recorded, deterministic); ``broadcast=True/False`` =
+the executor HONOURS a plan-recorded choice (E5). ``ShuffleResult.value`` is ``{part -> joined
+block}`` (``part`` = dest under shuffle, probe-partition index under broadcast — so the JOIN RESULT
+is the union over blocks, while the partitioning differs). ``dest_block_hashes`` is the
+content-addressed determinism key. ``ShuffleWitness`` gains the join counters (see the README).
 
-The relational contract (§3.3 pin, trap 3): a probe row with k matching build rows ⇒ **k output rows**
-(SQL/pandas merge duplication), NOT a list-of-matches / grouped shape. The oracle below is a DUPLICATING
-merge, so a grouped/dedup impl fails it. The oracle reuses only the pre-existing M39 ``partition`` (the
-golden-vector-pinned routing) + plain field reads — never the join kernel — so the executor cannot
-share a bug with the oracle.
+The relational contract (§3.3 pin, trap 3): a probe row with k matching build rows ⇒ **k output
+rows** (SQL/pandas merge duplication), NOT a list-of-matches / grouped shape. The oracle below is a
+DUPLICATING merge, so a grouped/dedup impl fails it. The oracle reuses only the pre-existing M39
+``partition`` (the golden-vector-pinned routing) + plain field reads — never the join kernel — so
+the executor cannot share a bug with the oracle.
 """
 
 from __future__ import annotations
@@ -93,7 +96,11 @@ def _numpy_adapter() -> JoinAdapter:
         return block
 
     def side_rows(block: object, field: str) -> list[tuple[int, int]]:
-        return list(zip([int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True))
+        return list(
+            zip(
+                [int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True
+            )
+        )
 
     def joined_rows(block: object) -> list[Row]:
         return list(
@@ -111,16 +118,21 @@ def _numpy_adapter() -> JoinAdapter:
 def adapters() -> list[JoinAdapter]:
     out: list[JoinAdapter] = []
     for factory in (_awkward_adapter, _numpy_adapter):
-        with contextlib.suppress(Exception):  # a backend not installed drops from the parametrization
+        # a backend not installed drops from the parametrization
+        with contextlib.suppress(Exception):
             out.append(factory())
     return out
 
 
 # ---- scenario builders (shared across themes) ---------------------------------------------------
 def broadcast_sides(adapter: JoinAdapter) -> tuple[list[object], list[object]]:
-    """A SMALL build (left) side + a LARGER probe (right) side over a shared key population, so the
-    cost model prefers broadcast and the (b) theme can witness the large side is never shuffled."""
-    left = [adapter.make_side([1, 2, 3], "lval", [10, 20, 30])]  # tiny build side (one small block)
+    """Return a SMALL build (left) side + a LARGER probe (right) side over a shared key population.
+
+    A SMALL build (left) side + a LARGER probe (right) side over a shared key population, so the
+    cost model prefers broadcast and the (b) theme can witness the large side is never shuffled.
+    """
+    # tiny build side (one small block)
+    left = [adapter.make_side([1, 2, 3], "lval", [10, 20, 30])]
     right = [
         adapter.make_side([1, 1, 2, 3, 3, 3], "rval", [100, 101, 200, 300, 301, 302]),
         adapter.make_side([2, 2, 1, 3, 1, 2], "rval", [201, 202, 102, 303, 103, 203]),
@@ -130,8 +142,12 @@ def broadcast_sides(adapter: JoinAdapter) -> tuple[list[object], list[object]]:
 
 
 def general_sides(adapter: JoinAdapter) -> tuple[list[object], list[object]]:
-    """A multi-block, multi-key both-large scenario (several src_pids per side, overlapping keys so a
-    dest gathers rows from several src_pids) — the co-partitioned shuffle join used by determinism."""
+    """Return a multi-block, multi-key, both-large scenario with overlapping keys.
+
+    Return a multi-block, multi-key both-large scenario (several src_pids per side, overlapping
+    keys so a dest gathers rows from several src_pids) — the co-partitioned shuffle join used by
+    determinism.
+    """
     left = [
         adapter.make_side([0, 1, 2, 3, 4, 5], "lval", [10, 11, 12, 13, 14, 15]),
         adapter.make_side([5, 4, 3, 2, 1, 0], "lval", [16, 17, 18, 19, 20, 21]),
@@ -147,8 +163,11 @@ def general_sides(adapter: JoinAdapter) -> tuple[list[object], list[object]]:
 
 
 def skewed_sides(adapter: JoinAdapter) -> tuple[list[object], list[object]]:
-    """A heavily skewed key: ~90% of rows carry the single hot key 7, so a naive hash-route piles one
-    dest sky-high — the (f) salt theme must still be deterministic and relationally correct."""
+    """Return a heavily skewed key.
+
+    ~90% of rows carry the single hot key 7, so a naive hash-route piles one dest sky-high —
+    the (f) salt theme must still be deterministic and relationally correct.
+    """
     hot = 7
     lkeys = [hot] * 27 + [3, 11, 42]
     rkeys = [hot] * 27 + [3, 11, 99]
@@ -157,10 +176,15 @@ def skewed_sides(adapter: JoinAdapter) -> tuple[list[object], list[object]]:
     return left, right
 
 
-def one_dest_sides(adapter: JoinAdapter, n_left: int, n_right: int) -> tuple[list[object], list[object]]:
-    """A single hot key (all rows key=7 -> one dest) with n_left build x n_right probe rows, so the
-    inner join emits n_left*n_right OUTPUT rows (relational duplication) — the B5 output-side blowup:
-    the joined dest_pid is far larger than any input-derived budget (trap 2)."""
+def one_dest_sides(
+    adapter: JoinAdapter, n_left: int, n_right: int
+) -> tuple[list[object], list[object]]:
+    """Return a single hot key (all rows key=7 -> one dest) with n_left build x n_right probe rows.
+
+    A single hot key (all rows key=7 -> one dest) with n_left build x n_right probe rows, so the
+    inner join emits n_left*n_right OUTPUT rows (relational duplication) — the B5 output-side
+    blowup: the joined dest_pid is far larger than any input-derived budget (trap 2).
+    """
     left = [adapter.make_side([7] * n_left, "lval", list(range(n_left)))]
     right = [adapter.make_side([7] * n_right, "rval", list(range(n_right)))]
     return left, right
@@ -182,15 +206,23 @@ def _per_dest_side(
 def expected_join_per_dest(
     adapter: JoinAdapter, left: list[object], right: list[object], parts: int
 ) -> dict[int, Counter[Row]]:
-    """DUPLICATING relational inner join, per dest, as a multiset (§3.3 pin). Routes each side with the
-    backend's own ``partition`` (golden-pinned routing, NOT re-implemented) then, within each dest,
-    emits one ``(key, lval, rval)`` row for every matching (build, probe) pair — a probe row with k
-    build matches ⇒ k rows. A grouped/list-of-matches or dedup impl produces a different multiset."""
+    """DUPLICATING relational inner join, per dest, as a multiset (§3.3 pin).
+
+    Routes each side with the backend's own ``partition`` (golden-pinned routing, NOT
+    re-implemented) then, within each dest, emits one ``(key, lval, rval)`` row for every
+    matching (build, probe) pair — a probe row with k build matches ⇒ k rows. A
+    grouped/list-of-matches or dedup impl produces a different multiset.
+    """
     left_by_dest = _per_dest_side(adapter, left, "lval", parts)
     right_by_dest = _per_dest_side(adapter, right, "rval", parts)
     per_dest: dict[int, Counter[Row]] = {}
     for dest in set(left_by_dest) & set(right_by_dest):
-        rows = [(k, lv, rv) for (k, lv) in left_by_dest[dest] for (k2, rv) in right_by_dest[dest] if k == k2]
+        rows = [
+            (k, lv, rv)
+            for (k, lv) in left_by_dest[dest]
+            for (k2, rv) in right_by_dest[dest]
+            if k == k2
+        ]
         if rows:
             per_dest[dest] = Counter(rows)
     return per_dest
@@ -199,14 +231,19 @@ def expected_join_per_dest(
 def expected_join_all(
     adapter: JoinAdapter, left: list[object], right: list[object], parts: int
 ) -> Counter[Row]:
-    """The whole relational result as one multiset (partitioning-independent) — for broadcast==shuffle."""
+    """Return the whole relational result as one multiset (partitioning-independent).
+
+    For broadcast==shuffle.
+    """
     total: Counter[Row] = Counter()
     for c in expected_join_per_dest(adapter, left, right, parts).values():
         total += c
     return total
 
 
-def observed_join_per_dest(adapter: JoinAdapter, value: dict[int, object]) -> dict[int, Counter[Row]]:
+def observed_join_per_dest(
+    adapter: JoinAdapter, value: dict[int, object]
+) -> dict[int, Counter[Row]]:
     out: dict[int, Counter[Row]] = {}
     for part, block in value.items():
         rows = adapter.joined_rows(block)

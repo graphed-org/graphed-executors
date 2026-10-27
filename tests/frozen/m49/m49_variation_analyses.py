@@ -1,4 +1,6 @@
-"""Module-level fixtures for the m49 cross-process variation anchors (plan §10/m49, executors half).
+"""Module-level fixtures for the m49 cross-process variation anchors.
+
+Plan §10/m49, executors half.
 
 Everything a spawned worker must unpickle lives here at module scope: the `PartitionedSource`, the
 histogram programs, and the poison. `graphed_histogram.plan` ships only the histograms' own
@@ -7,8 +9,8 @@ rendering anchors need is a plain USER arithmetic op recorded in the analysis, n
 payload (the m6 `numpy_mismatch_in_fused_stage` idiom, mismatched operand lengths).
 
 The 15-reference matrix runs against the corpus's OWN dataset, so `graphed_corpus.ttbar_region` /
-`ttgamma_region` recompute each reference in-process — the m7 house pattern (`tests/frozen/m7/adl.py`),
-not a vendored JSON.
+`ttgamma_region` recompute each reference in-process — the m7 house pattern
+(`tests/frozen/m7/adl.py`), not a vendored JSON.
 """
 
 from __future__ import annotations
@@ -62,9 +64,14 @@ class CorpusEvents:
         raise AssertionError("the whole-dataset loader must never run during a plan")
 
     def partitions(self, steps_per_file: int = 1) -> tuple[Partition, ...]:
-        return tuple(Partition.blind("corpus://events", "", s, steps_per_file) for s in range(steps_per_file))
+        return tuple(
+            Partition.blind("corpus://events", "", s, steps_per_file)
+            for s in range(steps_per_file)
+        )
 
-    def read_partition(self, partition: Partition, columns: Any, resources: WorkerResources) -> ak.Array:
+    def read_partition(
+        self, partition: Partition, columns: Any, resources: WorkerResources
+    ) -> ak.Array:
         part = partition.resolve(len(self.data))
         self.part_reads.append((part.entry_start, part.entry_stop))
         return self.data[part.entry_start : part.entry_stop]
@@ -78,15 +85,20 @@ def _session(events: ak.Array) -> tuple[Session, Any, CorpusEvents]:
 
 
 def _stable(values: Array) -> Array:
-    """The corpus's pre-fill 6-decimal rounding as a recorded ufunc (`np.round`'s own lowering)."""
+    """Return the corpus's pre-fill 6-decimal rounding as a recorded ufunc.
+
+    `np.round`'s own lowering.
+    """
     return np.rint(values * 1e6) / 1e6
 
 
 # ---- the 15-reference matrix (§10/m49(ii)) ---------------------------------------------------
 def matrix_plan(steps_per_file: int = MATRIX_PARTITIONS) -> tuple[Plan[Any], CorpusEvents]:
-    """One plan carrying all 15 (output, label) slots: the JES shift re-runs the selection, the
-    b-tag / photon scale factors re-weight it, and §2.4 keeps the two families siblings rather than
-    a cross product."""
+    """One plan carrying all 15 (output, label) slots.
+
+    The JES shift re-runs the selection, the b-tag / photon scale factors re-weight it, and
+    §2.4 keeps the two families siblings rather than a cross product.
+    """
     _ses, events, source = _session(MATRIX_EVENTS)
 
     jets = graphed.vary(
@@ -118,7 +130,9 @@ def matrix_plan(steps_per_file: int = MATRIX_PARTITIONS) -> tuple[Plan[Any], Cor
     muons = events.Muon[events.Muon.pt > 30]
     good_jets = jets[jets.pt > 25]
     selected = (
-        (gak.num(photons, axis=1) >= 1) & (gak.num(muons, axis=1) >= 1) & (gak.num(good_jets, axis=1) >= 2)
+        (gak.num(photons, axis=1) >= 1)
+        & (gak.num(muons, axis=1) >= 1)
+        & (gak.num(good_jets, axis=1) >= 2)
     )
     photon_pt = _stable(gak.drop_none(gak.firsts(photons[selected].pt)))
     pho = graphed.vary(
@@ -136,7 +150,10 @@ def matrix_plan(steps_per_file: int = MATRIX_PARTITIONS) -> tuple[Plan[Any], Cor
 
 @cache
 def corpus_reference(output: str, label: str) -> Any:
-    """The slot's reference recomputed IN-PROCESS from plain awkward + hist (`graphed_corpus`)."""
+    """Return the slot's reference recomputed IN-PROCESS from plain awkward + hist.
+
+    `graphed_corpus`.
+    """
     from graphed_corpus import ttbar_region, ttgamma_region  # noqa: PLC0415
 
     if output == "ttgamma":
@@ -146,14 +163,18 @@ def corpus_reference(output: str, label: str) -> Any:
 
 # ---- the §8.2 rendering fixtures -------------------------------------------------------------
 def _poison(factor: Array) -> Array:
-    """A user arithmetic op over operands of different lengths — the failure every rendering anchor
-    raises. One spelling for all three, so a `variation` difference can only come from WHERE in the
-    label topology the node sits."""
+    """Return a user arithmetic op over operands of different lengths.
+
+    The failure every rendering anchor raises. One spelling for all three, so a `variation`
+    difference can only come from WHERE in the label topology the node sits.
+    """
     return factor[factor > POISON_CUT] + factor
 
 
 def poisoned_program(where: str) -> tuple[Any, Array]:
-    """A varied value whose failing node sits in exactly one region of the label topology, and that
+    """Return a varied value whose failing node sits in exactly one region of the label topology.
+
+    A varied value whose failing node sits in exactly one region of the label topology, and that
     node itself.
 
     ``jes_up`` puts it in one universe's chain; ``shared`` puts it in a node UPSTREAM of the fork
@@ -192,8 +213,11 @@ def record_cone(array: Array) -> set[int]:
 
 
 def healthy_plan(*, steps_per_file: int = 2) -> Plan[Any]:
-    """The same shape with no poison: the control that the fixture's failures come from the poison
-    and not from the varied lowering itself."""
+    """Return the same shape with no poison.
+
+    The control that the fixture's failures come from the poison and not from the varied
+    lowering itself.
+    """
     _ses, events, _source = _session(POISON_EVENTS)
     scalar_pt = gak.sum(events.Jet.pt, axis=1)
     varied = graphed.vary(scalar_pt, "jes", up=scalar_pt * 1.05, down=scalar_pt * 0.95)

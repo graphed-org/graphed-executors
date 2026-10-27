@@ -1,6 +1,8 @@
-"""m44 peer reduction hosted on dask — ``transport_run_plan`` runs the UNCHANGED M38
-``process_and_reduce`` protocol over ``DaskWorkerTransport`` endpoints (plan §1.3; blueprint §3
-`test_transport_peer_reduce_dask`). Tier B: real worker processes, real sockets.
+"""m44 peer reduction hosted on dask.
+
+``transport_run_plan`` runs the UNCHANGED M38 ``process_and_reduce`` protocol over
+``DaskWorkerTransport`` endpoints (plan §1.3; blueprint §3 `test_transport_peer_reduce_dask`). Tier
+B: real worker processes, real sockets.
 
 Witnesses (mechanism, never clocks): result equals ``SequentialRunner`` bit-for-bit, TWICE (fresh
 epoch each run); the scheduler saw exactly k ``_dask_peer_main`` actor tasks through the m42
@@ -11,7 +13,8 @@ layer 1); zero epoch restarts on the clean path.
 
 Discriminates: a driver-side fold that matches the value but has zero cross-worker hand-offs and
 the wrong task count; a per-leaf future graph (peer task count explodes); an engine that drops
-reduction traffic and still reports green."""
+reduction traffic and still reports green.
+"""
 
 from __future__ import annotations
 
@@ -69,7 +72,8 @@ def test_peer_reduction_matches_sequential_twice_and_is_genuinely_distributed(cl
     # subtree top to the root owner over the transport
     pw = tw_per_worker(r1)
     assert pw[a1].get("peer_sends", 0) >= 1, (
-        f"no accepted worker->worker send recorded on {a1} — a driver-side fold, not peer reduction"
+        f"no accepted worker->worker send recorded on {a1} — a driver-side fold, not peer "
+        "reduction"
     )
     assert pw[a0].get("recv_invocations", 0) >= 1, (
         f"the root-subtree owner {a0} never received a transport message"

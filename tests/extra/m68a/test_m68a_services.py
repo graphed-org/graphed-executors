@@ -1,9 +1,12 @@
-"""m68a ``ServiceSet`` and the engine's service phase over ``ThreadBackend`` and small duck-typed
-backends: each leg, each refusal, the probe's identity rule and bound, the release of what a failed
-start acquired, and the engine's bind/resolve around a run. The frozen suite pins these through its
-harness; these witnesses keep ``submit/`` gated in the ``test-dask`` job, which runs no frozen m68a
-protocol file, and reach the branches a correct run never takes (a child that dies after its check
-passes, a child that ignores ``terminate``, graphed's resolve walk once it lands)."""
+"""m68a ``ServiceSet`` and the engine's service phase.
+
+Over ``ThreadBackend`` and small duck-typed backends: each leg, each refusal, the probe's identity
+rule and bound, the release of what a failed start acquired, and the engine's bind/resolve around a
+run. The frozen suite pins these through its harness; these witnesses keep ``submit/`` gated in the
+``test-dask`` job, which runs no frozen m68a protocol file, and reach the branches a correct run
+never takes (a child that dies after its check passes, a child that ignores ``terminate``,
+graphed's resolve walk once it lands).
+"""
 
 from __future__ import annotations
 
@@ -30,12 +33,12 @@ from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit import services as svc
 from graphed_executors.submit.recipes import http_server
 
-# ---- servers, plans, backends ------------------------------------------------------------------------
+# ---- servers, plans, backends -------------------------------------------------------------------
 
 
 @contextlib.contextmanager
 def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
-    """An HTTP server on loopback answering ``status`` (after ``ok_first`` 200s, 503)."""
+    """Serve ``status`` on loopback (after ``ok_first`` 200s, 503)."""
     gets = [0]
 
     class Handler(BaseHTTPRequestHandler):
@@ -51,7 +54,9 @@ def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
             return None
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -62,7 +67,7 @@ def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
 
 
 def free_ports() -> tuple[int, int]:
-    """A range of one port that was free a moment ago."""
+    """Return a range of one port that was free a moment ago."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = int(sock.getsockname()[1])
@@ -132,9 +137,14 @@ class Duck(ThreadBackend):
 
 
 class Hosting(Duck):
-    """Hosts a service on the cluster as an in-process HTTP server reported on ``service_identity``."""
+    """Hosts a service on the cluster as an in-process HTTP server.
 
-    def __init__(self, service_identity: str, driver_identity: str, *, release_raises: bool = False) -> None:
+    Reported on ``service_identity``.
+    """
+
+    def __init__(
+        self, service_identity: str, driver_identity: str, *, release_raises: bool = False
+    ) -> None:
         super().__init__()
         self.service_identity = service_identity
         self.driver_identity = driver_identity
@@ -172,10 +182,12 @@ def statuses(caplog: pytest.LogCaptureFixture) -> list[svc.ServiceStatus]:
     return [r.status for r in caplog.records if hasattr(r, "status")]
 
 
-# ---- the legs through the engine -----------------------------------------------------------------------
+# ---- the legs through the engine ----------------------------------------------------------------
 
 
-def test_a_given_endpoint_binds_and_the_value_is_resolved(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_given_endpoint_binds_and_the_value_is_resolved(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     with (
         serving() as endpoint,
         caplog.at_level(logging.INFO),
@@ -192,7 +204,7 @@ def test_a_failing_given_endpoint_is_never_replaced() -> None:
     with (
         serving(503) as endpoint,
         SubmitRunner(ThreadBackend(2), services={"web": endpoint}) as runner,
-        pytest.raises(svc.ServiceUnavailable) as excinfo,
+        pytest.raises(svc.ServiceUnavailableError) as excinfo,
     ):
         runner.run(plan_of(GetProcess(), [spec]))
     assert list(excinfo.value.legs) == ["user"] and endpoint in str(excinfo.value)
@@ -206,7 +218,9 @@ def test_the_site_leg_passes_or_falls_through(caplog: pytest.LogCaptureFixture) 
             assert dict(eps) == {"web": site}
         backend.close()
     with serving(503) as dead:
-        backend = Duck(site_services={"http": dead}, service_hosts=("driver",), advertise_host="127.0.0.1")
+        backend = Duck(
+            site_services={"http": dead}, service_hosts=("driver",), advertise_host="127.0.0.1"
+        )
         spec = replace(http_server("web"), ports=free_ports(), timeout_s=30.0)
         with svc.ServiceSet([spec], backend) as eps:
             assert eps["web"].startswith("http://127.0.0.1:")
@@ -218,27 +232,27 @@ def test_the_site_leg_passes_or_falls_through(caplog: pytest.LogCaptureFixture) 
 def test_no_leg_and_a_recipe_that_needs_the_cluster_are_refused() -> None:
     backend = ThreadBackend(1)
     try:
-        with pytest.raises(svc.ServiceUnavailable) as excinfo:
+        with pytest.raises(svc.ServiceUnavailableError) as excinfo:
             svc.ServiceSet([bare()], backend).start()
         assert set(excinfo.value.legs) == {"user", "site", "managed"}
         gpu = child((sys.executable, "-c", "pass"), resources={"gpus": 1})
-        with pytest.raises(svc.ServiceUnavailable, match="host_service"):
+        with pytest.raises(svc.ServiceUnavailableError, match="host_service"):
             svc.ServiceSet([gpu], backend).start()
         cluster_only = Duck(service_hosts=("cluster",))
-        with pytest.raises(svc.ServiceUnavailable, match=r"service_hosts=\('cluster',\)"):
+        with pytest.raises(svc.ServiceUnavailableError, match=r"service_hosts=\('cluster',\)"):
             svc.ServiceSet([child((sys.executable, "-c", "pass"))], cluster_only).start()
         cluster_only.close()
     finally:
         backend.close()
 
 
-# ---- managed beside the driver -------------------------------------------------------------------------
+# ---- managed beside the driver ------------------------------------------------------------------
 
 
 def test_a_child_that_exits_before_its_check_passes() -> None:
     backend = ThreadBackend(1)
     try:
-        with pytest.raises(svc.ServiceUnavailable, match="returncode 3"):
+        with pytest.raises(svc.ServiceUnavailableError, match="returncode 3"):
             svc.ServiceSet([child(("{python}", "-c", "raise SystemExit(3)"))], backend).start()
     finally:
         backend.close()
@@ -251,7 +265,7 @@ def test_a_child_that_exits_after_its_check_passed(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(svc, "check_ready", late_pass)
     backend = ThreadBackend(1)
     try:
-        with pytest.raises(svc.ServiceUnavailable, match="passed but the service exited"):
+        with pytest.raises(svc.ServiceUnavailableError, match="passed but the service exited"):
             svc.ServiceSet([child(("{python}", "-c", "pass"))], backend).start()
     finally:
         backend.close()
@@ -261,7 +275,7 @@ def test_a_check_that_never_passes_names_its_last_reason() -> None:
     backend = ThreadBackend(1)
     spec = child(("{python}", "-c", "import time; time.sleep(60)"), timeout_s=0.5)
     try:
-        with pytest.raises(svc.ServiceUnavailable, match="never passed") as excinfo:
+        with pytest.raises(svc.ServiceUnavailableError, match="never passed") as excinfo:
             svc.ServiceSet([spec], backend).start()
         assert "tcp connect" in excinfo.value.legs["managed"]
     finally:
@@ -308,26 +322,36 @@ def test_a_child_that_ignores_terminate_is_killed(monkeypatch: pytest.MonkeyPatc
     assert proc.calls == ["terminate", "wait(0.01)", "kill", "wait(None)"]
 
 
-# ---- on the cluster, and the probe ---------------------------------------------------------------------
+# ---- on the cluster, and the probe --------------------------------------------------------------
 
 
 def hosted() -> ServiceSpec:
-    return ServiceSpec("web", "http", check="http:/", launch=Launch(("serve",), image="img"), timeout_s=10.0)
+    return ServiceSpec(
+        "web", "http", check="http:/", launch=Launch(("serve",), image="img"), timeout_s=10.0
+    )
 
 
-def test_a_hosted_service_passes_off_its_host_and_is_released(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_hosted_service_passes_off_its_host_and_is_released(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     backend = Hosting("elsewhere.example", "driver.example")
     with caplog.at_level(logging.INFO), svc.ServiceSet([hosted()], backend, scope="s1") as eps:
         assert eps["web"].startswith("http://127.0.0.1:")
     assert backend.released == ["s1-0"]
     (status,) = statuses(caplog)
-    assert (status.leg, status.host, status.identity) == ("managed", "cluster", "elsewhere.example")
+    assert (status.leg, status.host, status.identity) == (
+        "managed",
+        "cluster",
+        "elsewhere.example",
+    )
     backend.close()
 
 
-def test_a_hosted_service_only_its_own_host_reaches_is_refused(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_hosted_service_only_its_own_host_reaches_is_refused(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     backend = Hosting(svc.host_identity(), "driver.example", release_raises=True)
-    with caplog.at_level(logging.INFO), pytest.raises(svc.ServiceUnreachable) as excinfo:
+    with caplog.at_level(logging.INFO), pytest.raises(svc.ServiceUnreachableError) as excinfo:
         svc.ServiceSet([hosted()], backend, scope="s2").start()
     assert excinfo.value.reason == "only same-host workers answered"
     assert backend.released == ["s2-0"]
@@ -337,12 +361,16 @@ def test_a_hosted_service_only_its_own_host_reaches_is_refused(caplog: pytest.Lo
 
 def test_a_probe_reason_and_an_unanswered_probe() -> None:
     backend = Duck()
-    with serving(ok_first=1) as once, pytest.raises(svc.ServiceUnreachable, match="503") as excinfo:
-        svc.ServiceSet([bare()], backend, endpoints={"web": once}).start()  # the leg check, then 503
+    with (
+        serving(ok_first=1) as once,
+        pytest.raises(svc.ServiceUnreachableError, match="503") as excinfo,
+    ):
+        # the leg check, then 503
+        svc.ServiceSet([bare()], backend, endpoints={"web": once}).start()
     assert excinfo.value.worker == svc.host_identity()
     backend.close()
     silent = Silent()
-    with serving() as ok, pytest.raises(svc.ServiceUnreachable, match="no worker answered"):
+    with serving() as ok, pytest.raises(svc.ServiceUnreachableError, match="no worker answered"):
         svc.ServiceSet([replace(bare(), timeout_s=0.2)], silent, endpoints={"web": ok}).start()
     assert len(silent.cancelled) == 1 and silent.cancelled[0].cancelled()
     silent.close()
@@ -361,12 +389,15 @@ def test_statuses_are_stamped_when_the_set_closes() -> None:
     backend.close()
 
 
-# ---- the engine ----------------------------------------------------------------------------------------
+# ---- the engine ---------------------------------------------------------------------------------
 
 
 def test_graphed_s_resolve_walk_is_what_a_run_returns(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The engine hands the run's value to ``graphed.services.resolve_services`` with the bound plan
-    and returns what it gives back; a process without the hook comes back unchanged."""
+    """The engine hands the run's value to ``graphed.services.resolve_services``.
+
+    With the bound plan and returns what it gives back; a process without the hook comes back
+    unchanged.
+    """
     seen: list[Any] = []
     real = graphed_services.resolve_services
 
@@ -377,7 +408,10 @@ def test_graphed_s_resolve_walk_is_what_a_run_returns(monkeypatch: pytest.Monkey
     plain = plan_of(leaf_uri, [])
     assert graphed_services.resolve_services(plain, ("v",)) == ("v",)  # no hook: the value itself
     monkeypatch.setattr(graphed_services, "resolve_services", walk)
-    with serving() as endpoint, SubmitRunner(ThreadBackend(2), services={"web": endpoint}) as runner:
+    with (
+        serving() as endpoint,
+        SubmitRunner(ThreadBackend(2), services={"web": endpoint}) as runner,
+    ):
         result = runner.run(plan_of(GetProcess(), [bare()]))
     assert result.value == ("walked", ("resolved", "body", "body"))
     ((process, value),) = seen
@@ -391,7 +425,9 @@ def test_a_run_without_services_cancels_nothing() -> None:
     assert result.n_partitions == 2 and backend.cancelled == []
 
 
-def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     backend = ThreadBackend(1)
     ran: list[str] = []
 
@@ -404,7 +440,9 @@ def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(caplog: pytest
             eps.on_close(lambda: ran.append("first"))
             eps.on_close(raising)
         assert ran == ["raising", "first"]
-    assert any("on_close fault (extra)" in str(r.exc_info[1]) for r in caplog.records if r.exc_info)
+    assert any(
+        "on_close fault (extra)" in str(r.exc_info[1]) for r in caplog.records if r.exc_info
+    )
     backend.close()
 
 
@@ -414,15 +452,21 @@ def test_the_http_server_recipe_serves_its_root(tmp_path: Any) -> None:
     spec = replace(http_server("web", root=str(tmp_path)), ports=free_ports(), timeout_s=30.0)
     backend = ThreadBackend(1)
     try:
-        with svc.ServiceSet([spec], backend) as eps, urllib.request.urlopen(eps["web"] + "/marker.txt") as r:
+        with (
+            svc.ServiceSet([spec], backend) as eps,
+            urllib.request.urlopen(eps["web"] + "/marker.txt") as r,
+        ):
             assert r.read() == b"from root"
     finally:
         backend.close()
 
 
 def test_the_scan_skips_a_port_something_answers_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A port whose bind passes (as on macOS/BSD beside a wildcard listener) is still skipped when a
-    connect is answered; the next one is handed out."""
+    """A port whose bind passes is still skipped when a connect is answered.
+
+    A port whose bind passes (as on macOS/BSD beside a wildcard listener) is still skipped when a
+    connect is answered; the next one is handed out.
+    """
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen(1)

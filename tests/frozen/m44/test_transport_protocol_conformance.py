@@ -1,6 +1,8 @@
-"""m44 protocol conformance — the dask-backed endpoints ARE graphed ``WorkerTransport``s
-(plan §1.1; blueprint §3 `test_transport_protocol_conformance`). Tier B (processes=True): the spec
-crosses a real process boundary and the round-trip rides real sockets.
+"""m44 protocol conformance.
+
+The dask-backed endpoints ARE graphed ``WorkerTransport``s (plan §1.1; blueprint §3
+`test_transport_protocol_conformance`). Tier B (processes=True): the spec crosses a real process
+boundary and the round-trip rides real sockets.
 
 Witnesses: ``runtime_checkable`` isinstance INSIDE a worker task; send->True then a recv round-trip
 carrying (src, message) with the true sender address; ``recv(timeout)`` -> None on empty (the
@@ -11,7 +13,8 @@ worker->driver channel, and its ``broadcast`` lands in every worker inbox.
 
 Discriminates: a stub whose ``send`` always returns True (the flood probes the drop signal), one
 that blocks forever on a full inbox (the flood is bounded by the pinned-task timeout), and a
-driver endpoint that fakes ``peers()``/``address``."""
+driver endpoint that fakes ``peers()``/``address``.
+"""
 
 from __future__ import annotations
 
@@ -49,7 +52,9 @@ def test_worker_endpoint_conforms_and_round_trips(client) -> None:  # type: igno
     spec = make_transport_spec(f"m44-conf-{uuid.uuid4().hex}", (a0, a1))
 
     obs = pinned_call(client, conf_probe, spec, worker=a0)
-    assert obs["is_transport"] is True, "the worker endpoint must satisfy the runtime_checkable Protocol"
+    assert obs["is_transport"] is True, (
+        "the worker endpoint must satisfy the runtime_checkable Protocol"
+    )
     assert obs["address"] == a0, "the endpoint address must be the dask worker address"
     assert set(obs["peers"]) == {a1, "driver"}, "default overlay: the other worker + the driver"
     assert obs["empty_recv"] is None, "recv(timeout) on an empty inbox must return None, not block"
@@ -77,7 +82,9 @@ def test_driver_endpoint_conforms_and_carries_both_channels(client) -> None:  # 
         # worker -> driver (the log_event channel behind send("driver", ...))
         assert pinned_call(client, conf_send, spec, "driver", ("root", 42), worker=a0) is True
         got = driver_ep.recv(timeout=90.0)
-        assert got is not None and tuple(got) == (a0, ("root", 42)), f"driver channel lost the root: {got!r}"
+        assert got is not None and tuple(got) == (a0, ("root", 42)), (
+            f"driver channel lost the root: {got!r}"
+        )
 
         # driver -> all workers (the reliable done/teardown path)
         driver_ep.broadcast(("done",))

@@ -28,6 +28,7 @@ def zeros() -> np.ndarray:
 
 def pid_plan(directory: str, weights_ms: tuple[int, ...]) -> Plan[np.ndarray]:
     tasks = tuple(
-        Task(k, Partition(f"{directory}/leaf{k}", "Events", 0, w)) for k, w in enumerate(weights_ms)
+        Task(k, Partition(f"{directory}/leaf{k}", "Events", 0, w))
+        for k, w in enumerate(weights_ms)
     )
     return Plan(process=record_pid, combine=add, empty=zeros, tasks=tasks)

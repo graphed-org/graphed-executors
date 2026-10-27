@@ -1,4 +1,7 @@
-"""m63 contract 9: a local executor runs one plan at a time, whether plans arrive by run or submit."""
+"""m63 contract 9.
+
+A local executor runs one plan at a time, whether plans arrive by run or submit.
+"""
 
 from __future__ import annotations
 

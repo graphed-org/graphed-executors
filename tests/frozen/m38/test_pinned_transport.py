@@ -1,9 +1,11 @@
-"""M38 P7: identity-pinned IPC workers with a BOUNDED (O(log N)) communication overlay, so the peer
-registry a worker inherits is O(log N) — not the O(N²) "every worker inherits every queue" that bites
-large single machines (>128 cores). Covers the shared overlay machinery (lifelines + reduction edges),
-the per-worker actor that resolves its inherited transport, the PinnedProcessPool executor, and that a
-persistent IPC executor reuses its pinned pool. (The dynamic-cluster runtime that recomputes this
-overlay on membership change is Phase 2; it reuses worker_outbox_addresses.)
+"""M38 P7: identity-pinned IPC workers with a BOUNDED (O(log N)) communication overlay.
+
+The peer registry a worker inherits is thus O(log N) — not the O(N²) "every worker inherits every
+queue" that bites large single machines (>128 cores). Covers the shared overlay machinery
+(lifelines + reduction edges), the per-worker actor that resolves its inherited transport, the
+PinnedProcessPool executor, and that a persistent IPC executor reuses its pinned pool. (The
+dynamic-cluster runtime that recomputes this overlay on membership change is Phase 2; it reuses
+worker_outbox_addresses.)
 """
 
 from __future__ import annotations
@@ -48,13 +50,17 @@ def _flat(n: int) -> str:
     return tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0]
 
 
-# ---- the bounded overlay: O(log N) degree (the sub-quadratic-inheritance witness) -----------------
+# ---- the bounded overlay: O(log N) degree (the sub-quadratic-inheritance witness) ---------------
 
 
-@pytest.mark.parametrize(("n", "w"), [(8, 4), (32, 8), (64, 16), (256, 32), (1024, 64), (4096, 128)])
+@pytest.mark.parametrize(
+    ("n", "w"), [(8, 4), (32, 8), (64, 16), (256, 32), (1024, 64), (4096, 128)]
+)
 def test_overlay_degree_is_logarithmic_not_linear(n: int, w: int) -> None:
-    """Each worker's outbox set (what it inherits beyond its inbox) is O(log w), NOT O(w) — so a
-    worker inherits O(log N) queue handles and the whole registry is O(N log N)."""
+    """Each worker's outbox set (what it inherits beyond its inbox) is O(log w), NOT O(w).
+
+    A worker thus inherits O(log N) queue handles and the whole registry is O(N log N).
+    """
     addrs = tuple(f"w{i}" for i in range(w))
     out = worker_outbox_addresses(n, make_bounds(n, w), addrs)
     degree = max(len(s) for s in out.values())
@@ -73,13 +79,16 @@ def test_lifelines_are_a_symmetric_hypercube() -> None:
     assert all(len(nb[i]) <= math.ceil(math.log2(w)) for i in range(w))  # O(log w) degree
 
 
-# ---- the per-worker actor resolving its inherited transport (in-process, single worker) ----------
+# ---- the per-worker actor resolving its inherited transport (in-process, single worker) ---------
 
 
 def test_pinned_actor_resolves_inherited_transport_and_reduces() -> None:
-    """``pinned_peer_init`` installs THIS worker's transport (its bounded subset) as the process state
+    """``pinned_peer_init`` installs this worker's transport for ``pinned_peer_actor``.
+
+    ``pinned_peer_init`` installs THIS worker's transport (its bounded subset) as the process state
     ``pinned_peer_actor`` reads. Single worker (w=1) so one process-global suffices in-process; the
-    multi-worker reduction is covered by test_peer_reduce + the real ProcessExecutor tests."""
+    multi-worker reduction is covered by test_peer_reduce + the real ProcessExecutor tests.
+    """
     n = 4
     registry: dict[str, queue.Queue[object]] = {DRIVER: queue.Queue(), "w0": queue.Queue()}
     pinned_peer_init("w0", registry["w0"], {DRIVER: registry[DRIVER]}, ())
@@ -89,7 +98,9 @@ def test_pinned_actor_resolves_inherited_transport_and_reduces() -> None:
     wit: dict[str, dict[str, int]] = {}
 
     def run() -> None:
-        wit["w0"] = pinned_peer_actor(n, make_bounds(n, 1), ("w0",), _leaf_value, _cat, items, steal=False)
+        wit["w0"] = pinned_peer_actor(
+            n, make_bounds(n, 1), ("w0",), _leaf_value, _cat, items, steal=False
+        )
 
     t = threading.Thread(target=run)
     t.start()
@@ -112,12 +123,16 @@ def test_pinned_actor_without_init_is_a_loud_error() -> None:
 
 
 def test_pinned_loop_serves_calls_then_shuts_down() -> None:
-    """The generic pinned-worker body (in-process): run the initializer once, serve ok + erroring
-    calls, stop on the shutdown sentinel."""
+    """The generic pinned-worker body (in-process).
+
+    Run the initializer once, serve ok + erroring calls, stop on the shutdown sentinel.
+    """
     call_q: queue.Queue = queue.Queue()
     result_q: queue.Queue = queue.Queue()
     inited: list = []
-    t = threading.Thread(target=_pinned_loop, args=(lambda *a: inited.append(a), ("tag",), call_q, result_q))
+    t = threading.Thread(
+        target=_pinned_loop, args=(lambda *a: inited.append(a), ("tag",), call_q, result_q)
+    )
     t.start()
     call_q.put((0, lambda a, b: a + b, (2, 3)))
     assert result_q.get(timeout=5) == (0, True, 5)
@@ -146,13 +161,17 @@ def _pp_boom() -> None:
 
 
 def test_pinned_process_pool_pins_identity_and_propagates_errors() -> None:
-    """Each worker runs its OWN init (so worker 0 != worker 1's inherited state); submit targets a
-    specific worker; errors surface through the Future (M6/M7)."""
+    """Each worker runs its OWN init (so worker 0 != worker 1's inherited state).
+
+    Submit targets a specific worker; errors surface through the Future (M6/M7).
+    """
     ctx = multiprocessing.get_context("spawn")
     pool = PinnedProcessPool(2, ctx, _pp_init, [("a",), ("b",)])
     try:
-        assert pool.submit(_pp_echo, 5, worker=0).result(timeout=15) == ("a", 5)  # worker 0's identity
-        assert pool.submit(_pp_echo, 7, worker=1).result(timeout=15) == ("b", 7)  # worker 1's identity
+        # worker 0's identity
+        assert pool.submit(_pp_echo, 5, worker=0).result(timeout=15) == ("a", 5)
+        # worker 1's identity
+        assert pool.submit(_pp_echo, 7, worker=1).result(timeout=15) == ("b", 7)
         assert pool.workers_alive()
         with pytest.raises(ValueError, match="boom"):
             pool.submit(_pp_boom, worker=0).result(timeout=15)
@@ -160,7 +179,7 @@ def test_pinned_process_pool_pins_identity_and_propagates_errors() -> None:
         pool.shutdown()
 
 
-# ---- the executor reuses its pinned pool across runs (spawn paid once) ---------------------------
+# ---- the executor reuses its pinned pool across runs (spawn paid once) --------------------------
 
 
 def _count(_part: Partition, _resources: object) -> int:
@@ -176,13 +195,15 @@ def _zero() -> int:
 
 
 def test_persistent_ipc_reuses_pinned_pool_across_runs() -> None:
-    # PinnedPoolExecutor uses the identity-pinned pool explicitly (no env override, no silent switch)
+    # PinnedPoolExecutor uses the identity-pinned pool explicitly (no env override, no silent
+    # switch)
     tasks = tuple(Task(i, Partition(f"p{i}", "Events", i, i + 1)) for i in range(8))
     plan = Plan(process=_count, combine=_add, empty=_zero, tasks=tasks)
     with PinnedPoolExecutor(max_workers=4, persistent=True, comms="ipc", steal=True) as ex:
         r1 = ex.run(plan).value
         pool1 = ex._peer_pool
-        assert isinstance(pool1, PinnedProcessPool)  # the identity-pinned pool, not the full-registry one
+        # the identity-pinned pool, not the full-registry one
+        assert isinstance(pool1, PinnedProcessPool)
         r2 = ex.run(plan).value  # same (n, w) -> reuse the pinned pool, no respawn
         assert ex._peer_pool is pool1  # witness: identity-pinned workers were REUSED
     assert r1 == r2 == 8

@@ -1,27 +1,31 @@
-"""Shared harness for the m68a frozen suite: the engine service set, driver-hosted and site legs, and
-driverless endpoints (plan-services.md §3.1, D1-D10).
+"""Shared harness for the m68a frozen suite.
+
+The engine service set, driver-hosted and site legs, and driverless endpoints (plan-services.md
+§3.1, D1-D10).
 
 Frozen suites never import across directories, so the m67 pieces this suite needs are copied here
-(``RecordingSchedd``/``FakeHTCondor``/``record_bindings``, ``job_dir``, ``write_machine_ad``, the bounded
-runners). What is new:
+(``RecordingSchedd``/``FakeHTCondor``/``record_bindings``, ``job_dir``, ``write_machine_ad``, the
+bounded runners). What is new:
 
-- ``RecordingBackend``: wraps any ``SubmitBackend`` and records every submit (key, placement hints, the
-  ``RunContext`` nonce of a plan task), every cancel (by key), every task that actually ran, and every
-  probe answer; an optional gate holds its inner single worker until the test opens it, and an optional
-  fault raises at a chosen submit.
+- ``RecordingBackend``: wraps any ``SubmitBackend`` and records every submit (key, placement hints,
+  the ``RunContext`` nonce of a plan task), every cancel (by key), every task that actually ran,
+  and every probe answer; an optional gate holds its inner single worker until the test opens it,
+  and an optional fault raises at a chosen submit.
 - ``HostFake``: a ``SubmitBackend`` with the duck-typed service attributes (``host_identity``,
   ``advertise_host``, ``site_services``, ``service_hosts`` and, when hosting, ``host_service`` /
-  ``release_service``). Its driver is on one host, its hosted services on another, and each probe task
-  runs as a worker on a host of the test's choosing (``$_CONDOR_MACHINE_AD`` set around the call).
-- Spy plan parts (``SpyProcess``, ``SpyReduce``) that record ``bind_services``/``resolve_services`` into
-  one ordered trace shared with the backends, and GET their bound endpoint.
-- In-process servers with accept counters (HTTP, a bare TCP listener, a first-bytes sniffing proxy, gRPC
-  health servers) and the ``service_child.py`` managed child, which reports its own pid.
+  ``release_service``). Its driver is on one host, its hosted services on another, and each probe
+  task runs as a worker on a host of the test's choosing (``$_CONDOR_MACHINE_AD`` set around the
+  call).
+- Spy plan parts (``SpyProcess``, ``SpyReduce``) that record ``bind_services``/``resolve_services``
+  into one ordered trace shared with the backends, and GET their bound endpoint.
+- In-process servers with accept counters (HTTP, a bare TCP listener, a first-bytes sniffing proxy,
+  gRPC health servers) and the ``service_child.py`` managed child, which reports its own pid.
 - ``pid_gone`` / ``port_free``: the reaped-pid and freed-port witnesses, on every OS.
 
-The implementation under test is reached only through the ``*_api()`` accessors, inside test bodies,
-so the suite collects before ``submit/services.py`` and ``submit/recipes.py`` exist. Everything a pilot
-or a driver job unpickles is module-level here; the driverless tests ship this file as a user module.
+The implementation under test is reached only through the ``*_api()`` accessors, inside test
+bodies, so the suite collects before ``submit/services.py`` and ``submit/recipes.py`` exist.
+Everything a pilot or a driver job unpickles is module-level here; the driverless tests ship this
+file as a user module.
 """
 
 from __future__ import annotations
@@ -79,8 +83,11 @@ THIRD_HOST = "host-c.m68a.example"
 
 
 def services_api() -> Any:
-    """``graphed_executors.submit.services``: ServiceSet, ServiceStatus, ServiceUnavailable,
-    ServiceUnreachable, Endpoints, check_ready, host_identity, _probe_services."""
+    """``graphed_executors.submit.services``.
+
+    ServiceSet, ServiceStatus, ServiceUnavailableError, ServiceUnreachableError, Endpoints,
+    check_ready, host_identity, _probe_services.
+    """
     return importlib.import_module("graphed_executors.submit.services")
 
 
@@ -100,12 +107,18 @@ def local_api() -> Any:
 
 
 def htcondor_api() -> Any:
-    """``graphed_executors.htcondor_backend``: submit_driverless, RunHandle, SITES, SiteProfile, ..."""
+    """``graphed_executors.htcondor_backend``.
+
+    submit_driverless, RunHandle, SITES, SiteProfile, ..
+    """
     return importlib.import_module("graphed_executors.htcondor_backend")
 
 
 def launch_api() -> Any:
-    """``graphed_executors.htcondor_backend.launch``: every bindings call goes through ``_htcondor()``."""
+    """``graphed_executors.htcondor_backend.launch``.
+
+    Every bindings call goes through ``_htcondor()``.
+    """
     return importlib.import_module("graphed_executors.htcondor_backend.launch")
 
 
@@ -120,7 +133,7 @@ def driver_api() -> Any:
 
 
 def server_api() -> Any:
-    """``graphed_executors.htcondor_backend.server``: WorkerLost."""
+    """``graphed_executors.htcondor_backend.server``: WorkerLostError."""
     return importlib.import_module("graphed_executors.htcondor_backend.server")
 
 
@@ -128,21 +141,29 @@ DRIVER_MODULE = "graphed_executors.htcondor_backend.driver"
 
 
 def require_module(name: str) -> Any:
-    """``name`` imported. Where the GIL is enabled (or the interpreter predates the question) a
-    missing module is a failure; only a free-threaded interpreter, which has no grpcio wheel, skips."""
+    """``name`` imported.
+
+    Where the GIL is enabled (or the interpreter predates the question) a missing module is a
+    failure; only a free-threaded interpreter, which has no grpcio wheel, skips.
+    """
     gil_enabled = getattr(sys, "_is_gil_enabled", None)
     if gil_enabled is None or gil_enabled():
         return importlib.import_module(name)
     pytest_mod = importlib.import_module("pytest")
-    return pytest_mod.importorskip(name, reason=f"{name} has no wheel for a free-threaded interpreter")
+    return pytest_mod.importorskip(
+        name, reason=f"{name} has no wheel for a free-threaded interpreter"
+    )
 
 
-# ---- bounds (copied from m67) --------------------------------------------------------------------
+# ---- bounds (copied from m67) -------------------------------------------------------------------
 
 
 def run_bounded(fn: Callable[[], Any], timeout_s: float = RUN_TIMEOUT_S) -> Any:
-    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``: a hang is a
-    failure, never a wedged CI job. Returns the value or re-raises the call's exception."""
+    """Run ``fn`` on a daemon thread and fail if it does not finish in ``timeout_s``.
+
+    A hang is a failure, never a wedged CI job. Returns the value or re-raises the call's
+    exception.
+    """
     out: dict[str, Any] = {}
 
     def _drive() -> None:
@@ -170,13 +191,16 @@ def wait_for(predicate: Callable[[], bool], timeout_s: float = 30.0) -> bool:
     return True
 
 
-# ---- the reaped-pid and freed-port witnesses -----------------------------------------------------
+# ---- the reaped-pid and freed-port witnesses ----------------------------------------------------
 
 
 def pid_gone(pid: int) -> bool:
-    """Whether ``pid`` is no longer a live (or unreaped) process. POSIX: ``os.kill(pid, 0)`` raises
-    ``ProcessLookupError`` once the parent has waited on it (a zombie still answers). Windows, where
-    ``os.kill(pid, 0)`` would terminate the process, asks ``GetExitCodeProcess`` instead."""
+    """Whether ``pid`` is no longer a live (or unreaped) process.
+
+    POSIX: ``os.kill(pid, 0)`` raises ``ProcessLookupError`` once the parent has waited on it
+    (a zombie still answers). Windows, where ``os.kill(pid, 0)`` would terminate the process,
+    asks ``GetExitCodeProcess`` instead.
+    """
     if sys.platform == "win32":
         import ctypes  # noqa: PLC0415  (Windows only)
 
@@ -228,13 +252,18 @@ def _listening(port: int) -> bool:
 
 
 def port_free(port: int) -> bool:
-    """Nothing listens on ``port``: it binds on loopback and on all interfaces, and a connect is refused."""
+    """Nothing listens on ``port``.
+
+    It binds on loopback and on all interfaces, and a connect is refused.
+    """
     return _bindable("127.0.0.1", port) and _bindable("", port) and not _listening(port)
 
 
 def free_range(n: int = 3) -> tuple[int, int]:
-    """An inclusive range of ``n`` consecutive ports that are free right now (above the 10000-10100 band
-    the site rows and task servers use)."""
+    """Return an inclusive range of ``n`` consecutive ports that are free right now.
+
+    Above the 10000-10100 band the site rows and task servers use.
+    """
     for _ in range(200):
         low = 20000 + secrets.randbelow(30000)
         if all(port_free(p) for p in range(low, low + n)):
@@ -243,7 +272,7 @@ def free_range(n: int = 3) -> tuple[int, int]:
 
 
 def closed_port() -> int:
-    """A port nothing listens on (bound once, then released)."""
+    """Return a port nothing listens on (bound once, then released)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
@@ -251,7 +280,10 @@ def closed_port() -> int:
 
 @contextlib.contextmanager
 def bounded_set(service_set: Any, timeout_s: float = RUN_TIMEOUT_S) -> Iterator[Any]:
-    """``with service_set as eps`` with ``start`` and ``close`` each bounded: a hang fails the test."""
+    """``with service_set as eps`` with ``start`` and ``close`` each bounded.
+
+    A hang fails the test.
+    """
     endpoints = run_bounded(service_set.start, timeout_s)
     try:
         yield endpoints
@@ -270,8 +302,10 @@ def closing_bounded(obj: Any, timeout_s: float = RUN_TIMEOUT_S) -> Iterator[Any]
 
 @contextlib.contextmanager
 def hold_port(port: int) -> Iterator[socket.socket]:
-    """A listening socket on ``127.0.0.1:port`` for the block (exclusive on Windows): a managed service
-    advertised on loopback cannot bind it."""
+    """Yield a listening socket on ``127.0.0.1:port`` for the block (exclusive on Windows).
+
+    A managed service advertised on loopback cannot bind it.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         if sys.platform == "win32":
@@ -291,8 +325,11 @@ def endpoint_port(endpoint: str) -> int:
 
 
 class _RecordingPopen(subprocess.Popen[Any]):
-    """``subprocess.Popen`` that remembers every process it started, so a child that writes no pid
-    report (``python -m http.server`` from ``recipes.http_server``) can still be stopped at teardown."""
+    """``subprocess.Popen`` that remembers every process it started.
+
+    A child that writes no pid report (``python -m http.server`` from ``recipes.http_server``) can
+    thus still be stopped at teardown.
+    """
 
     started: ClassVar[list[subprocess.Popen[Any]]] = []
 
@@ -303,8 +340,11 @@ class _RecordingPopen(subprocess.Popen[Any]):
 
 @contextlib.contextmanager
 def popen_backstop() -> Iterator[list[subprocess.Popen[Any]]]:
-    """For the block, ``subprocess.Popen`` records what it starts; at exit any recorded process still
-    alive is killed and waited on (a correct implementation has already stopped them)."""
+    """For the block, ``subprocess.Popen`` records what it starts.
+
+    At exit any recorded process still alive is killed and waited on (a correct implementation
+    has already stopped them).
+    """
     real = subprocess.Popen
     _RecordingPopen.started = []
     subprocess.Popen = _RecordingPopen  # the stdlib class, patched for the block
@@ -319,11 +359,11 @@ def popen_backstop() -> Iterator[list[subprocess.Popen[Any]]]:
                     proc.wait(30)
 
 
-# ---- the managed child and its report ------------------------------------------------------------
+# ---- the managed child and its report -----------------------------------------------------------
 
 
 def read_report(path: Path, timeout_s: float = 30.0) -> dict[str, Any]:
-    """The ``{"pid", "python"}`` a ``service_child.py`` wrote at start."""
+    """Return the ``{"pid", "python"}`` a ``service_child.py`` wrote at start."""
     wait_for(path.is_file, timeout_s)
     assert path.is_file(), f"the managed child never started: no report at {path}"
     report: dict[str, Any] = json.loads(path.read_text())
@@ -344,34 +384,53 @@ def child_spec(
     kind: str = "http",
     timeout_s: float = 30.0,
 ) -> ServiceSpec:
-    """A driver-hostable requirement (no image, no GPUs) whose recipe runs ``service_child.py``."""
+    """Return a driver-hostable requirement whose recipe runs ``service_child.py``.
+
+    It has no image and no GPUs.
+    """
     return ServiceSpec(
-        name, kind, check=check, ports=ports, launch=child_launch(mode, report), timeout_s=timeout_s
+        name,
+        kind,
+        check=check,
+        ports=ports,
+        launch=child_launch(mode, report),
+        timeout_s=timeout_s,
     )
 
 
 def hosted_spec(
     name: str, *, kind: str = "http", check: str = "http:/", timeout_s: float = 30.0
 ) -> ServiceSpec:
-    """A requirement whose recipe has an image, so only a backend with ``host_service`` can start it."""
+    """Return a requirement whose recipe has an image.
+
+    A requirement whose recipe has an image, so only a backend with ``host_service`` can start it.
+    """
     launch = Launch(argv=("serve", "--port", "{port}"), image="registry.m68a.example/service:1")
-    return ServiceSpec(name, kind, check=check, ports=(40000, 40010), launch=launch, timeout_s=timeout_s)
+    return ServiceSpec(
+        name, kind, check=check, ports=(40000, 40010), launch=launch, timeout_s=timeout_s
+    )
 
 
 def gpu_spec(name: str, *, timeout_s: float = 30.0) -> ServiceSpec:
-    """An image-less recipe that asks for a GPU: never driver-hosted."""
-    launch = Launch(argv=("{python}", CHILD_SCRIPT, "serve", "{port}", "unused"), resources={"gpus": 1})
-    return ServiceSpec(name, "http", check="http:/", ports=(40000, 40010), launch=launch, timeout_s=timeout_s)
+    """Return an image-less recipe that asks for a GPU: never driver-hosted."""
+    launch = Launch(
+        argv=("{python}", CHILD_SCRIPT, "serve", "{port}", "unused"), resources={"gpus": 1}
+    )
+    return ServiceSpec(
+        name, "http", check="http:/", ports=(40000, 40010), launch=launch, timeout_s=timeout_s
+    )
 
 
 def bare_spec(
     name: str, *, kind: str = "http", check: str = "http:/", timeout_s: float = 30.0
 ) -> ServiceSpec:
-    """A requirement without a recipe: legs 1-2 only."""
-    return ServiceSpec(name, kind, check=check, ports=(40000, 40010), launch=None, timeout_s=timeout_s)
+    """Return a requirement without a recipe: legs 1-2 only."""
+    return ServiceSpec(
+        name, kind, check=check, ports=(40000, 40010), launch=None, timeout_s=timeout_s
+    )
 
 
-# ---- one ordered trace shared by backends and spies ----------------------------------------------
+# ---- one ordered trace shared by backends and spies ---------------------------------------------
 
 _TRACE_LOCK = threading.Lock()
 TRACE: list[tuple[Any, ...]] = []
@@ -406,11 +465,11 @@ def probe_scope(key: str) -> str:
     return key[len("svc-") : key.rindex("-probe-")]
 
 
-# ---- HTTP -----------------------------------------------------------------------------------------
+# ---- HTTP ---------------------------------------------------------------------------------------
 
 
 def http_get(url: str, timeout_s: float = HTTP_TIMEOUT_S) -> str:
-    """The body of a 2xx answer; anything else raises."""
+    """Return the body of a 2xx answer; anything else raises."""
     with urllib.request.urlopen(url, timeout=timeout_s) as resp:
         return str(resp.read().decode())
 
@@ -430,7 +489,7 @@ def to_http(endpoint: str) -> str:
     return f"http://{rest}"
 
 
-# ---- spy plan parts -------------------------------------------------------------------------------
+# ---- spy plan parts -----------------------------------------------------------------------------
 
 _SPY_LOCK = threading.Lock()
 SPY_EVENTS: dict[str, list[tuple[Any, ...]]] = {}
@@ -457,7 +516,10 @@ def spy_reset() -> None:
 
 @dataclass(frozen=True)
 class Resolved:
-    """What a spy's ``resolve_services`` returns: the value it was given and the service's answer then."""
+    """What a spy's ``resolve_services`` returns.
+
+    The value it was given and the service's answer then.
+    """
 
     tag: str
     value: Any
@@ -483,9 +545,12 @@ def _register_on_close(tag: str, endpoints: Mapping[str, str], url: str | None) 
 
 @dataclass(frozen=True)
 class SpyProcess:
-    """A plan ``process`` that is ``Bindable`` and ``Resolvable``: a leaf GETs ``path`` on the bound
-    endpoint of ``service`` and returns ``(body,)``. Pickled into workers, so it records into the
-    module-level ``SPY_EVENTS`` (in-process backends) and returns what it saw."""
+    """A plan ``process`` that is ``Bindable`` and ``Resolvable``.
+
+    A leaf GETs ``path`` on the bound endpoint of ``service`` and returns ``(body,)``. Pickled
+    into workers, so it records into the module-level ``SPY_EVENTS`` (in-process backends) and
+    returns what it saw.
+    """
 
     tag: str
     service: str | None = "web"
@@ -521,7 +586,10 @@ class SpyProcess:
 
 @dataclass(frozen=True)
 class SpyReduce:
-    """An ``aggregate_plan`` ``reduce`` with the same hooks: it GETs the bound endpoint per partition."""
+    """An ``aggregate_plan`` ``reduce`` with the same hooks.
+
+    It GETs the bound endpoint per partition.
+    """
 
     tag: str
     service: str = "web"
@@ -562,9 +630,15 @@ def mem_partitions(n: int, tag: str) -> tuple[Partition, ...]:
     return tuple(Partition(f"mem://{tag}/{i}", "", i, i + 1) for i in range(n))
 
 
-def spy_plan(process: Any, n: int, specs: Sequence[ServiceSpec], tag: str | None = None) -> Plan[Any]:
-    tasks = tuple(Task(i, p) for i, p in enumerate(mem_partitions(n, tag or getattr(process, "tag", "m68a"))))
-    return Plan(process=process, combine=concat, empty=empty_tuple, tasks=tasks, services=tuple(specs))
+def spy_plan(
+    process: Any, n: int, specs: Sequence[ServiceSpec], tag: str | None = None
+) -> Plan[Any]:
+    tasks = tuple(
+        Task(i, p) for i, p in enumerate(mem_partitions(n, tag or getattr(process, "tag", "m68a")))
+    )
+    return Plan(
+        process=process, combine=concat, empty=empty_tuple, tasks=tasks, services=tuple(specs)
+    )
 
 
 def text_process(partition: Partition, resources: object) -> tuple[str, ...]:
@@ -576,13 +650,16 @@ def plain_plan(n: int, tag: str) -> Plan[Any]:
     return Plan(process=text_process, combine=concat, empty=empty_tuple, tasks=tasks)
 
 
-# ---- driverless plan parts (module-level: the job side imports this file by name) ----------------
+# ---- driverless plan parts (module-level: the job side imports this file by name) ---------------
 
 
 @dataclass(frozen=True)
 class GetProcess:
-    """A driverless plan process: each pilot task GETs ``/`` on the bound endpoint and returns
-    ``((pilot pid, body),)``; ``resolve_services`` GETs again in the driver and wraps the value."""
+    """A driverless plan process.
+
+    Each pilot task GETs ``/`` on the bound endpoint and returns ``((pilot pid, body),)``;
+    ``resolve_services`` GETs again in the driver and wraps the value.
+    """
 
     service: str = "web"
     endpoint: str | None = None
@@ -604,13 +681,18 @@ class GetProcess:
 
     def resolve_services(self, value: Any) -> DriverResolved:
         assert self.endpoint is not None, "resolve_services called on an unbound process"
-        return DriverResolved(value, os.getpid(), self.endpoint, http_get(to_http(self.endpoint) + "/"))
+        return DriverResolved(
+            value, os.getpid(), self.endpoint, http_get(to_http(self.endpoint) + "/")
+        )
 
 
 @dataclass(frozen=True)
 class DriverResolved:
-    """A driverless run's value after the driver resolved it: the leaves, the driver's pid, the endpoint
-    and the body the service answered while it was up."""
+    """A driverless run's value after the driver resolved it.
+
+    The leaves, the driver's pid, the endpoint and the body the service answered while it was
+    up.
+    """
 
     leaves: Any
     driver_pid: int
@@ -634,19 +716,23 @@ def get_plan(n: int, tag: str, specs: Sequence[ServiceSpec], fail: str | None = 
 
 
 class NarrowError(RuntimeError):
-    """An exception whose constructor takes more arguments than it passes to ``super().__init__``:
-    stdlib pickling dumps it, and the load raises ``TypeError``."""
+    """An exception whose constructor takes more arguments than it passes to ``super().__init__``.
+
+    Stdlib pickling dumps it, and the load raises ``TypeError``.
+    """
 
     def __init__(self, name: str, endpoint: str, worker: str, reason: str) -> None:
         super().__init__(f"{name}: {reason}")
         self.name, self.endpoint, self.worker, self.reason = name, endpoint, worker, reason
 
 
-USER_FRAME = SourceFrame(filename="user_analysis.py", lineno=42, function="my_cut", source="pt > 30")
+USER_FRAME = SourceFrame(
+    filename="user_analysis.py", lineno=42, function="my_cut", source="pt > 30"
+)
 
 
 def task_stage_error() -> StageError:
-    """A ``StageError`` raised by a task's ``ValueError``."""
+    """Return a ``StageError`` raised by a task's ``ValueError``."""
     return StageError(
         op="mul",
         frames=(USER_FRAME,),
@@ -658,7 +744,7 @@ def task_stage_error() -> StageError:
     )
 
 
-# ---- in-process servers with accept counters -----------------------------------------------------
+# ---- in-process servers with accept counters ----------------------------------------------------
 
 
 class _CountingHTTP(ThreadingHTTPServer):
@@ -691,9 +777,10 @@ class _CountingHandler(BaseHTTPRequestHandler):
 class CountingHTTPServer:
     """An HTTP server on ``127.0.0.1:0`` counting accepted connections and answered GETs.
 
-    ``mode``: ``"pid"`` answers 200 ``text/plain`` with this process's pid; ``"grpcish"`` answers 200
-    ``application/grpc`` to every path (the EAF gateway's shape, P8); ``ok_first=n`` answers the first
-    ``n`` GETs as ``"pid"`` and every later one 503."""
+    ``mode``: ``"pid"`` answers 200 ``text/plain`` with this process's pid; ``"grpcish"`` answers
+    200 ``application/grpc`` to every path (the EAF gateway's shape, P8); ``ok_first=n`` answers
+    the first ``n`` GETs as ``"pid"`` and every later one 503.
+    """
 
     def __init__(self, mode: str = "pid", ok_first: int | None = None) -> None:
         self.mode = mode
@@ -739,9 +826,11 @@ class CountingHTTPServer:
 
 
 class CountingListener:
-    """A bare TCP listener on ``127.0.0.1:0``: accepts, counts, closes. ``settled()`` is the count once
-    every connection made before the call was accepted (a sentinel connection, accepted in order after
-    them, is not counted)."""
+    """A bare TCP listener on ``127.0.0.1:0``: accepts, counts, closes.
+
+    ``settled()`` is the count once every connection made before the call was accepted (a
+    sentinel connection, accepted in order after them, is not counted).
+    """
 
     SENTINEL = b"m68a-sentinel"
 
@@ -781,7 +870,9 @@ class CountingListener:
             target = self._sentinels + 1
         with socket.create_connection(("127.0.0.1", self.port), timeout=timeout_s) as s:
             s.sendall(self.SENTINEL)
-            assert wait_for(lambda: self._sentinels >= target, timeout_s), "the listener stopped accepting"
+            assert wait_for(lambda: self._sentinels >= target, timeout_s), (
+                "the listener stopped accepting"
+            )
         with self._lock:
             return self.accepts
 
@@ -804,9 +895,11 @@ TLS_HANDSHAKE = 0x16  # the first byte of a TLS ClientHello record
 
 
 class SniffProxy:
-    """A TCP proxy on ``127.0.0.1:0`` in front of ``127.0.0.1:target``: counts accepted connections,
-    records each connection's first bytes (a TLS ClientHello starts ``0x16``, h2 ``PRI``, HTTP/1 ``GET``)
-    and forwards both ways."""
+    """A TCP proxy on ``127.0.0.1:0`` in front of ``127.0.0.1:target``.
+
+    Counts accepted connections, records each connection's first bytes (a TLS ClientHello
+    starts ``0x16``, h2 ``PRI``, HTTP/1 ``GET``) and forwards both ways.
+    """
 
     def __init__(self, target: int) -> None:
         self.target = target
@@ -887,8 +980,12 @@ def _pump(src: socket.socket, dst: socket.socket) -> None:
 
 @contextlib.contextmanager
 def grpc_health_server(statuses: Mapping[str, str]) -> Iterator[int]:
-    """A gRPC server with the reference ``grpc_health.v1`` servicer (``grpcio-health-checking``) on
-    ``127.0.0.1``; ``statuses`` maps a service name to ``"SERVING"``/``"NOT_SERVING"``. Yields the port."""
+    """Run a gRPC server with the reference ``grpc_health.v1`` servicer and yield its port.
+
+    Run a gRPC server with the reference ``grpc_health.v1`` servicer (``grpcio-health-checking``)
+    on ``127.0.0.1``; ``statuses`` maps a service name to ``"SERVING"``/``"NOT_SERVING"``. Yields
+    the port.
+    """
     grpc = require_module("grpc")
     health = require_module("grpc_health.v1.health")
     health_pb2 = require_module("grpc_health.v1.health_pb2")
@@ -909,7 +1006,7 @@ def grpc_health_server(statuses: Mapping[str, str]) -> Iterator[int]:
 
 @contextlib.contextmanager
 def grpc_bare_server() -> Iterator[int]:
-    """A gRPC server with no service registered, so no health service either."""
+    """Run a gRPC server with no service registered, so no health service either."""
     grpc = require_module("grpc")
     futures = importlib.import_module("concurrent.futures")
     server = grpc.server(futures.ThreadPoolExecutor(2))
@@ -921,14 +1018,17 @@ def grpc_bare_server() -> Iterator[int]:
         server.stop(0).wait(5.0)
 
 
-# ---- backends -------------------------------------------------------------------------------------
+# ---- backends -----------------------------------------------------------------------------------
 
 
 @dataclass
 class BackendLog:
-    """What a recording backend saw, in order. ``submits``: (key, hints, run_nonce of a plan task's
-    RunContext or None); ``cancels``: keys; ``ran``: keys whose task body started; ``answers``: (key,
-    value) of completed probe tasks."""
+    """What a recording backend saw, in order.
+
+    ``submits``: (key, hints, run_nonce of a plan task's RunContext or None); ``cancels``:
+    keys; ``ran``: keys whose task body started; ``answers``: (key, value) of completed probe
+    tasks.
+    """
 
     submits: list[tuple[str, dict[str, Any], str | None]] = field(default_factory=list)
     cancels: list[str] = field(default_factory=list)
@@ -960,7 +1060,10 @@ class BackendLog:
 
 
 def _run_nonce(args: tuple[object, ...]) -> str | None:
-    """The ``run_nonce`` of the first ``RunContext``-shaped argument (a plan task's first argument)."""
+    """Return the ``run_nonce`` of the first ``RunContext``-shaped argument.
+
+    A plan task's first argument.
+    """
     for arg in args:
         nonce = getattr(arg, "run_nonce", None)
         if isinstance(nonce, str):
@@ -969,13 +1072,16 @@ def _run_nonce(args: tuple[object, ...]) -> str | None:
 
 
 class RecordingBackend:
-    """A ``SubmitBackend`` over ``inner`` that records submits, cancels, task starts and probe answers
-    into ``log`` and the shared trace. Attributes it does not define are ``inner``'s, so a duck-typed
-    service attribute is visible exactly when ``inner`` has it.
+    """A ``SubmitBackend`` over ``inner`` that records submits, cancels, starts and probes.
 
-    ``gate``: the inner backend's (single) worker is held by a blocker task until the event is set, so
-    every task queues and none starts. ``fail_key``/``fault``: ``submit`` raises ``fault`` for the first
-    key the predicate accepts."""
+    A ``SubmitBackend`` over ``inner`` that records submits, cancels, task starts and probe answers
+    into ``log`` and the shared trace. Attributes it does not define are ``inner``'s, so a
+    duck-typed service attribute is visible exactly when ``inner`` has it.
+
+    ``gate``: the inner backend's (single) worker is held by a blocker task until the event is set,
+    so every task queues and none starts. ``fail_key``/``fault``: ``submit`` raises ``fault`` for
+    the first key the predicate accepts.
+    """
 
     def __init__(
         self,
@@ -1014,14 +1120,21 @@ class RecordingBackend:
         resources: Mapping[str, float] | None = None,
         workers: Sequence[str] | None = None,
     ) -> Any:
-        hints = {"retries": retries, "priority": priority, "resources": resources, "workers": workers}
+        hints = {
+            "retries": retries,
+            "priority": priority,
+            "resources": resources,
+            "workers": workers,
+        }
         with self.log.lock:
             self.log.submits.append((key, hints, _run_nonce(args)))
         trace("submit", key)
         if self._fail_key is not None and self._fault is not None and self._fail_key(key):
             self._fail_key = None
             raise self._fault
-        fut = self.inner.submit(self._started, key, fn, *args, key=key, retries=retries, priority=priority)
+        fut = self.inner.submit(
+            self._started, key, fn, *args, key=key, retries=retries, priority=priority
+        )
         self._key_of[id(fut)] = key
         if is_probe_key(key):
             fut.add_done_callback(lambda f: self._answered(key, f))
@@ -1067,7 +1180,10 @@ _ENV_LOCK = threading.Lock()
 
 
 def _as_host(ad: str, fn: Callable[..., object], *args: object) -> object:
-    """Run ``fn`` as a worker on the host whose machine ad is ``ad``: ``host_identity()`` reads it."""
+    """Run ``fn`` as a worker on the host whose machine ad is ``ad``.
+
+    ``host_identity()`` reads it.
+    """
     with _ENV_LOCK:
         before = os.environ.get("_CONDOR_MACHINE_AD")
         os.environ["_CONDOR_MACHINE_AD"] = ad
@@ -1081,17 +1197,19 @@ def _as_host(ad: str, fn: Callable[..., object], *args: object) -> object:
 
 
 def write_machine_ad(path: Path, host: str = "127.0.0.1") -> Path:
-    """A machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
+    """Return a machine ad file in the classad text form of ``$_CONDOR_MACHINE_AD``."""
     path.write_text(f'Machine = "{host}"\nName = "slot1@{host}"\nCpus = 2\n')
     return path
 
 
 @dataclass
 class HostFaults:
-    """Faults a ``HostFake`` injects: ``host_raises`` from ``host_service``; ``release_raises`` from
-    ``release_service``; ``probe_raises`` from a probe ``submit``; ``probe_silent``: a probe submit
-    returns a future no worker ever answers; ``dead_hosted``: ``host_service`` returns an endpoint
-    that accepts TCP and answers every HTTP GET with 503."""
+    """Faults a ``HostFake`` injects: ``host_raises`` from ``host_service``.
+
+    ``release_raises`` from ``release_service``; ``probe_raises`` from a probe ``submit``;
+    ``probe_silent``: a probe submit returns a future no worker ever answers; ``dead_hosted``:
+    ``host_service`` returns an endpoint that accepts TCP and answers every HTTP GET with 503.
+    """
 
     host_raises: BaseException | None = None
     release_raises: BaseException | None = None
@@ -1101,10 +1219,13 @@ class HostFaults:
 
 
 class HostFake:
-    """A two-host ``SubmitBackend``: the driver is ``driver_host``; ``host_service`` starts an HTTP
-    server here but reports it on ``service_host``; probe task ``i`` runs as a worker on
-    ``worker_hosts[i % len]``. Tasks run on ``inner`` (a ``RecordingBackend``). ``host_service`` and
-    ``release_service`` exist as instance attributes only when ``hosting``."""
+    """A two-host ``SubmitBackend``: the driver is ``driver_host``.
+
+    ``host_service`` starts an HTTP server here but reports it on ``service_host``; probe task
+    ``i`` runs as a worker on ``worker_hosts[i % len]``. Tasks run on ``inner`` (a
+    ``RecordingBackend``). ``host_service`` and ``release_service`` exist as instance
+    attributes only when ``hosting``.
+    """
 
     def __init__(
         self,
@@ -1130,7 +1251,8 @@ class HostFake:
         self.service_hosts = service_hosts
         self.faults = faults or HostFaults()
         self.lock = threading.Lock()
-        self.calls: list[tuple[Any, ...]] = []  # ("host_service", name, scope) / ("release_service", key)
+        # ("host_service", name, scope) / ("release_service", key)
+        self.calls: list[tuple[Any, ...]] = []
         self.minted: list[tuple[str, str]] = []  # (scope, key) of every host_service that returned
         self.released: list[str] = []
         self.probe_hints: list[dict[str, Any]] = []
@@ -1156,8 +1278,8 @@ class HostFake:
             raise self.faults.host_raises
         key = f"{scope}-{secrets.token_hex(8)}"
         scheme = {"http": "http", "grpc": "grpc"}.get(spec.check.partition(":")[0], "tcp")
-        # dead_hosted: a server that accepts TCP but answers every GET 503, so only a probe that runs
-        # the spec's own check (not a connect) refuses it
+        # dead_hosted: a server that accepts TCP but answers every GET 503, so only a probe that
+        # runs the spec's own check (not a connect) refuses it
         server = CountingHTTPServer("pid", ok_first=0 if self.faults.dead_hosted else None)
         self._servers[key] = server
         port = server.port
@@ -1249,11 +1371,11 @@ class HostFake:
         self.inner.close()
 
 
-# ---- the services log ------------------------------------------------------------------------------
+# ---- the services log ---------------------------------------------------------------------------
 
 
 def status_records(records: Sequence[logging.LogRecord]) -> list[Any]:
-    """The ``ServiceStatus`` of every record the ``graphed_executors.services`` logger emitted."""
+    """Return every ``ServiceStatus`` the ``graphed_executors.services`` logger emitted."""
     return [r.status for r in records if r.name == SERVICES_LOGGER and hasattr(r, "status")]
 
 
@@ -1261,7 +1383,7 @@ def statuses_named(records: Sequence[logging.LogRecord], name: str) -> list[Any]
     return [s for s in status_records(records) if s.name == name]
 
 
-# ---- recorded bindings (copied from m67) -----------------------------------------------------------
+# ---- recorded bindings (copied from m67) --------------------------------------------------------
 
 
 class SubmitResult:
@@ -1273,9 +1395,11 @@ class SubmitResult:
 
 
 class RecordingSchedd:
-    """A stand-in ``htcondor2.Schedd`` that appends every call to ``log``; ``query`` answers from
-    ``queue`` (the last answer repeats), ``history`` from ``history``; ``spool_raises`` makes ``spool``
-    raise it."""
+    """A stand-in ``htcondor2.Schedd`` that appends every call to ``log``.
+
+    ``query`` answers from ``queue`` (the last answer repeats), ``history`` from ``history``;
+    ``spool_raises`` makes ``spool`` raise it.
+    """
 
     def __init__(
         self,
@@ -1288,15 +1412,21 @@ class RecordingSchedd:
         self.history_ads = list(history or [])
         self.spool_raises = spool_raises
 
-    def query(self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def query(
+        self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("query", str(constraint), tuple(projection or ())))
         return self.queue.pop(0) if len(self.queue) > 1 else list(self.queue[0])
 
-    def history(self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def history(
+        self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("history", str(constraint), tuple(projection or ())))
         return list(self.history_ads)
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         self.log.append(("submit", dict(description), count, spool))
         return SubmitResult(FAKE_CLUSTER)
 
@@ -1317,7 +1447,9 @@ class _Collector:
         self.fake = fake
         self.pool = pool
 
-    def locate(self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def locate(
+        self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         self.fake.log.append(("locate", self.pool, str(daemon_type), name))
         return {"Name": name or FAKE_SCHEDD, "MyAddress": "<127.0.0.1:9618>", "located": True}
 
@@ -1329,8 +1461,10 @@ class _Collector:
 
 
 class FakeHTCondor:
-    """What ``launch._htcondor()`` returns under the recorder: ``param``, ``Collector``, ``Schedd``,
-    ``Submit`` and the enums the backend names."""
+    """What ``launch._htcondor()`` returns under the recorder.
+
+    ``param``, ``Collector``, ``Schedd``, ``Submit`` and the enums the backend names.
+    """
 
     class DaemonType:
         Schedd = "Schedd"
@@ -1362,8 +1496,10 @@ class FakeHTCondor:
         return dict(description or {})
 
 
-def record_bindings(monkeypatch: pytest.MonkeyPatch, schedd: RecordingSchedd, **kwargs: Any) -> FakeHTCondor:
-    """Patch ``launch._htcondor`` to log ``("_htcondor",)`` and return a ``FakeHTCondor`` over ``schedd``."""
+def record_bindings(
+    monkeypatch: pytest.MonkeyPatch, schedd: RecordingSchedd, **kwargs: Any
+) -> FakeHTCondor:
+    """Patch ``launch._htcondor`` to log its call and return a ``FakeHTCondor`` over ``schedd``."""
     fake = FakeHTCondor(schedd, **kwargs)
 
     def _htcondor() -> FakeHTCondor:
@@ -1378,7 +1514,7 @@ def submits(log: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
     return [entry for entry in log if entry[0] == "submit"]
 
 
-# ---- the job side (copied from m67) ----------------------------------------------------------------
+# ---- the job side (copied from m67) -------------------------------------------------------------
 
 
 def input_entries(desc: dict[str, Any]) -> list[str]:
@@ -1386,8 +1522,11 @@ def input_entries(desc: dict[str, Any]) -> list[str]:
 
 
 def job_dir(desc: dict[str, Any], log_dir: Path, dest: Path) -> Path:
-    """A job scratch dir holding what the schedd transfers: each ``transfer_input_files`` entry, resolved
-    against ``initialdir`` (else ``log_dir``), under its base name."""
+    """Return a job scratch dir holding what the schedd transfers.
+
+    Each ``transfer_input_files`` entry, resolved against ``initialdir`` (else ``log_dir``),
+    under its base name.
+    """
     iwd = Path(desc.get("initialdir") or log_dir)
     dest.mkdir(parents=True)
     for entry in input_entries(desc):
@@ -1401,8 +1540,11 @@ def job_dir(desc: dict[str, Any], log_dir: Path, dest: Path) -> Path:
 
 
 class NoStartLauncher:
-    """A ``PilotLauncher`` that starts nothing; ``profile`` is what an attached backend reads its site
-    data from. ``stop_raises`` makes ``stop`` raise it."""
+    """A ``PilotLauncher`` that starts nothing.
+
+    ``profile`` is what an attached backend reads its site data from. ``stop_raises`` makes
+    ``stop`` raise it.
+    """
 
     def __init__(self, profile: Any = None, stop_raises: BaseException | None = None) -> None:
         if profile is not None:
@@ -1424,17 +1566,22 @@ class NoStartLauncher:
 
 
 def with_ports(spec: ServiceSpec, ports: tuple[int, int], timeout_s: float = 30.0) -> ServiceSpec:
-    """A recipe-built spec on a free port range with a test-sized ``timeout_s`` (its kind, check and
-    launch unchanged)."""
+    """Return a recipe-built spec on a free port range with a test-sized ``timeout_s``.
+
+    Its kind, check and launch unchanged.
+    """
     return dataclasses.replace(spec, ports=ports, timeout_s=timeout_s)
 
 
-# ---- fresh-interpreter legs ------------------------------------------------------------------------
+# ---- fresh-interpreter legs ---------------------------------------------------------------------
 
 
 def narrow_blob_main(out: str) -> None:
-    """``driver._result_blob`` of a ``NarrowError`` in an interpreter where nothing replaced stdlib
-    exception pickling (``distributed`` installs a process-wide one that skips ``__init__``)."""
+    """Write ``driver._result_blob`` of a ``NarrowError``, unpickled, to ``out`` as JSON.
+
+    ``driver._result_blob`` of a ``NarrowError`` in an interpreter where nothing replaced stdlib
+    exception pickling (``distributed`` installs a process-wide one that skips ``__init__``).
+    """
     narrow = NarrowError("t", "grpc://h:1", "w", "refused")
     try:
         pickle.loads(pickle.dumps((False, narrow)))
@@ -1447,13 +1594,16 @@ def narrow_blob_main(out: str) -> None:
     )
 
 
-# ---- the whole path in a fresh interpreter ----------------------------------------------------------
+# ---- the whole path in a fresh interpreter ------------------------------------------------------
 
 
 def whole_path_main(out: str, root: str) -> None:
-    """``recipes.http_server`` through ``SubmitRunner(ThreadBackend)`` in a fresh interpreter: writes
-    what the parent asserts on (the resolved value, the order of bind/probe/plan submits, the endpoint
-    and whether its port is free after ``run``, and every service-client module imported)."""
+    """``recipes.http_server`` through ``SubmitRunner(ThreadBackend)`` in a fresh interpreter.
+
+    Writes what the parent asserts on (the resolved value, the order of bind/probe/plan
+    submits, the endpoint and whether its port is free after ``run``, and every service-client
+    module imported).
+    """
     recipes, submit = recipes_api(), submit_api()
     spec = with_ports(recipes.http_server("web", root=root), free_range(3))
     assert (spec.kind, spec.check) == ("http", "http:/"), spec
@@ -1474,9 +1624,12 @@ def whole_path_main(out: str, root: str) -> None:
                 "port_free_after_run": free,
                 "order": order,
                 "modules": modules,
-                "value_is_resolved": isinstance(result.value, Resolved) and result.value.tag == "whole",
+                "value_is_resolved": isinstance(result.value, Resolved)
+                and result.value.tag == "whole",
                 "resolves": [(r[2], len(r[1])) for r in resolves],
-                "leaf_bodies": list(result.value.value) if isinstance(result.value, Resolved) else None,
+                "leaf_bodies": list(result.value.value)
+                if isinstance(result.value, Resolved)
+                else None,
             }
         )
     )

@@ -1,18 +1,21 @@
 """m68a §3.1 ``check_ready`` and D1's wire rule, against in-process servers, on every OS.
 
-``check_ready(endpoint, check, timeout) -> None | reason`` is the one readiness check every caller runs:
-``tcp`` connects; ``http:<path>`` GETs and is ready on a 2xx that is not ``application/grpc*`` (the EAF
-gateway answers 200 ``application/grpc`` on every path, P8); ``grpc:<service>`` is the standard
-``grpc.health.v1`` Check, ready iff SERVING, over TLS exactly for ``grpcs``. A check runs only over a wire
-that carries it; a mismatch or an unknown form is refused without dialling.
+``check_ready(endpoint, check, timeout) -> None | reason`` is the one readiness check every caller
+runs: ``tcp`` connects; ``http:<path>`` GETs and is ready on a 2xx that is not
+``application/grpc*`` (the EAF gateway answers 200 ``application/grpc`` on every path, P8);
+``grpc:<service>`` is the standard ``grpc.health.v1`` Check, ready iff SERVING, over TLS exactly
+for ``grpcs``. A check runs only over a wire that carries it; a mismatch or an unknown form is
+refused without dialling.
 
 Witnesses: the reason (``None`` or text), the accept counter of each server, and the first bytes a
 sniffing proxy saw (``0x16`` = a TLS ClientHello, so a ``grpcs``/``https`` check attempted TLS).
 
-The gRPC cases need ``grpcio`` and ``grpcio-health-checking`` (the reference servicer): they skip only
-on a free-threaded interpreter (no wheel); wherever the GIL is enabled a missing package fails.
+The gRPC cases need ``grpcio`` and ``grpcio-health-checking`` (the reference servicer): they skip
+only on a free-threaded interpreter (no wheel); wherever the GIL is enabled a missing package
+fails.
 
-Discriminates: an HTTP check passing a gRPC gateway, a scheme-blind TLS choice, a connect-only probe.
+Discriminates: an HTTP check passing a gRPC gateway, a scheme-blind TLS choice, a connect-only
+probe.
 """
 
 from __future__ import annotations
@@ -40,7 +43,9 @@ TIMEOUT_S = 5.0
 
 
 def check(endpoint: str, rule: str) -> str | None:
-    reason: str | None = run_bounded(lambda: services_api().check_ready(endpoint, rule, TIMEOUT_S), 60.0)
+    reason: str | None = run_bounded(
+        lambda: services_api().check_ready(endpoint, rule, TIMEOUT_S), 60.0
+    )
     return reason
 
 
@@ -56,7 +61,9 @@ def plain_http_server(root: Path) -> Iterator[int]:
             return None
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
     thread.start()
     try:
         yield int(server.server_address[1])
@@ -66,7 +73,7 @@ def plain_http_server(root: Path) -> Iterator[int]:
         thread.join(5.0)
 
 
-# ---- gRPC health ------------------------------------------------------------------------------------
+# ---- gRPC health --------------------------------------------------------------------------------
 
 HEALTH = {"": "SERVING", "svc.A": "SERVING", "svc.B": "NOT_SERVING"}
 
@@ -94,7 +101,7 @@ def test_a_grpc_server_without_health_fails() -> None:
         assert check(f"grpc://127.0.0.1:{port}", "grpc:")
 
 
-# ---- HTTP -------------------------------------------------------------------------------------------
+# ---- HTTP ---------------------------------------------------------------------------------------
 
 
 def test_an_http_check_fails_on_a_grpc_gateway_answering_200_everywhere() -> None:
@@ -144,7 +151,7 @@ def test_a_closed_port_fails_tcp() -> None:
     assert check(endpoint, "tcp")
 
 
-# ---- the probe task and endpoint form -----------------------------------------------------------------
+# ---- the probe task and endpoint form -----------------------------------------------------------
 
 
 def test_the_probe_reports_not_serving_where_a_connect_would_pass() -> None:
@@ -152,15 +159,23 @@ def test_the_probe_reports_not_serving_where_a_connect_would_pass() -> None:
     with grpc_health_server(HEALTH) as port:
         endpoint = f"grpc://127.0.0.1:{port}"
         assert check(endpoint, "tcp") is None  # a connect-only probe would pass here
-        _identity, reasons = run_bounded(lambda: services._probe_services([(endpoint, "grpc:svc.B")]), 60.0)
+        _identity, reasons = run_bounded(
+            lambda: services._probe_services([(endpoint, "grpc:svc.B")]), 60.0
+        )
         got = list(reasons.values() if hasattr(reasons, "values") else reasons)
         assert len(got) == 1 and isinstance(got[0], str) and got[0], reasons
-        _identity, reasons = run_bounded(lambda: services._probe_services([(endpoint, "grpc:svc.A")]), 60.0)
+        _identity, reasons = run_bounded(
+            lambda: services._probe_services([(endpoint, "grpc:svc.A")]), 60.0
+        )
         assert list(reasons.values() if hasattr(reasons, "values") else reasons) == [None]
 
 
-@pytest.mark.parametrize("endpoint", ["h:1", "127.0.0.1:8001", "triton://h:1", "http://h", "http://h:1/path"])
-def test_a_service_set_refuses_an_endpoint_without_a_scheme_naming_the_schemes(endpoint: str) -> None:
+@pytest.mark.parametrize(
+    "endpoint", ["h:1", "127.0.0.1:8001", "triton://h:1", "http://h", "http://h:1/path"]
+)
+def test_a_service_set_refuses_an_endpoint_without_a_scheme_naming_the_schemes(
+    endpoint: str,
+) -> None:
     services = services_api()
     backend = submit_api().ThreadBackend(1)
     try:
@@ -168,4 +183,6 @@ def test_a_service_set_refuses_an_endpoint_without_a_scheme_naming_the_schemes(e
             run_bounded(lambda: services.ServiceSet((), backend, endpoints={"x": endpoint}), 60.0)
     finally:
         run_bounded(backend.close, 60.0)
-    assert all(s in str(excinfo.value) for s in ("tcp", "http", "https", "grpc", "grpcs")), str(excinfo.value)
+    assert all(s in str(excinfo.value) for s in ("tcp", "http", "https", "grpc", "grpcs")), str(
+        excinfo.value
+    )

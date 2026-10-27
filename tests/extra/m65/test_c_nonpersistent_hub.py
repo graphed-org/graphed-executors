@@ -1,4 +1,7 @@
-"""m65 C: a complete_events monitor holds each run's events on a fresh (non-persistent) process hub pool."""
+"""m65 C: a complete_events monitor on a fresh process hub pool.
+
+A complete_events monitor holds each run's events on a fresh (non-persistent) process hub pool.
+"""
 
 from __future__ import annotations
 

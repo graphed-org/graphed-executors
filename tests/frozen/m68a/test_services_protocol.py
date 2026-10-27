@@ -1,19 +1,23 @@
-"""m68a D2/D10 and §3.1: the engine's three-leg service set, run on ``ThreadBackend`` and on a two-host fake
-backend (``services_harness.HostFake``), on every OS.
+"""m68a D2/D10 and §3.1.
 
-What a submission acquires lives exactly as long as the submission: a managed child, a hosted service, a
-probe task, the plan's queued tasks. Every leg witnesses the mechanism: pids reaped (``pid_gone``), ports
-free (``port_free``), the recording backend's submits/cancels/task starts, the fake's ``host_service`` /
-``release_service`` calls, the spies' ``bind_services``/``resolve_services`` records in one ordered
-trace, and the ``ServiceStatus`` on each ``graphed_executors.services`` log record.
+The engine's three-leg service set, run on ``ThreadBackend`` and on a two-host fake backend
+(``services_harness.HostFake``), on every OS.
 
-Discriminates: bind after submit, a same-host probe pass off the driver's machine, a service, record or
-pending task outliving its submission or a warm set's ``with``, a cleanup failure replacing the refusal,
-a raising release step skipping a later one, a returned value that needs a released service (a composed
-plan's too), an unanswered probe that hangs, a replaced given endpoint, a connect-only probe.
+What a submission acquires lives exactly as long as the submission: a managed child, a hosted
+service, a probe task, the plan's queued tasks. Every leg witnesses the mechanism: pids reaped
+(``pid_gone``), ports free (``port_free``), the recording backend's submits/cancels/task starts,
+the fake's ``host_service`` / ``release_service`` calls, the spies'
+``bind_services``/``resolve_services`` records in one ordered trace, and the ``ServiceStatus`` on
+each ``graphed_executors.services`` log record.
 
-The legs that resolve a value through ``collate`` and ``aggregate_plan`` need graphed's resolve walk
-(plan §3.2), which graphed has not merged; they stay red until it lands.
+Discriminates: bind after submit, a same-host probe pass off the driver's machine, a service,
+record or pending task outliving its submission or a warm set's ``with``, a cleanup failure
+replacing the refusal, a raising release step skipping a later one, a returned value that needs a
+released service (a composed plan's too), an unanswered probe that hangs, a replaced given
+endpoint, a connect-only probe.
+
+The legs that resolve a value through ``collate`` and ``aggregate_plan`` need graphed's resolve
+walk (plan §3.2), which graphed has not merged; they stay red until it lands.
 """
 
 from __future__ import annotations
@@ -98,20 +102,28 @@ def ports_free(ports: tuple[int, int]) -> bool:
 
 
 def body_pids(value: Any) -> set[int]:
-    """The pids a spy's leaves read from a ``service_child.py`` (its GET answers its pid)."""
+    """Return the pids a spy's leaves read from a ``service_child.py``.
+
+    Its GET answers its pid.
+    """
     assert isinstance(value, Resolved), value
     return {int(b) for b in value.value}
 
 
-# ---- the whole path on the generic recipe ----------------------------------------------------------
+# ---- the whole path on the generic recipe -------------------------------------------------------
 
 
 def test_http_server_recipe_runs_the_whole_path_without_a_service_client(tmp_path: Path) -> None:
-    """``recipes.http_server`` through ``SubmitRunner(ThreadBackend)`` in a fresh interpreter: resolve,
-    probe, bind, a task GET, resolve the value, close; no Triton or histserv module is imported."""
+    """``recipes.http_server`` through ``SubmitRunner(ThreadBackend)`` in a fresh interpreter.
+
+    Resolve, probe, bind, a task GET, resolve the value, close; no Triton or histserv module is
+    imported.
+    """
     out = tmp_path / "whole.json"
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([HARNESS_DIR, env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
+    env["PYTHONPATH"] = os.pathsep.join([HARNESS_DIR, env.get("PYTHONPATH", "")]).rstrip(
+        os.pathsep
+    )
     code = f"import services_harness as h; h.whole_path_main({str(out)!r}, {str(tmp_path)!r})"
     proc = subprocess.run(
         [sys.executable, "-c", code],
@@ -138,12 +150,16 @@ def test_http_server_recipe_runs_the_whole_path_without_a_service_client(tmp_pat
     assert max(probes) < bind < min(plans), order
 
 
-# ---- resolution order ------------------------------------------------------------------------------
+# ---- resolution order ---------------------------------------------------------------------------
 
 
-def test_a_given_endpoint_wins_over_a_site_endpoint(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_a_given_endpoint_wins_over_a_site_endpoint(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     with CountingHTTPServer() as user_srv, CountingHTTPServer() as site_srv:
-        fake = HostFake(tmp_path / "ads", site_services={"kind-x": site_srv.endpoint()}, hosting=False)
+        fake = HostFake(
+            tmp_path / "ads", site_services={"kind-x": site_srv.endpoint()}, hosting=False
+        )
         specs = [bare_spec("svc-1", kind="kind-x"), bare_spec("svc-2", kind="kind-x")]
         plan = spy_plan(SpyProcess("order", service="svc-1"), 2, specs)
         with (
@@ -169,7 +185,7 @@ def test_a_dead_given_endpoint_refuses_naming_user_with_zero_plan_submits(
     backend = RecordingBackend(thread_backend())
     plan = spy_plan(SpyProcess("dead-user"), 2, [child_spec("web", report, ports=free_range())])
     with closing_bounded(runner_over(backend, services={"web": dead})) as runner:
-        with pytest.raises(services.ServiceUnavailable) as excinfo:
+        with pytest.raises(services.ServiceUnavailableError) as excinfo:
             run_bounded(lambda: runner.run(plan), BOUND_S)
         assert backend.log.plan_keys() == []
     assert excinfo.value.name == "web"
@@ -197,12 +213,14 @@ def test_no_launch_and_no_endpoint_names_all_three_legs() -> None:
     plan = spy_plan(SpyProcess("nothing"), 2, [bare_spec("web")])
     with (
         closing_bounded(runner_over(thread_backend())) as runner,
-        pytest.raises(services.ServiceUnavailable) as excinfo,
+        pytest.raises(services.ServiceUnavailableError) as excinfo,
     ):
         run_bounded(lambda: runner.run(plan), BOUND_S)
     assert set(excinfo.value.legs) == {"user", "site", "managed"}
     assert all(excinfo.value.legs[leg] for leg in ("user", "site", "managed")), excinfo.value.legs
-    assert all(leg in str(excinfo.value) for leg in ("user", "site", "managed")), str(excinfo.value)
+    assert all(leg in str(excinfo.value) for leg in ("user", "site", "managed")), str(
+        excinfo.value
+    )
 
 
 def test_a_gpu_recipe_without_host_service_is_refused_naming_the_attribute() -> None:
@@ -210,13 +228,13 @@ def test_a_gpu_recipe_without_host_service_is_refused_naming_the_attribute() -> 
     plan = spy_plan(SpyProcess("gpu"), 2, [gpu_spec("web")])
     with (
         closing_bounded(runner_over(thread_backend())) as runner,
-        pytest.raises(services.ServiceUnavailable) as excinfo,
+        pytest.raises(services.ServiceUnavailableError) as excinfo,
     ):
         run_bounded(lambda: runner.run(plan), BOUND_S)
     assert "host_service" in excinfo.value.legs["managed"], excinfo.value.legs
 
 
-# ---- injected faults: the refusal surfaces, nothing is left ---------------------------------------
+# ---- injected faults: the refusal surfaces, nothing is left -------------------------------------
 
 FAULTS = (
     "check-never-passes",
@@ -232,8 +250,11 @@ FAULTS = (
 
 
 class FaultCase:
-    """One injected fault: its specs, the fake's faults, the managed children's reports and port
-    ranges, and the check on the exception that must surface."""
+    """One injected fault.
+
+    Its specs, the fake's faults, the managed children's reports and port ranges, and the check
+    on the exception that must surface.
+    """
 
     def __init__(self, fault: str, tmp_path: Path, children: Any) -> None:
         self.fault = fault
@@ -260,14 +281,18 @@ class FaultCase:
             faults.dead_hosted = True
             self.specs = [ready, hosted_spec("b-hosted")]
         elif fault == "release-raises-then-refusal":
-            self.release_error = faults.release_raises = RuntimeError("release_service fault injected")
+            self.release_error = faults.release_raises = RuntimeError(
+                "release_service fault injected"
+            )
             self.specs = [ready, hosted_spec("b-hosted"), bare_spec("c-missing")]
         elif fault == "port-range-held":
             self.held = closed_port()
             held = child_spec("b-held", children.report("b-held"), ports=(self.held, self.held))
             self.specs = [ready, held]
         elif fault == "probe-submit-worker-lost":
-            self.injected = faults.probe_raises = server_api().WorkerLost("svc-probe", "pilot-lost")
+            self.injected = faults.probe_raises = server_api().WorkerLostError(
+                "svc-probe", "pilot-lost"
+            )
             self.specs = [ready]
         elif fault == "probe-unanswered":
             faults.probe_silent = True
@@ -293,19 +318,25 @@ class FaultCase:
         if self.injected is not None:
             assert exc is self.injected, repr(exc)
         elif self.fault == "check-never-passes":
-            assert isinstance(exc, services.ServiceUnavailable), repr(exc)
+            assert isinstance(exc, services.ServiceUnavailableError), repr(exc)
             assert exc.name == "a-never" and "http:/" in exc.legs["managed"], exc.legs
         elif self.fault in ("ready-child-then-refusal", "hosted-then-refusal"):
-            assert isinstance(exc, services.ServiceUnavailable) and exc.name == "b-missing", repr(exc)
+            assert isinstance(exc, services.ServiceUnavailableError) and exc.name == "b-missing", (
+                repr(exc)
+            )
         elif self.fault == "release-raises-then-refusal":
-            assert isinstance(exc, services.ServiceUnavailable) and exc.name == "c-missing", repr(exc)
+            assert isinstance(exc, services.ServiceUnavailableError) and exc.name == "c-missing", (
+                repr(exc)
+            )
         elif self.fault == "probe-refuses":
-            assert isinstance(exc, services.ServiceUnreachable) and exc.name == "b-hosted", repr(exc)
+            assert isinstance(exc, services.ServiceUnreachableError) and exc.name == "b-hosted", (
+                repr(exc)
+            )
             assert exc.reason, repr(exc)
         elif self.fault == "port-range-held":
             assert isinstance(exc, OSError), repr(exc)
         elif self.fault == "probe-unanswered":
-            assert isinstance(exc, services.ServiceUnreachable), repr(exc)
+            assert isinstance(exc, services.ServiceUnreachableError), repr(exc)
             assert "no worker answered" in exc.reason, exc.reason
         else:  # pragma: no cover
             raise AssertionError(self.fault)
@@ -329,7 +360,9 @@ class FaultCase:
                 probes,
                 self.fake.inner.log.cancelled(),
             )
-            assert all(f.cancelled() for f in self.fake.silent), "an unanswered probe was left pending"
+            assert all(f.cancelled() for f in self.fake.silent), (
+                "an unanswered probe was left pending"
+            )
 
 
 @pytest.mark.parametrize("entry", ["run", "start"])
@@ -367,7 +400,7 @@ def test_an_injected_fault_surfaces_and_leaves_nothing(
         run_bounded(runner.close, BOUND_S)
 
 
-# ---- per-run lifetime -------------------------------------------------------------------------------
+# ---- per-run lifetime ---------------------------------------------------------------------------
 
 
 def test_a_managed_child_lives_exactly_as_long_as_its_run(children: Any) -> None:
@@ -393,7 +426,10 @@ def test_two_sequential_runs_on_the_fake_each_release_only_their_own_key(tmp_pat
     with closing_bounded(runner_over(fake)) as runner:
         run_bounded(lambda: runner.run(plan), BOUND_S)
         ((_, _, scope1),) = fake.host_service_calls()
-        assert fake.released_keys() == fake.minted_under(scope1) and len(fake.minted_under(scope1)) == 1
+        assert (
+            fake.released_keys() == fake.minted_under(scope1)
+            and len(fake.minted_under(scope1)) == 1
+        )
         run_bounded(lambda: runner.run(plan), BOUND_S)
         (_, (_, _, scope2)) = fake.host_service_calls()
         assert scope2 != scope1
@@ -403,27 +439,39 @@ def test_two_sequential_runs_on_the_fake_each_release_only_their_own_key(tmp_pat
 
 
 def test_overlapping_submissions_keep_their_own_scope(tmp_path: Path) -> None:
-    """A (``run``) and B (``submit``, longer ``timeout_s``) on one runner over the fake, whose single
-    worker a gate holds until A raises: A's probe goes unanswered and is cancelled, B completes."""
+    """A and B on one runner keep their own scope: A's probe is cancelled, B completes.
+
+    A (``run``) and B (``submit``, longer ``timeout_s``) on one runner over the fake, whose single
+    worker a gate holds until A raises: A's probe goes unanswered and is cancelled, B completes.
+    """
     services = services_api()
     gate = threading.Event()
     inner = RecordingBackend(thread_backend(1), gate=gate)
     fake = HostFake(tmp_path / "ads", inner=inner)
-    plan_a = spy_plan(SpyProcess("overlap-a", service=None), 2, [hosted_spec("svc-a", timeout_s=2.0)])
-    plan_b = spy_plan(SpyProcess("overlap-b", service=None), 2, [hosted_spec("svc-b", timeout_s=90.0)])
+    plan_a = spy_plan(
+        SpyProcess("overlap-a", service=None), 2, [hosted_spec("svc-a", timeout_s=2.0)]
+    )
+    plan_b = spy_plan(
+        SpyProcess("overlap-b", service=None), 2, [hosted_spec("svc-b", timeout_s=90.0)]
+    )
     runner = runner_over(fake)
     try:
         fut_b = runner.submit(plan_b)
         assert wait_for(lambda: any(c[1] == "svc-b" for c in fake.host_service_calls()), 30.0)
-        with pytest.raises(services.ServiceUnreachable) as excinfo:
+        with pytest.raises(services.ServiceUnreachableError) as excinfo:
             run_bounded(lambda: runner.run(plan_a), BOUND_S)
         assert "no worker answered" in excinfo.value.reason
         scope = {name: s for _, name, s in fake.host_service_calls()}
         scope_a, scope_b = scope["svc-a"], scope["svc-b"]
         assert scope_a != scope_b
-        assert fake.released_keys() == fake.minted_under(scope_a), "A's end released another run's key"
+        assert fake.released_keys() == fake.minted_under(scope_a), (
+            "A's end released another run's key"
+        )
         probes_a = [k for k in inner.log.probe_keys() if probe_scope(k) == scope_a]
-        assert probes_a and set(probes_a) <= set(inner.log.cancelled()), (probes_a, inner.log.cancelled())
+        assert probes_a and set(probes_a) <= set(inner.log.cancelled()), (
+            probes_a,
+            inner.log.cancelled(),
+        )
         gate.set()
         result_b = fut_b.result(timeout=BOUND_S)
         assert result_b.n_partitions == 2
@@ -431,7 +479,9 @@ def test_overlapping_submissions_keep_their_own_scope(tmp_path: Path) -> None:
         ran = inner.log.ran_keys()
         assert not set(probes_a) & set(ran), f"A's cancelled probe ran: {ran}"
         events = trace_snapshot()
-        cancel_at = max(i for i, e in enumerate(events) if e[0] == "cancel" and set(probes_a) & set(e[1:]))
+        cancel_at = max(
+            i for i, e in enumerate(events) if e[0] == "cancel" and set(probes_a) & set(e[1:])
+        )
         b_first = min(i for i, e in enumerate(events) if e[0] == "ran" and scope_b in e[1])
         assert cancel_at < b_first, events
         probes_b = [k for k in inner.log.probe_keys() if probe_scope(k) == scope_b]
@@ -439,7 +489,9 @@ def test_overlapping_submissions_keep_their_own_scope(tmp_path: Path) -> None:
         b_plan = inner.log.plan_keys()
         assert b_plan and all(scope_b in k and scope_a not in k for k in b_plan), b_plan
         assert set(inner.log.plan_nonces()) == {scope_b}
-        assert sorted(fake.released_keys()) == sorted(fake.minted_under(scope_a) + fake.minted_under(scope_b))
+        assert sorted(fake.released_keys()) == sorted(
+            fake.minted_under(scope_a) + fake.minted_under(scope_b)
+        )
     finally:
         gate.set()
         run_bounded(runner.close, BOUND_S)
@@ -457,7 +509,9 @@ def test_a_failed_leaf_submit_cancels_the_run_s_queued_leaves() -> None:
             run_bounded(lambda: runner.run(plain_plan(4, "m68a-leaf-fault")), BOUND_S)
         assert excinfo.value is fault
         queued = [k for k in backend.log.plan_keys() if k.endswith(("-leaf-0", "-leaf-1"))]
-        assert len(queued) == 2 and set(queued) <= set(backend.log.cancelled()), backend.log.cancelled()
+        assert len(queued) == 2 and set(queued) <= set(backend.log.cancelled()), (
+            backend.log.cancelled()
+        )
         gate.set()
         backend.drain()
         assert not set(queued) & set(backend.log.ran_keys()), backend.log.ran_keys()
@@ -496,7 +550,9 @@ def _enter_two_sets_together(
         assert not errors, errors
         (ep0, pid0), (ep1, pid1) = got[0], got[1]
         assert endpoint_port(ep0) != endpoint_port(ep1), f"trial {trial}: one port for two sets"
-        assert pid0 != pid1 and not pid_gone(pid0) and not pid_gone(pid1), f"trial {trial}: a child is not up"
+        assert pid0 != pid1 and not pid_gone(pid0) and not pid_gone(pid1), (
+            f"trial {trial}: a child is not up"
+        )
     finally:
         release.set()
         for t in threads:
@@ -538,12 +594,14 @@ def test_a_warm_user_held_set_serves_two_plans_with_one_child(
         assert after.n_partitions == 2  # the runner is still open
 
 
-# ---- bind, probe, resolve ----------------------------------------------------------------------------
+# ---- bind, probe, resolve -----------------------------------------------------------------------
 
 
 def test_bind_comes_after_the_probe_and_before_the_first_plan_task(children: Any) -> None:
     backend = RecordingBackend(thread_backend())
-    plan = spy_plan(SpyProcess("bind-order"), 2, [child_spec("web", children.report(), ports=free_range())])
+    plan = spy_plan(
+        SpyProcess("bind-order"), 2, [child_spec("web", children.report(), ports=free_range())]
+    )
     with closing_bounded(runner_over(backend)) as runner:
         run_bounded(lambda: runner.run(plan), BOUND_S)
     events = trace_snapshot()
@@ -556,7 +614,9 @@ def test_bind_comes_after_the_probe_and_before_the_first_plan_task(children: Any
 
 
 def test_resolve_services_runs_once_on_the_run_value_while_the_child_is_up(children: Any) -> None:
-    plan = spy_plan(SpyProcess("resolve"), 2, [child_spec("web", children.report(), ports=free_range())])
+    plan = spy_plan(
+        SpyProcess("resolve"), 2, [child_spec("web", children.report(), ports=free_range())]
+    )
     with closing_bounded(runner_over(thread_backend())) as runner:
         result = run_bounded(lambda: runner.run(plan), BOUND_S)
     (resolve,) = spy_events("resolve", "resolve")
@@ -571,7 +631,10 @@ def test_resolve_reaches_a_collated_part(children: Any) -> None:
     """Needs graphed's resolve walk (``_Collated`` forwarding ``resolve_services``, plan §3.2)."""
     spec = child_spec("web", children.report(), ports=free_range())
     plan = collate(
-        {"a": spy_plan(SpyProcess("col-a"), 2, [spec]), "b": spy_plan(SpyProcess("col-b"), 2, [spec])}
+        {
+            "a": spy_plan(SpyProcess("col-a"), 2, [spec]),
+            "b": spy_plan(SpyProcess("col-b"), 2, [spec]),
+        }
     )
     with closing_bounded(runner_over(thread_backend())) as runner:
         result = run_bounded(lambda: runner.run(plan), BOUND_S)
@@ -586,8 +649,10 @@ def test_resolve_reaches_a_collated_part(children: Any) -> None:
 
 
 def test_resolve_reaches_an_aggregate_plan_reduce(children: Any) -> None:
-    """Needs graphed's resolve walk (``_PartitionReduce`` forwarding ``resolve_services`` to its
-    ``reduce``, plan §3.2)."""
+    """Needs graphed's resolve walk.
+
+    ``_PartitionReduce`` forwarding ``resolve_services`` to its ``reduce``, plan §3.2.
+    """
     spec = child_spec("web", children.report(), ports=free_range())
     plan = spy_aggregate_plan(SpyReduce("agg"), spec, concat, empty_tuple)
     assert plan.services == (spec,)
@@ -614,7 +679,9 @@ def test_an_unbound_plan_is_refused_before_any_process_call() -> None:
 
 def test_on_close_runs_before_teardown(children: Any) -> None:
     ON_CLOSE_MODES["on-close"] = "record"
-    plan = spy_plan(SpyProcess("on-close"), 2, [child_spec("web", children.report(), ports=free_range())])
+    plan = spy_plan(
+        SpyProcess("on-close"), 2, [child_spec("web", children.report(), ports=free_range())]
+    )
     with closing_bounded(runner_over(thread_backend())) as runner:
         result = run_bounded(lambda: runner.run(plan), BOUND_S)
     assert spy_events("on-close", "no-on_close") == []
@@ -640,8 +707,12 @@ def test_a_raising_on_close_is_logged_and_the_value_stands(
     assert any("on_close fault injected" in t for t in text), "the raising on_close was not logged"
 
 
-def test_statuses_are_logged_with_leg_and_ready_at(children: Any, caplog: pytest.LogCaptureFixture) -> None:
-    plan = spy_plan(SpyProcess("status"), 2, [child_spec("web", children.report(), ports=free_range())])
+def test_statuses_are_logged_with_leg_and_ready_at(
+    children: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    plan = spy_plan(
+        SpyProcess("status"), 2, [child_spec("web", children.report(), ports=free_range())]
+    )
     with caplog.at_level(logging.INFO), closing_bounded(runner_over(thread_backend())) as runner:
         run_bounded(lambda: runner.run(plan), BOUND_S)
     records = [r for r in caplog.records if hasattr(r, "status")]
@@ -655,7 +726,7 @@ def test_statuses_are_logged_with_leg_and_ready_at(children: Any, caplog: pytest
     assert status.started_at <= status.ready_at
 
 
-# ---- the probe and host identity -----------------------------------------------------------------------
+# ---- the probe and host identity ----------------------------------------------------------------
 
 
 def test_on_thread_backend_every_probe_answer_carries_the_driver_identity(
@@ -663,7 +734,9 @@ def test_on_thread_backend_every_probe_answer_carries_the_driver_identity(
 ) -> None:
     services = services_api()
     backend = RecordingBackend(thread_backend())
-    plan = spy_plan(SpyProcess("same-host"), 2, [child_spec("web", children.report(), ports=free_range())])
+    plan = spy_plan(
+        SpyProcess("same-host"), 2, [child_spec("web", children.report(), ports=free_range())]
+    )
     with caplog.at_level(logging.INFO), closing_bounded(runner_over(backend)) as runner:
         result = run_bounded(lambda: runner.run(plan), BOUND_S)
     driver = run_bounded(services.host_identity, BOUND_S)
@@ -701,18 +774,22 @@ def test_the_two_host_probe_passes_only_off_the_service_host(
     services = services_api()
     fake = HostFake(tmp_path / "ads", worker_hosts=worker_hosts, n_workers=n_workers)
     plan = spy_plan(
-        SpyProcess(f"two-host-{len(worker_hosts)}-{passes}", service="web"), 2, [hosted_spec("web")]
+        SpyProcess(f"two-host-{len(worker_hosts)}-{passes}", service="web"),
+        2,
+        [hosted_spec("web")],
     )
     with caplog.at_level(logging.INFO), closing_bounded(runner_over(fake)) as runner:
         if passes:
             run_bounded(lambda: runner.run(plan), BOUND_S)
         else:
-            with pytest.raises(services.ServiceUnreachable) as excinfo:
+            with pytest.raises(services.ServiceUnreachableError) as excinfo:
                 run_bounded(lambda: runner.run(plan), BOUND_S)
             assert "only same-host workers answered" in excinfo.value.reason
     probes = fake.inner.log.probe_keys()
     assert len(set(probes)) == len(probes), "a probe was resubmitted under the same key"
-    assert all(h == {"resources": None, "workers": None} for h in fake.probe_hints), fake.probe_hints
+    assert all(h == {"resources": None, "workers": None} for h in fake.probe_hints), (
+        fake.probe_hints
+    )
     if passes:
         (status,) = statuses_named(caplog.records, "web")
         assert (status.leg, status.host, status.identity) == ("managed", "cluster", SERVICE_HOST)
@@ -730,16 +807,23 @@ def test_a_user_or_site_service_passes_on_any_answer(
     with CountingHTTPServer() as srv:
         site = {"http": srv.endpoint()} if leg == "site" else {}
         given = {"web": srv.endpoint()} if leg == "user" else None
-        fake = HostFake(tmp_path / "ads", worker_hosts=(worker_host,), site_services=site, hosting=False)
+        fake = HostFake(
+            tmp_path / "ads", worker_hosts=(worker_host,), site_services=site, hosting=False
+        )
         plan = spy_plan(SpyProcess(f"any-{leg}-{worker_host}"), 2, [bare_spec("web")])
-        with caplog.at_level(logging.INFO), closing_bounded(runner_over(fake, services=given)) as runner:
+        with (
+            caplog.at_level(logging.INFO),
+            closing_bounded(runner_over(fake, services=given)) as runner,
+        ):
             run_bounded(lambda: runner.run(plan), BOUND_S)
         (status,) = statuses_named(caplog.records, "web")
         assert (status.leg, status.identity) == (leg, None)
         assert len(fake.inner.log.probe_keys()) == 1
 
 
-def test_the_probe_task_returns_host_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_probe_task_returns_host_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     services = services_api()
     with CountingHTTPServer() as srv:
         monkeypatch.setenv(
@@ -754,5 +838,7 @@ def test_the_probe_task_returns_host_identity(tmp_path: Path, monkeypatch: pytes
         assert srv.gets == 1
         monkeypatch.delenv("_CONDOR_MACHINE_AD")
         assert run_bounded(services.host_identity, BOUND_S) == socket.getfqdn()
-        identity, _ = run_bounded(lambda: services._probe_services([(srv.endpoint(), "http:/")]), BOUND_S)
+        identity, _ = run_bounded(
+            lambda: services._probe_services([(srv.endpoint(), "http:/")]), BOUND_S
+        )
         assert identity == socket.getfqdn()

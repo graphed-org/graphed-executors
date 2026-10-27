@@ -1,7 +1,8 @@
-"""m47 import hygiene for the NEW modules (MAIN matrix — no parsl/dask needed): the frozen §1.6
-import rule applied to every module m47 creates, plus the shim identities the §1.6 move must
-preserve (plan §0.4, §1.6 import rule, G9; the m46 `test_parsl_no_cross_import` precedent extended
-to modules that did not exist at the m46 freeze).
+"""m47 import hygiene for the NEW modules (MAIN matrix — no parsl/dask needed).
+
+The frozen §1.6 import rule applied to every module m47 creates, plus the shim identities the §1.6
+move must preserve (plan §0.4, §1.6 import rule, G9; the m46 `test_parsl_no_cross_import` precedent
+extended to modules that did not exist at the m46 freeze).
 
 Subprocess probes (each import in a FRESH interpreter so sys.modules is a clean witness):
 - ``common.http_plane`` / ``common.transport_run`` / ``common.facade`` / ``common.transport_tasks``
@@ -19,7 +20,8 @@ Subprocess probes (each import in a FRESH interpreter so sys.modules is a clean 
 
 Discriminates: an eager ``import parsl``/``import dask`` anywhere under the new modules; a parsl
 facade importing ``dask_backend`` for the resolver instead of ``common/facade``; copied (drift-
-prone) resolver/witness definitions left behind by an incomplete move."""
+prone) resolver/witness definitions left behind by an incomplete move.
+"""
 
 from __future__ import annotations
 

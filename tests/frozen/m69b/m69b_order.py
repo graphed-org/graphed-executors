@@ -1,12 +1,14 @@
-"""Harness for ``test_service_order.py``: when a run's service jobs and its pilots are submitted
-(plan-services.md §5.2 "Ordering").
+"""Harness for ``test_service_order.py``.
 
-- ``OrderSchedd``: m68a's recorded schedd (``services_harness.RecordingSchedd``, whose ``log`` it keeps)
-  that also stamps every submit, ``act`` and announce in ``events``, numbers each submitted cluster, and
-  answers ``query`` per cluster: a pilot not yet started is idle, a started one running (with its claim),
-  an exited or removed one gone; a service job answers ``service_status``. On a pilots' submit it can
-  start real pilot processes in ``initialdir`` with the job's ``arguments``; on a service submit it posts
-  the job's signed announce ``announce_after_s`` later, naming ``service_port``.
+When a run's service jobs and its pilots are submitted (plan-services.md §5.2 "Ordering").
+
+- ``OrderSchedd``: m68a's recorded schedd (``services_harness.RecordingSchedd``, whose ``log`` it
+  keeps) that also stamps every submit, ``act`` and announce in ``events``, numbers each submitted
+  cluster, and answers ``query`` per cluster: a pilot not yet started is idle, a started one
+  running (with its claim), an exited or removed one gone; a service job answers
+  ``service_status``. On a pilots' submit it can start real pilot processes in ``initialdir`` with
+  the job's ``arguments``; on a service submit it posts the job's signed announce
+  ``announce_after_s`` later, naming ``service_port``.
 - ``order_bindings``: m68a's ``record_bindings``, with ``Hold`` and ``Release`` added to the fake
   module's ``JobAction`` (m68a's has only ``Remove``).
 - ``order_plan``/``twin``: a ``SpyProcess`` plan over cluster-only services, and its value on a
@@ -71,9 +73,11 @@ class OrderJobAction:
 
 @dataclass(frozen=True)
 class Event:
-    """One stamped schedd event: ``kind`` is ``submit-pilots``, ``submit-service``, ``pilot-start``,
-    ``act``, ``announce`` or ``mark``; ``text`` is the service key, the action and constraint, or the
-    mark's label."""
+    """One stamped schedd event.
+
+    ``kind`` is ``submit-pilots``, ``submit-service``, ``pilot-start``, ``act``, ``announce``
+    or ``mark``; ``text`` is the service key, the action and constraint, or the mark's label.
+    """
 
     t: float
     kind: str
@@ -121,7 +125,9 @@ class OrderSchedd(RecordingSchedd):
     def mark(self, label: str) -> None:
         self._stamp("mark", text=label)
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         super().submit(description, count, spool, **kwargs)
         desc = dict(description)
         with self._lock:
@@ -134,13 +140,17 @@ class OrderSchedd(RecordingSchedd):
                 self._pilots[cluster] = [None] * count
             self._stamp("submit-pilots", cluster)
             if self.start_pilots:
-                threading.Thread(target=self._start, args=(cluster, desc, count), daemon=True).start()
+                threading.Thread(
+                    target=self._start, args=(cluster, desc, count), daemon=True
+                ).start()
         else:
             with self._lock:
                 self._services[cluster] = job_dir
             self._stamp("submit-service", cluster, batch.removeprefix(SERVICE_BATCH))
             if self.announce_after_s is not None:
-                threading.Thread(target=self._announce_later, args=(cluster, job_dir), daemon=True).start()
+                threading.Thread(
+                    target=self._announce_later, args=(cluster, job_dir), daemon=True
+                ).start()
         return SubmitResult(cluster)
 
     def _start(self, cluster: int, desc: dict[str, Any], count: int) -> None:
@@ -168,12 +178,17 @@ class OrderSchedd(RecordingSchedd):
                 self.announce(job_dir)
 
     def announce(self, job_dir: Path) -> int:
-        """Post the signed announce of the service job in ``job_dir``: its key at ``service_port``."""
+        """Post the signed announce of the service job in ``job_dir``.
+
+        Its key at ``service_port``.
+        """
         cfg = json.loads((job_dir / "service.json").read_text())
         secret = bytes.fromhex((job_dir / "graphed-secret").read_text().strip())
         body = f"{cfg['key']} 127.0.0.1:{self.service_port} {IDENTITY}".encode()
         self._stamp("announce", text=str(cfg["key"]))
-        request = urllib.request.Request(str(cfg["url"]).rstrip("/") + "/announce", data=body, method="POST")
+        request = urllib.request.Request(
+            str(cfg["url"]).rstrip("/") + "/announce", data=body, method="POST"
+        )
         request.add_header(SIG_HEADER, hmac.new(secret, body, hashlib.sha256).hexdigest())
         try:
             with urllib.request.urlopen(request, timeout=30.0) as response:
@@ -202,7 +217,9 @@ class OrderSchedd(RecordingSchedd):
                 ads.append({**ad, "JobStatus": 2, **claim})
         return ads
 
-    def query(self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def query(
+        self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("query", str(constraint), tuple(projection or ())))
         cluster = cluster_of(constraint)
         wanted = re.search(r"JobStatus\s*==\s*(\d+)", str(constraint))
@@ -221,7 +238,9 @@ class OrderSchedd(RecordingSchedd):
         super().act(action, constraint, *args, **kwargs)
         reason = kwargs.get("reason", args[0] if args else None)
         cluster = cluster_of(constraint)
-        self._stamp("act", cluster, f"{action} {constraint}", None if reason is None else str(reason))
+        self._stamp(
+            "act", cluster, f"{action} {constraint}", None if reason is None else str(reason)
+        )
         if str(action) == OrderJobAction.Remove and cluster is not None:
             with self._lock:
                 self._gone.add(cluster)
@@ -246,8 +265,11 @@ class OrderSchedd(RecordingSchedd):
 
 @contextlib.contextmanager
 def closing(runner: Any, timeout_s: float) -> Iterator[Any]:
-    """``runner`` closed within ``timeout_s`` when the block ends; an exception leaving the block ends any
-    wait for a slot first, as leaving the runner's own ``with`` block does."""
+    """``runner`` closed within ``timeout_s`` when the block ends.
+
+    An exception leaving the block ends any wait for a slot first, as leaving the runner's own
+    ``with`` block does.
+    """
     try:
         yield runner
     except BaseException:
@@ -268,7 +290,10 @@ def of_kind(events: list[Event], kind: str) -> list[Event]:
 
 
 def between(events: list[Event], start: str, stop: str | None = None) -> list[Event]:
-    """The events after the mark ``start`` and before the mark ``stop`` (else to the end)."""
+    """Return the events after the mark ``start`` and before the mark ``stop``.
+
+    Else to the end.
+    """
     labels = [e.text if e.kind == "mark" else None for e in events]
     first = labels.index(start) + 1
     last = labels.index(stop) if stop is not None else len(events)
@@ -280,48 +305,71 @@ def acts(events: list[Event], action: str) -> list[Event]:
 
 
 def order_plan(tag: str, *services: str, timeout_s: float = 30.0) -> Any:
-    """Two tasks of ``SpyProcess(tag)`` (bound to ``web``) over ``services``, each with an image, so no
-    backend runs one beside the driver."""
-    return spy_plan(SpyProcess(tag), 2, [hosted_spec(name, timeout_s=timeout_s) for name in services])
+    """Two tasks of ``SpyProcess(tag)`` (bound to ``web``) over ``services``, each with an image.
+
+    No backend thus runs one beside the driver.
+    """
+    return spy_plan(
+        SpyProcess(tag), 2, [hosted_spec(name, timeout_s=timeout_s) for name in services]
+    )
 
 
 def twin(plan: Any, endpoint: str) -> Any:
-    """``plan``'s value on a one-thread ``SubmitRunner`` given ``endpoint`` for each of its services."""
+    """Return ``plan``'s value on a one-thread ``SubmitRunner`` given each service's endpoint.
+
+    ``plan``'s value on a one-thread ``SubmitRunner`` given ``endpoint`` for each of its services.
+    """
     api = submit_api()
-    runner = api.SubmitRunner(api.ThreadBackend(1), services={s.name: endpoint for s in plan.services})
+    runner = api.SubmitRunner(
+        api.ThreadBackend(1), services={s.name: endpoint for s in plan.services}
+    )
     try:
         return run_bounded(lambda: runner.run(plan), RUN_S).value
     finally:
         runner.close()
 
 
-# ---- the pool (as test_histserv_cluster.py) ------------------------------------------------------------
+# ---- the pool (as test_histserv_cluster.py) -----------------------------------------------------
 
 
 def require_pool() -> Any:
-    """The bindings and a schedd of a reachable pool, or a skip (no bindings) / failure (no pool)."""
+    """Return the bindings and a schedd of a reachable pool, or a skip (no bindings) / failure.
+
+    No pool.
+    """
     import pytest  # noqa: PLC0415  (the pilots import this module without pytest)
     from m69b_harness import require_histserv  # noqa: PLC0415  (pulls awkward; the pool rows only)
 
     htcondor2: Any = pytest.importorskip(
         "htcondor2",
-        reason="the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)",
+        reason=(
+            "the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)"
+        ),
     )
     try:
         ads = run_bounded(
-            lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]), POOL_PROBE_S
+            lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]),
+            POOL_PROBE_S,
         )
     except Exception as exc:
-        pytest.fail(f"htcondor2 is installed but no pool answers ({exc}): start a personal HTCondor")
-    assert ads, "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+        pytest.fail(
+            f"htcondor2 is installed but no pool answers ({exc}): start a personal HTCondor"
+        )
+    assert ads, (
+        "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+    )
     require_histserv()
     return htcondor2
 
 
 def largest_slot_mb(htc: Any) -> int:
-    """The largest slot memory the collector advertises: partitionable ``TotalSlotMemory``, static
-    ``Memory``, dynamic slots skipped."""
-    ads = htc.Collector().query(htc.AdType.Startd, projection=["SlotType", "TotalSlotMemory", "Memory"])
+    """Return the largest slot memory the collector advertises.
+
+    Partitionable ``TotalSlotMemory``, static ``Memory``, dynamic slots skipped.
+    """
+    ads = htc.Collector().query(
+        htc.AdType.Startd, projection=["SlotType", "TotalSlotMemory", "Memory"]
+    )
     sizes = [
         int(ad["TotalSlotMemory"] if ad.get("SlotType") == "Partitionable" else ad["Memory"])
         for ad in ads
@@ -332,10 +380,14 @@ def largest_slot_mb(htc: Any) -> int:
 
 
 def queued(schedd: Any, constraint: str) -> list[Any]:
-    return list(schedd.query(constraint=constraint, projection=["ClusterId", "JobStatus", "JobBatchName"]))
+    return list(
+        schedd.query(constraint=constraint, projection=["ClusterId", "JobStatus", "JobBatchName"])
+    )
 
 
 def unrun(schedd: Any, constraint: str) -> list[tuple[Any, bool]]:
-    """``(NumJobStarts, JobCurrentStartDate present)`` of each history ad matching ``constraint``."""
-    ads = schedd.history(constraint, ["ClusterId", "NumJobStarts", "JobCurrentStartDate"], match=10)
+    """``(NumJobStarts, JobCurrentStartDate present)`` per history ad matching ``constraint``."""
+    ads = schedd.history(
+        constraint, ["ClusterId", "NumJobStarts", "JobCurrentStartDate"], match=10
+    )
     return [(ad.get("NumJobStarts"), "JobCurrentStartDate" in ad) for ad in ads]

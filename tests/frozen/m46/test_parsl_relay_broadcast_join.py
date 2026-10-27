@@ -1,5 +1,7 @@
-"""m46 relay engine — F6 plan choice + the broadcast plane on HTEX (plan §1.3; §3 m46
-`test_parsl_relay_broadcast_join`; the m43 `test_dask_join_plan_choice` lineage).
+"""m46 relay engine.
+
+F6 plan choice + the broadcast plane on HTEX (plan §1.3; §3 m46 `test_parsl_relay_broadcast_join`;
+the m43 `test_dask_join_plan_choice` lineage).
 
 The discrimination gap is built into the scenario: with byte-comparable sides and ``parts=8`` the
 pinned rule (`graphed.shuffle.broadcast_join_choice`, keyed on ``parts``) says SHUFFLE, while the
@@ -14,7 +16,8 @@ scatter_broadcast=False); the how=left unmatched-build tail is EXACTLY one extra
 
 Discriminates: the F6 live-`n_workers()` recompute, an executor overriding a forced choice, a
 "broadcast" that secretly map-writes the large side, and a per-probe-block re-emission of
-unmatched build rows (tail count and multiset both fail)."""
+unmatched build rows (tail count and multiset both fail).
+"""
 
 from __future__ import annotations
 
@@ -68,7 +71,9 @@ def htex2():  # type: ignore[no-untyped-def]
 
 def _run(htex, left, right, parts: int, **kwargs):  # type: ignore[no-untyped-def]
     spy = SpyParslBackend(make_parsl_backend(htex))
-    res = run_bounded(lambda: relay_join(BACKEND, left, right, parts, runner=make_runner(spy), **kwargs))
+    res = run_bounded(
+        lambda: relay_join(BACKEND, left, right, parts, runner=make_runner(spy), **kwargs)
+    )
     return spy, res
 
 
@@ -77,7 +82,9 @@ def test_auto_choice_is_parts_keyed_and_worker_count_invariant(htex1, htex2) -> 
     bb, pb = side_bytes(left), side_bytes(right)
     # scenario sanity: the DISCRIMINATION GAP is real for these measured bytes
     assert broadcast_join_choice(bb, pb, PARTS) is False, "parts-keyed rule must say SHUFFLE here"
-    assert broadcast_join_choice(bb, pb, 1) is True, "worker-keyed rule on 1 worker must say BROADCAST"
+    assert broadcast_join_choice(bb, pb, 1) is True, (
+        "worker-keyed rule on 1 worker must say BROADCAST"
+    )
 
     spy1, r1 = _run(htex1, left, right, PARTS)
     names1 = spy1.fn_names()
@@ -100,7 +107,8 @@ def test_auto_choice_is_parts_keyed_and_worker_count_invariant(htex1, htex2) -> 
 def test_forced_broadcast_never_shuffles_the_large_side(htex2) -> None:  # type: ignore[no-untyped-def]
     left, right = join_equal_sides()
     bb, pb = side_bytes(left), side_bytes(right)
-    assert broadcast_join_choice(bb, pb, PARTS) is False  # the model would shuffle: the force is real
+    # the model would shuffle: the force is real
+    assert broadcast_join_choice(bb, pb, PARTS) is False
 
     spy, res = _run(htex2, left, right, PARTS, broadcast=True)
     names = spy.fn_names()
@@ -137,7 +145,9 @@ def test_unmatched_build_tail_is_exactly_one_extra_part(htex2) -> None:  # type:
     )
     got = nullable_join_multiset(res.value)
     local = run_join(BACKEND, left, right, parts, how="left", broadcast=True)
-    assert got == nullable_join_multiset(local.value), "broadcast-left diverged from the local engine"
+    assert got == nullable_join_multiset(local.value), (
+        "broadcast-left diverged from the local engine"
+    )
     n13 = sum(c for (k, _lv, rv), c in got.items() if k == 13 and rv is None)
     assert n13 == 2, "the two unmatched build rows (key 13) must appear EXACTLY once each"
 
@@ -149,7 +159,9 @@ def test_forced_shuffle_is_honoured_against_the_cost_model(htex2) -> None:  # ty
 
     spy, res = _run(htex2, left, right, parts, broadcast=False)
     names = spy.fn_names()
-    assert names["_dask_broadcast_join_part"] == 0, "forced shuffle must not take the broadcast path"
+    assert names["_dask_broadcast_join_part"] == 0, (
+        "forced shuffle must not take the broadcast path"
+    )
     assert names["_dask_map_write"] > 0
     assert res.witness.broadcast_chosen is False
     assert observed_join_all(res.value) == dup_join_all(left, right, parts)

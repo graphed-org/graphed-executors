@@ -1,12 +1,13 @@
-"""Reference single-machine executors (plan M7): a thread pool AND a process pool, both running the
-same `graphed.core.Plan` to one reduced result.
+"""Reference single-machine executors (plan M7).
+
+A thread pool AND a process pool, both running the same `graphed.core.Plan` to one reduced result.
 
 Both share the driver below; they differ only in the worker pool and how per-worker `open_once`
-resources are held (thread-local vs a per-process global set by an initializer). Fixed partition sets
-use the deterministic straggler-tolerant tree reduction; an adaptive `next_tasks` plan uses a running
-fold over a partition set discovered from observed timings. A worker failure (thread or process)
-propagates to the driver intact — in particular a picklable `graphed.debug.StageError` is re-raised
-as-is, never degraded to an opaque string (plan A.3 #8).
+resources are held (thread-local vs a per-process global set by an initializer). Fixed partition
+sets use the deterministic straggler-tolerant tree reduction; an adaptive `next_tasks` plan uses a
+running fold over a partition set discovered from observed timings. A worker failure (thread or
+process) propagates to the driver intact — in particular a picklable `graphed.debug.StageError` is
+re-raised as-is, never degraded to an opaque string (plan A.3 #8).
 """
 
 from __future__ import annotations
@@ -36,12 +37,22 @@ from concurrent.futures import (
     Executor as _PoolExecutor,
 )
 from concurrent.futures import (
-    ProcessPoolExecutor as _StdProcessPool,  # the stdlib pool; our public ProcessPoolExecutor wraps it
+    # the stdlib pool; our public ProcessPoolExecutor wraps it
+    ProcessPoolExecutor as _StdProcessPool,
 )
 from multiprocessing.managers import SyncManager
 from typing import Any, Generic, TypeVar, cast
 
-from graphed.core import ExecContext, ExecResult, Partition, Plan, RunControl, RunState, StopReason, Task
+from graphed.core import (
+    ExecContext,
+    ExecResult,
+    Partition,
+    Plan,
+    RunControl,
+    RunState,
+    StopReason,
+    Task,
+)
 from graphed.core.execution import (
     LocalResources,
     Monitor,
@@ -105,16 +116,21 @@ def _close_registry(registry: dict[str, Any]) -> None:
 
 
 def _exceeds_fd_budget(w: int) -> bool:
-    """Would a full-registry IPC pool of ``w`` workers strain the per-process fd limit? Each worker in
-    :class:`ProcessPoolExecutor` inherits every inbox (~``2*(w+1)`` fds), so the registry is O(N²) in
-    fds; on large many-core machines (>~128 cores, or any low ``RLIMIT_NOFILE``) that approaches the
-    limit. This is advisory only — it drives a warning that recommends :class:`PinnedPoolExecutor`
-    (whose bounded O(log N) overlay inherits ~``log w`` fds per worker); it never switches pools
-    silently. The user picks the executor explicitly."""
-    if sys.platform == "win32":  # no POSIX RLIMIT; Windows fd/handle limits are high (CRT default 512)
+    """Return whether a full-registry IPC pool of ``w`` workers strains the per-process fd limit.
+
+    Each worker in :class:`ProcessPoolExecutor` inherits every inbox (~``2*(w+1)`` fds), so the
+    registry is O(N²) in fds; on large many-core machines (>~128 cores, or any low
+    ``RLIMIT_NOFILE``) that approaches the limit. This is advisory only — it drives a warning
+    that recommends :class:`PinnedPoolExecutor` (whose bounded O(log N) overlay inherits ~``log
+    w`` fds per worker); it never switches pools silently. The user picks the executor
+    explicitly.
+    """
+    # no POSIX RLIMIT; Windows fd/handle limits are high (CRT default 512)
+    if sys.platform == "win32":
         soft = 512
     else:
-        import resource  # noqa: PLC0415 — POSIX only (sys.platform narrows this off Windows for mypy)
+        # POSIX only (sys.platform narrows this off Windows for mypy)
+        import resource  # noqa: PLC0415
 
         soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
     return 2 * (w + 1) + 64 > soft // 2  # full-registry fds would exceed half the limit
@@ -145,22 +161,24 @@ _proc_drain_thread: threading.Thread | None = None
 _proc_last_flush = 0.0
 _PROC_DRAIN_INTERVAL = 0.05  # seconds between worker->driver batch flushes
 _PROC_BUFFER_CAP = 50000  # bounded local buffer (drop-oldest on overflow)
-_PROC_EXIT_JOIN_S = 2.0  # how long a stopping drain thread may finish its send; a hung one is abandoned
+# how long a stopping drain thread may finish its send; a hung one is abandoned
+_PROC_EXIT_JOIN_S = 2.0
 _PROFILE_FLUSH_INTERVAL = 1.0  # serialize the profiler at most ~1/s, never per task
-# Monitored peer runs drain trailing worker events while waiting for the futures to finish; a coarse
-# poll cadence here is a fixed per-run tail (the no-monitor path blocks on f.result() to avoid exactly
-# that). 2 ms keeps the tail negligible (~1 % on a sub-second pass) without busy-spinning.
+# Monitored peer runs drain trailing worker events while waiting for the futures to finish; a
+# coarse poll cadence here is a fixed per-run tail (the no-monitor path blocks on f.result() to
+# avoid exactly that). 2 ms keeps the tail negligible (~1 % on a sub-second pass) without
+# busy-spinning.
 _PEER_MONITOR_DRAIN_POLL_S = 0.002
-# A paused hub route with tasks running wakes this often, so a resume refills the free slots without
-# waiting for a running task to end.
+# A paused hub route with tasks running wakes this often, so a resume refills the free slots
+# without waiting for a running task to end.
 _PAUSED_WAKE_S = 0.05
-# How long a complete_events hub run waits, after its leaf futures are done, for their terminal events
-# to cross the process collector (forty drain ticks); read at call time.
+# How long a complete_events hub run waits, after its leaf futures are done, for their terminal
+# events to cross the process collector (forty drain ticks); read at call time.
 _HUB_EVENT_DRAIN_S = 2.0
 
 # M37: every statistical profiler we start (thread-local or per-process) is registered here so a
-# single atexit handler can stop it — its background sampler thread must be joined before the worker's
-# interpreter tears down module globals, or a late sample touches half-collected state.
+# single atexit handler can stop it — its background sampler thread must be joined before the
+# worker's interpreter tears down module globals, or a late sample touches half-collected state.
 _live_profilers: list[WorkerProfiler] = []
 _profiler_lock = threading.Lock()
 _atexit_registered = False
@@ -222,8 +240,8 @@ def _proc_init(
     _proc_profiler = _proc_buffer = _proc_drain_stop = _proc_drain_thread = _proc_monitor = None
     _proc_lean = lean
     if monitor_factory is not None:
-        # built before _proc_drain_final registers, so LIFO atexit runs that hook (the final profile)
-        # while this monitor's own exit flush has not yet run
+        # built before _proc_drain_final registers, so LIFO atexit runs that hook (the final
+        # profile) while this monitor's own exit flush has not yet run
         with contextlib.suppress(Exception):  # a monitor that won't build just disables telemetry
             _proc_monitor = monitor_factory()
     if profiler_factory is not None:
@@ -232,7 +250,8 @@ def _proc_init(
             prof.start()
             _proc_profiler = prof
             _register_profiler(prof)  # stopped at worker-process exit (silences sampler teardown)
-    if event_q is not None:  # a monitor is attached -> run the off-path drain thread for this worker
+    # a monitor is attached -> run the off-path drain thread for this worker
+    if event_q is not None:
         _proc_buffer = deque(maxlen=_PROC_BUFFER_CAP)
         _proc_drain_stop = threading.Event()
         _proc_drain_thread = threading.Thread(
@@ -244,15 +263,21 @@ def _proc_init(
 
 
 def _proc_emit(item: tuple[str, object]) -> None:
-    """Append an event to this worker's local buffer (in-process, ~0.1us). The drain thread ships it;
-    the data path never blocks on IPC. The bounded deque drops the oldest on overflow (best-effort)."""
+    """Append an event to this worker's local buffer (in-process, ~0.1us).
+
+    The drain thread ships it; the data path never blocks on IPC. The bounded deque drops the
+    oldest on overflow (best-effort).
+    """
     buf = _proc_buffer
     if buf is not None:
         buf.append(item)
 
 
 def _proc_drain_batch() -> None:
-    """Move everything currently buffered to the driver in ONE Manager-queue put (amortizes IPC)."""
+    """Move everything currently buffered to the driver in ONE Manager-queue put.
+
+    Amortizes IPC.
+    """
     buf, q = _proc_buffer, _proc_event_q
     if buf is None or q is None:
         return
@@ -276,8 +301,11 @@ def _proc_drain_loop() -> None:
 
 
 def _proc_drain_final() -> None:
-    """At worker exit: stop sampling (same thread that started it), buffer the final session, and
-    flush whatever remains so the last events/profile are not lost."""
+    """At worker exit.
+
+    Stop sampling (same thread that started it), buffer the final session, and flush whatever
+    remains so the last events/profile are not lost.
+    """
     if _proc_drain_stop is not None:
         _proc_drain_stop.set()
     if _proc_drain_thread is not None:  # a daemon: exit would kill it mid-send of a batch it holds
@@ -293,8 +321,11 @@ def _proc_drain_final() -> None:
 
 
 def _proc_profile_due() -> bool:
-    """True at most once per ``_PROFILE_FLUSH_INTERVAL`` — keeps the profiler serialize (JSON-encoding
-    the accumulated stack tree) off the per-task path. Called on the worker thread."""
+    """Return True at most once per ``_PROFILE_FLUSH_INTERVAL``.
+
+    Keeps the profiler serialize (JSON-encoding the accumulated stack tree) off the per-task
+    path. Called on the worker thread.
+    """
     global _proc_last_flush
     now = time.monotonic()
     if now - _proc_last_flush >= _PROFILE_FLUSH_INTERVAL:
@@ -315,11 +346,13 @@ def _run_with_emit(
     profile_due: Callable[[], bool],
     lean: bool = False,
 ) -> object:
-    """Run one task, emitting STARTED before and FINISHED/ERRORED after (worker-side timing), or in
-    ``lean`` mode only the terminal event, unlabelled. ``emit_event`` is cheap (a local buffer
+    """Run one task, emitting STARTED before and FINISHED/ERRORED after (worker-side timing).
+
+    In ``lean`` mode only the terminal event, unlabelled. ``emit_event`` is cheap (a local buffer
     append for processes, an in-process enqueue for threads); the (expensive) profiler serialize
     runs only when ``profile_due()`` says so (time-throttled, off the per-task path). SUBMITTED is
-    emitted driver-side. Emission is best-effort."""
+    emitted driver-side. Emission is best-effort.
+    """
     label = "" if lean else partition_label(task.partition)
     n = task.partition.n_entries
     if not lean:
@@ -329,7 +362,13 @@ def _run_with_emit(
     except BaseException as exc:
         emit_event(
             TaskEvent(
-                TaskPhase.ERRORED, task.key, worker, time.perf_counter(), label, n, error=_render_error(exc)
+                TaskPhase.ERRORED,
+                task.key,
+                worker,
+                time.perf_counter(),
+                label,
+                n,
+                error=_render_error(exc),
             )
         )
         raise
@@ -343,17 +382,23 @@ def _run_with_emit(
 
 
 def _render_error(exc: BaseException) -> str:
-    """A concise, picklable error summary for the dashboard. A graphed-debug ``StageError`` already
-    str()s to a user-source-mapped message (op + analysis line), so its own text is the best summary;
-    anything else gets a plain ``Type: message``."""
+    """Return a concise, picklable error summary for the dashboard.
+
+    A graphed-debug ``StageError`` already str()s to a user-source-mapped message (op +
+    analysis line), so its own text is the best summary; anything else gets a plain ``Type:
+    message``.
+    """
     if isinstance(exc, StageError):
         return str(exc)
     return f"{type(exc).__name__}: {exc}"
 
 
 def _thread_profiler(monitor: Monitor | None) -> WorkerProfiler | None:
-    """A per-thread profiler, built once from the monitor's factory and reused for this worker
-    thread's later tasks. ``None`` when no monitor or no factory (MVP tier)."""
+    """Return a per-thread profiler.
+
+    Built once from the monitor's factory and reused for this worker thread's later tasks. ``None``
+    when no monitor or no factory (MVP tier).
+    """
     if monitor is None:
         return None
     cached = getattr(_thread_local, "prof", _MISSING)
@@ -390,7 +435,8 @@ def _thread_task(
         return process(task.partition, _thread_resources())
 
     def emit_event(ev: TaskEvent) -> None:
-        emit_task(monitor, ev)  # in-process enqueue; the NetworkMonitor's sender thread does the I/O
+        # in-process enqueue; the NetworkMonitor's sender thread does the I/O
+        emit_task(monitor, ev)
 
     def emit_profile(worker: str, payload: bytes) -> None:
         if monitor is not None:
@@ -411,11 +457,13 @@ def _thread_task(
 
 
 def _prime_shared(token: str, payload: bytes) -> int:
-    """Cache the broadcast process under ``token`` and return this worker's pid so the driver
-    can confirm coverage. Bounded FIFO (cap ``_SHARED_CACHE_CAP``), evicting the oldest
-    broadcast -- identical across workers because every worker sees the same broadcast order,
-    so it stays in lockstep with the driver's token set. The brief hold makes a worker keep
-    this task long enough for its siblings to each claim one (single-round coverage)."""
+    """Cache the broadcast process under ``token`` and return this worker's pid.
+
+    The pid lets the driver confirm coverage. Bounded FIFO (cap ``_SHARED_CACHE_CAP``), evicting
+    the oldest broadcast -- identical across workers because every worker sees the same broadcast
+    order, so it stays in lockstep with the driver's token set. The brief hold makes a worker keep
+    this task long enough for its siblings to each claim one (single-round coverage).
+    """
     if token not in _shared_objects:  # idempotent: re-priming an existing token does not reorder
         _shared_objects[token] = pickle.loads(payload)
         while len(_shared_objects) > _SHARED_CACHE_CAP:
@@ -461,7 +509,10 @@ def _proc_task_shared(token: str, task: Task) -> object:
 
 
 def _proc_task_portable(token: str, task: Task) -> object:
-    """The process pool's leaf entry: the partial returns through a pickle it may not survive."""
+    """Run the process pool's leaf entry.
+
+    The partial returns through a pickle it may not survive.
+    """
     return Portable(_proc_task_shared(token, task))
 
 
@@ -470,20 +521,28 @@ def _combine_task(combine: Callable[[object, object], object], a: object, b: obj
     return combine(a, b)
 
 
-def _proc_combine_task(combine: Callable[[object, object], object], a: object, b: object) -> object:
+def _proc_combine_task(
+    combine: Callable[[object, object], object], a: object, b: object
+) -> object:
     return Portable(combine(a, b))
 
 
 def _wait_until(predicate: Callable[[], bool], timeout_s: float) -> None:
-    """Bounded off-path poll (never an assertion): drain trailing worker events before unsubscribe."""
+    """Bounded off-path poll (never an assertion).
+
+    Drain trailing worker events before unsubscribe.
+    """
     deadline = time.monotonic() + timeout_s
     while not predicate() and time.monotonic() < deadline:
         time.sleep(0.005)
 
 
 class _Window(Generic[T]):
-    """The dispatch point of a hub route (plan-A2 A2-1): held items go out through at most ``size``
-    slots, and only while the control is RUNNING; without a control every held item goes at once."""
+    """The dispatch point of a hub route (plan-A2 A2-1).
+
+    Held items go out through at most ``size`` slots, and only while the control is RUNNING;
+    without a control every held item goes at once.
+    """
 
     def __init__(self, control: RunControl | None, size: int, items: Iterable[T] = ()) -> None:
         self.control = control
@@ -493,7 +552,7 @@ class _Window(Generic[T]):
         self._paused = False
 
     def cancelled(self) -> bool:
-        """A check that drops the held work once the control is CANCELLED."""
+        """Drop the held work once the control is CANCELLED, and say whether it was."""
         if self.control is None or self.control.state is not RunState.CANCELLED:
             return False
         self.stopped = True
@@ -501,7 +560,10 @@ class _Window(Generic[T]):
         return True
 
     def take(self, in_flight: int) -> list[T]:
-        """The check before starting tasks: the held items to submit now, given ``in_flight`` running."""
+        """Run the check before starting tasks.
+
+        The held items to submit now, given ``in_flight`` running.
+        """
         state = self.control.state if self.control is not None else RunState.RUNNING
         self._paused = state is RunState.PAUSED
         if state is RunState.CANCELLED:
@@ -512,18 +574,24 @@ class _Window(Generic[T]):
         return [self.held.popleft() for _ in range(min(len(self.held), self.size - in_flight))]
 
     def wait(self, futures: list[Future[Any]]) -> set[Future[Any]]:
-        """The next completions; empty on a paused wake or a resume, which only re-run :meth:`take`."""
+        """Return the next completions.
+
+        Empty on a paused wake or a resume, which only re-run :meth:`take`.
+        """
         if not futures:  # paused with work held and nothing running
             assert self.control is not None
             self.control.wait()
             return set()
-        timeout = _PAUSED_WAKE_S if self._paused else None  # the state take() saw, so a resume still wakes
+        # the state take() saw, so a resume still wakes
+        timeout = _PAUSED_WAKE_S if self._paused else None
         return wait(futures, timeout=timeout, return_when=FIRST_COMPLETED)[0]
 
 
 class _RunLeaves:
-    """A complete_events hub run's leaves: only the unresolved futures are held, so a leaf's result
-    is never kept alive by the settle."""
+    """A complete_events hub run's leaves.
+
+    Only the unresolved futures are held, so a leaf's result is never kept alive by the settle.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -557,7 +625,8 @@ class _BaseExecutor:
     the leaves, instead of running them serially on the driver thread — for heavy partials (large
     histograms, many partitions) the driver otherwise becomes a serial combine bottleneck. The
     combine pairing is the same fixed `plan_tree`, so results stay bit-identical; with a process
-    pool, `plan.combine` must be picklable (module-level), exactly like `plan.process`."""
+    pool, `plan.combine` must be picklable (module-level), exactly like `plan.process`.
+    """
 
     def __init__(
         self,
@@ -574,15 +643,15 @@ class _BaseExecutor:
     ):
         self._plans = PlanQueue(self.run, max_in_flight)
         self.max_workers = max_workers if max_workers is not None else (os.cpu_count() or 1)
-        self._on_combine = on_combine  # test hook: called per tree-reduce combine with #leaves so far
+        # test hook: called per tree-reduce combine with #leaves so far
+        self._on_combine = on_combine
         self._pooled_combines = pooled_combines
         # persistent=True keeps ONE pool across run() calls (amortizing the import-heavy spawn
         # over many plans — notebooks, sweeps); the default stays a fresh pool per run.
         self._persistent = persistent
         self._kept_pool: _PoolExecutor | None = None
-        self._broadcast_tokens: OrderedDict[str, None] = (
-            OrderedDict()
-        )  # M31/M34: primed tokens, FIFO-bounded in lockstep with each worker cache
+        # M31/M34: primed tokens, FIFO-bounded in lockstep with each worker cache
+        self._broadcast_tokens: OrderedDict[str, None] = OrderedDict()
         self.monitor = monitor  # M37: a passive dashboard observer (None => no instrumentation)
         self.control = control  # m65: pause/resume/cancel, read at each run (plan-A1 A-2)
         # the running plan's snapshot: a reassignment mid-run reaches the next plan, not this one
@@ -592,20 +661,22 @@ class _BaseExecutor:
         self._run_keys: list[int] | None = None  # a peer run's task keys, when not 0..n-1
         self._run_leaves: _RunLeaves | None = None  # a complete_events hub run's leaves
         # M38: comms=None -> the hub reduction (driver combines); "ipc"/"http" -> PEER reduction
-        # (combines run across the workers over that transport, off the driver). Result is identical
-        # (same fixed plan_tree grouping); peer just relocates the combines. steal=True (peer only)
-        # lets an idle worker take leaves from a busy peer (process work moves; the leaf's owner still
-        # reduces it -> result unchanged). The last run's per-worker witness stats are kept for tests.
+        # (combines run across the workers over that transport, off the driver). Result is
+        # identical (same fixed plan_tree grouping); peer just relocates the combines. steal=True
+        # (peer only) lets an idle worker take leaves from a busy peer (process work moves; the
+        # leaf's owner still reduces it -> result unchanged). The last run's per-worker witness
+        # stats are kept for tests.
         self._comms = comms
         self._steal = steal
         self._last_peer_witness: list[dict[str, int]] = []
         # Per-run state lives on the instance (kept pool, peer registry, broadcast tokens).
         self._run_lock = threading.Lock()
-        # STRICT: peer reduction (comms set) emits monitor events + fires on_combine, but it CANNOT run
-        # pooled combines (its whole model is off-driver combines — `pooled_combines` is a hub-only
-        # mechanism). Rather than SILENTLY falling back to the hub path (hub-mode sneaking into a run
-        # the caller asked to be peer), refuse loudly, so a big calculation can never quietly run hub
-        # when peer was requested. (comms=None => hub, which supports pooled_combines.)
+        # STRICT: peer reduction (comms set) emits monitor events + fires on_combine, but it CANNOT
+        # run pooled combines (its whole model is off-driver combines — `pooled_combines` is a
+        # hub-only mechanism). Rather than SILENTLY falling back to the hub path (hub-mode sneaking
+        # into a run the caller asked to be peer), refuse loudly, so a big calculation can never
+        # quietly run hub when peer was requested. (comms=None => hub, which supports
+        # pooled_combines.)
         if comms is not None and pooled_combines:
             raise ValueError(
                 f"peer reduction (comms={comms!r}) does not support pooled_combines (a hub-only "
@@ -619,14 +690,19 @@ class _BaseExecutor:
         self, pool: _PoolExecutor, process: Callable[[Partition, LocalResources], object]
     ) -> Callable[[Task], Future[object]]:
         """Deliver ``process`` to the pool's workers as needed and return ``submit(task)``.
-        Threads share memory (no delivery); processes broadcast the process once (M31)."""
+
+        Threads share memory (no delivery); processes broadcast the process once (M31).
+        """
         raise NotImplementedError
 
     def _leaf_submit(
         self, pool: _PoolExecutor, process: Callable[[Partition, LocalResources], object]
     ) -> Callable[[Task], Future[object]]:
-        """``_raw_submit``'s callable, keeping each leaf future for the settle when the run's monitor
-        asks for complete events (a base cannot wrap what a subclass's ``_raw_submit`` returns)."""
+        """``_raw_submit``'s callable.
+
+        Keeping each leaf future for the settle when the run's monitor asks for complete events (a
+        base cannot wrap what a subclass's ``_raw_submit`` returns).
+        """
         raw = self._raw_submit(pool, process)
         leaves = self._run_leaves
         if leaves is None:
@@ -642,8 +718,11 @@ class _BaseExecutor:
     def _prepare(
         self, pool: _PoolExecutor, process: Callable[[Partition, LocalResources], object]
     ) -> Callable[[Task], Future[object]]:
-        """Wrap the subclass submit with a driver-side SUBMITTED emission (M37). Worker-side STARTED/
-        FINISHED/ERRORED come from the worker entry; here we record the moment of submission."""
+        """Wrap the subclass submit with a driver-side SUBMITTED emission (M37).
+
+        Worker-side STARTED/FINISHED/ERRORED come from the worker entry; here we record the
+        moment of submission.
+        """
         raw = self._leaf_submit(pool, process)
         monitor = self._run_monitor
         if monitor is None:
@@ -685,8 +764,11 @@ class _BaseExecutor:
     def _folded(
         self, plan: Plan[R], pieces: list[tuple[int, R]], done: int, n_combines: int, stopped: bool
     ) -> ExecResult[R]:
-        """The result from what the combine tree left: the root, or on a cancel the completed subtrees
-        folded by first leaf (plan-A2 A2-1)."""
+        """Return the result from what the combine tree left.
+
+        The root, or on a cancel the completed subtrees folded by first leaf (plan-A2
+        A2-1).
+        """
         value, k = running_fold(iter(pieces), plan.combine, plan.empty)
         for _ in range(k):
             self._combine_cb(done)
@@ -695,7 +777,10 @@ class _BaseExecutor:
         )
 
     def _combine_cb(self, leaves_done: int) -> None:
-        """The tree-reduce combine callback: the legacy test hook AND the dashboard monitor (M37)."""
+        """Run the tree-reduce combine callback.
+
+        The legacy test hook AND the dashboard monitor (M37).
+        """
         if self._on_combine is not None:
             self._on_combine(leaves_done)
         if self._run_monitor is not None:
@@ -707,7 +792,8 @@ class _BaseExecutor:
         self._run_leaves = _RunLeaves() if complete_events(self._run_monitor) else None
         if not self._persistent:
             self._broadcast_tokens = OrderedDict()  # a fresh pool: nothing is primed yet
-            with self._pool() as pool, self._settled(pool):  # settle before the shutdown's exit flush
+            # settle before the shutdown's exit flush
+            with self._pool() as pool, self._settled(pool):
                 yield pool
             return
         if self._kept_pool is None:
@@ -718,8 +804,10 @@ class _BaseExecutor:
 
     @contextlib.contextmanager
     def _settled(self, pool: _PoolExecutor) -> Iterator[_PoolExecutor]:
-        """On a normal or ``Exception`` exit of a complete_events run, wait for its leaf futures, then
-        for their events; a ``KeyboardInterrupt`` leaves at once."""
+        """On a normal or ``Exception`` exit of a complete_events run, wait for its leaf futures.
+
+        Then wait for their events; a ``KeyboardInterrupt`` leaves at once.
+        """
         leaves = self._run_leaves
         if leaves is None:
             yield pool
@@ -735,12 +823,18 @@ class _BaseExecutor:
             self._run_leaves = None
 
     def _await_run_events(self, target: int) -> None:
-        """Wait until the leaves' events have reached the monitor. A thread worker calls ``on_task``
-        before its future resolves, so here the future wait was the whole wait."""
+        """Wait until the leaves' events have reached the monitor.
+
+        A thread worker calls ``on_task`` before its future resolves, so here the future
+        wait was the whole wait.
+        """
 
     def _switch_in(self, monitor: Monitor | None) -> None:
-        """Called in ``run()`` before ``monitor`` becomes the run's monitor; the thread hub binds each
-        leaf's monitor at submit, so nothing earlier can reach it."""
+        """Prepare for ``monitor``; called in ``run()`` before it becomes the run's monitor.
+
+        The thread hub binds each leaf's monitor at submit, so nothing earlier can reach
+        it.
+        """
 
     def _release_kept_pool(self) -> None:
         if self._kept_pool is not None:
@@ -754,13 +848,17 @@ class _BaseExecutor:
 
     def submit(self, plan: Plan[R]) -> Future[ExecResult[R]]:
         """Queue ``plan`` and return a future of its :meth:`run` result without waiting for it.
-        Plans run one at a time in submit order; this blocks while ``max_in_flight`` submitted plans
-        are unfinished."""
+
+        Plans run one at a time in submit order; this blocks while ``max_in_flight``
+        submitted plans are unfinished.
+        """
         return self._plans.submit(plan)
 
     def close(self) -> None:
-        """Finish every submitted plan, then release a persistent pool (idempotent); a later run()
-        or submit() lazily respawns."""
+        """Finish every submitted plan, then release a persistent pool (idempotent).
+
+        A later run() or submit() lazily respawns.
+        """
         self._plans.close()
         self._release_kept_pool()
 
@@ -771,9 +869,12 @@ class _BaseExecutor:
         self.close()
 
     def run(self, plan: Plan[R]) -> ExecResult[R]:
-        """Run ``plan`` to its reduced result. One plan runs at a time per executor; a concurrent
-        caller waits for the running plan to finish. A plan whose services are not bound is refused
-        before any task (this runner resolves no services: bind them, or use ``SubmitRunner``)."""
+        """Run ``plan`` to its reduced result.
+
+        One plan runs at a time per executor; a concurrent caller waits for the running
+        plan to finish. A plan whose services are not bound is refused before any task
+        (this runner resolves no services: bind them, or use ``SubmitRunner``).
+        """
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
         with self._run_lock:
@@ -799,13 +900,17 @@ class _BaseExecutor:
                     control.reset()  # a cancel ends this run only, whether or not a check saw it
 
     def _run_peer(self, plan: Plan[R], control: RunControl | None = None) -> ExecResult[R]:
-        """M38 peer reduction: partition the leaves into contiguous per-worker ranges and reduce them
-        across the workers over ``self._comms``, off the driver. The subclass spawns the W actors
+        """M38 peer reduction.
+
+        Partition the leaves into contiguous per-worker ranges and reduce them across the
+        workers over ``self._comms``, off the driver. The subclass spawns the W actors
         (threads or processes); the result is bit-for-bit the hub path's (same fixed tree).
 
         Monitor parity (so peer can be the default): the driver emits SUBMITTED per task here, the
         workers emit STARTED/FINISHED/ERRORED over the transport (forwarded to the monitor by the
-        collect loop), and the driver fires the n-1 combine callbacks below (completed-1 on a cancel)."""
+        collect loop), and the driver fires the n-1 combine callbacks below (completed-1 on a
+        cancel).
+        """
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
         n = len(tasks)
         if n == 0:
@@ -818,8 +923,8 @@ class _BaseExecutor:
         self._run_keys = None
         if self._run_monitor is not None and any(t.key != i for i, t in enumerate(tasks)):
             self._run_keys = [t.key for t in tasks]  # workers emit keys[leaf]
-        # A thread actor starts its first leaf before the driver's first poll, so no tag could hold a
-        # run entered paused: it waits here, before any actor exists.
+        # A thread actor starts its first leaf before the driver's first poll, so no tag could hold
+        # a run entered paused: it waits here, before any actor exists.
         if control is not None and control.wait() is RunState.CANCELLED:
             return ExecResult(plan.empty(), 0, 0, StopReason.CANCELLED)
         value, done = self._peer_execute(plan, n, w, bounds, worker_addrs, items, control)
@@ -829,14 +934,22 @@ class _BaseExecutor:
         return ExecResult(value, done, max(done - 1, 0), stopped)
 
     def _peer_profiler_factory(self) -> Callable[[], WorkerProfiler] | None:
-        """The picklable per-worker profiler factory (M37), or None — so peer workers profile exactly
-        like the hub path and ``Dashboard(profile=True)`` works under peer (no silent loss)."""
-        return self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
+        """Return the picklable per-worker profiler factory (M37), or None.
+
+        Peer workers then profile exactly like the hub path and ``Dashboard(profile=True)`` works
+        under peer (no silent loss).
+        """
+        return (
+            self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
+        )
 
     def _forward_peer_events(self, payload: tuple[Any, ...]) -> bool:
-        """If ``payload`` is a worker monitor-event batch (task lifecycle) or a profile sample-tree,
+        """Forward a worker monitor-event batch or profile sample-tree to the monitor.
+
+        If ``payload`` is a worker monitor-event batch (task lifecycle) or a profile sample-tree,
         forward it to the monitor and return True; else return False (the caller handles root/other
-        messages). Best-effort (M37 passivity) — a raising monitor never breaks the run."""
+        messages). Best-effort (M37 passivity) — a raising monitor never breaks the run.
+        """
         if payload[0] == "events":
             for ev in payload[1]:
                 emit_task(self._run_monitor, ev)
@@ -857,7 +970,10 @@ class _BaseExecutor:
         items: dict[str, list[tuple[int, Partition]]],
         control: RunControl | None = None,
     ) -> tuple[R, int]:
-        """The reduced value and the number of leaves it holds (fewer than ``n`` only on a cancel)."""
+        """Return the reduced value and the number of leaves it holds.
+
+        Fewer than ``n`` only on a cancel.
+        """
         raise NotImplementedError
 
     def _run_fixed_pooled(self, plan: Plan[R], control: RunControl | None = None) -> ExecResult[R]:
@@ -900,9 +1016,11 @@ class _BaseExecutor:
                         remaining[ci].discard(node)
                         if not remaining[ci]:
                             out, a, b = combines[ci]
-                            # a<b -> deterministic left/right grouping, same tree as the driver path
+                            # a<b -> deterministic left/right grouping, same tree as the driver
+                            # path
                             combine = cast("Callable[[object, object], object]", plan.combine)
-                            if isinstance(self, _ProcessExecutorBase):  # inputs and output cross processes
+                            # inputs and output cross processes
+                            if isinstance(self, _ProcessExecutorBase):
                                 f2 = pool.submit(
                                     _proc_combine_task,
                                     combine,
@@ -910,12 +1028,16 @@ class _BaseExecutor:
                                     Portable(ready.pop(b)),
                                 )
                             else:
-                                f2 = pool.submit(_combine_task, combine, ready.pop(a), ready.pop(b))
+                                f2 = pool.submit(
+                                    _combine_task, combine, ready.pop(a), ready.pop(b)
+                                )
                             node_of[f2] = out
                             n_combines += 1
                             self._combine_cb(leaves_done)
         pieces = [(first[node], v) for node, v in ready.items()]
-        return self._folded(plan, sorted(pieces, key=lambda p: p[0]), leaves_done, n_combines, window.stopped)
+        return self._folded(
+            plan, sorted(pieces, key=lambda p: p[0]), leaves_done, n_combines, window.stopped
+        )
 
     def _run_fixed(self, plan: Plan[R]) -> ExecResult[R]:
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
@@ -928,7 +1050,8 @@ class _BaseExecutor:
 
             def completed() -> Iterator[tuple[int, R]]:
                 for fut in as_completed(leaf_of):
-                    yield leaf_of[fut], cast(R, fut.result())  # fut.result() re-raises a worker error
+                    # fut.result() re-raises a worker error
+                    yield leaf_of[fut], cast(R, fut.result())
 
             value, n_combines = tree_reduce(
                 n, completed(), plan.combine, plan.empty, on_combine=self._combine_cb
@@ -936,7 +1059,10 @@ class _BaseExecutor:
         return ExecResult(value, n, n_combines, StopReason.EXHAUSTED)
 
     def _run_fixed_windowed(self, plan: Plan[R], control: RunControl) -> ExecResult[R]:
-        """``_run_fixed`` through a :class:`_Window`: the same fixed tree, fed as leaves complete."""
+        """``_run_fixed`` through a :class:`_Window`.
+
+        The same fixed tree, fed as leaves complete.
+        """
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
         reducer: LazyReducer[R] = LazyReducer(
             len(tasks), plan.combine, plan.empty, on_combine=self._combine_cb
@@ -952,15 +1078,19 @@ class _BaseExecutor:
                 if not leaf_of and not window.held:
                     break
                 for fut in window.wait(list(leaf_of)):
-                    reducer.feed(leaf_of.pop(fut), cast(R, fut.result()))  # re-raises a worker error
-        return self._folded(plan, reducer.frontier(), reducer.delivered, reducer.n_combines, window.stopped)
+                    # re-raises a worker error
+                    reducer.feed(leaf_of.pop(fut), cast(R, fut.result()))
+        return self._folded(
+            plan, reducer.frontier(), reducer.delivered, reducer.n_combines, window.stopped
+        )
 
     def _run_adaptive(self, plan: Plan[R], control: RunControl | None = None) -> ExecResult[R]:
         assert plan.next_tasks is not None
         ctx = ExecContext()
         start = time.perf_counter()
         results: list[tuple[int, R]] = []
-        submitted: dict[Future[object], tuple[int, int, float]] = {}  # future -> (key, n_entries, t0)
+        # future -> (key, n_entries, t0)
+        submitted: dict[Future[object], tuple[int, int, float]] = {}
         stopped: StopReason | None = None
         next_tasks = plan.next_tasks
         window: _Window[Task] = _Window(control, self.max_workers)
@@ -978,7 +1108,11 @@ class _BaseExecutor:
             while True:
                 for task in window.take(len(submitted)):
                     # t0 at submission, so time held in the window never counts as run time
-                    submitted[submit(task)] = (task.key, task.partition.n_entries, time.perf_counter())
+                    submitted[submit(task)] = (
+                        task.key,
+                        task.partition.n_entries,
+                        time.perf_counter(),
+                    )
                 if not submitted and not window.held:
                     break
                 done = window.wait(list(submitted))
@@ -991,7 +1125,8 @@ class _BaseExecutor:
                     ctx.events_done += n_entries
                     ctx.last_durations[key] = time.perf_counter() - t0
                 ctx.elapsed_s = time.perf_counter() - start
-                if window.cancelled():  # the next_tasks call is skipped; no stop exit ends the drain
+                # the next_tasks call is skipped; no stop exit ends the drain
+                if window.cancelled():
                     continue
                 reason = plan.stop.reason(ctx) if plan.stop else None
                 if reason is not None:
@@ -1028,12 +1163,13 @@ class ThreadExecutor(_BaseExecutor):
         items: dict[str, list[tuple[int, Partition]]],
         control: RunControl | None = None,
     ) -> tuple[R, int]:
-        # threads share the process, so the in-process transports (queue.Queue or loopback HTTP) are
-        # built once by the driver and handed to each worker thread directly.
+        # threads share the process, so the in-process transports (queue.Queue or loopback HTTP)
+        # are built once by the driver and handed to each worker thread directly.
         transports = build_transports(self._comms or "ipc", ("driver", *worker_addrs))
         witness: dict[str, dict[str, int]] = {}
         complete = complete_events(self._run_monitor)
-        errors: dict[str, BaseException] = {}  # a worker thread's exception (captured, then re-raised)
+        # a worker thread's exception (captured, then re-raised)
+        errors: dict[str, BaseException] = {}
         release_r, release_w = multiprocessing.Pipe(duplex=False)  # EOF once the driver closes it
 
         def actor(addr: str) -> None:
@@ -1056,7 +1192,8 @@ class ThreadExecutor(_BaseExecutor):
                     complete=complete,
                     release=release_r,
                 )
-            except BaseException as exc:  # a thread exception is otherwise lost -> capture + propagate
+            # a thread exception is otherwise lost -> capture + propagate
+            except BaseException as exc:
                 errors[addr] = exc
 
         threads = [
@@ -1064,7 +1201,11 @@ class ThreadExecutor(_BaseExecutor):
             for a in worker_addrs
         ]
         driver_t = transports["driver"]
-        ctl = PeerControl(control, driver_t, n, plan.combine, plan.empty) if control is not None else None
+        ctl = (
+            PeerControl(control, driver_t, n, plan.combine, plan.empty)
+            if control is not None
+            else None
+        )
         try:
             for t in threads:
                 t.start()
@@ -1077,10 +1218,12 @@ class ThreadExecutor(_BaseExecutor):
                     break
                 if got is not None and not self._forward_peer_events(got[1]) and ctl is not None:
                     out = ctl.take(got[1])  # a cancel hand-in; the fold once all are in
-                if errors:  # a worker failed -> the root will never form; stop waiting and re-raise
+                # a worker failed -> the root will never form; stop waiting and re-raise
+                if errors:
                     break
                 if ctl is not None and ctl.relay():
-                    deadline = time.monotonic() + _PEER_ROOT_TIMEOUT_S  # paused time does not count
+                    # paused time does not count
+                    deadline = time.monotonic() + _PEER_ROOT_TIMEOUT_S
                 if time.monotonic() >= deadline:
                     driver_t.broadcast(("done",))  # release the actors the finally joins
                     raise TimeoutError(
@@ -1093,7 +1236,8 @@ class ThreadExecutor(_BaseExecutor):
                 t.join(timeout=30.0)
             for a in worker_addrs:  # an HTTP lane still POSTs a returned actor's last events
                 transports[a].close()
-            for _sender, payload in driver_t.poll():  # drain trailing monitor events the workers shipped
+            # drain trailing monitor events the workers shipped
+            for _sender, payload in driver_t.poll():
                 self._forward_peer_events(payload)
             if errors:
                 raise next(iter(errors.values()))  # re-raise a worker exception intact (M6)
@@ -1113,21 +1257,26 @@ class ThreadExecutor(_BaseExecutor):
 
 
 class _ProcessExecutorBase(_BaseExecutor):
-    """Shared process-pool machinery: spawn-based worker processes (cross-platform + free-threaded-safe),
-    each with its own ``open_once`` resources. The Plan ``process`` callable and its partials must be
-    picklable; a remote ``StageError`` round-trips to the driver intact.
+    """Shared process-pool machinery.
 
-    The two public process executors differ ONLY in which pool peer-reduction IPC uses, selected by the
-    class attribute ``_peer_pool_is_pinned`` (no silent runtime switch): :class:`ProcessPoolExecutor`
-    (full-registry stdlib pool) vs :class:`PinnedPoolExecutor` (identity-pinned, bounded O(log N)
-    overlay). Everything else — the main task pool, tree reduction, monitoring — is identical.
+    Spawn-based worker processes (cross-platform + free-threaded-safe), each with its own
+    ``open_once`` resources. The Plan ``process`` callable and its partials must be picklable;
+    a remote ``StageError`` round-trips to the driver intact.
+
+    The two public process executors differ ONLY in which pool peer-reduction IPC uses, selected by
+    the class attribute ``_peer_pool_is_pinned`` (no silent runtime switch):
+    :class:`ProcessPoolExecutor` (full-registry stdlib pool) vs :class:`PinnedPoolExecutor`
+    (identity-pinned, bounded O(log N) overlay). Everything else — the main task pool, tree
+    reduction, monitoring — is identical.
 
     M37: when a :class:`Monitor` is attached, workers cannot reach the driver's monitor object, so
     they push events onto a bounded ``Manager().Queue()`` that a driver-side **collector daemon
     thread** drains and replays into the monitor. The queue is best-effort (drop-on-full) so
-    instrumentation never back-pressures a worker."""
+    instrumentation never back-pressures a worker.
+    """
 
-    #: Which pool the peer-reduction IPC path builds. Subclasses set this; the base is never used directly.
+    #: Which pool the peer-reduction IPC path builds. Subclasses set this; the base is never used
+    #: directly.
     _peer_pool_is_pinned: bool = False
 
     def __init__(
@@ -1155,7 +1304,8 @@ class _ProcessExecutorBase(_BaseExecutor):
             max_in_flight=max_in_flight,
         )
         self._mgr: SyncManager | None = None
-        self._kept_init: tuple[bytes, bool] | None = None  # the kept hub pool's initializer identity
+        # the kept hub pool's initializer identity
+        self._kept_init: tuple[bytes, bool] | None = None
         # False while a kept pool whose workers ship to the collector may still deliver an earlier
         # run's events: from each hub entry until a complete_events run's event wait returns
         self._kept_settled = True
@@ -1163,13 +1313,14 @@ class _ProcessExecutorBase(_BaseExecutor):
         self._event_q: object | None = None
         self._collector: threading.Thread | None = None
         self._collector_stop: threading.Event | None = None
-        # M38 persistent peer state: reused across run()s when persistent=True so the worker spawn is
-        # paid once, like the hub pool. Both paths reuse on w: a pinned worker reaches a merge target
-        # its spawn-time overlay lacks through the driver.
+        # M38 persistent peer state: reused across run()s when persistent=True so the worker spawn
+        # is paid once, like the hub pool. Both paths reuse on w: a pinned worker reaches a merge
+        # target its spawn-time overlay lacks through the driver.
         self._peer_pool: _StdProcessPool | PinnedProcessPool | None = None
         self._peer_nworkers = 0
         self._last_peer_relays = 0  # nodes the driver forwarded in the last pinned run
-        self._peer_pinned = False  # which IPC path the live pool is (identity-pinned vs full-registry)
+        # which IPC path the live pool is (identity-pinned vs full-registry)
+        self._peer_pinned = False
         self._warned_fd_budget = False  # fire the full-registry fd-budget warning at most once
         self._peer_registry: dict[str, Any] | None = None  # SimpleQueue inbox per address
         self._peer_driver: QueueTransport | None = None
@@ -1208,8 +1359,8 @@ class _ProcessExecutorBase(_BaseExecutor):
             # They land AFTER run() returns, so a reused pool cannot be cleaned by draining at the
             # start of the next run — that run would take the stale `done` as its first message and
             # its worker would leave the actor before reducing anything. Drop the persistent peer
-            # state instead; the next run respawns. Bounded because every exit closes the run's release
-            # pipe: the surviving actors return within ``OUTBOX_EXIT_WAIT_S``.
+            # state instead; the next run respawns. Bounded because every exit closes the run's
+            # release pipe: the surviving actors return within ``OUTBOX_EXIT_WAIT_S``.
             self._close_peer()
             raise
 
@@ -1225,11 +1376,15 @@ class _ProcessExecutorBase(_BaseExecutor):
         control: RunControl | None = None,
     ) -> tuple[R, int]:
         # IPC across processes. The pool is the executor's fixed choice (no silent switch):
-        #  * ProcessPoolExecutor (full-registry, the default): every worker inherits every SimpleQueue
+        #  * ProcessPoolExecutor (full-registry, the default): every worker inherits every
+        #  SimpleQueue
         #    inbox (O(N²) fds — fine while N << the fd limit).
-        #  * PinnedPoolExecutor (identity-pinned, large many-core machines): each worker inherits ONLY
-        #    its inbox + its O(log N) overlay peers (reduction targets + hypercube lifelines + driver),
-        #    so the registry is O(N log N) and stays under the per-process fd limit. Both bound stealing
+        #  * PinnedPoolExecutor (identity-pinned, large many-core machines): each worker inherits
+        #  ONLY
+        #    its inbox + its O(log N) overlay peers (reduction targets + hypercube lifelines +
+        #    driver),
+        #    so the registry is O(N log N) and stays under the per-process fd limit. Both bound
+        #    stealing
         #    to the lifelines. (A *dynamic* cluster — workers joining/dying — needs a lazy-connect
         #    transport + multi-hop routing over this same overlay: the Phase-2 distributed runtime,
         #    which reuses worker_outbox_addresses.)
@@ -1238,8 +1393,10 @@ class _ProcessExecutorBase(_BaseExecutor):
             self._warned_fd_budget = True
             warnings.warn(
                 f"ProcessPoolExecutor peer reduction inherits ~2*(w+1) queue fds per worker; with "
-                f"w={w} this likely exceeds the per-process file-descriptor limit on this machine. "
-                f"Use PinnedPoolExecutor for a bounded O(log N) overlay on large many-core machines.",
+                f"w={w} this likely exceeds the per-process file-descriptor limit on this "
+                "machine. "
+                "Use PinnedPoolExecutor for a bounded O(log N) overlay on large many-core "
+                "machines.",
                 stacklevel=2,
             )
         addrs = ("driver", *worker_addrs)
@@ -1254,23 +1411,28 @@ class _ProcessExecutorBase(_BaseExecutor):
         if reuse:
             pool, registry, driver_t = self._peer_pool, self._peer_registry, self._peer_driver
             assert pool is not None and registry is not None and driver_t is not None
-            for q in registry.values():  # clear any straggler before reuse (a clean run leaves none)
+            # clear any straggler before reuse (a clean run leaves none)
+            for q in registry.values():
                 _drain_queue(q)
         else:
             self._close_peer()
-            registry = {a: PipeInbox(ctx) for a in addrs}  # SimpleQueue inboxes: no per-queue feeder thread
+            # SimpleQueue inboxes: no per-queue feeder thread
+            registry = {a: PipeInbox(ctx) for a in addrs}
             driver_t = QueueTransport(
                 "driver", registry["driver"], {a: registry[a] for a in addrs if a != "driver"}
             )
             if pinned:
-                outbox = worker_outbox_addresses(n, bounds, worker_addrs)  # address -> its O(log N) peers
+                # address -> its O(log N) peers
+                outbox = worker_outbox_addresses(n, bounds, worker_addrs)
                 wi = {a: i for i, a in enumerate(worker_addrs)}
                 init_args = [
                     (
                         a,
                         registry[a],  # this worker's inbox
-                        {t: registry[t] for t in outbox[a]},  # only its O(log N) outboxes (+ driver)
-                        tuple(worker_addrs[j] for j in lifeline_neighbors(wi[a], w)),  # steal lifelines
+                        # only its O(log N) outboxes (+ driver)
+                        {t: registry[t] for t in outbox[a]},
+                        # steal lifelines
+                        tuple(worker_addrs[j] for j in lifeline_neighbors(wi[a], w)),
                     )
                     for a in worker_addrs
                 ]
@@ -1283,7 +1445,8 @@ class _ProcessExecutorBase(_BaseExecutor):
                 self._peer_pool, self._peer_registry, self._peer_driver = pool, registry, driver_t
                 self._peer_nworkers, self._peer_pinned = w, pinned
         factory = self._peer_profiler_factory()
-        release_r, release_w = ctx.Pipe(duplex=False)  # the run's release: EOF once the driver closes it
+        # the run's release: EOF once the driver closes it
+        release_r, release_w = ctx.Pipe(duplex=False)
         try:
             if pinned:
                 ppool = cast(PinnedProcessPool, pool)
@@ -1350,14 +1513,16 @@ class _ProcessExecutorBase(_BaseExecutor):
         ctx: Any,
         control: RunControl | None = None,
     ) -> tuple[R, int]:
-        # HTTP across processes: each worker binds its own loopback server and announces its port to
-        # the driver (known up front), which assembles + broadcasts the registry — real sockets, the
-        # path a distributed scheduler takes. persistent=True reuses the worker POOL (spawn paid once);
-        # the loopback servers + discovery handshake are re-done per run (workers are per-submit actors).
+        # HTTP across processes: each worker binds its own loopback server and announces its port
+        # to the driver (known up front), which assembles + broadcasts the registry — real sockets,
+        # the path a distributed scheduler takes. persistent=True reuses the worker POOL (spawn
+        # paid once); the loopback servers + discovery handshake are re-done per run (workers are
+        # per-submit actors).
         reuse = (
             self._persistent
             and self._peer_pool is not None
-            and not self._peer_pinned  # HTTP always uses a plain stdlib pool, never the pinned pool
+            # HTTP always uses a plain stdlib pool, never the pinned pool
+            and not self._peer_pinned
             and self._peer_nworkers == w
         )
         if reuse:
@@ -1370,7 +1535,8 @@ class _ProcessExecutorBase(_BaseExecutor):
         assert pool is not None
         driver_t = HttpTransport("driver")
         factory = self._peer_profiler_factory()
-        release_r, release_w = ctx.Pipe(duplex=False)  # the run's release: EOF once the driver closes it
+        # the run's release: EOF once the driver closes it
+        release_r, release_w = ctx.Pipe(duplex=False)
         try:
             futs = [
                 pool.submit(
@@ -1413,10 +1579,17 @@ class _ProcessExecutorBase(_BaseExecutor):
         pool: Any = None,
         control: RunControl | None = None,
     ) -> tuple[R, int]:
-        """Wait for the root while watching the worker futures: a worker exception means the root will
-        never form, so we must detect it PROMPTLY (not after the 300s safety timeout) and re-raise it
-        intact (a picklable ``StageError``, M6 obligation). Also records each worker's witness stats."""
-        ctl = PeerControl(control, driver_t, n, plan.combine, plan.empty) if control is not None else None
+        """Wait for the root while watching the worker futures.
+
+        A worker exception means the root will never form, so we must detect it PROMPTLY
+        (not after the 300s safety timeout) and re-raise it intact (a picklable
+        ``StageError``, M6 obligation). Also records each worker's witness stats.
+        """
+        ctl = (
+            PeerControl(control, driver_t, n, plan.combine, plan.empty)
+            if control is not None
+            else None
+        )
         deadline = time.monotonic() + _PEER_ROOT_TIMEOUT_S
         out: tuple[R, int] | None = None
         forward: _Outbox | None = None  # asynchronous, so a >64 KB node never parks this loop
@@ -1432,26 +1605,30 @@ class _ProcessExecutorBase(_BaseExecutor):
                     forward.send(got[1][1], got[1][2])
                     self._last_peer_relays += 1
                     continue
-                # worker STARTED/FINISHED/ERRORED -> monitor; a cancel hand-in -> the fold once all are in
+                # worker STARTED/FINISHED/ERRORED -> monitor; a cancel hand-in -> the fold once all
+                # are in
                 if got is not None and not self._forward_peer_events(got[1]) and ctl is not None:
                     out = ctl.take(got[1])
                 for f in futs:  # a dead worker -> re-raise the real cause now, not 300s from now
                     if f.done() and f.exception() is not None:
                         f.result()
-                # PinnedProcessPool backstop: a HARD worker crash ships no error + leaves its Future
-                # unresolved, so the future check above can't see it — detect the dead process directly.
+                # PinnedProcessPool backstop: a HARD worker crash ships no error + leaves its
+                # Future unresolved, so the future check above can't see it — detect the dead
+                # process directly.
                 if pool is not None and not getattr(pool, "workers_alive", lambda: True)():
                     raise RuntimeError("a peer worker process died before producing the root")
                 if ctl is not None and ctl.relay():
-                    deadline = time.monotonic() + _PEER_ROOT_TIMEOUT_S  # paused time does not count
+                    # paused time does not count
+                    deadline = time.monotonic() + _PEER_ROOT_TIMEOUT_S
                 if time.monotonic() >= deadline:
                     raise TimeoutError(
                         f"peer reduction did not produce a root within {_PEER_ROOT_TIMEOUT_S}s"
                     )
         except BaseException as exc:
-            # EVERY exit releases the workers — including a KeyboardInterrupt delivered while parked
-            # in ``recv``. An unreleased actor waits for ``done`` forever, and the pool shutdown that
-            # follows (the non-persistent ``finally``, the persistent discard) then never returns.
+            # EVERY exit releases the workers — including a KeyboardInterrupt delivered while
+            # parked in ``recv``. An unreleased actor waits for ``done`` forever, and the pool
+            # shutdown that follows (the non-persistent ``finally``, the persistent discard) then
+            # never returns.
             if ctl is not None:
                 ctl.close(0.0)
             if forward is not None:
@@ -1474,21 +1651,23 @@ class _ProcessExecutorBase(_BaseExecutor):
         release_workers(driver_t)
         if self._run_monitor is None:
             # Fast path (no monitor): workers see ``done`` immediately (the transport wakes on the
-            # message) and return, so BLOCK on the futures' completion instead of polling ``f.done()``
-            # on a 20 ms cadence. That poll granularity was a fixed ~20-30 ms tail on EVERY run — under
-            # 1 % of a long job but ~15 % of a sub-second interactive pass (the measured peer-vs-hub
-            # regression on the ADL benchmark was almost entirely this join). ``f.result()`` is woken
-            # the instant a worker finishes and re-raises a worker error intact (M6).
+            # message) and return, so BLOCK on the futures' completion instead of polling
+            # ``f.done()`` on a 20 ms cadence. That poll granularity was a fixed ~20-30 ms tail on
+            # EVERY run — under 1 % of a long job but ~15 % of a sub-second interactive pass (the
+            # measured peer-vs-hub regression on the ADL benchmark was almost entirely this join).
+            # ``f.result()`` is woken the instant a worker finishes and re-raises a worker error
+            # intact (M6).
             self._last_peer_witness = [f.result() for f in futs]
             return out
-        # Monitored: drain trailing events until every worker has finished (a late FINISHED/ERRORED,
-        # shipped after the root formed, must not be lost) — we cannot just block on f.result() here
-        # because a worker could still be shipping events, so we drain concurrently. The IPC transport
-        # write is synchronous (a worker's trailing telemetry is readable the instant it returns), so a
-        # FINE cadence has no tail: a coarse cadence was a ~20 ms over-wait per run = ~13 % of a
-        # sub-second interactive pass, the bulk of the measured monitor-attached overhead. HTTP delivers
-        # asynchronously (a worker's end-of-run profile POST can still be in flight when its future
-        # completes), so it keeps the coarse grace to let that final POST land before we stop draining.
+        # Monitored: drain trailing events until every worker has finished (a late
+        # FINISHED/ERRORED, shipped after the root formed, must not be lost) — we cannot just block
+        # on f.result() here because a worker could still be shipping events, so we drain
+        # concurrently. The IPC transport write is synchronous (a worker's trailing telemetry is
+        # readable the instant it returns), so a FINE cadence has no tail: a coarse cadence was a
+        # ~20 ms over-wait per run = ~13 % of a sub-second interactive pass, the bulk of the
+        # measured monitor-attached overhead. HTTP delivers asynchronously (a worker's end-of-run
+        # profile POST can still be in flight when its future completes), so it keeps the coarse
+        # grace to let that final POST land before we stop draining.
         drain_poll = 0.02 if isinstance(driver_t, HttpTransport) else _PEER_MONITOR_DRAIN_POLL_S
         while not all(f.done() for f in futs):
             got = driver_t.recv(timeout=drain_poll)
@@ -1500,8 +1679,13 @@ class _ProcessExecutorBase(_BaseExecutor):
         return out
 
     def _pool_init(self) -> tuple[Any, Any, Any, bool]:
-        """What the worker initializer fixes: profiler factory, event queue, push factory, lean."""
-        factory = self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
+        """Return what the worker initializer fixes.
+
+        These are the profiler factory, event queue, push factory and lean flag.
+        """
+        factory = (
+            self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
+        )
         push = self._run_push
         return factory, None if push is not None else self._event_q, push, self._run_lean
 
@@ -1542,9 +1726,10 @@ class _ProcessExecutorBase(_BaseExecutor):
                 yield pool
         finally:
             # The collector's lifecycle follows the POOL, not the run. Non-persistent: the pool is
-            # shut down above, so drain + stop now. Persistent: workers stay alive and keep draining
-            # their buffers *after* run() returns (emission is off-path/async), so the collector must
-            # stay alive across runs or those trailing events are lost — close() stops it.
+            # shut down above, so drain + stop now. Persistent: workers stay alive and keep
+            # draining their buffers *after* run() returns (emission is off-path/async), so the
+            # collector must stay alive across runs or those trailing events are lost — close()
+            # stops it.
             if not self._persistent:
                 self._stop_collector()
 
@@ -1554,8 +1739,9 @@ class _ProcessExecutorBase(_BaseExecutor):
         self._kept_settled = True
 
     def _switch_in(self, monitor: Monitor | None) -> None:
-        # a kept pool that may still ship an earlier run's events hands them to the previous monitor
-        # (the collector's final drain) and is respawned, so the incoming complete_events run gets none
+        # a kept pool that may still ship an earlier run's events hands them to the previous
+        # monitor (the collector's final drain) and is respawned, so the incoming complete_events
+        # run gets none
         if complete_events(monitor) and self._kept_pool is not None and not self._kept_settled:
             self._release_kept_pool()
             self._stop_collector()
@@ -1606,7 +1792,10 @@ class _ProcessExecutorBase(_BaseExecutor):
                 worker, data = cast("tuple[str, bytes]", payload)
                 monitor.on_profile(worker, data)
         # counted whether on_task returned or raised, never before it returns
-        if kind == "task" and cast("TaskEvent", payload).phase in (TaskPhase.FINISHED, TaskPhase.ERRORED):
+        if kind == "task" and cast("TaskEvent", payload).phase in (
+            TaskPhase.FINISHED,
+            TaskPhase.ERRORED,
+        ):
             self._hub_terms += 1
 
     def _stop_collector(self) -> None:
@@ -1625,19 +1814,24 @@ class _ProcessExecutorBase(_BaseExecutor):
             self._event_q = None
 
     def _broadcast(self, pool: _PoolExecutor, token: str, payload: bytes) -> None:
-        """Prime every worker with ``payload`` exactly once. concurrent.futures exposes no worker
-        identity, so we submit priming tasks (each holds briefly, then returns its pid) until the
-        set of pids covers the whole pool — the prime is idempotent, so extra hits are harmless."""
+        """Prime every worker with ``payload`` exactly once.
+
+        concurrent.futures exposes no worker identity, so we submit priming tasks (each
+        holds briefly, then returns its pid) until the set of pids covers the whole pool —
+        the prime is idempotent, so extra hits are harmless.
+        """
         if token in self._broadcast_tokens:
             self._broadcast_tokens.move_to_end(token)  # idempotent; keep recency
             return
         target = self.max_workers  # concrete (resolved in __init__) -- no private pool attribute
         seen: set[int] = set()
-        # a deadline, not a round count: booted workers answer every round while a sibling still boots
+        # a deadline, not a round count: booted workers answer every round while a sibling still
+        # boots
         t0 = time.monotonic()
         while len(seen) < target and time.monotonic() - t0 < _WORKER_START_TIMEOUT_S:
             batch = [pool.submit(_prime_shared, token, payload) for _ in range(target - len(seen))]
-            seen.update(f.result() for f in batch)  # a dead worker surfaces as BrokenProcessPool here
+            # a dead worker surfaces as BrokenProcessPool here
+            seen.update(f.result() for f in batch)
         if len(seen) < target:  # never silently mark a token primed without full coverage (P1-3)
             raise RuntimeError(
                 f"broadcast reached only {len(seen)}/{target} workers in "
@@ -1650,35 +1844,46 @@ class _ProcessExecutorBase(_BaseExecutor):
 
 
 class ProcessPoolExecutor(_ProcessExecutorBase):
-    """Process executor whose peer-reduction IPC uses a **full-registry** worker pool (the stdlib
-    :class:`concurrent.futures.ProcessPoolExecutor`): every worker inherits every peer's queue via the
-    pool initializer. Simple and fast — the right default up to roughly the per-process file-descriptor
-    limit. Because inheritance is O(N²) in fds, on large many-core machines (>~128 cores, or any low
-    ``RLIMIT_NOFILE``) it warns and you should switch to :class:`PinnedPoolExecutor` instead. This is
-    the original M7 behaviour, now named explicitly so the pool choice is never hidden."""
+    """Process executor whose peer-reduction IPC uses a **full-registry** worker pool.
+
+    That pool is the stdlib :class:`concurrent.futures.ProcessPoolExecutor`: every worker inherits
+    every peer's queue via the pool initializer. Simple and fast — the right default up to roughly
+    the per-process file-descriptor limit. Because inheritance is O(N²) in fds, on large many-core
+    machines (>~128 cores, or any low ``RLIMIT_NOFILE``) it warns and you should switch to
+    :class:`PinnedPoolExecutor` instead. This is the original M7 behaviour, now named explicitly so
+    the pool choice is never hidden.
+    """
 
     _peer_pool_is_pinned = False
 
 
 class PinnedPoolExecutor(_ProcessExecutorBase):
-    """Process executor whose peer-reduction IPC uses an **identity-pinned** worker pool
-    (:class:`~graphed_executors.local._pinned_pool.PinnedProcessPool`): each worker is spawned once and
-    inherits ONLY its own inbox plus its O(log N) overlay peers (segment-tree reduction targets +
-    hypercube steal lifelines + the driver). The registry is therefore O(N log N), not O(N²), so it
-    stays under the per-process fd limit — the executor to pick for large many-core machines. Identical
-    results to :class:`ProcessPoolExecutor` (bit-for-bit), only the communication footprint differs."""
+    """Process executor whose peer-reduction IPC uses an **identity-pinned** worker pool.
+
+    That pool is :class:`~graphed_executors.local._pinned_pool.PinnedProcessPool`: each worker is
+    spawned once and inherits ONLY its own inbox plus its O(log N) overlay peers (segment-tree
+    reduction targets + hypercube steal lifelines + the driver). The registry is therefore O(N log
+    N), not O(N²), so it stays under the per-process fd limit — the executor to pick for large
+    many-core machines. Identical results to :class:`ProcessPoolExecutor` (bit-for-bit), only the
+    communication footprint differs.
+    """
 
     _peer_pool_is_pinned = True
 
 
 class ProcessExecutor(ProcessPoolExecutor):
-    """Deprecated alias for :class:`ProcessPoolExecutor` (the full-registry pool — its original M7
-    meaning). Kept for back-compat; pick :class:`ProcessPoolExecutor` or :class:`PinnedPoolExecutor`
-    explicitly so the IPC pool is visible at the call site rather than chosen silently."""
+    """Deprecated alias for :class:`ProcessPoolExecutor`.
+
+    The full-registry pool — its original M7 meaning. Kept for back-compat; pick
+    :class:`ProcessPoolExecutor` or :class:`PinnedPoolExecutor` explicitly so the IPC pool is
+    visible at the call site rather than chosen silently.
+    """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Warn that this alias is deprecated, then build a :class:`ProcessPoolExecutor`."""
         warnings.warn(
-            "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same behaviour) "
+            "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same "
+            "behaviour) "
             "or PinnedPoolExecutor (identity-pinned, bounded O(log N) overlay) explicitly.",
             DeprecationWarning,
             stacklevel=2,

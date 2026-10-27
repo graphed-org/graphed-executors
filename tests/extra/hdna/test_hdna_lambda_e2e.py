@@ -1,4 +1,7 @@
-"""A plan whose op is a closure, or whose partials carry a backend behavior holding a lambda, runs on the process pool (GW33)."""
+"""A plan whose op is a closure runs on the process pool (GW33).
+
+So does one whose partials carry a backend behavior holding a lambda.
+"""
 
 from __future__ import annotations
 
@@ -37,7 +40,9 @@ def _events(backend: AwkwardBackend | None = None) -> Any:
 
 def _closure_plan() -> Any:
     pt = graphed.apply(scale_by(3.0), _events().Jet.pt)
-    return aggregate_plan(gak.sum(pt, axis=1), reduce=sum_all, combine=add, empty=zero, steps_per_file=4)
+    return aggregate_plan(
+        gak.sum(pt, axis=1), reduce=sum_all, combine=add, empty=zero, steps_per_file=4
+    )
 
 
 def _behavior_plan() -> Any:
@@ -52,7 +57,9 @@ def _behavior_plan() -> Any:
 
 
 @pytest.mark.parametrize("comms", [None, "ipc"])
-def test_a_closure_op_runs_on_the_process_pool(comms: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_closure_op_runs_on_the_process_pool(
+    comms: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(local_executors, "_PEER_ROOT_TIMEOUT_S", 60.0)
     got = ProcessPoolExecutor(max_workers=2, comms=comms).run(_closure_plan()).value
     assert got == 3.0 * float(ak.sum(EVENTS.Jet.pt))

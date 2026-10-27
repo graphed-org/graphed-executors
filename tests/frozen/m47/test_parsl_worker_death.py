@@ -1,7 +1,9 @@
-"""m47 worker-death semantics (contract obligation 17) — losing a participating peer mid-shuffle
-costs ONE whole-run restart under a fresh epoch onto the surviving set; an exhausted restart
-budget surfaces as an attributed ``StageError``, never a raw parsl exception and NEVER a hang
-(plan §1.4 epoch/restart + §0.3 measured death latency; blueprint §3 `test_parsl_worker_death`).
+"""m47 worker-death semantics (contract obligation 17).
+
+Losing a participating peer mid-shuffle costs ONE whole-run restart under a fresh epoch onto the
+surviving set; an exhausted restart budget surfaces as an attributed ``StageError``, never a raw
+parsl exception and NEVER a hang (plan §1.4 epoch/restart + §0.3 measured death latency; blueprint
+§3 `test_parsl_worker_death`).
 
 Deterministic mid-run kill, no timing races (the m43/m44 gated-kill mechanism): the harness
 ``GatedP2PShuffleBackend`` marks every map-phase ``partition`` call (``pmark``: pid) and BLOCKS
@@ -24,7 +26,8 @@ the driver-release leg and flagged in the README).
 
 Discriminates: a silent-wrong-answer engine reusing the dead holder's stale blocks (byte
 divergence); one that never restarts (pmark count stays n_src, or a hang); raw
-WorkerLost/ManagerLost leakage to the user."""
+WorkerLost/ManagerLost leakage to the user.
+"""
 
 from __future__ import annotations
 
@@ -60,7 +63,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 PARTS = 8
-DEATH_SIGNALS = ("PullTimeoutError", "WorkerLost", "ManagerLost", "barrier", "TransportDeliveryError")
+DEATH_SIGNALS = (
+    "PullTimeoutError",
+    "WorkerLost",
+    "ManagerLost",
+    "barrier",
+    "TransportDeliveryError",
+)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -74,8 +83,11 @@ def _pid_alive(pid: int) -> bool:
 def _run_death_scenario(
     htex: Any, tmp_path: Path, *, epoch_restarts_allowed: int
 ) -> tuple[dict[str, Any], Any, str, int]:
-    """Drive a gated p2p repartition, SIGKILL one block-holding peer mid-gather, open the gate,
-    join under the hard timeout. Returns (outcome, oracle, mark_dir, n_src)."""
+    """Drive a gated p2p repartition that loses one block-holding peer mid-gather.
+
+    Drive a gated p2p repartition, SIGKILL one block-holding peer mid-gather, open the gate, join
+    under the hard timeout. Returns (outcome, oracle, mark_dir, n_src).
+    """
     adapter = numpy_p2p_adapter()
     src = repartition_blocks(adapter)
     n_src = len(src)
@@ -110,11 +122,15 @@ def _run_death_scenario(
         def victim_ready() -> bool:
             if len(mark_pids(str(mark_dir), "pmark")) < n_src:
                 return False
-            return bool(set(mark_pids(str(mark_dir), "pmark")) & set(mark_pids(str(mark_dir), "gstart")))
+            return bool(
+                set(mark_pids(str(mark_dir), "pmark")) & set(mark_pids(str(mark_dir), "gstart"))
+            )
 
         poll_until(lambda: victim_ready() or not thread.is_alive(), timeout_s=120.0)
         assert "error" not in outcome, f"run raised before the kill: {outcome.get('error')!r}"
-        assert victim_ready(), "scenario misfired: the map phase or a blocked gather never materialised"
+        assert victim_ready(), (
+            "scenario misfired: the map phase or a blocked gather never materialised"
+        )
 
         victims = set(mark_pids(str(mark_dir), "pmark")) & set(mark_pids(str(mark_dir), "gstart"))
         victim_pid = sorted(victims)[0]
@@ -137,7 +153,9 @@ def _run_death_scenario(
 
 def test_one_epoch_restart_completes_bit_for_bit(tmp_path: Path) -> None:
     with p2p_htex_pool(workers=2, heartbeat_period=2) as htex:
-        outcome, oracle, mark_dir, n_src = _run_death_scenario(htex, tmp_path, epoch_restarts_allowed=1)
+        outcome, oracle, mark_dir, n_src = _run_death_scenario(
+            htex, tmp_path, epoch_restarts_allowed=1
+        )
         assert "error" not in outcome, f"restart-allowed run raised: {outcome.get('error')!r}"
         result = outcome["result"]
 
@@ -154,14 +172,17 @@ def test_one_epoch_restart_completes_bit_for_bit(tmp_path: Path) -> None:
 
         n_pmarks = len(mark_pids(mark_dir, "pmark"))
         assert n_pmarks > n_src, (
-            f"only {n_pmarks} partition calls for {n_src} src blocks — the map phase never re-ran, "
+            f"only {n_pmarks} partition calls for {n_src} src blocks — the map phase never "
+            "re-ran, "
             "so the dead peer's blocks survived OUTSIDE the epoch (a stale store, not a restart)"
         )
 
 
 def test_exhausted_restart_budget_is_an_attributed_stage_error(tmp_path: Path) -> None:
     with p2p_htex_pool(workers=2, heartbeat_period=2) as htex:
-        outcome, _oracle, _mark_dir, _n_src = _run_death_scenario(htex, tmp_path, epoch_restarts_allowed=0)
+        outcome, _oracle, _mark_dir, _n_src = _run_death_scenario(
+            htex, tmp_path, epoch_restarts_allowed=0
+        )
         assert "result" not in outcome, (
             "with epoch_restarts_allowed=0 a participating-peer death must FAIL the run — a green "
             "result means the loss was silently absorbed (or the restart budget was ignored)"

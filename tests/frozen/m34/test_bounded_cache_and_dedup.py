@@ -7,8 +7,9 @@ broadcast-token set, asserts full worker coverage before caching a token (never 
 under-prime), and reuses the one canonical bounded LocalResources from graphed.core (P3-6/P0-1).
 
 M38: these broadcast-cache tests pin ``comms=None`` (the hub path). The ship-once broadcast is a
-hub mechanism — peer reduction ships the process to each worker directly (no per-worker token cache) —
-so after peer became the default ``comms``, the broadcast cache is exercised explicitly via ``comms=None``.
+hub mechanism — peer reduction ships the process to each worker directly (no per-worker token
+cache) — so after peer became the default ``comms``, the broadcast cache is exercised explicitly
+via ``comms=None``.
 """
 
 from __future__ import annotations

@@ -1,5 +1,7 @@
-"""m46 m42-parity Plan path — `SubmitRunner(ParslBackend(HTEX))` bit-for-bit vs `SequentialRunner`
-(plan §1.2, §3 m46 `test_parsl_plan_parity`).
+"""m46 m42-parity Plan path.
+
+`SubmitRunner(ParslBackend(HTEX))` bit-for-bit vs `SequentialRunner` (plan §1.2, §3 m46
+`test_parsl_plan_parity`).
 
 The engine is reused, not rebuilt, so parity is inherited — what THIS module witnesses is that the
 parsl seam underneath it is real: leaves AND combines execute in HTEX worker processes (pid-span
@@ -11,7 +13,8 @@ identities.
 
 Discriminates: a driver-side fold (leaf/combine pids == driver pid), a nondeterministic reduction
 order (bit-for-bit x2 fails), a `close()` that shuts the executor down (the follow-on submit
-dies), and a monitor path that drops or driver-stamps the worker-side STARTED/FINISHED events."""
+dies), and a monitor path that drops or driver-stamps the worker-side STARTED/FINISHED events.
+"""
 
 from __future__ import annotations
 
@@ -76,7 +79,8 @@ def test_leaves_and_combines_run_in_worker_processes_and_span_two(htex) -> None:
     leaf_pids = {pid for _, pid, _ in pv.leaves}
     assert driver_pid not in leaf_pids, "a leaf ran in the DRIVER process — head-node compute"
     assert len({worker for _, _, worker in pv.leaves}) >= 2, (
-        f"all 12 leaves ran on one worker: { ({worker for _, _, worker in pv.leaves}) } — the pool "
+        f"all 12 leaves ran on one worker: { ({worker for _, _, worker in pv.leaves}) } — the "
+        "pool "
         "never spread (or the site witness is synthesized)"
     )
     assert pv.combine_sites, "no combine recorded a site — the tree reduction never ran as tasks"
@@ -87,13 +91,16 @@ def test_leaves_and_combines_run_in_worker_processes_and_span_two(htex) -> None:
 
 
 def test_close_does_not_shut_down_the_callers_executor(htex) -> None:  # type: ignore[no-untyped-def]
-    """`ParslBackend.close()` must leave the caller-owned executor alive (plan §1.2; the m42
-    ready-client-in precedent) — witnessed by a successful follow-on submit on a FRESH backend
-    over the SAME module-scoped pool."""
+    """``ParslBackend.close()`` leaves the caller-owned executor alive.
+
+    `ParslBackend.close()` must leave the caller-owned executor alive (plan §1.2; the m42
+    ready-client-in precedent) — witnessed by a successful follow-on submit on a FRESH backend over
+    the SAME module-scoped pool.
+    """
     with make_runner(make_parsl_backend(htex)) as runner:
-        assert run_bounded(lambda: runner.run(concat_plan(4, "m46close"))).value == expected_concat(
-            4, "m46close"
-        )
+        assert run_bounded(
+            lambda: runner.run(concat_plan(4, "m46close"))
+        ).value == expected_concat(4, "m46close")
     follow_on = make_parsl_backend(htex).submit(double, 21, key="graphed-m46par-close-probe")
     assert run_bounded(lambda: follow_on.result(timeout=120)) == 42, (
         "the pool died with backend.close() — close() must not shut down the caller's executor"
@@ -101,9 +108,11 @@ def test_close_does_not_shut_down_the_callers_executor(htex) -> None:  # type: i
 
 
 def test_monitor_piggyback_delivers_worker_phases_after_completion(htex) -> None:  # type: ignore[no-untyped-def]
-    """M37 through the seam (plan §1.2 monitor position/G10): per leaf exactly one driver-side
-    SUBMITTED + worker-side STARTED + FINISHED (2·n worker events, completion-granularity
-    delivery), no phantom keys, value unchanged by observation."""
+    """M37 through the seam (plan §1.2 monitor position/G10).
+
+    Per leaf exactly one driver-side SUBMITTED + worker-side STARTED + FINISHED (2·n worker
+    events, completion-granularity delivery), no phantom keys, value unchanged by observation.
+    """
     monitor = RecordingMonitor()
     runner = make_runner(make_parsl_backend(htex), monitor=monitor)
     value = run_bounded(lambda: runner.run(concat_plan(6, "m46mon"))).value

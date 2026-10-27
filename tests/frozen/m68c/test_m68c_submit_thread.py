@@ -1,6 +1,8 @@
-"""m68c §6 on ``SubmitRunner(ThreadBackend)`` and the local executors: a join plan (``DurablePlanV2``)
-runs stage by stage, with its services, its (map, dest) edge, its control and its cancel-before-release
-order; the local executors refuse it."""
+"""m68c §6 on ``SubmitRunner(ThreadBackend)`` and the local executors.
+
+A join plan (``DurablePlanV2``) runs stage by stage, with its services, its (map, dest) edge, its
+control and its cancel-before-release order; the local executors refuse it.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +43,7 @@ from m68c_harness import (
 
 from graphed_executors.local import ProcessPoolExecutor, ThreadExecutor
 from graphed_executors.submit import SubmitRunner, ThreadBackend
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 PARTS = 8  # steps_per_file: map tasks per side, and dests
 N_MAPS = 2 * PARTS
@@ -84,7 +86,7 @@ def test_a_managed_child_lives_exactly_as_long_as_the_join_run(tmp_path: Path) -
 
 def test_an_unbound_service_without_a_launch_is_refused_before_any_stage_task() -> None:
     backend = RecordingBackend(ThreadBackend(2))
-    with closing(SubmitRunner(backend)) as runner, pytest.raises(ServiceUnavailable):
+    with closing(SubmitRunner(backend)) as runner, pytest.raises(ServiceUnavailableError):
         run_bounded(lambda: runner.run(join_v2("unbound", spec=given_spec())))
     assert backend.plan_keys() == [], backend.plan_keys()
 
@@ -177,7 +179,9 @@ def test_a_mid_run_cancel_cancels_the_queued_map_tasks() -> None:
     runner = SubmitRunner(backend, control=control)
     try:
         run = Background(lambda: runner.run(plan))
-        assert wait_for(lambda: sum(map(is_map, backend.submitted())) == N_MAPS), backend.submitted()
+        assert wait_for(lambda: sum(map(is_map, backend.submitted())) == N_MAPS), (
+            backend.submitted()
+        )
         control.cancel()
         gate.set()
         wait_for(lambda: any(is_map(k) for k in backend.cancelled()))
@@ -203,7 +207,9 @@ def test_a_cancel_at_a_stage_boundary_submits_no_next_stage() -> None:
     runner = SubmitRunner(backend, control=control)
     try:
         run = Background(lambda: runner.run(plan))
-        assert wait_for(lambda: sum(map(is_map, backend.submitted())) == N_MAPS), backend.submitted()
+        assert wait_for(lambda: sum(map(is_map, backend.submitted())) == N_MAPS), (
+            backend.submitted()
+        )
         control.pause()
         gate.set()
         assert control.parked.wait(60.0), "the driver never held before the next stage"
@@ -245,9 +251,13 @@ def test_a_failed_map_submit_cancels_the_run_s_queued_map_tasks() -> None:
 # ---- refusals -----------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("executor", [ThreadExecutor, ProcessPoolExecutor], ids=["thread", "process"])
+@pytest.mark.parametrize(
+    "executor", [ThreadExecutor, ProcessPoolExecutor], ids=["thread", "process"]
+)
 def test_a_local_executor_refuses_a_join_plan_naming_submit_runner(executor: Any) -> None:
     plan = join_v2("refuse-local", spec=given_spec())
     with closing(executor(1)) as ex, pytest.raises(TypeError) as excinfo:
         run_bounded(lambda: ex.run(plan))
-    assert "SubmitRunner(" in str(excinfo.value) and "DurablePlanV2" in str(excinfo.value), excinfo.value
+    assert "SubmitRunner(" in str(excinfo.value) and "DurablePlanV2" in str(excinfo.value), (
+        excinfo.value
+    )

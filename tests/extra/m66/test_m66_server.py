@@ -1,6 +1,9 @@
-"""m66 task-server and pilot paths the frozen suite does not drive: a cancelled queued task, an idle long poll,
-a stale or unusable result, close with held tasks, an exhausted port range, a malformed signature header,
-pilots sharing a hostname and pid, and a pilot orphaned by its driver, idle or mid-task."""
+"""m66 task-server and pilot paths the frozen suite does not drive.
+
+A cancelled queued task, an idle long poll, a stale or unusable result, close with held tasks, an
+exhausted port range, a malformed signature header, pilots sharing a hostname and pid, and a pilot
+orphaned by its driver, idle or mid-task.
+"""
 
 from __future__ import annotations
 
@@ -39,7 +42,9 @@ def task_server() -> server.TaskServer:
     return server.TaskServer("127.0.0.1", PORTS, SimpleNamespace(alive=lambda: 1))
 
 
-def test_a_cancelled_queued_task_is_skipped_and_fails_its_dependent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_cancelled_queued_task_is_skipped_and_fails_its_dependent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(server, "POLL_S", 0.2)
     ts = task_server()
     try:
@@ -48,7 +53,8 @@ def test_a_cancelled_queued_task_is_skipped_and_fails_its_dependent(monkeypatch:
         second: Future[Any] = Future()
         ts.add("k2", double, (_ParslFuture(first, {}),), second)
         assert first.cancel()
-        assert ts.lease("pilot-a") is None  # the cancelled task is dropped, then the poll times out
+        # the cancelled task is dropped, then the poll times out
+        assert ts.lease("pilot-a") is None
         assert isinstance(second.exception(0), CancelledError)
     finally:
         ts.close()
@@ -87,7 +93,8 @@ def test_an_exhausted_port_range_is_an_error() -> None:
         ts.shutdown()
 
 
-KILLED = (-signal.SIGTERM, signal.SIGTERM)  # POSIX reports the signal negated; Windows as the exit code
+# POSIX reports the signal negated; Windows as the exit code
+KILLED = (-signal.SIGTERM, signal.SIGTERM)
 
 
 def sleep_for(seconds: float, marker: str) -> None:
@@ -103,8 +110,14 @@ def die_once(marker: str) -> str:
 
 
 def start_pilot(url: str, secret: Path, prelude: str = "") -> subprocess.Popen[str]:
-    """A pilot on this interpreter with this directory importable; ``prelude`` runs first."""
-    code = f"{prelude}\nimport sys\nfrom graphed_executors.htcondor_backend import pilot\nsys.exit(pilot.main(sys.argv[1:]))"
+    """Start a pilot on this interpreter with this directory importable.
+
+    ``prelude`` runs first.
+    """
+    code = (
+        f"{prelude}\nimport sys\nfrom graphed_executors.htcondor_backend import "
+        "pilot\nsys.exit(pilot.main(sys.argv[1:]))"
+    )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([HERE, os.environ.get("PYTHONPATH", "")])}
     return subprocess.Popen(
         [sys.executable, "-c", code, url, str(secret)],
@@ -137,7 +150,8 @@ def test_a_pilot_whose_driver_is_gone_exits_at_once(
     pilot = start_pilot(ts.url, secret)
     wait_until(started.exists if busy else lambda: ts.live_pilots() == 1)
     assert started.exists() if busy else ts.live_pilots() == 1
-    ts.shutdown()  # the socket goes away without a 410: the pilot cannot tell a crash from a partition
+    # the socket goes away without a 410: the pilot cannot tell a crash from a partition
+    ts.shutdown()
     gone_at = time.monotonic()
     out, _ = pilot.communicate(timeout=60)
     ts.close()
@@ -176,7 +190,8 @@ def test_a_malformed_signature_header_is_refused(capfd: pytest.CaptureFixture[st
         host, port = ts.url.removeprefix("http://").split(":")
         with socket.create_connection((host, int(port)), timeout=30) as conn:
             conn.sendall(
-                b"POST /hello HTTP/1.1\r\nHost: x\r\nX-Graphed-Sig: \xe9\r\nContent-Length: 0\r\n\r\n"
+                b"POST /hello HTTP/1.1\r\nHost: x\r\nX-Graphed-Sig: \xe9\r\nContent-Length: "
+                b"0\r\n\r\n"
             )
             # to EOF: closing early resets the server's write
             reply = b"".join(iter(lambda: conn.recv(4096), b""))
@@ -187,13 +202,17 @@ def test_a_malformed_signature_header_is_refused(capfd: pytest.CaptureFixture[st
     assert "Traceback" not in capfd.readouterr().err
 
 
-def test_an_unpicklable_task_error_still_settles_the_future(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unpicklable_task_error_still_settles_the_future(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(server, "POLL_S", 0.2)  # the idle pilot also sees 204s
     backend = HTCondorBackend(LocalPilots(pythonpath=[Path(__file__).parent]), 1, host="127.0.0.1")
     try:
         backend.wait_for_pilots(1, timeout=60)
         time.sleep(0.5)
-        err = backend.submit(raise_unpicklable, key="graphed-m66-unpicklable").exception(timeout=60)
+        err = backend.submit(raise_unpicklable, key="graphed-m66-unpicklable").exception(
+            timeout=60
+        )
     finally:
         backend.close()
     assert isinstance(err, RuntimeError), err

@@ -1,6 +1,8 @@
-"""m42 frontend parity on dask (plan §1.5 rows 1, 3, 4, 5, 11; blueprint §3
-`test_dask_parity_surfaces`): the executor is domain-blind — every frontend surface reaches it as
-a picklable `Plan`, so each surface is exercised end-to-end against `SequentialRunner`:
+"""m42 frontend parity on dask: every frontend surface runs end-to-end on dask.
+
+m42 frontend parity on dask (plan §1.5 rows 1, 3, 4, 5, 11; blueprint §3
+`test_dask_parity_surfaces`): the executor is domain-blind — every frontend surface reaches it as a
+picklable `Plan`, so each surface is exercised end-to-end against `SequentialRunner`:
 
 1.  `aggregate_plan` multi-output (shared-subgraph IR) over a REAL parquet dataset — surfaces 1+5
     in one run: outs bit-for-bit vs sequential AND >=2 workers ran leaves, driver ran none.
@@ -11,7 +13,8 @@ a picklable `Plan`, so each surface is exercised end-to-end against `SequentialR
     tasks-per-worker > 1 (plus the §1.3.3 plugin name/idempotent pins).
 
 Requires pyarrow at runtime (`ak.to_parquet`/`ak.from_parquet`) — the test-dask CI job must
-install it alongside the dask extra."""
+install it alongside the dask extra.
+"""
 
 from __future__ import annotations
 
@@ -54,7 +57,10 @@ def client():
 
 @pytest.fixture(scope="module")
 def parquet_paths(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
-    """A deterministic INT-valued 2-file dataset (exact float sums — grouping-safe bit-for-bit)."""
+    """Return a deterministic INT-valued 2-file dataset.
+
+    Exact float sums — grouping-safe bit-for-bit.
+    """
     d = tmp_path_factory.mktemp("m42-parquet")
     paths = []
     for i in range(N_FILES):
@@ -77,7 +83,9 @@ def _truth() -> tuple[float, float]:
     return 2.0 * total, total
 
 
-def test_parquet_aggregate_multi_output_matches_sequential_and_spreads(client, parquet_paths) -> None:
+def test_parquet_aggregate_multi_output_matches_sequential_and_spreads(
+    client, parquet_paths
+) -> None:
     session = Session(AwkwardBackend())
     events = from_parquet(session, "events", parquet_paths, open_files=False, steps_per_file=4)
     shared = events.x + events.y  # the shared subgraph, compiled ONCE into the plan's IR
@@ -101,8 +109,11 @@ def test_parquet_aggregate_multi_output_matches_sequential_and_spreads(client, p
 
 
 def _toy_external_plan(*, bind_external: bool):
-    """A toy-backend aggregate whose graph holds ONE External (`map`) node; ``bind_external``
-    resolves it by content hash exactly as a deployment would (the m10 idiom)."""
+    """Return a toy-backend aggregate whose graph holds ONE External (`map`) node.
+
+    ``bind_external`` resolves it by content hash exactly as a deployment would (the m10
+    idiom).
+    """
     session = Session(ToyListBackend())
     src = ToyListSource(tuple(range(1, 13)), n_parts=6)
     x = session.source("x", form="num", data=src)
@@ -111,7 +122,9 @@ def _toy_external_plan(*, bind_external: bool):
     if bind_external:
         compiled = compile_ir(session, out)
         store = graphed.core.GraphStore.deserialize(compiled.ir)
-        (chash,) = [n["descriptor"]["content_hash"] for n in store.nodes() if n["kind"] == "external"]
+        (chash,) = [
+            n["descriptor"]["content_hash"] for n in store.nodes() if n["kind"] == "external"
+        ]
         externals = {chash: times10}
     plan = aggregate_plan(
         out, reduce=agg_reduce, combine=agg_combine, empty=agg_empty, externals=externals
@@ -140,11 +153,18 @@ def test_missing_external_fails_loudly_from_the_worker(client) -> None:
     assert "externals" in str(excinfo.value)  # the message tells the user the fix
 
 
-def test_to_parquet_on_dask_matches_sequential(client, parquet_paths, tmp_path: pathlib.Path) -> None:
+def test_to_parquet_on_dask_matches_sequential(
+    client, parquet_paths, tmp_path: pathlib.Path
+) -> None:
     def write(dest: pathlib.Path, executor) -> list[pathlib.Path]:
         session = Session(AwkwardBackend())
         events = from_parquet(session, "events", parquet_paths, open_files=False, steps_per_file=2)
-        return [pathlib.Path(p) for p in to_parquet(events.x + events.y, str(dest), steps_per_file=2, executor=executor)]
+        return [
+            pathlib.Path(p)
+            for p in to_parquet(
+                events.x + events.y, str(dest), steps_per_file=2, executor=executor
+            )
+        ]
 
     seq_parts = write(tmp_path / "seq", SequentialRunner())
     with make_dask_runner(client) as runner:
@@ -153,7 +173,10 @@ def test_to_parquet_on_dask_matches_sequential(client, parquet_paths, tmp_path: 
     assert [p.name for p in dask_parts] == [p.name for p in seq_parts]  # key-ordered path reduce
     assert len(dask_parts) == N_FILES * 2
     for dp, sp in zip(dask_parts, seq_parts, strict=True):
-        assert hashlib.sha256(dp.read_bytes()).hexdigest() == hashlib.sha256(sp.read_bytes()).hexdigest()
+        assert (
+            hashlib.sha256(dp.read_bytes()).hexdigest()
+            == hashlib.sha256(sp.read_bytes()).hexdigest()
+        )
 
 
 def test_open_once_opens_each_uri_once_per_worker(client) -> None:
@@ -177,7 +200,8 @@ def test_open_once_opens_each_uri_once_per_worker(client) -> None:
 
 def test_worker_plugin_pins(client) -> None:
     """§1.3.3 pins: the plugin is a named, idempotent WorkerPlugin holding per-worker resources."""
-    from graphed_executors.dask_backend.plugin import GraphedWorkerPlugin  # noqa: PLC0415  (deferred)
+    # deferred
+    from graphed_executors.dask_backend.plugin import GraphedWorkerPlugin  # noqa: PLC0415
 
     assert GraphedWorkerPlugin.name == "graphed-worker"
     assert GraphedWorkerPlugin.idempotent is True

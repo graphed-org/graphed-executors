@@ -1,14 +1,16 @@
-"""m69b: a served histogram plan's histserv servers are ordinary managed services of the executors
-(plan-services.md, the m69b ``test_histserv_managed.py`` row). Every OS, no bindings.
+"""m69b: a served histogram plan's histserv servers are ordinary managed services of the executors.
 
-The plan is two equal Weight slots (dyadic weights, so every sum is exact) under a context whose one size
-fits each slot alone and not both, so it declares two servers. On ``SubmitRunner(ThreadBackend(2))`` the
-engine starts both beside the driver, the run's receipts name them, the resolve reads them while they are
-up and the run's end stops them; given endpoints are used instead and emptied; a driverless job hosts them
-in the driver job and ships back resolved histograms. Servers the driver host cannot hold (a
-``driver_memory_mb`` set on the backend, else the host's physical memory; a driver job's slot ``Memory``)
-are refused before the one that overflows starts: the servers beside the driver count together, and a given
-endpoint is never held to it.
+Plan-services.md, the m69b ``test_histserv_managed.py`` row. Every OS, no bindings.
+
+The plan is two equal Weight slots (dyadic weights, so every sum is exact) under a context whose
+one size fits each slot alone and not both, so it declares two servers. On
+``SubmitRunner(ThreadBackend(2))`` the engine starts both beside the driver, the run's receipts
+name them, the resolve reads them while they are up and the run's end stops them; given endpoints
+are used instead and emptied; a driverless job hosts them in the driver job and ships back resolved
+histograms. Servers the driver host cannot hold (a ``driver_memory_mb`` set on the backend, else
+the host's physical memory; a driver job's slot ``Memory``) are refused before the one that
+overflows starts: the servers beside the driver count together, and a given endpoint is never held
+to it.
 """
 
 from __future__ import annotations
@@ -55,7 +57,7 @@ from services_harness import (
 )
 
 from graphed_executors.submit import SubmitRunner, ThreadBackend
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 SERVICES_LOGGER = "graphed_executors.services"
 WORKERS = 2
@@ -80,7 +82,9 @@ def twin() -> dict[Any, Any]:
 
 def two_server_plan(size_mb: int, ports: tuple[int, int] | None = None) -> tuple[Any, Any]:
     kwargs: dict[str, Any] = {} if ports is None else {"ports": ports}
-    ctx = histserv_api().Context(memory_mb=size_mb, workers=WORKERS, name=unique("m69b-managed"), **kwargs)
+    ctx = histserv_api().Context(
+        memory_mb=size_mb, workers=WORKERS, name=unique("m69b-managed"), **kwargs
+    )
     plan = served_plan(BINS, ctx)
     names = sorted(s.name for s in plan.services)
     assert [(s[0], s[3]) for s in sorted(ctx.servers())] == [(n, 1) for n in names], ctx.servers()
@@ -131,7 +135,9 @@ def test_given_endpoints_start_nothing_and_are_left_empty(
             managed, started = refused(runner, 1024)
         finally:
             runner.close()
-        assert sorted((s.name, s.leg, s.endpoint) for s in statuses) == [(n, "user", given[n]) for n in names]
+        assert sorted((s.name, s.leg, s.endpoint) for s in statuses) == [
+            (n, "user", given[n]) for n in names
+        ]
         assert seen(tag) == dict.fromkeys(endpoints, (1, 1))
         assert [server_count(ep) for ep in endpoints] == [0, 0], "the resolve left server copies"
     assert same_values(result.value, twin)
@@ -142,8 +148,11 @@ def test_given_endpoints_start_nothing_and_are_left_empty(
 def driver_job(
     plan: Any, size_mb: int, slot_mb: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
-    """``plan`` submitted driverless (``pilots="local"``) under recorded bindings, then its driver job run
-    here (``python -m …driver``) with a machine ad whose slot ``Memory`` is ``slot_mb``."""
+    """``plan`` submitted driverless (``pilots="local"``) under recorded bindings.
+
+    Then its driver job run here (``python -m …driver``) with a machine ad whose slot ``Memory`` is
+    ``slot_mb``.
+    """
     log_dir = tmp_path / "submit"
     log_dir.mkdir()
     fake = record_bindings(monkeypatch, RecordingSchedd())
@@ -161,7 +170,9 @@ def driver_job(
     (entry,) = submits(fake.log)
     job = job_dir(entry[1], log_dir, tmp_path / "job")
     ad = job / ".machine.ad"
-    ad.write_text(f'Machine = "127.0.0.1"\nName = "slot1@127.0.0.1"\nCpus = 4\nMemory = {slot_mb}\n')
+    ad.write_text(
+        f'Machine = "127.0.0.1"\nName = "slot1@127.0.0.1"\nCpus = 4\nMemory = {slot_mb}\n'
+    )
     proc = subprocess.run(
         [sys.executable, "-m", DRIVER_MODULE, str(job)],
         cwd=job,
@@ -184,7 +195,10 @@ def test_a_driverless_job_hosts_the_servers_and_returns_resolved_histograms(
     assert proc.returncode == 0, (proc.stderr, log)
     hosted = {name: int(port) for name, port in STATUS_LINE.findall(log)}
     assert sorted(hosted) == sorted(s.name for s in plan.services), log
-    assert all(ports[0] <= p <= ports[1] and port_free(p) for p in hosted.values()), (hosted, ports)
+    assert all(ports[0] <= p <= ports[1] and port_free(p) for p in hosted.values()), (
+        hosted,
+        ports,
+    )
     ok, result = pickle.loads((job / "result.pkl").read_bytes())
     assert ok is True, result
     assert same_values(result.value, twin)
@@ -203,20 +217,23 @@ def test_a_driver_job_holds_its_servers_to_its_slot_memory(
 
 
 def named(number: int, text: str, *cut: str) -> bool:
-    """``number`` stands alone in ``text`` once ``cut`` (the run's own paths) is removed from it."""
+    """Check that ``number`` stands alone in ``text`` once ``cut`` (the run's paths) is removed."""
     for ident in cut:
         text = text.replace(ident, "")
     return re.search(rf"(?<!\d){number}(?!\d)", text) is not None
 
 
 def refused(runner: Any, size_mb: int) -> tuple[str, list[Any]]:
-    """``legs["managed"]`` of the ``ServiceUnavailable`` a one-server plan of ``size_mb``, bound to no
-    endpoint, raises on ``runner``, and every process ``subprocess.Popen`` started meanwhile."""
+    """Return ``legs["managed"]`` of the refusal and every process started meanwhile.
+
+    ``legs["managed"]`` of the ``ServiceUnavailableError`` a one-server plan of ``size_mb``, bound
+    to no endpoint, raises on ``runner``, and every process ``subprocess.Popen`` started meanwhile.
+    """
     require_histserv()
     ctx = histserv_api().Context(memory_mb=size_mb, workers=WORKERS, name=unique("m69b-refused"))
     plan = served_plan(SMALL, ctx)
     assert [s[1] for s in ctx.servers()] == [size_mb], ctx.servers()
-    with popen_backstop() as started, pytest.raises(ServiceUnavailable) as err:
+    with popen_backstop() as started, pytest.raises(ServiceUnavailableError) as err:
         run_bounded(lambda: runner.run(plan))
     return str(err.value.legs["managed"]), list(started)
 
@@ -251,10 +268,12 @@ def test_the_driver_check_sums_the_servers_beside_the_driver(size_mb: int) -> No
     backend.driver_memory_mb = limit
     runner = SubmitRunner(backend)
     try:
-        with popen_backstop() as started, pytest.raises(ServiceUnavailable) as err:
+        with popen_backstop() as started, pytest.raises(ServiceUnavailableError) as err:
             run_bounded(lambda: runner.run(plan))
     finally:
         runner.close()
     managed = str(err.value.legs["managed"])
-    assert named(size_mb, managed) and named(2 * size_mb, managed) and named(limit, managed), managed
+    assert named(size_mb, managed) and named(2 * size_mb, managed) and named(limit, managed), (
+        managed
+    )
     assert len([p for p in started if "histserv" in str(p.args)]) == 1, [p.args for p in started]

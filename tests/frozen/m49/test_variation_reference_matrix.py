@@ -16,7 +16,7 @@ from functools import cache
 from typing import Any
 
 import graphed_histogram as gh
-import m49_variation_analyses as A
+import m49_variation_analyses as analyses
 import pytest
 from graphed_corpus.histograms import bin_values, fingerprint
 
@@ -24,59 +24,92 @@ from graphed_executors.local import ProcessPoolExecutor, ThreadExecutor
 
 
 @cache
-def _run(steps_per_file: int, threaded: bool = False) -> tuple[dict[str, Any], A.CorpusEvents, int]:
-    plan, source = A.matrix_plan(steps_per_file)
+def _run(
+    steps_per_file: int, threaded: bool = False
+) -> tuple[dict[str, Any], analyses.CorpusEvents, int]:
+    plan, source = analyses.matrix_plan(steps_per_file)
     executor = ThreadExecutor(max_workers=2) if threaded else ProcessPoolExecutor(max_workers=2)
     result = executor.run(plan)
     return gh.unpack(result.value), source, result.n_combines
 
 
-@pytest.mark.parametrize(("output", "label"), A.MATRIX)
+@pytest.mark.parametrize(("output", "label"), analyses.MATRIX)
 def test_the_matrix_slot_reproduces_its_corpus_reference(output: str, label: str) -> None:
-    unpacked, _source, _combines = _run(A.MATRIX_PARTITIONS)
+    unpacked, _source, _combines = _run(analyses.MATRIX_PARTITIONS)
     got = unpacked[output][label]
-    reference = A.corpus_reference(output, label)
+    reference = analyses.corpus_reference(output, label)
     assert bin_values(got) == bin_values(reference), f"{output}/{label}: bin contents drifted"
     assert fingerprint(got) == fingerprint(reference), f"{output}/{label}: fingerprint drifted"
 
 
 def test_the_fifteen_references_are_pairwise_distinct() -> None:
-    """Non-vacuity of the matrix above: an implementation that answered `nominal` for every label,
-    or collapsed one family onto another, would satisfy 15 equalities against 15 references only if
-    the references themselves agreed. They do not."""
-    prints = {slot: fingerprint(A.corpus_reference(*slot)) for slot in A.MATRIX}
-    assert len(set(prints.values())) == len(A.MATRIX)
+    """Non-vacuity of the matrix above.
+
+    An implementation that answered `nominal` for every label, or collapsed one family onto
+    another, would satisfy 15 equalities against 15 references only if the references
+    themselves agreed. They do not.
+    """
+    prints = {slot: fingerprint(analyses.corpus_reference(*slot)) for slot in analyses.MATRIX}
+    assert len(set(prints.values())) == len(analyses.MATRIX)
 
 
 def test_every_output_carries_exactly_its_own_nine_labels() -> None:
-    """§6.1a/§2.4 under m53's dependency fanout: the weight family reads the JES-shifted kinematics,
-    so each output carries `1 + |S| + |W| + |S|·|W|` labels — the joint `w__s` universes are minted,
-    not silently taken at nominal JES — and no family leaks onto an output its `vary` never reached."""
-    unpacked, _source, _combines = _run(A.MATRIX_PARTITIONS)
-    ttbar = ["btag_down", "btag_down__jes_down", "btag_down__jes_up", "btag_up", "btag_up__jes_down",
-             "btag_up__jes_up", "jes_down", "jes_up", "nominal"]
+    """§6.1a/§2.4 under m53's dependency fanout.
+
+    The weight family reads the JES-shifted kinematics, so each output carries `1 + |S| + |W| +
+    |S|·|W|` labels — the joint `w__s` universes are minted, not silently taken at nominal JES
+    — and no family leaks onto an output its `vary` never reached.
+    """
+    unpacked, _source, _combines = _run(analyses.MATRIX_PARTITIONS)
+    ttbar = [
+        "btag_down",
+        "btag_down__jes_down",
+        "btag_down__jes_up",
+        "btag_up",
+        "btag_up__jes_down",
+        "btag_up__jes_up",
+        "jes_down",
+        "jes_up",
+        "nominal",
+    ]
     assert sorted(unpacked["ttbar_4j1b"]) == ttbar
     assert sorted(unpacked["ttbar_4j2b"]) == ttbar
-    assert sorted(unpacked["ttgamma"]) == ["jes_down", "jes_up", "nominal", "pho_down", "pho_down__jes_down",
-                                          "pho_down__jes_up", "pho_up", "pho_up__jes_down", "pho_up__jes_up"]
+    assert sorted(unpacked["ttgamma"]) == [
+        "jes_down",
+        "jes_up",
+        "nominal",
+        "pho_down",
+        "pho_down__jes_down",
+        "pho_down__jes_up",
+        "pho_up",
+        "pho_up__jes_down",
+        "pho_up__jes_up",
+    ]
 
 
 def test_the_matrix_really_crossed_a_process_boundary() -> None:
-    """The mechanism witness, with its own positive control: the source counts its reads in the
-    process that performs them, so the driver's copy stays EMPTY under the process pool and fills
-    under the thread pool. A process executor that silently degraded to in-process evaluation would
-    populate both."""
-    _unpacked, process_source, combines = _run(A.MATRIX_PARTITIONS)
-    _unpacked_t, thread_source, _combines_t = _run(A.MATRIX_PARTITIONS, threaded=True)
+    """The mechanism witness, with its own positive control.
+
+    The source counts its reads in the process that performs them, so the driver's copy stays
+    EMPTY under the process pool and fills under the thread pool. A process executor that
+    silently degraded to in-process evaluation would populate both.
+    """
+    _unpacked, process_source, combines = _run(analyses.MATRIX_PARTITIONS)
+    _unpacked_t, thread_source, _combines_t = _run(analyses.MATRIX_PARTITIONS, threaded=True)
     assert process_source.part_reads == []
-    assert len(thread_source.part_reads) == A.MATRIX_PARTITIONS
-    assert combines == A.MATRIX_PARTITIONS - 1
+    assert len(thread_source.part_reads) == analyses.MATRIX_PARTITIONS
+    assert combines == analyses.MATRIX_PARTITIONS - 1
 
 
 def test_the_matrix_is_invariant_to_the_partition_count() -> None:
-    """§5.5a discipline: the compared quantities come from plan runs at two `steps_per_file` values,
-    the only place the partitioning is observable at all."""
-    fine, _source, _combines = _run(A.MATRIX_PARTITIONS)
+    """§5.5a discipline.
+
+    The compared quantities come from plan runs at two `steps_per_file` values, the only place
+    the partitioning is observable at all.
+    """
+    fine, _source, _combines = _run(analyses.MATRIX_PARTITIONS)
     coarse, _source_c, _combines_c = _run(1)
-    for output, label in A.MATRIX:
-        assert bin_values(fine[output][label]) == bin_values(coarse[output][label]), f"{output}/{label}"
+    for output, label in analyses.MATRIX:
+        assert bin_values(fine[output][label]) == bin_values(coarse[output][label]), (
+            f"{output}/{label}"
+        )

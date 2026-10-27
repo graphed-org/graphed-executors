@@ -3,14 +3,16 @@
 ``transport_run_repartition`` / ``transport_run_join`` seat ``k`` persistent peers (one per worker
 slot), each of which — INSIDE its task — maps its owned src range into its endpoint's block store,
 announces a manifest to the driver, awaits the driver's aggregated pull assignment, then PULLS its
-owned dests' fragments peer→peer over ``/pull`` (coalesced one request per holder, evict-after-serve)
-and gathers/joins them. Bytes move peer↔peer over the block plane; only the final dest blocks + the
-counters ride the task return (once, like the m44 dask returns). Reader-plane fetch budgets are a
-driver-side replay of the imported ``_stage2_gather`` (``common.transport_tasks.replay_reader_plane``,
-the SAME code the dask job gates); join budgets are the real per-dest ``_join_with_budget``.
+owned dests' fragments peer→peer over ``/pull`` (coalesced one request per holder,
+evict-after-serve) and gathers/joins them. Bytes move peer↔peer over the block plane; only the
+final dest blocks + the counters ride the task return (once, like the m44 dask returns).
+Reader-plane fetch budgets are a driver-side replay of the imported ``_stage2_gather``
+(``common.transport_tasks.replay_reader_plane``, the SAME code the dask job gates); join budgets
+are the real per-dest ``_join_with_budget``.
 
-Reuses the driver primitives (barrier / registry / probe / restart) from ``transport_peer``; imports
-NOTHING from parsl or ``dask_backend`` (F13 / G9)."""
+Reuses the driver primitives (barrier / registry / probe / restart) from ``transport_peer``;
+imports NOTHING from parsl or ``dask_backend`` (F13 / G9).
+"""
 
 from __future__ import annotations
 
@@ -25,15 +27,19 @@ from graphed_executors.common.transport_run import (
     is_restart_worthy,
     pick_attributable,
 )
-from graphed_executors.common.transport_tasks import gather_join_body, map_task_body, replay_reader_plane
+from graphed_executors.common.transport_tasks import (
+    gather_join_body,
+    map_task_body,
+    replay_reader_plane,
+)
 from graphed_executors.local.shuffle import ShuffleWitness, _assign, _sha256_hex
 
 from .transport_peer import (
     DRIVER,
-    ProbeUnreachable,
+    ProbeUnreachableError,
     _barrier_and_registry,
     _barrier_stage_error,
-    _BarrierTimeout,
+    _BarrierTimeoutError,
     _bump_driver,
     _cleanup_after_barrier,
     _collect_probes,
@@ -47,25 +53,30 @@ from .transport_peer import (
     sorted_addrs_seen,
 )
 
-_MSG_WAIT_S = 120.0  # bound on a peer's assign/done wait (a lost driver message never hangs the task)
+# bound on a peer's assign/done wait (a lost driver message never hangs the task)
+_MSG_WAIT_S = 120.0
 _COLLECT_S = 120.0  # bound on the driver's manifest/gathered collection
 
 
-# ---- the parsl block plane over the peer's http endpoint (self-fragments read locally) -----------
+# ---- the parsl block plane over the peer's http endpoint (self-fragments read locally) ----------
 class _HttpBlockPlane:
-    """The ``map_task_body`` / ``gather*`` plane over an ``EscalatingHttpTransport``: ``store_block``
-    puts into the endpoint's /pull store; ``pull_blocks`` reads SELF-owned fragments locally (never
-    over HTTP, so they are not billed to ``bytes_served``) and CROSS fragments over the real /pull
-    route (billed at the serving holder)."""
+    """The ``map_task_body`` / ``gather*`` plane over an ``EscalatingHttpTransport``.
+
+    ``store_block`` puts into the endpoint's /pull store; ``pull_blocks`` reads SELF-owned
+    fragments locally (never over HTTP, so they are not billed to ``bytes_served``) and CROSS
+    fragments over the real /pull route (billed at the serving holder).
+    """
 
     def __init__(self, ep: Any) -> None:
         self._ep = ep
 
     def store_block(self, digest: str, wire: bytes, *, to_disk: bool) -> None:
-        self._ep.put_block(digest, wire)  # holder retention is RAM-only for m47 (no test wires holder spill)
+        # holder retention is RAM-only for m47 (no test wires holder spill)
+        self._ep.put_block(digest, wire)
 
     def record(self, **counters: int) -> None:
-        return None  # the parsl block-plane witnesses live on the endpoint, not the plugin record seam
+        # the parsl block-plane witnesses live on the endpoint, not the plugin record seam
+        return None
 
     def pull_blocks(self, holder_addr: str, digests: Any, *, timeout_s: float) -> list[bytes]:
         if holder_addr == self._ep.address:  # self fragment: local read + evict, never over HTTP
@@ -73,14 +84,16 @@ class _HttpBlockPlane:
             for digest in digests:
                 wire = self._ep.take_local(digest)
                 if wire is None:
-                    raise PullTimeoutError(f"self-fragment {digest[:8]} missing from the local store")
+                    raise PullTimeoutError(
+                        f"self-fragment {digest[:8]} missing from the local store"
+                    )
                 out.append(wire)
             return out
         got = self._ep.pull(holder_addr, list(digests), timeout_s=timeout_s)
         return [got[d] for d in digests]
 
 
-# ---- the peer shuffle body (called INSIDE _parsl_peer_main) --------------------------------------
+# ---- the peer shuffle body (called INSIDE _parsl_peer_main) -------------------------------------
 def _peer_shuffle_body(
     ep: Any,
     spec: dict[str, Any],
@@ -123,7 +136,13 @@ def _peer_shuffle_body(
         "store_blocks_at_return": int(ep.store_blocks_count()),
         **_sender_counters(ep),
     }
-    return {"addr": ep.address, "value": value, "hashes": hashes, "join_witness": jw, "counters": counters}
+    return {
+        "addr": ep.address,
+        "value": value,
+        "hashes": hashes,
+        "join_witness": jw,
+        "counters": counters,
+    }
 
 
 def _wait_msg(ep: Any, tag: str, prebuffered: list[Any]) -> Any:
@@ -152,17 +171,24 @@ def _wait_done(ep: Any) -> None:
 
 
 def _gather_repartition(
-    plane: _HttpBlockPlane, backend: Any, assign: dict[int, dict[str, list[Any]]], pull_timeout_s: float
+    plane: _HttpBlockPlane,
+    backend: Any,
+    assign: dict[int, dict[str, list[Any]]],
+    pull_timeout_s: float,
 ) -> tuple[dict[int, Any], dict[int, str], dict[str, int]]:
-    """Coalesce ALL of this peer's cross-fragment pulls to ONE request per holder (the <= k*k incast
-    bound), then reassemble each owned dest in ascending-producer order — byte-identical to local."""
+    """Coalesce ALL of this peer's cross-fragment pulls to ONE request per holder.
+
+    That is the <= k*k incast bound. Each owned dest is then reassembled in ascending-producer
+    order — byte-identical to local.
+    """
     by_holder: dict[str, list[str]] = {}
     for _dest, per_side in assign.items():
         for holder, digest in per_side["src"]:
             by_holder.setdefault(holder, []).append(digest)
     wires: dict[str, bytes] = {}
     for holder, digests in by_holder.items():
-        uniq = list(dict.fromkeys(digests))  # dedup so evict-after-serve never re-reads an evicted digest
+        # dedup so evict-after-serve never re-reads an evicted digest
+        uniq = list(dict.fromkeys(digests))
         got = plane.pull_blocks(holder, uniq, timeout_s=pull_timeout_s)
         wires.update(zip(uniq, got, strict=True))
     value: dict[int, Any] = {}
@@ -240,8 +266,11 @@ def _build_assignment(
     k: int,
     sides: tuple[str, ...],
 ) -> dict[str, dict[int, dict[str, list[tuple[str, str]]]]]:
-    """For each dest d, owner = ``worker_addrs[d % k]``; its per-side pulls are ``[(holder, digest)]``
-    in ascending-producer (== ascending-src) order — the frozen deterministic merge."""
+    """For each dest d, owner = ``worker_addrs[d % k]``.
+
+    Its per-side pulls are ``[(holder, digest)]`` in ascending-producer (== ascending-src)
+    order — the frozen deterministic merge.
+    """
     dests: set[int] = set()
     for m in manifests.values():
         for side in sides:
@@ -263,10 +292,18 @@ def _build_assignment(
 
 
 def _collect_tagged(
-    driver_ep: Any, tag: str, k: int, futures: dict[str, Any], driver_counts: dict[str, int], timeout_s: float
+    driver_ep: Any,
+    tag: str,
+    k: int,
+    futures: dict[str, Any],
+    driver_counts: dict[str, int],
+    timeout_s: float,
 ) -> tuple[dict[str, Any], bool]:
-    """Collect k ``tag`` messages at the driver, returning ``(collected, errored)``. ``errored`` is
-    True if a peer future failed mid-collection (restart-worthy — stop waiting for the dead peer)."""
+    """Collect k ``tag`` messages at the driver, returning ``(collected, errored)``.
+
+    ``errored`` is True if a peer future failed mid-collection (restart-worthy — stop waiting
+    for the dead peer).
+    """
     collected: dict[str, Any] = {}
     deadline = time.monotonic() + timeout_s
     while len(collected) < k and time.monotonic() < deadline:
@@ -310,8 +347,11 @@ def _run_shuffle(
     registry_rewrite: Any,
     assemble: Any,
 ) -> TransportShuffleResult:
-    """The shared shuffle driver: seat k peers, rendezvous+probe, aggregate manifests, broadcast the
-    pull assignment, collect results, and restart the whole run on a restart-worthy failure."""
+    """Run the shared shuffle driver.
+
+    Seat k peers, rendezvous+probe, aggregate manifests, broadcast the pull assignment, collect
+    results, and restart the whole run on a restart-worthy failure.
+    """
     from .transport_peer import _BARRIER_DEFAULT_S  # noqa: PLC0415
 
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
@@ -335,7 +375,9 @@ def _run_shuffle(
                 _parsl_peer_main_ref(),
                 make_peer_spec(nonce, driver_ep, worker_addrs, k, i, addr),
                 key=f"graphed-parsl-shuffle-{nonce}-{i}",
-            )  # ponytail: k persistent tasks gang-schedule by slot saturation (pin_to_worker=False)
+                # ponytail: k persistent tasks gang-schedule by slot saturation
+                # (pin_to_worker=False)
+            )
             for i, addr in enumerate(worker_addrs)
         }
         try:
@@ -351,12 +393,12 @@ def _run_shuffle(
                 driver_counts=driver_counts,
                 per_worker=per_worker,
             )
-        except _BarrierTimeout as bt:
+        except _BarrierTimeoutError as bt:
             _cleanup_after_barrier(driver_ep, pbackend, futures, sorted_addrs_seen(driver_ep))
             _merge_peer(per_worker, DRIVER, driver_counts)
             driver_ep.close()
             raise _barrier_stage_error(bt) from bt
-        except ProbeUnreachable:
+        except ProbeUnreachableError:
             _merge_peer(per_worker, DRIVER, driver_counts)
             driver_ep.close()
             raise
@@ -379,16 +421,24 @@ def _run_shuffle(
         )
 
     transport.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise _shuffle_stage_error(last_exc, pbackend) if last_exc is not None else RuntimeError("no epochs run")
+    raise (  # pragma: no cover
+        _shuffle_stage_error(last_exc, pbackend)
+        if last_exc is not None
+        else RuntimeError("no epochs run")
+    )
 
 
 def _shuffle_stage_error(exc: BaseException, pbackend: Any) -> Any:
-    """Wrap a run-fatal shuffle failure as an attributed ``StageError`` that NAMES the actual death
-    signal (``WorkerLost``/``ManagerLost``/``PullTimeoutError``/``TransportDeliveryError``) — unlike
-    the shared ``build_stage_error`` (which renders a described death as ``cause_type='KilledWorker'``,
+    """Wrap a run-fatal shuffle failure as an attributed ``StageError``.
+
+    That NAMES the actual death signal
+    (``WorkerLost``/``ManagerLost``/``PullTimeoutError``/``TransportDeliveryError``) — unlike the
+    shared ``build_stage_error`` (which renders a described death as ``cause_type='KilledWorker'``,
     losing the parsl signal whose ``str`` never carries its class name), the m47 driver layers the
-    victim-worker context on top of the named signal (backend.describe_failure's own note)."""
-    from graphed.debug import SourceFrame, StageError  # noqa: PLC0415  (error path; dask/parsl-free)
+    victim-worker context on top of the named signal (backend.describe_failure's own note).
+    """
+    # error path; dask/parsl-free
+    from graphed.debug import SourceFrame, StageError  # noqa: PLC0415
 
     describe = getattr(pbackend, "describe_failure", None)
     info = describe(exc) if describe is not None else None
@@ -429,10 +479,12 @@ def _drive_shuffle_attempt(
     if failed:
         _release(driver_ep, seated, ("abort",))
         _harvest(futures, per_worker)
-        raise ProbeUnreachable(failed)
+        raise ProbeUnreachableError(failed)
     _release(driver_ep, seated, ("proceed",))
 
-    manifests, errored = _collect_tagged(driver_ep, "manifest", k, futures, driver_counts, _COLLECT_S)
+    manifests, errored = _collect_tagged(
+        driver_ep, "manifest", k, futures, driver_counts, _COLLECT_S
+    )
     if errored:
         _release(driver_ep, seated, ("done",))
         _, errs = _harvest(futures, per_worker)
@@ -477,9 +529,12 @@ def transport_run_repartition(
     barrier_timeout_s: float | None = None,
     registry_rewrite: Any = None,
 ) -> TransportShuffleResult:
-    """Hash-repartition ``src_blocks`` into ``parts`` dests over the k-peer transport. Byte-identical
-    to the local ``run_repartition``. ``fetch_budget_bytes`` bounds the reader plane (driver-side
-    replay); a probe failure raises ``ProbeUnreachable`` (the facade decides error vs fallback)."""
+    """Hash-repartition ``src_blocks`` into ``parts`` dests over the k-peer transport.
+
+    Byte-identical to the local ``run_repartition``. ``fetch_budget_bytes`` bounds the reader
+    plane (driver-side replay); a probe failure raises ``ProbeUnreachableError`` (the facade
+    decides error vs fallback).
+    """
     n_src = len(src_blocks)
 
     def make_peer_spec(
@@ -511,7 +566,9 @@ def transport_run_repartition(
         for res in results.values():
             value.update(res["value"])
             hashes.update(res["hashes"])
-        witness = _repartition_witness(manifests, worker_addrs, k, parts, n_src, fetch_budget_bytes)
+        witness = _repartition_witness(
+            manifests, worker_addrs, k, parts, n_src, fetch_budget_bytes
+        )
         return value, hashes, witness
 
     return _run_shuffle(
@@ -536,8 +593,11 @@ def _repartition_witness(
     n_src: int,
     fetch_budget: int | None,
 ) -> ShuffleWitness:
-    """The reader-plane fetch counters via the SAME ``replay_reader_plane`` the dask job gates, over
-    the collected manifests (producer i = peer i = holder i)."""
+    """Return the reader-plane fetch counters via the SAME ``replay_reader_plane``.
+
+    The dask job gates the same replay. It runs over the collected manifests (producer i = peer
+    i = holder i).
+    """
     idx_of = {a: i for i, a in enumerate(worker_addrs)}
     replay: dict[int, dict[int, tuple[str, int]]] = {}
     size_of: dict[str, int] = {}
@@ -572,9 +632,12 @@ def transport_run_join(
     epoch_restarts_allowed: int = 1,
     barrier_timeout_s: float | None = None,
 ) -> TransportShuffleResult:
-    """Distributed relational hash JOIN over the k-peer transport (SHUFFLE join — the peer plane never
-    head-node-routes a broadcast build side; ``broadcast`` is accepted but the shuffle path is always
-    taken). Rows == the local ``run_join``; ``mem_budget_bytes`` bounds the per-dest ``_join_with_budget``."""
+    """Distributed relational hash JOIN over the k-peer transport.
+
+    SHUFFLE join — the peer plane never head-node-routes a broadcast build side; ``broadcast``
+    is accepted but the shuffle path is always taken. Rows == the local ``run_join``;
+    ``mem_budget_bytes`` bounds the per-dest ``_join_with_budget``.
+    """
     n_left, n_right = len(left_blocks), len(right_blocks)
     left_carrier = left_blocks[0] if left_blocks else None
     right_carrier = right_blocks[0] if right_blocks else None
@@ -584,8 +647,12 @@ def transport_run_join(
     ) -> dict[str, Any]:
         t_l = min(k, n_left) if n_left else 0
         t_r = min(k, n_right) if n_right else 0
-        owned_left = [left_blocks[s] for s in _assign(n_left, t_l)[i]] if (n_left and i < t_l) else []
-        owned_right = [right_blocks[s] for s in _assign(n_right, t_r)[i]] if (n_right and i < t_r) else []
+        owned_left = (
+            [left_blocks[s] for s in _assign(n_left, t_l)[i]] if (n_left and i < t_l) else []
+        )
+        owned_right = (
+            [right_blocks[s] for s in _assign(n_right, t_r)[i]] if (n_right and i < t_r) else []
+        )
         return {
             "kind": "join",
             "addr": addr,
@@ -613,7 +680,8 @@ def transport_run_join(
     ) -> Any:
         value: dict[int, Any] = {}
         hashes: dict[int, str] = {}
-        overflow: list[tuple[Any, str]] = []  # spilled sub-partition (block, hash) pairs, driver-rekeyed
+        # spilled sub-partition (block, hash) pairs, driver-rekeyed
+        overflow: list[tuple[Any, str]] = []
         peak = spilled = read = rows = 0
         for addr in worker_addrs:  # deterministic producer order; peers own disjoint base dests
             res = results.get(addr)
@@ -621,21 +689,26 @@ def transport_run_join(
                 continue
             res_value, res_hashes = res["value"], res["hashes"]
             for key in sorted(res_value):
-                if key < parts:  # a base dest key — globally unique (owner = worker_addrs[dest % k])
+                # a base dest key — globally unique (owner = worker_addrs[dest % k])
+                if key < parts:
                     value[key], hashes[key] = res_value[key], res_hashes[key]
-                else:  # a per-peer overflow (spill) key: collect, then rekey into ONE global sequence
+                # a per-peer overflow (spill) key: collect, then rekey into ONE global sequence
+                else:
                     overflow.append((res_value[key], res_hashes[key]))
             jw = res.get("join_witness") or {}
             peak = max(peak, jw.get("peak_join_bytes", 0))
             spilled += jw.get("join_spilled_partitions", 0)
             read += jw.get("join_chunks_read", 0)
             rows += jw.get("join_output_rows", 0)
-        next_key = parts  # spilled sub-partitions get fresh keys beyond the dest range (mirrors local)
+        # spilled sub-partitions get fresh keys beyond the dest range (mirrors local)
+        next_key = parts
         for block, h in overflow:
             value[next_key], hashes[next_key] = block, h
             next_key += 1
         witness = ShuffleWitness(
-            n_producer_tasks=max(min(k, n_left) if n_left else 0, min(k, n_right) if n_right else 0),
+            n_producer_tasks=max(
+                min(k, n_left) if n_left else 0, min(k, n_right) if n_right else 0
+            ),
             broadcast_chosen=False,
             peak_join_bytes=peak,
             join_spilled_partitions=spilled,

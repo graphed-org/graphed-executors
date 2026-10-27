@@ -1,6 +1,8 @@
-"""Module-level (picklable) recording monitors for the m65 B push suites: every monitor writes one
-connection file ``<dir>/<pid>.<uuid>.jsonl`` on its first event, so a test sees which process built
-how many worker monitors, without any dashboard stack."""
+"""Module-level (picklable) recording monitors for the m65 B push suites.
+
+Every monitor writes one connection file ``<dir>/<pid>.<uuid>.jsonl`` on its first event, so a test
+sees which process built how many worker monitors, without any dashboard stack.
+"""
 
 from __future__ import annotations
 

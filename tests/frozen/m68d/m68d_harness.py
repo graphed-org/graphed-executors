@@ -1,11 +1,14 @@
-"""Harness for the m68d frozen suite (plan §4): a lost service ends the run as a service failure (C), a
-SERVICE node restarts its service and the driver reruns (B), the driver fails fast on a node that can
-never announce (A), and a port counts only when the child holds its listener.
+"""Harness for the m68d frozen suite (plan §4).
 
-The accessors look the implementation up inside test bodies, so the suite collects before it exists.
-Frozen suites never import across directories, so what this suite shares with m68b (bounds, signing,
-the bindings recorder's shape) is written here again. This file is shipped to pilots and driver jobs as
-a user module: at module level it imports only the stdlib, graphed and graphed_executors.
+A lost service ends the run as a service failure (C), a SERVICE node restarts its service and the
+driver reruns (B), the driver fails fast on a node that can never announce (A), and a port counts
+only when the child holds its listener.
+
+The accessors look the implementation up inside test bodies, so the suite collects before it
+exists. Frozen suites never import across directories, so what this suite shares with m68b (bounds,
+signing, the bindings recorder's shape) is written here again. This file is shipped to pilots and
+driver jobs as a user module: at module level it imports only the stdlib, graphed and
+graphed_executors.
 """
 
 from __future__ import annotations
@@ -85,7 +88,10 @@ def engine_api() -> Any:
 
 
 def services_api() -> Any:
-    """``graphed_executors.submit.services``: ServiceSet, ServiceUnreachable, listeners, held_by."""
+    """``graphed_executors.submit.services``.
+
+    ServiceSet, ServiceUnreachableError, listeners, held_by.
+    """
     return importlib.import_module("graphed_executors.submit.services")
 
 
@@ -99,7 +105,10 @@ def backend_api() -> Any:
 
 
 def driver_api() -> Any:
-    """``graphed_executors.htcondor_backend.driver``: ``main(argv)`` and ``_runner(run, job, log)``."""
+    """``graphed_executors.htcondor_backend.driver``.
+
+    ``main(argv)`` and ``_runner(run, job, log)``.
+    """
     return importlib.import_module(DRIVER_MODULE)
 
 
@@ -116,11 +125,14 @@ def htcondor_api() -> Any:
     return importlib.import_module("graphed_executors.htcondor_backend")
 
 
-# ---- bounds ----------------------------------------------------------------------------------------
+# ---- bounds -------------------------------------------------------------------------------------
 
 
 class Background:
-    """``fn()`` started on a daemon thread; :meth:`result` joins it within a bound (a hang fails)."""
+    """``fn()`` started on a daemon thread.
+
+    :meth:`result` joins it within a bound (a hang fails).
+    """
 
     def __init__(self, fn: Callable[[], Any]) -> None:
         self._out: dict[str, Any] = {}
@@ -138,13 +150,18 @@ class Background:
 
     def result(self, timeout_s: float = RUN_TIMEOUT_S) -> Any:
         self._thread.join(timeout_s)
-        assert not self._thread.is_alive(), f"HARD TIMEOUT: call did not finish within {timeout_s}s"
+        assert not self._thread.is_alive(), (
+            f"HARD TIMEOUT: call did not finish within {timeout_s}s"
+        )
         if "error" in self._out:
             raise self._out["error"]
         return self._out["result"]
 
     def error(self, timeout_s: float = RUN_TIMEOUT_S) -> BaseException:
-        """The exception the call raised; a failure when it returned or did not finish in time."""
+        """Return the exception the call raised.
+
+        A failure when it returned or did not finish in time.
+        """
         try:
             value = self.result(timeout_s)
         except AssertionError as exc:
@@ -193,7 +210,7 @@ def pid_gone(pid: int) -> bool:
     return False
 
 
-# ---- ports and servers -------------------------------------------------------------------------------
+# ---- ports and servers --------------------------------------------------------------------------
 
 
 def _bindable(port: int) -> bool:
@@ -206,7 +223,7 @@ def _bindable(port: int) -> bool:
 
 
 def free_range(n: int = 3) -> tuple[int, int]:
-    """An inclusive range of ``n`` consecutive free ports, outside the 10000-10100 band of the site rows."""
+    """Return an inclusive range of ``n`` free ports outside the site rows' 10000-10100 band."""
     for _ in range(400):
         low = 20000 + secrets.randbelow(30000)
         if all(_bindable(p) for p in range(low, low + n)):
@@ -231,7 +248,10 @@ class _Answer(BaseHTTPRequestHandler):
 
 
 class Web(LookupFreeHTTPServer):
-    """An HTTP server answering every GET with ``status``, counting them; ``host=""`` binds every interface."""
+    """An HTTP server answering every GET with ``status``, counting them.
+
+    ``host=""`` binds every interface.
+    """
 
     daemon_threads = True
 
@@ -240,7 +260,9 @@ class Web(LookupFreeHTTPServer):
         self.status = status
         self._lock = threading.Lock()
         self._gets = 0
-        self._thread = threading.Thread(target=self.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        self._thread = threading.Thread(
+            target=self.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        )
         self._thread.start()
 
     def count(self) -> None:
@@ -278,11 +300,11 @@ def http_status(endpoint: str, timeout_s: float = 10.0) -> int:
         return int(resp.status)
 
 
-# ---- the plan parts (pilots and driver jobs import them from this file by name) -------------------------
+# ---- the plan parts (pilots and driver jobs import them from this file by name) -----------------
 
 
 def mark_of(partition: Partition) -> Path:
-    """The marker directory a task's partition names: ``mem://<dir>/<i>``."""
+    """Return the marker directory a task's partition names: ``mem://<dir>/<i>``."""
     return Path(partition.uri.removeprefix("mem://").rsplit("/", 1)[0])
 
 
@@ -296,8 +318,11 @@ def touch(path: Path) -> None:
 
 @dataclass(frozen=True)
 class GatedGet:
-    """Task ``i`` marks ``t<i>.start``; from task 1 on it waits for ``killed``; then it GETs the bound
-    service, marking ``t<i>.done``, or ``t<i>.error`` holding the exception's repr before re-raising."""
+    """Task ``i`` marks ``t<i>.start``; from task 1 on it waits for ``killed``.
+
+    Then it GETs the bound service, marking ``t<i>.done``, or ``t<i>.error`` holding the
+    exception's repr before re-raising.
+    """
 
     endpoint: str | None = None
 
@@ -323,8 +348,10 @@ class GatedGet:
 
 @dataclass(frozen=True)
 class SlowToLoad(GatedGet):
-    """:class:`GatedGet` whose first unpickling in a driver job sleeps ``delay_s``, so the driver binds its
-    task server that much later."""
+    """:class:`GatedGet` whose first unpickling in a driver job sleeps ``delay_s``.
+
+    The driver thus binds its task server that much later.
+    """
 
     delay_s: float = 0.0
 
@@ -340,7 +367,10 @@ _LOADED: list[bool] = []
 
 @dataclass(frozen=True)
 class RaiseIn:
-    """Raises the builtin ``error`` named (``PLAN_ERROR`` its message), or returns ``((i, "ok"),)``."""
+    """Raises the builtin ``error`` named (``PLAN_ERROR`` its message).
+
+    Otherwise returns ``((i, "ok"),)``.
+    """
 
     error: str | None
     endpoint: str | None = None
@@ -368,7 +398,7 @@ class StageGet:
 
 
 def stop_leaf(partition: Partition, resources: object) -> tuple[int, ...]:
-    """Marks ``start-<i>``; leaf 1 raises ``ValueError(LEAF_ERROR)``, every other sleeps 0.3 s."""
+    """Mark ``start-<i>``; leaf 1 raises ``ValueError(LEAF_ERROR)``, every other sleeps 0.3 s."""
     i = partition.entry_start
     touch(mark_of(partition) / f"start-{i}")
     if i == 1:
@@ -386,8 +416,10 @@ def empty_tuple() -> tuple[Any, ...]:
 
 
 def given_spec(timeout_s: float = 30.0) -> ServiceSpec:
-    """A requirement without a recipe: only a given endpoint serves it."""
-    return ServiceSpec(SERVICE, "http", check="http:/", ports=(40000, 40010), launch=None, timeout_s=timeout_s)
+    """Return a requirement without a recipe: only a given endpoint serves it."""
+    return ServiceSpec(
+        SERVICE, "http", check="http:/", ports=(40000, 40010), launch=None, timeout_s=timeout_s
+    )
 
 
 def node_spec(
@@ -402,7 +434,9 @@ def node_spec(
     if memory_mb is not None:
         resources["memory_mb"] = memory_mb
     launch = Launch(argv=tuple(argv), resources=resources, inputs=tuple(inputs))
-    return ServiceSpec(SERVICE, "http", check="http:/", ports=(40000, 40010), launch=launch, timeout_s=timeout_s)
+    return ServiceSpec(
+        SERVICE, "http", check="http:/", ports=(40000, 40010), launch=launch, timeout_s=timeout_s
+    )
 
 
 def gated_plan(mark: Path, spec: ServiceSpec | None, n: int = 3, process: Any = None) -> Plan[Any]:
@@ -449,7 +483,7 @@ class EventLog:
             return [e for e in self.events if str(e.phase) == phase]
 
 
-# ---- the managed child ------------------------------------------------------------------------------
+# ---- the managed child --------------------------------------------------------------------------
 
 
 def child_starts(report: Path) -> list[tuple[int, int]]:
@@ -474,14 +508,15 @@ def write_machine_ad(path: Path, machine: str) -> Path:
 
 
 def write_job_ad(path: Path) -> Path:
-    """A DAG driver node's ``$_CONDOR_JOB_AD``: its own cluster and its DAGMan job."""
+    """Return a DAG driver node's ``$_CONDOR_JOB_AD``: its own cluster and its DAGMan job."""
     path.write_text(
-        f'ClusterId = {DRIVER_CLUSTER}\nProcId = 0\nDAGManJobId = {DAG_ID}\nDAGNodeName = "driver"\nJobStatus = 2\n'
+        f"ClusterId = {DRIVER_CLUSTER}\nProcId = 0\nDAGManJobId = {DAG_ID}\nDAGNodeName = "
+        '"driver"\nJobStatus = 2\n'
     )
     return path
 
 
-# ---- signing and announces -----------------------------------------------------------------------------
+# ---- signing and announces ----------------------------------------------------------------------
 
 
 def sign(secret: bytes, body: bytes) -> str:
@@ -499,9 +534,11 @@ def post(url: str, body: bytes, secret: bytes, timeout: float = 30.0) -> int:
 
 
 def dag_pair(dag_dir: Path, timeout_s: float = 60.0) -> tuple[str, bytes]:
-    """The driver's ``(url, announce secret)`` as it published them in ``dag_dir``."""
+    """Return the driver's ``(url, announce secret)`` as it published them in ``dag_dir``."""
     url_file, secret_file = dag_dir / "driver.url", dag_dir / "graphed-secret"
-    assert wait_for(lambda: url_file.is_file() and secret_file.is_file(), timeout_s), "the driver published nothing"
+    assert wait_for(lambda: url_file.is_file() and secret_file.is_file(), timeout_s), (
+        "the driver published nothing"
+    )
     return url_file.read_text().strip().rstrip("/"), bytes.fromhex(secret_file.read_text().strip())
 
 
@@ -518,8 +555,11 @@ def announce_later(dag_dir: Path, port: int, delay_s: float) -> threading.Timer:
 
 
 class AnnounceRun:
-    """``python -m …announce service.json`` with ``cwd=job``; output collected on a thread. Leaving the
-    ``with`` SIGTERMs it (then kills it) and kills every child pid ``report`` lists."""
+    """``python -m …announce service.json`` with ``cwd=job``; output collected on a thread.
+
+    Leaving the ``with`` SIGTERMs it (then kills it) and kills every child pid ``report``
+    lists.
+    """
 
     def __init__(self, job: Path, env: Mapping[str, str], report: Path) -> None:
         self.report = report
@@ -554,7 +594,9 @@ class AnnounceRun:
         try:
             code = self.proc.wait(timeout_s)
         except subprocess.TimeoutExpired:
-            raise AssertionError(f"announce.py did not exit within {timeout_s}s; output:\n{self.output()}") from None
+            raise AssertionError(
+                f"announce.py did not exit within {timeout_s}s; output:\n{self.output()}"
+            ) from None
         self._reader.join(5.0)
         return code
 
@@ -604,7 +646,7 @@ class NoLauncher:
         return 1
 
 
-# ---- the driver job's directory ---------------------------------------------------------------------------
+# ---- the driver job's directory -----------------------------------------------------------------
 
 
 def run_json(site: str, *, dag_dir: Path | None = None, **over: Any) -> dict[str, Any]:
@@ -641,13 +683,18 @@ def write_driver_job(job: Path, plan: Any, run: Mapping[str, Any]) -> Path:
 
 def log_lines(job: Path, text: str) -> list[str]:
     path = job / "driver.log"
-    return [line for line in path.read_text().splitlines() if text in line] if path.is_file() else []
+    return (
+        [line for line in path.read_text().splitlines() if text in line] if path.is_file() else []
+    )
 
 
 @contextmanager
 def driver_log(job: Path) -> Iterator[TextIO]:
-    """``job/driver.log`` open for ``_runner``, with the package's records routed into it as
-    ``driver.main`` routes them."""
+    """Yield ``job/driver.log`` with the package's records routed into it.
+
+    ``job/driver.log`` open for ``_runner``, with the package's records routed into it as
+    ``driver.main`` routes them.
+    """
     job.mkdir(parents=True, exist_ok=True)
     with open(job / "driver.log", "a") as log:
         handler = logging.StreamHandler(log)
@@ -671,12 +718,16 @@ def site_copy(monkeypatch: pytest.MonkeyPatch, key: str, base: str, **changes: A
     return profile
 
 
-# ---- recorded bindings: a schedd that evaluates simple constraints, a collector, ClassAds ------------------
+# ---- recorded bindings: a schedd that evaluates simple constraints, a collector, ClassAds -------
 
 
 class FakeAd(dict[str, Any]):
-    """A ClassAd stand-in: ``eval`` reads an attribute, ``symmetricMatch`` fits a job's ``Request*`` into a
-    slot's free ``Memory``/``Cpus``/``GPUs`` (both sides need ``Requirements``), ``str`` is ClassAd text."""
+    """A ClassAd stand-in.
+
+    ``eval`` reads an attribute, ``symmetricMatch`` fits a job's ``Request*`` into a slot's
+    free ``Memory``/``Cpus``/``GPUs`` (both sides need ``Requirements``), ``str`` is ClassAd
+    text.
+    """
 
     def eval(self, attr: str) -> Any:
         return self.get(attr)
@@ -685,7 +736,10 @@ class FakeAd(dict[str, Any]):
         job, slot = (self, other) if "RequestMemory" in self else (other, self)
         if "Requirements" not in job or "Requirements" not in slot:
             return False
-        return all(int(slot.get(r, 0)) >= int(job.get(f"Request{r}", 0)) for r in ("Memory", "Cpus", "GPUs"))
+        return all(
+            int(slot.get(r, 0)) >= int(job.get(f"Request{r}", 0))
+            for r in ("Memory", "Cpus", "GPUs")
+        )
 
     def __str__(self) -> str:
         def lit(v: Any) -> str:
@@ -729,11 +783,16 @@ def fake_classad2() -> types.ModuleType:
     return module
 
 
-_TERM = re.compile(r'^\(?\s*(\w+)\s*(?:==|=\?=)\s*("[^"]*"|-?\d+|true|false)\s*\)?$', re.IGNORECASE)
+_TERM = re.compile(
+    r'^\(?\s*(\w+)\s*(?:==|=\?=)\s*("[^"]*"|-?\d+|true|false)\s*\)?$', re.IGNORECASE
+)
 
 
 def matches(ad: Mapping[str, Any], constraint: str) -> bool:
-    """``constraint``, a conjunction of ``Attr == literal`` terms, over ``ad`` (names case-insensitive)."""
+    """``constraint``, a conjunction of ``Attr == literal`` terms, over ``ad``.
+
+    Names case-insensitive.
+    """
     text = constraint.strip()
     if text.lower() in ("", "true"):
         return True
@@ -748,7 +807,7 @@ def matches(ad: Mapping[str, Any], constraint: str) -> bool:
 
 
 def driver_job_ad() -> FakeAd:
-    """The DAG's running driver node, holding 8000 MiB of ``SLOT``."""
+    """Return the DAG's running driver node, holding 8000 MiB of ``SLOT``."""
     return FakeAd(
         ClusterId=DRIVER_CLUSTER,
         ProcId=0,
@@ -783,8 +842,10 @@ def node_ad(status: int, memory_mb: int = 4000, **extra: Any) -> FakeAd:
 
 
 def machine_ads() -> list[FakeAd]:
-    """One partitionable slot of 16000 MiB, 8 CPUs and 1 GPU, busy down to 2000 MiB free, and its
-    dynamic slot (which the collector lists too)."""
+    """One partitionable slot of 16000 MiB, 8 CPUs and 1 GPU, busy down to 2000 MiB free.
+
+    Also its dynamic slot (which the collector lists too).
+    """
     return [
         FakeAd(
             MyType="Machine",
@@ -822,12 +883,18 @@ class SubmitResult:
 
 
 class NodeSchedd:
-    """A stand-in ``htcondor2.Schedd`` holding the driver node's ad and svc0's, whose ad follows ``phases``
-    (``(until_s, ad or None)`` from the first query; the last one's ``until_s`` is ignored). ``query``
-    evaluates its constraint, honours its projection, and logs ``("query", constraint, projection,
-    svc0's JobStatus then, monotonic time)``; with ``refuse`` set it raises that text instead."""
+    """A stand-in ``htcondor2.Schedd`` whose svc0 ad follows ``phases``.
 
-    def __init__(self, phases: Sequence[tuple[float, FakeAd | None]] = (), refuse: str | None = None) -> None:
+    A stand-in ``htcondor2.Schedd`` holding the driver node's ad and svc0's, whose ad follows
+    ``phases`` (``(until_s, ad or None)`` from the first query; the last one's ``until_s`` is
+    ignored). ``query`` evaluates its constraint, honours its projection, and logs ``("query",
+    constraint, projection, svc0's JobStatus then, monotonic time)``; with ``refuse`` set it raises
+    that text instead.
+    """
+
+    def __init__(
+        self, phases: Sequence[tuple[float, FakeAd | None]] = (), refuse: str | None = None
+    ) -> None:
         self.started: float | None = None
         self.phases = list(phases)
         self.refuse = refuse
@@ -843,21 +910,31 @@ class NodeSchedd:
                 return ad
         return None
 
-    def query(self, constraint: Any = "true", projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def query(
+        self, constraint: Any = "true", projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         text = str(kwargs.get("constraint", constraint))
         proj = tuple(kwargs.get("projection", projection) or ())
         ad = self.node()
-        self.log.append(("query", text, proj, None if ad is None else ad.get("JobStatus"), time.monotonic()))
+        self.log.append(
+            ("query", text, proj, None if ad is None else ad.get("JobStatus"), time.monotonic())
+        )
         if self.refuse is not None:
             raise RuntimeError(self.refuse)
         rows = [job for job in (self.driver, ad) if job is not None and matches(job, text)]
-        return [FakeAd({k: job[k] for k in proj if k in job}) if proj else FakeAd(job) for job in rows]
+        return [
+            FakeAd({k: job[k] for k in proj if k in job}) if proj else FakeAd(job) for job in rows
+        ]
 
-    def history(self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def history(
+        self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("history", str(constraint), tuple(projection or ())))
         return []
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         self.log.append(("submit", dict(description), count, spool))
         return SubmitResult(DAG_ID)
 
@@ -871,7 +948,7 @@ class NodeSchedd:
         self.log.append(("act", str(action), str(constraint)))
 
     def node_queries(self) -> list[tuple[Any, ...]]:
-        """The logged queries whose constraint names svc0 by its node name within its DAG."""
+        """Return the logged queries whose constraint names svc0 by its node name in its DAG."""
         return [e for e in self.log if e[0] == "query" and names_the_node(e[1])]
 
 
@@ -887,13 +964,21 @@ class FakeCollector:
         self.fake = fake
         self.pool = pool
 
-    def locate(self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def locate(
+        self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         self.fake.log.append(("locate", self.pool, str(daemon_type), name))
         if self.fake.locate_refuses:
             raise RuntimeError(LOCATE_TEXT)
-        return {"Name": name or FAKE_SCHEDD, "MyAddress": "<127.0.0.1:9618>", "CondorVersion": "$CondorVersion$"}
+        return {
+            "Name": name or FAKE_SCHEDD,
+            "MyAddress": "<127.0.0.1:9618>",
+            "CondorVersion": "$CondorVersion$",
+        }
 
-    def query(self, ad_type: Any = None, constraint: Any = None, projection: Any = None, **kwargs: Any) -> list[Any]:
+    def query(
+        self, ad_type: Any = None, constraint: Any = None, projection: Any = None, **kwargs: Any
+    ) -> list[Any]:
         text = str(kwargs.get("constraint", constraint))
         self.fake.log.append(("collector-query", self.pool, str(ad_type), text))
         if "Machine" in text or str(ad_type) in ("Startd", "Machine"):

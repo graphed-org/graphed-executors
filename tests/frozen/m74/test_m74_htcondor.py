@@ -1,11 +1,12 @@
 """m74 §4.2 E6 and E8: HTCondor driverless runs resume from a store on every try.
 
-E6 runs the driver entry from a job dir laid out by a recorded ``submit_driverless(store=...)`` with two
-local pilots, kills its session after ``MIN_DONE`` stored tasks and reruns it as the job's retry would;
-``driver.log`` reports the reused count. E8 pins the submit side (``run.json`` fields, the submit-time
-``check_resumable`` refusal of a histserv-backed plan), a driver whose store records another
-environment (exit 3, ``EnvironmentChanged`` in ``result.pkl``, no pilot), and ``_exit_code`` of a
-``StoreUnavailable``."""
+E6 runs the driver entry from a job dir laid out by a recorded ``submit_driverless(store=...)``
+with two local pilots, kills its session after ``MIN_DONE`` stored tasks and reruns it as the job's
+retry would; ``driver.log`` reports the reused count. E8 pins the submit side (``run.json`` fields,
+the submit-time ``check_resumable`` refusal of a histserv-backed plan), a driver whose store
+records another environment (exit 3, ``EnvironmentChanged`` in ``result.pkl``, no pilot), and
+``_exit_code`` of a ``StoreUnavailable``.
+"""
 
 from __future__ import annotations
 
@@ -79,14 +80,24 @@ def test_e6_a_killed_driverless_driver_resumes_on_its_retry(
 
     ref_markers, _ = work_dirs(tmp_path / "ref-work")
     ref_job = prepared_job(
-        tmp_path, monkeypatch, leaf_plan(ref_markers), "ref-job", store=str(tmp_path / "ref-store"), **LOCAL
+        tmp_path,
+        monkeypatch,
+        leaf_plan(ref_markers),
+        "ref-job",
+        store=str(tmp_path / "ref-store"),
+        **LOCAL,
     )
     assert run_job(ref_job) == 0, (ref_job / "driver.log").read_text()[-4000:]
     ref_ok, reference = read_result(ref_job)
     assert ref_ok is True, reference
 
-    assert executions == T - left, f"the retry executed {executions} tasks; {T} - {left} were not done"
-    assert pickle.dumps(result.value) == pickle.dumps(reference.value), (result.value, reference.value)
+    assert executions == T - left, (
+        f"the retry executed {executions} tasks; {T} - {left} were not done"
+    )
+    assert pickle.dumps(result.value) == pickle.dumps(reference.value), (
+        result.value,
+        reference.value,
+    )
     assert reused_line(last_driver_section(job / "driver.log")) == left
 
 
@@ -120,7 +131,9 @@ def test_e8_a_driver_whose_store_records_another_environment_exits_3_without_a_p
     store = tmp_path / "store"
     salt = "m74-env"
     markers, _ = work_dirs(tmp_path / "work")
-    job = prepared_job(tmp_path, monkeypatch, leaf_plan(markers), "job", store=str(store), salt=salt, **LOCAL)
+    job = prepared_job(
+        tmp_path, monkeypatch, leaf_plan(markers), "job", store=str(store), salt=salt, **LOCAL
+    )
     record_environment_with(fake_dist(tmp_path / "zz", "1.0"), store, salt, tmp_path / "other")
     code = finish(start_job_driver(job))
     section = last_driver_section(job / "driver.log")
@@ -150,12 +163,18 @@ def test_e8_a_histserv_backed_plan_with_a_store_is_refused_before_any_bindings_c
     assert len(submits(fake.log)) == 1, fake.log
 
 
-def test_e8_an_unbacked_gh_plan_with_a_store_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_e8_an_unbacked_gh_plan_with_a_store_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake = record_bindings(monkeypatch, RecordingSchedd())
     store = str(tmp_path / "store")
     log_dir = tmp_path / "submit"
     htcondor_api().submit_driverless(
-        histogram_plan(), log_dir=log_dir, request_memory_mb=2048, user_modules=[HARNESS_FILE], store=store
+        histogram_plan(),
+        log_dir=log_dir,
+        request_memory_mb=2048,
+        user_modules=[HARNESS_FILE],
+        store=store,
     )
     assert len(submits(fake.log)) == 1, fake.log
     assert json.loads((log_dir / "run.json").read_text())["store"] == store

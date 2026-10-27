@@ -1,5 +1,8 @@
-"""#30: a persistent ``PinnedPoolExecutor`` keeps its workers when a plan's task count changes; a merge
-target outside a worker's spawn-time overlay is reached through the driver, so no worker gains a handle."""
+"""#30: a persistent ``PinnedPoolExecutor`` keeps its workers when a plan's task count changes.
+
+A merge target outside a worker's spawn-time overlay is reached through the driver, so no worker
+gains a handle.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +27,8 @@ SPAWN_N = 9
 
 @pytest.fixture(autouse=True)
 def _bounded_root_wait(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", 60.0)  # a lost node fails in a minute, not five
+    # a lost node fails in a minute, not five
+    monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", 60.0)
 
 
 def _cat(a: str, b: str) -> str:
@@ -46,7 +50,8 @@ def _slow_tail_leaf(part: Partition, _resources: object) -> str:
 
 
 def _late_failing_leaf(part: Partition, _resources: object) -> str:
-    if part.entry_start == 11:  # w3's last leaf at n=12, failing after w2 has relayed its node to w1
+    # w3's last leaf at n=12, failing after w2 has relayed its node to w1
+    if part.entry_start == 11:
         time.sleep(0.5)
         raise ValueError("leaf 11")
     return str(part.entry_start)

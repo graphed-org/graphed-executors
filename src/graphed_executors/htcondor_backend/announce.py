@@ -1,22 +1,25 @@
-"""The job side of a cluster-hosted service: ``python3 announce.py service.json`` in the job's scratch dir.
+"""The job side of a cluster-hosted service.
 
-Stdlib only and python >= 3.9, since a service's image need not carry our venv: the job runs this file by
-path, and ``python -m graphed_executors.htcondor_backend.announce`` runs the same code. ``service.json``
-holds ``argv``, ``env``, ``check``, ``ports``, ``key``, ``url``, ``watch``, ``python``, ``timeout_s``,
-``lease_s`` and ``beat_s``; the announce secret is no field.
+``python3 announce.py service.json`` in the job's scratch dir.
 
-It reads the secret, starts the recipe's child in ``service/`` (the transferred directory holding exactly
-the recipe's inputs) on the first free port of ``ports``, checks it where it runs, and posts ``key
-host:port identity``, signed, to ``<url>/announce``. ``timeout_s`` bounds the whole start. A child that
-exits moves on to the next port only when another process took its port; otherwise the start fails (exit
-3). A port another process listens on, which the child's process tree does not hold (Linux ``/proc``),
-moves on too. Attached (``url`` set): the secret file is read and unlinked before the child starts, the
-announce repeats every ``beat_s``, and a 403 or no 200 for ``lease_s`` (counted from readiness) stops the
-service and exits 0, as an orphaned pilot does. Watch mode (``watch`` a directory): ``<watch>/driver.url`` and
-``<watch>/graphed-secret`` are read each second and each new pair is announced until it answers 200, and a
-child that dies after it was ready is started again, at most ``RESTARTS`` times, on a port no earlier
-child of this job served, then announced to the current pair. Otherwise the exit code is the child's
-(3 when a restart never became ready); SIGTERM reaps the child and exits 143.
+Stdlib only and python >= 3.9, since a service's image need not carry our venv: the job runs this
+file by path, and ``python -m graphed_executors.htcondor_backend.announce`` runs the same code.
+``service.json`` holds ``argv``, ``env``, ``check``, ``ports``, ``key``, ``url``, ``watch``,
+``python``, ``timeout_s``, ``lease_s`` and ``beat_s``; the announce secret is no field.
+
+It reads the secret, starts the recipe's child in ``service/`` (the transferred directory holding
+exactly the recipe's inputs) on the first free port of ``ports``, checks it where it runs, and
+posts ``key host:port identity``, signed, to ``<url>/announce``. ``timeout_s`` bounds the whole
+start. A child that exits moves on to the next port only when another process took its port;
+otherwise the start fails (exit 3). A port another process listens on, which the child's process
+tree does not hold (Linux ``/proc``), moves on too. Attached (``url`` set): the secret file is read
+and unlinked before the child starts, the announce repeats every ``beat_s``, and a 403 or no 200
+for ``lease_s`` (counted from readiness) stops the service and exits 0, as an orphaned pilot does.
+Watch mode (``watch`` a directory): ``<watch>/driver.url`` and ``<watch>/graphed-secret`` are read
+each second and each new pair is announced until it answers 200, and a child that dies after it was
+ready is started again, at most ``RESTARTS`` times, on a port no earlier child of this job served,
+then announced to the current pair. Otherwise the exit code is the child's (3 when a restart never
+became ready); SIGTERM reaps the child and exits 143.
 """
 
 from __future__ import annotations
@@ -57,11 +60,15 @@ STARTING = [False, False]  # a start is in flight; a SIGTERM arrived during it
 
 
 def log(msg: str) -> None:
+    """Print ``msg`` with a timestamp."""
     print(f"[announce {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def host_identity() -> str:
-    """``Machine`` from ``$_CONDOR_MACHINE_AD``, else ``socket.getfqdn()`` (the engine's rule, copied)."""
+    """``Machine`` from ``$_CONDOR_MACHINE_AD``, else ``socket.getfqdn()``.
+
+    The engine's rule, copied.
+    """
     path = os.environ.get("_CONDOR_MACHINE_AD")
     if path and os.path.isfile(path):
         with open(path) as ad:
@@ -73,8 +80,11 @@ def host_identity() -> str:
 
 
 def self_check(check: str, host: str, port: int, timeout: float) -> str | None:
-    """``None`` when ready: ``http:<path>`` wants a 2xx whose content-type is not ``application/grpc*``;
-    ``tcp`` and ``grpc:`` a connect."""
+    """``None`` when ready.
+
+    ``http:<path>`` wants a 2xx whose content-type is not ``application/grpc*``; ``tcp`` and
+    ``grpc:`` a connect.
+    """
     try:
         if check.startswith("http:"):
             with _DIRECT.open(f"http://{host}:{port}{check[5:] or '/'}", timeout=timeout) as resp:
@@ -89,8 +99,11 @@ def self_check(check: str, host: str, port: int, timeout: float) -> str | None:
 
 
 def listeners(port: int, proc: str = "/proc") -> set[str]:
-    """The inodes of the sockets listening on ``port`` (the engine's rule, copied): read from
-    ``{proc}/net/tcp`` and ``{proc}/net/tcp6``; a file that cannot be read contributes none."""
+    """Return the inodes of the sockets listening on ``port`` (the engine's rule, copied).
+
+    Read from ``{proc}/net/tcp`` and ``{proc}/net/tcp6``; a file that cannot be read
+    contributes none.
+    """
     found: set[str] = set()
     for name in ("tcp", "tcp6"):
         try:
@@ -106,14 +119,18 @@ def listeners(port: int, proc: str = "/proc") -> set[str]:
 
 
 def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
-    """Whether ``pid`` and its descendants hold every one of ``inodes`` among their fds (the engine's rule,
-    copied); a process whose ``stat`` or ``fd`` cannot be read holds none."""
+    """Whether ``pid`` and its descendants hold every one of ``inodes`` among their fds.
+
+    This is the engine's rule, copied; a process whose ``stat`` or ``fd`` cannot be read holds
+    none.
+    """
     kids: dict[int, list[int]] = {}
     for entry in os.listdir(proc):
         if entry.isdigit():
             try:
                 with open(os.path.join(proc, entry, "stat")) as f:
-                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])  # comm, in parentheses, may hold spaces
+                    # comm, in parentheses, may hold spaces
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
             except (OSError, IndexError, ValueError):
                 continue
             kids.setdefault(ppid, []).append(int(entry))
@@ -125,13 +142,17 @@ def held_by(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
         fds = os.path.join(proc, str(p), "fd")
         with contextlib.suppress(OSError):
             for fd in os.listdir(fds):
-                with contextlib.suppress(OSError):  # an fd closed meanwhile, or a host without symlinks
+                # an fd closed meanwhile, or a host without symlinks
+                with contextlib.suppress(OSError):
                     links.add(os.readlink(os.path.join(fds, fd)))
     return {f"socket:[{inode}]" for inode in inodes} <= links
 
 
 def free(port: int) -> bool:
-    """A bind with ``SO_REUSEADDR``: a listener refuses it, a ``TIME_WAIT`` the self-check left does not."""
+    """Return whether a bind with ``SO_REUSEADDR`` succeeds.
+
+    A listener refuses it, a ``TIME_WAIT`` the self-check left does not.
+    """
     sock = socket.socket()
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -144,7 +165,10 @@ def free(port: int) -> bool:
 
 
 def post(url: str, secret: bytes, body: bytes) -> int | None:
-    """The status of ``body`` posted, signed, to ``<url>/announce``; ``None`` when nothing answered."""
+    """Return the status of ``body`` posted, signed, to ``<url>/announce``.
+
+    ``None`` when nothing answered.
+    """
     sig = hmac.new(secret, body, hashlib.sha256).hexdigest()
     request = urllib.request.Request(
         url.rstrip("/") + "/announce", data=body, method="POST", headers={SIG_HEADER: sig}
@@ -159,7 +183,10 @@ def post(url: str, secret: bytes, body: bytes) -> int | None:
 
 
 def reap(child: subprocess.Popen[bytes]) -> None:
-    """The one bounded reap: terminate, wait at most ``REAP_S``, kill (neither signals a reaped child)."""
+    """Run the one bounded reap.
+
+    Terminate, wait at most ``REAP_S``, kill (neither signals a reaped child).
+    """
     child.terminate()
     try:
         child.wait(REAP_S)
@@ -169,9 +196,13 @@ def reap(child: subprocess.Popen[bytes]) -> None:
 
 
 def hard_reap(pid: int | None) -> None:
-    """The reap after a SIGTERM, on the pid: ``Popen``'s waitpid lock may be held by the wait it
-    interrupted. SIGTERM, ``waitpid(WNOHANG)`` for at most ``REAP_S``, then SIGKILL and a blocking wait."""
-    if pid is None or sys.platform == "win32":  # after the None return: the reaped path runs everywhere
+    """Reap after a SIGTERM, on the pid.
+
+    ``Popen``'s waitpid lock may be held by the wait it interrupted. SIGTERM,
+    ``waitpid(WNOHANG)`` for at most ``REAP_S``, then SIGKILL and a blocking wait.
+    """
+    # after the None return: the reaped path runs everywhere
+    if pid is None or sys.platform == "win32":
         return
     try:
         os.kill(pid, signal.SIGTERM)
@@ -188,6 +219,7 @@ def hard_reap(pid: int | None) -> None:
 
 def on_sigterm(signum: int, frame: object) -> None:
     # never waits: the interrupted main thread may hold Popen's waitpid lock
+    """Stop on SIGTERM, or mark it for later while the child is starting."""
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if STARTING[0]:
         STARTING[1] = True
@@ -196,8 +228,11 @@ def on_sigterm(signum: int, frame: object) -> None:
 
 
 def interpreter(name: str) -> str:
-    """``{python}`` as the job dir names it: a path made absolute here (the child starts in
-    ``service/``), a bare name looked up on ``PATH`` or ``os.defpath``, else left bare."""
+    """``{python}`` as the job dir names it.
+
+    A path made absolute here (the child starts in ``service/``), a bare name looked up on
+    ``PATH`` or ``os.defpath``, else left bare.
+    """
     if os.sep in name:
         return os.path.abspath(name)
     return shutil.which(name, path=os.environ.get("PATH", os.defpath)) or name
@@ -206,7 +241,7 @@ def interpreter(name: str) -> str:
 def start(
     cfg: dict[str, Any], ident: str, skip: frozenset[int] = frozenset()
 ) -> tuple[subprocess.Popen[bytes], int] | str:
-    """The ready child and its port, never one of ``skip``, or why none is."""
+    """Return the ready child and its port, never one of ``skip``, or why none is."""
     low, high = cfg["ports"]
     deadline = time.monotonic() + float(cfg["timeout_s"])
     subs = {"{python}": interpreter(cfg["python"]), "{host}": ident}
@@ -238,9 +273,13 @@ def start(
             if child.poll() is not None:
                 if free(port):
                     return f"the child exited with returncode {child.returncode} on port {port}"
-                log(f"port {port} taken after the scan (the child exited {child.returncode}), next")
+                log(
+                    f"port {port} taken after the scan (the child exited {child.returncode}), next"
+                )
                 break
-            why = self_check(cfg["check"], ident, port, max(0.1, min(CHECK_S, deadline - time.monotonic())))
+            why = self_check(
+                cfg["check"], ident, port, max(0.1, min(CHECK_S, deadline - time.monotonic()))
+            )
             # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
             if inodes and not held_by(child.pid, inodes):
@@ -269,6 +308,7 @@ def _watched(watch: str) -> tuple[str, bytes] | None:
 
 
 def serve() -> int:
+    """Start the service, announce it, and watch it until it exits; return its exit status."""
     with open(sys.argv[1]) as f:
         cfg: dict[str, Any] = json.load(f)
     ident = host_identity()
@@ -290,7 +330,8 @@ def serve() -> int:
     log(f"ready pid={child.pid} body={body.decode()!r}")
     last: tuple[str, bytes] | None = None
     last_ok, announced = time.monotonic(), False
-    # graphed keys a worker's client by endpoint and pilots outlive a rerun: no port serves two children
+    # graphed keys a worker's client by endpoint and pilots outlive a rerun: no port serves two
+    # children
     served, restarts = {port}, 0
     while True:
         if child.poll() is not None:
@@ -322,13 +363,17 @@ def serve() -> int:
                 log(f"announced to {cfg['url']}")
             announced, last_ok = True, time.monotonic()
         elif status == 403 or time.monotonic() - last_ok > cfg["lease_s"]:
-            log(f"orphaned ({status}, last 200 {time.monotonic() - last_ok:.1f}s ago): stopping the service")
+            log(
+                f"orphaned ({status}, last 200 {time.monotonic() - last_ok:.1f}s ago): stopping "
+                "the service"
+            )
             reap(child)
             return 0
         time.sleep(cfg["beat_s"] if announced else 1.0)
 
 
 def main() -> int:
+    """Serve, reaping the child on SIGTERM; return the exit status."""
     signal.signal(signal.SIGTERM, on_sigterm)
     try:
         return serve()

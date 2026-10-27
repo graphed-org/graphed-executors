@@ -1,8 +1,9 @@
-"""ADL benchmark queries 1-8 re-expressed against graphed, plus the picklable executor glue (plan
-M7). These are the corpus analyses recorded through the frontend; the M7 suite runs EACH of them
-over partitions through BOTH executors and reduces to a histogram — a deeper integration than the
-graphed-awkward (M3) per-`materialize` tests, since here the graph is recorded + executed per chunk
-and the per-chunk histograms are tree-reduced across workers/processes.
+"""ADL benchmark queries 1-8 re-expressed against graphed, plus the picklable executor glue.
+
+Plan M7. These are the corpus analyses recorded through the frontend; the M7 suite runs EACH of
+them over partitions through BOTH executors and reduces to a histogram — a deeper integration than
+the graphed-awkward (M3) per-`materialize` tests, since here the graph is recorded + executed per
+chunk and the per-chunk histograms are tree-reduced across workers/processes.
 """
 
 from __future__ import annotations
@@ -95,7 +96,9 @@ def q7(events: Array) -> Array:
 
 def q8(events: Array) -> Array:
     muons = gak.with_field(events.Muon, gak.zeros_like(events.Muon.pt, dtype="int64"), "flavor")
-    eles = gak.with_field(events.Electron, gak.ones_like(events.Electron.pt, dtype="int64"), "flavor")
+    eles = gak.with_field(
+        events.Electron, gak.ones_like(events.Electron.pt, dtype="int64"), "flavor"
+    )
     lep = gak.concatenate([muons, eles], axis=1)
     lep = lep[gak.argsort(lep.pt, axis=1, ascending=False)]
     mask3 = gak.num(lep, axis=1) >= 3
@@ -127,10 +130,14 @@ def _load_dataset(uri: str) -> object:
 
 
 def _counts(values: object, bins: int, start: float, stop: float, name: str) -> np.ndarray:
-    return np.asarray(hist1d(values, bins=bins, start=start, stop=stop, name=name).values(), dtype=np.int64)
+    return np.asarray(
+        hist1d(values, bins=bins, start=start, stop=stop, name=name).values(), dtype=np.int64
+    )
 
 
-def adl_partial(qname: str, bins: int, start: float, stop: float, part: Partition, res: object) -> np.ndarray:
+def adl_partial(
+    qname: str, bins: int, start: float, stop: float, part: Partition, res: object
+) -> np.ndarray:
     chunk = res.open_once(part.uri, _load_dataset)[part.entry_start : part.entry_stop]  # type: ignore[attr-defined]
     s = Session(AwkwardBackend())
     ev = from_awkward(s, "events", chunk)

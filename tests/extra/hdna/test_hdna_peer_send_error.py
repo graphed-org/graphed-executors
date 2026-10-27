@@ -1,4 +1,7 @@
-"""A peer worker whose partial fails to pickle raises that error at once, not the root timeout (GW34)."""
+"""A peer worker whose partial fails to pickle raises that error at once, not the root timeout.
+
+GW34.
+"""
 
 from __future__ import annotations
 
@@ -42,7 +45,10 @@ def test_an_unpicklable_partial_surfaces_its_pickling_error_promptly(
 
 
 class _SilentBrokenTransport:
-    """Every send raises and no ``done`` ever arrives, as when the partial for the root never lands."""
+    """Every send raises and no ``done`` ever arrives.
+
+    As when the partial for the root never lands.
+    """
 
     address = "w0"
 

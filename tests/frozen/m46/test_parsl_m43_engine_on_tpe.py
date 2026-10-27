@@ -1,6 +1,7 @@
-"""m46 — the reuse claim made real + the honest refusal (plan §1.1 consequences, §1.6 move
-table; §3 m46 `test_parsl_m43_engine_on_tpe`; Counter pins copied from the frozen m43
-`test_dask_shuffle_structure` / `test_dask_join_plan_choice.py:78-113` shapes).
+"""m46 — the reuse claim made real + the honest refusal.
+
+Plan §1.1 consequences, §1.6 move table; §3 m46 `test_parsl_m43_engine_on_tpe`; Counter pins copied
+from the frozen m43 `test_dask_shuffle_structure` / `test_dask_join_plan_choice.py:78-113` shapes.
 
 The MOVED m43 engine (`graphed_executors.common.tasks_engine` — names verbatim, m46 IT1) runs
 UNCHANGED over `ParslBackend(TPE)`: its peer gate passes (peer_data_movement=True, the
@@ -18,7 +19,8 @@ the §1.1.4 correction frozen (a peer-flag lie on HTEX would silently open head-
 
 Discriminates: a relay-everywhere implementation (zero picks fails the join Counter), a
 compute-on-driver stub that never submits (zero counts), a moved engine that renamed its task fns
-(the Counter keys), and an HTEX capability lie (the refusal arm executes work instead of raising)."""
+(the Counter keys), and an HTEX capability lie (the refusal arm executes work instead of raising).
+"""
 
 from __future__ import annotations
 
@@ -121,9 +123,12 @@ def test_m43_join_runs_on_tpe_with_nonzero_picks(tpe) -> None:  # type: ignore[n
 
 
 def test_htex_is_refused_by_require_peer_before_any_work(htex) -> None:  # type: ignore[no-untyped-def]
-    """The §1.1.4 crux frozen: HTEX reports peer_data_movement=False, so the m43 engine's own
-    `_require_peer` gate refuses it BEFORE any submit — head-node routing must never silently
-    enter the peer-shuffle engine (that route is the relay engine's, honestly labeled)."""
+    """The §1.1.4 crux frozen.
+
+    HTEX reports peer_data_movement=False, so the m43 engine's own `_require_peer` gate refuses
+    it BEFORE any submit — head-node routing must never silently enter the peer-shuffle engine
+    (that route is the relay engine's, honestly labeled).
+    """
     spy = SpyParslBackend(make_parsl_backend(htex))
     runner = make_runner(spy)
     src = repartition_blocks()
@@ -135,6 +140,7 @@ def test_htex_is_refused_by_require_peer_before_any_work(htex) -> None:  # type:
         m43_join(BACKEND, left, right, 4, runner=runner)
 
     assert spy.submitted == [], (
-        f"the gate must refuse BEFORE submitting any work; {len(spy.submitted)} task(s) reached the backend"
+        f"the gate must refuse BEFORE submitting any work; {len(spy.submitted)} task(s) reached "
+        "the backend"
     )
     assert spy.broadcast_tokens == [], "the gate must refuse BEFORE broadcasting any payload"

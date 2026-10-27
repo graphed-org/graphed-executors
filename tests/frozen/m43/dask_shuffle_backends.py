@@ -1,6 +1,8 @@
-"""Shared harness for the m43 frozen suite: shuffle/join on dask as a NATIVE future graph
-(dask-parallel-backends-plan §1.3.4, §2 m43, §3 m43) + the two carried m42-review follow-ups
-(F2a adaptive monitor drain, F2b adaptive KilledWorker attribution).
+"""Shared harness for the m43 frozen suite.
+
+Shuffle/join on dask as a NATIVE future graph (dask-parallel-backends-plan §1.3.4, §2 m43, §3 m43)
++ the two carried m42-review follow-ups (F2a adaptive monitor drain, F2b adaptive KilledWorker
+attribution).
 
 Pinned execution contract (test-author decision — the implementer builds
 ``graphed_executors.dask_backend.shuffle`` to this; see the m43 README):
@@ -61,26 +63,38 @@ NJRow = tuple[int | None, int | None, int | None]
 
 
 def shuffle_api() -> Any:
-    """``graphed_executors.dask_backend.shuffle`` — absent pre-implementation: the right-reason
-    ``ModuleNotFoundError`` for every shuffle-theme test lands here."""
-    import graphed_executors.dask_backend.shuffle as mod  # noqa: PLC0415  (deferred: module under test)
+    """``graphed_executors.dask_backend.shuffle`` — absent pre-implementation.
+
+    The right-reason ``ModuleNotFoundError`` for every shuffle-theme test lands here.
+    """
+    # deferred: module under test
+    import graphed_executors.dask_backend.shuffle as mod  # noqa: PLC0415
 
     return mod
 
 
 def dask_repartition(*args: Any, **kwargs: Any) -> Any:
-    """``dask_run_repartition(backend, src_blocks, parts, *, runner, salt=0)`` (plan §2 m43 pin)."""
+    """``dask_run_repartition(backend, src_blocks, parts, *, runner, salt=0)``.
+
+    Plan §2 m43 pin.
+    """
     return shuffle_api().dask_run_repartition(*args, **kwargs)
 
 
 def dask_join(*args: Any, **kwargs: Any) -> Any:
-    """``dask_run_join(backend, left, right, parts, *, on=("__joinkey__",), how="inner", runner,
-    broadcast=None, salt=0, mem_budget_bytes=None)`` (plan §2 m43 pin)."""
+    """Call ``dask_run_join`` with its pinned signature.
+
+    ``dask_run_join(backend, left, right, parts, *, on=("__joinkey__",), how="inner", runner,
+    broadcast=None, salt=0, mem_budget_bytes=None)`` (plan §2 m43 pin).
+    """
     return shuffle_api().dask_run_join(*args, **kwargs)
 
 
 def build_dask_backend(client: Any) -> Any:
-    """A plain ``DaskBackend`` over a ready client (constructor already frozen by the m42 suite)."""
+    """Return a plain ``DaskBackend`` over a ready client.
+
+    Constructor already frozen by the m42 suite.
+    """
     from graphed_executors.dask_backend import DaskBackend  # noqa: PLC0415  (deferred: dask extra)
 
     return DaskBackend(client)
@@ -88,7 +102,8 @@ def build_dask_backend(client: Any) -> Any:
 
 def install_worker_plugin(client: Any) -> None:
     """Register the m42 ``GraphedWorkerPlugin`` (idempotent) — required by the DaskBackend shim."""
-    from graphed_executors.dask_backend.plugin import GraphedWorkerPlugin  # noqa: PLC0415  (deferred)
+    # deferred
+    from graphed_executors.dask_backend.plugin import GraphedWorkerPlugin  # noqa: PLC0415
 
     client.register_plugin(GraphedWorkerPlugin())
 
@@ -97,7 +112,7 @@ def make_submit_runner(backend: Any, *, monitor: Any = None, retries: int = 3) -
     return SubmitRunner(backend, monitor=monitor, retries=retries)
 
 
-# ---- LocalCluster fixture discipline (plan §3: tier A processes=False, tier B processes=True) ----
+# ---- LocalCluster fixture discipline (plan §3: tier A processes=False, tier B processes=True)
 
 
 @contextmanager
@@ -105,8 +120,10 @@ def shuffle_cluster(
     n_workers: int = 2, *, processes: bool = True, allowed_failures: int | None = None
 ) -> Iterator[Any]:
     """Context-managed LocalCluster + Client, 1 thread per worker, random dashboard port.
-    ``allowed_failures`` sets ``distributed.scheduler.allowed-failures`` BEFORE the scheduler is
-    built (worker-death modules configure it on a dedicated cluster)."""
+
+    ``allowed_failures`` sets ``distributed.scheduler.allowed-failures`` BEFORE the scheduler
+    is built (worker-death modules configure it on a dedicated cluster).
+    """
     import dask  # noqa: PLC0415  (dask-touching modules call this after their importorskip)
     import distributed  # noqa: PLC0415
 
@@ -127,28 +144,36 @@ def shuffle_cluster(
 
 
 def live_worker_pids(client: Any) -> dict[str, int]:
-    """worker address -> pid for every live worker (the driver-vs-worker discrimination map)."""
+    """Worker address -> pid for every live worker (the driver-vs-worker discrimination map)."""
     return dict(client.run(os.getpid))
 
 
 def kill_worker(client: Any, address: str) -> None:
-    """Hard-kill ONE worker process by address (``os._exit`` on its event loop — validated against
-    distributed 2026.7: the dead-comm error is ignored and the nanny restarts a fresh process)."""
+    """Hard-kill ONE worker process by address.
+
+    ``os._exit`` on its event loop — validated against distributed 2026.7: the dead-comm error
+    is ignored and the nanny restarts a fresh process.
+    """
     with contextlib.suppress(Exception):  # the RPC dies with its target; on_error guards the rest
         client.run(os._exit, 1, workers=[address], on_error="ignore")
 
 
 def poll_until(predicate: Callable[[], bool], timeout_s: float = 90.0) -> None:
-    """Bounded driver-side poll; assertions on the state happen AFTER (fixture discipline, never an
-    assertion — R0.10a)."""
+    """Bounded driver-side poll.
+
+    Assertions on the state happen AFTER (fixture discipline, never an assertion — R0.10a).
+    """
     deadline = time.monotonic() + timeout_s
     while not predicate() and time.monotonic() < deadline:
         time.sleep(0.05)
 
 
 def task_site() -> tuple[int, str]:
-    """(pid, worker identity) at the point of call — dask worker address inside a worker, else the
-    driver marker (used by the gated backend's marks, mirrors the m42 ``where`` witness)."""
+    """(pid, worker identity) at the point of call.
+
+    Dask worker address inside a worker, else the driver marker (used by the gated backend's
+    marks, mirrors the m42 ``where`` witness).
+    """
     try:
         from distributed import get_worker  # noqa: PLC0415  (absent or outside a worker -> driver)
 
@@ -235,7 +260,9 @@ def _numpy_shuffle_adapter() -> ShuffleJoinAdapter:
 
     def side_rows(block: object, field: str) -> list[tuple[int, int]]:
         return list(
-            zip([int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True)
+            zip(
+                [int(k) for k in block["__joinkey__"]], [int(v) for v in block[field]], strict=True
+            )
         )
 
     def joined_rows(block: object) -> list[JRow]:
@@ -256,7 +283,8 @@ def _numpy_shuffle_adapter() -> ShuffleJoinAdapter:
 def shuffle_adapters() -> list[ShuffleJoinAdapter]:
     out: list[ShuffleJoinAdapter] = []
     for factory in (_awkward_shuffle_adapter, _numpy_shuffle_adapter):
-        with contextlib.suppress(Exception):  # a backend not installed drops from the parametrization
+        # a backend not installed drops from the parametrization
+        with contextlib.suppress(Exception):
             out.append(factory())
     return out
 
@@ -265,10 +293,13 @@ def shuffle_adapters() -> list[ShuffleJoinAdapter]:
 
 
 def repartition_blocks(adapter: ShuffleJoinAdapter, copies: int = 1) -> list[object]:
-    """The m39-style multi-src scenario: 6 source blocks with overlapping key populations, so a
-    P-way hash coalesces several dests per producer task and several src blocks feed each dest.
-    ``copies`` repeats each key list in place — MORE ROWS, SAME BLOCK COUNT (the row-count-
-    independence knob for the structure gates)."""
+    """Return the m39-style multi-src scenario.
+
+    6 source blocks with overlapping key populations, so a P-way hash coalesces several dests
+    per producer task and several src blocks feed each dest. ``copies`` repeats each key list
+    in place — MORE ROWS, SAME BLOCK COUNT (the row-count-independence knob for the structure
+    gates).
+    """
     key_lists = [
         [0, 1, 2, 3, 4, 5, 6, 7],
         [7, 6, 5, 4, 3, 2, 1, 0],
@@ -281,9 +312,12 @@ def repartition_blocks(adapter: ShuffleJoinAdapter, copies: int = 1) -> list[obj
 
 
 def join_general_sides(adapter: ShuffleJoinAdapter) -> tuple[list[object], list[object]]:
-    """Multi-block, both-large sides with overlapping keys PLUS a left-only key (13) and a
-    right-only key (17) — so the non-inner arms have real unmatched rows on BOTH sides (the m40
-    F1/F3 discrimination re-armed on dask)."""
+    """Return multi-block, both-large sides with overlapping and one-sided keys.
+
+    Multi-block, both-large sides with overlapping keys PLUS a left-only key (13) and a right-only
+    key (17) — so the non-inner arms have real unmatched rows on BOTH sides (the m40 F1/F3
+    discrimination re-armed on dask).
+    """
     left = [
         adapter.make_side([0, 1, 2, 3, 4, 5], "lval", [10, 11, 12, 13, 14, 15]),
         adapter.make_side([5, 4, 3, 2, 1, 0], "lval", [16, 17, 18, 19, 20, 21]),
@@ -299,23 +333,33 @@ def join_general_sides(adapter: ShuffleJoinAdapter) -> tuple[list[object], list[
 
 
 def join_equal_sides(adapter: ShuffleJoinAdapter) -> tuple[list[object], list[object]]:
-    """Byte-comparable sides: with ``parts=8`` the pinned rule says SHUFFLE
-    (``build*8 >= build+probe``), while a live-``n_workers()`` recompute on a 1-worker cluster says
-    BROADCAST (``build*1 < build+probe`` always) — the F6 plan-choice discrimination gap."""
+    """Byte-comparable sides.
+
+    With ``parts=8`` the pinned rule says SHUFFLE (``build*8 >= build+probe``), while a
+    live-``n_workers()`` recompute on a 1-worker cluster says BROADCAST (``build*1 <
+    build+probe`` always) — the F6 plan-choice discrimination gap.
+    """
     left = [
         adapter.make_side([0, 1, 2, 3, 4, 5, 6, 7], "lval", [10, 11, 12, 13, 14, 15, 16, 17]),
         adapter.make_side([8, 9, 10, 11, 0, 1, 2, 3], "lval", [18, 19, 20, 21, 22, 23, 24, 25]),
     ]
     right = [
-        adapter.make_side([0, 2, 4, 6, 8, 10, 1, 3], "rval", [100, 101, 102, 103, 104, 105, 106, 107]),
-        adapter.make_side([5, 7, 9, 11, 0, 2, 4, 6], "rval", [108, 109, 110, 111, 112, 113, 114, 115]),
+        adapter.make_side(
+            [0, 2, 4, 6, 8, 10, 1, 3], "rval", [100, 101, 102, 103, 104, 105, 106, 107]
+        ),
+        adapter.make_side(
+            [5, 7, 9, 11, 0, 2, 4, 6], "rval", [108, 109, 110, 111, 112, 113, 114, 115]
+        ),
     ]
     return left, right
 
 
 def join_small_build_sides(adapter: ShuffleJoinAdapter) -> tuple[list[object], list[object]]:
-    """A tiny build side + a larger multi-block probe side, so the pinned rule prefers BROADCAST at
-    the tested ``parts`` — the forced ``broadcast=False`` honor test runs against the model."""
+    """Return a tiny build side + a larger multi-block probe side.
+
+    A tiny build side + a larger multi-block probe side, so the pinned rule prefers BROADCAST at
+    the tested ``parts`` — the forced ``broadcast=False`` honor test runs against the model.
+    """
     left = [adapter.make_side([1, 2, 3], "lval", [10, 20, 30])]
     right = [
         adapter.make_side([1, 1, 2, 3, 3, 3], "rval", [100, 101, 200, 300, 301, 302]),
@@ -328,8 +372,11 @@ def join_small_build_sides(adapter: ShuffleJoinAdapter) -> tuple[list[object], l
 def join_hot_key_sides(
     adapter: ShuffleJoinAdapter, n_left: int, n_right: int
 ) -> tuple[list[object], list[object]]:
-    """A single hot key (all rows key=7 -> one dest): the inner join emits ``n_left*n_right``
-    duplicated OUTPUT rows in one dest — the B5 output-side blowup the budget must cover."""
+    """Return a single hot key (all rows key=7 -> one dest).
+
+    The inner join emits ``n_left*n_right`` duplicated OUTPUT rows in one dest — the B5
+    output-side blowup the budget must cover.
+    """
     left = [adapter.make_side([7] * n_left, "lval", list(range(n_left)))]
     right = [adapter.make_side([7] * n_right, "rval", list(range(100, 100 + n_right)))]
     return left, right
@@ -340,14 +387,17 @@ def side_bytes(adapter: ShuffleJoinAdapter, blocks: Sequence[object]) -> int:
     return sum(int(be.estimated_bytes(b)) for b in blocks)
 
 
-# ---- test-authored oracles (route via the golden-pinned ``partition``, never the join kernel) ----
+# ---- test-authored oracles (route via the golden-pinned ``partition``, never the join kernel)
 
 
 def route_oracle_dest_keys(
     adapter: ShuffleJoinAdapter, src_blocks: Sequence[object], parts: int
 ) -> dict[int, list[int]]:
-    """Per dest, the ``__joinkey__`` values routed there in ascending-src, within-src order — built
-    from the backend's own golden-pinned ``partition`` (routing is NOT re-implemented here)."""
+    """Per dest, the ``__joinkey__`` values routed there in ascending-src, within-src order.
+
+    Built from the backend's own golden-pinned ``partition`` (routing is NOT re-implemented
+    here).
+    """
     be: Any = adapter.backend
     per_dest: dict[int, list[int]] = {}
     for src in src_blocks:  # ascending src index
@@ -358,7 +408,9 @@ def route_oracle_dest_keys(
     return per_dest
 
 
-def result_dest_keys(adapter: ShuffleJoinAdapter, value: dict[int, object]) -> dict[int, list[int]]:
+def result_dest_keys(
+    adapter: ShuffleJoinAdapter, value: dict[int, object]
+) -> dict[int, list[int]]:
     return {dest: adapter.keys_of(block) for dest, block in value.items()}
 
 
@@ -382,15 +434,20 @@ def _per_dest_side(
 def dup_join_per_dest(
     adapter: ShuffleJoinAdapter, left: Sequence[object], right: Sequence[object], parts: int
 ) -> dict[int, Counter[JRow]]:
-    """DUPLICATING relational inner join per dest as a multiset (the m40 §3.3 pin): a probe row
-    with k build matches ⇒ k rows. Routes each side with the backend's ``partition`` only — the
-    executor cannot share a join-kernel bug with this oracle."""
+    """DUPLICATING relational inner join per dest as a multiset (the m40 §3.3 pin).
+
+    A probe row with k build matches ⇒ k rows. Routes each side with the backend's
+    ``partition`` only — the executor cannot share a join-kernel bug with this oracle.
+    """
     left_by_dest = _per_dest_side(adapter, left, "lval", parts)
     right_by_dest = _per_dest_side(adapter, right, "rval", parts)
     per_dest: dict[int, Counter[JRow]] = {}
     for dest in set(left_by_dest) & set(right_by_dest):
         rows = [
-            (k, lv, rv) for (k, lv) in left_by_dest[dest] for (k2, rv) in right_by_dest[dest] if k == k2
+            (k, lv, rv)
+            for (k, lv) in left_by_dest[dest]
+            for (k2, rv) in right_by_dest[dest]
+            if k == k2
         ]
         if rows:
             per_dest[dest] = Counter(rows)
@@ -428,8 +485,11 @@ def observed_join_all(adapter: ShuffleJoinAdapter, value: dict[int, object]) -> 
 
 
 def read_nullable_column(c: object) -> list[int | None]:
-    """One joined column to Python ints with ``None`` for a null/masked entry — survives the
-    option/masked rows the non-inner arms produce (a plain ``int()`` reader would crash)."""
+    """One joined column to Python ints with ``None`` for a null/masked entry.
+
+    Survives the option/masked rows the non-inner arms produce (a plain ``int()`` reader would
+    crash).
+    """
     to_list = getattr(c, "to_list", None)
     if to_list is not None:  # awkward option array -> [.., None, ..]
         return [None if v is None else int(v) for v in to_list()]
@@ -438,8 +498,10 @@ def read_nullable_column(c: object) -> list[int | None]:
 
 
 def nullable_join_multiset(value: dict[int, object]) -> Counter[NJRow]:
-    """The whole relational result as one null-aware multiset over ALL blocks (partitioning-
-    independent — the join RESULT does not depend on how it is partitioned)."""
+    """Return the whole relational result as one null-aware multiset over ALL blocks.
+
+    Partitioning-independent — the join RESULT does not depend on how it is partitioned.
+    """
     total: Counter[NJRow] = Counter()
     for block in value.values():
         ks = read_nullable_column(block["__joinkey__"])  # type: ignore[index]
@@ -452,9 +514,12 @@ def nullable_join_multiset(value: dict[int, object]) -> Counter[NJRow]:
 def pandas_join_oracle(
     lk: list[int], lv: list[int], rk: list[int], rv: list[int], how: str
 ) -> Counter[NJRow]:
-    """``pandas.merge`` on ``__joinkey__``: duplicating, null-preserving, key-coalescing — a wholly
-    independent relational engine (no shared code with the kernels under test)."""
-    import pandas as pd  # noqa: PLC0415  (optional oracle dep: only the relational module needs it)
+    """``pandas.merge`` on ``__joinkey__``: duplicating, null-preserving, key-coalescing.
+
+    A wholly independent relational engine (no shared code with the kernels under test).
+    """
+    # optional oracle dep: only the relational module needs it
+    import pandas as pd  # noqa: PLC0415
 
     left = pd.DataFrame({"__joinkey__": lk, "lval": lv})
     right = pd.DataFrame({"__joinkey__": rk, "rval": rv})
@@ -468,17 +533,20 @@ def pandas_join_oracle(
     return out
 
 
-# ---- GatedShuffleBackend: mark stage-1 executions, hold stage-2 open (worker-death scenario) -----
+# ---- GatedShuffleBackend: mark stage-1 executions, hold stage-2 open (worker-death scenario) ----
 
 
 class GatedShuffleBackend:
-    """A delegating ``ShuffleBackend`` for the worker-death theme. ``partition`` (stage-1 only)
-    drops a ``pmark-*`` file per call recording ``pid\\naddress`` — the RE-EXECUTION witness (more
-    pmarks than src blocks proves a lost producer re-ran). ``from_wire`` (stage-2 only under
-    repartition) drops a ``gstart-*`` file, then BLOCKS until ``gate_path`` exists — holding the
-    gather open so the driver can kill a stage-1 holder mid-run deterministically (scenario
-    construction; the assertions are file counts and content hashes, R0.10a). Data is delegated
-    UNTOUCHED, so hashes stay comparable with a plain-backend local oracle run."""
+    r"""A delegating ``ShuffleBackend`` for the worker-death theme.
+
+    ``partition`` (stage-1 only) drops a ``pmark-*`` file per call recording ``pid\naddress``
+    — the RE-EXECUTION witness (more pmarks than src blocks proves a lost producer re-ran).
+    ``from_wire`` (stage-2 only under repartition) drops a ``gstart-*`` file, then BLOCKS until
+    ``gate_path`` exists — holding the gather open so the driver can kill a stage-1 holder
+    mid-run deterministically (scenario construction; the assertions are file counts and
+    content hashes, R0.10a). Data is delegated UNTOUCHED, so hashes stay comparable with a
+    plain-backend local oracle run.
+    """
 
     def __init__(self, inner: Any, mark_dir: str, gate_path: str | None) -> None:
         self.inner = inner
@@ -537,8 +605,11 @@ def _fn_name(fn: Any) -> str:
 
 
 class SpySubmitBackend:
-    """A delegating ``SubmitBackend`` recording every submitted task fn's name + key and every
-    broadcast token — the §1.3.4 future-count gates read these (counts, never clocks)."""
+    """A delegating ``SubmitBackend`` that records submitted task fns and broadcast tokens.
+
+    A delegating ``SubmitBackend`` recording every submitted task fn's name + key and every
+    broadcast token — the §1.3.4 future-count gates read these (counts, never clocks).
+    """
 
     def __init__(self, inner: Any) -> None:
         self.inner = inner
@@ -591,12 +662,15 @@ class SpySubmitBackend:
         return None if describe is None else describe(exc)
 
 
-# ---- NoPeerBackend: the capability-gate stub (peer_data_movement=False, must receive NO work) ----
+# ---- NoPeerBackend: the capability-gate stub (peer_data_movement=False, must receive NO work)
 
 
 class NoPeerBackend:
-    """A protocol-shaped stub modelling a head-node-routed backend (parsl-HTEX class): the §1.3.4
-    gate must fire BEFORE any work reaches it — ``submit``/``broadcast`` count and refuse."""
+    """A protocol-shaped stub modelling a head-node-routed backend (parsl-HTEX class).
+
+    The §1.3.4 gate must fire BEFORE any work reaches it — ``submit``/``broadcast`` count and
+    refuse.
+    """
 
     capabilities = SubmitCapabilities(
         peer_data_movement=False,
@@ -637,13 +711,16 @@ class NoPeerBackend:
 
 
 class DelayedEventBackend:
-    """A delegating ``SubmitBackend`` whose event DELIVERY lags emission by ``delay_s`` and whose
+    """A ``SubmitBackend`` that delivers events late and drops undelivered ones on unsubscribe.
+
+    A delegating ``SubmitBackend`` whose event DELIVERY lags emission by ``delay_s`` and whose
     unsubscribe DROPS undelivered events — the honest model of dask's asynchronous worker->driver
     event transport (an unsubscribed topic never delivers). Against it, an engine that returns from
     ``run()`` without draining trailing events loses them DETERMINISTICALLY: the driver path from
     the last result to the unsubscribe is microseconds against a ``delay_s`` of hundreds of
     milliseconds. The delay is scenario construction; every assertion is an event-set count
-    (R0.10a)."""
+    (R0.10a).
+    """
 
     def __init__(self, inner: Any, delay_s: float = 0.5) -> None:
         self.inner = inner
@@ -706,7 +783,8 @@ class DelayedEventBackend:
 
 
 def f2_partitions(n: int, tag: str) -> tuple[Any, ...]:
-    from graphed.core.execution import Partition  # noqa: PLC0415  (kept local: harness stays light)
+    # kept local: harness stays light
+    from graphed.core.execution import Partition  # noqa: PLC0415
 
     return tuple(Partition(f"mem://{tag}/{i}", "", i, i + 1) for i in range(n))
 
@@ -725,9 +803,11 @@ def int_zero() -> int:
 
 @dataclass(frozen=True)
 class AlwaysDieProcess:
-    """Hard-kills its worker process on EVERY attempt at the poison uri (segfault/OOM stand-in) —
-    with ``retries=0`` + a low allowed-failures budget the scheduler deterministically blames the
-    task and the driver sees the backend's worker-death signal."""
+    """Hard-kills its worker process on EVERY attempt at the poison uri (segfault/OOM stand-in).
+
+    With ``retries=0`` + a low allowed-failures budget the scheduler deterministically blames
+    the task and the driver sees the backend's worker-death signal.
+    """
 
     poison_uri: str
 
