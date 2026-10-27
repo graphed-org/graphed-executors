@@ -421,7 +421,7 @@ def _run_shuffle(
         )
 
     transport.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise (
+    raise (  # pragma: no cover
         _shuffle_stage_error(last_exc, pbackend)
         if last_exc is not None
         else RuntimeError("no epochs run")
