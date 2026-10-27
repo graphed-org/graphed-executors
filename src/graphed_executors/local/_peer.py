@@ -611,58 +611,23 @@ def process_and_reduce(
     events and profile trees that would otherwise ship to the driver. ``complete`` makes a failing
     actor wait, bounded, for its queued sends (its last event batch included) before it raises.
     """
-    outbox = Outbox(transport)  # the reducer's node/root sends go through it too
-    reducer: PeerReducer[R] = PeerReducer(address, outbox, n, bounds, worker_addresses, combine)
-    mine: deque[tuple[int, Partition]] = deque(items)  # leaves to PROCESS (own + stolen)
-    # dedup settled nodes/leaves (a reliable transport may retry)
-    seen: set[tuple[int, int]] = set()
-    # victims this worker may steal from: the bounded lifeline overlay when given (O(log N), so the
-    # IPC registry stays sub-quadratic), else every peer (the in-process / full-mesh case).
-    peers = (
-        steal_peers
-        if steal_peers is not None
-        else tuple(a for a in worker_addresses if a != address)
+    actor: _PeerActor[R] = _PeerActor(
+        address,
+        transport,
+        n,
+        bounds,
+        worker_addresses,
+        process,
+        combine,
+        items,
+        steal=steal,
+        steal_peers=steal_peers,
+        emit=emit,
+        prebuffered=prebuffered,
+        monitor_factory=monitor_factory,
+        lean=lean,
+        keys=keys,
     )
-    me = worker_addresses.index(address)
-    stats = {"steals": 0, "given": 0, "asked": 0, "processed": 0}  # asked: steal-requests I sent
-    victim = 0
-    # when this worker ran out of local work (gates the steal delay)
-    idle_since: float | None = None
-    # current wait between steal-requests; grows on denial, resets on a grant
-    backoff = STEAL_DELAY
-    next_steal_at = 0.0  # monotonic time of the next allowed steal-request
-    pending = [payload for _sender, payload in prebuffered]
-    done = False
-    paused = cancelled = False  # the driver's run-control tags (plan-A2 A2-2)
-    events: list[TaskEvent] = []  # M37 monitor events, batched to the driver off the hot path
-    monitor = None
-    if monitor_factory is not None:
-        with contextlib.suppress(Exception):  # a monitor that won't build just disables telemetry
-            monitor = monitor_factory()
-
-    def emit_event(phase: TaskPhase, leaf: int, part: Partition, error: str | None = None) -> None:
-        if lean and phase is TaskPhase.STARTED:
-            return
-        ev = TaskEvent(
-            phase,
-            leaf if keys is None else keys[leaf],
-            address,
-            time.perf_counter(),
-            "" if lean else partition_label(part),
-            part.n_entries,
-            error=error,
-        )
-        if monitor is not None:
-            emit_task(monitor, ev)
-        else:
-            events.append(ev)
-
-    def ship_events() -> None:
-        if events:
-            # the driver forwards them to the monitor
-            outbox.send(DRIVER, ("events", events.copy()))
-            events.clear()
-
     # off-thread profiler parity with the hub: a worker samples its task thread and ships the
     # flamegraph tree to the driver (forwarded to monitor.on_profile), throttled so the serialize
     # is never per-leaf.
@@ -672,162 +637,276 @@ def process_and_reduce(
         with contextlib.suppress(Exception):  # a profiler that won't start just disables sampling
             profiler = profiler_factory()
             profiler.start()
-
-    def ship_profile(payload: bytes | None) -> None:
-        if payload and monitor is not None:
-            with contextlib.suppress(Exception):
-                monitor.on_profile(address, payload)
-        elif payload:
-            outbox.send(DRIVER, ("profile", address, payload))
-
-    def owner(leaf: int) -> str:
-        return worker_addresses[worker_of(leaf, bounds)]
-
-    def settle_leaf(leaf: int, value: R) -> None:
-        # idempotent: own-processing and a thief's `leaf` can't double-count
-        if (0, leaf) not in seen:
-            seen.add((0, leaf))
-            reducer.settle(0, leaf, value)
-
-    def handle(payload: Any) -> None:
-        nonlocal done, paused, cancelled
-        tag = payload[0]
-        if tag == "node":
-            _, lvl, pos, val = payload
-            if (lvl, pos) not in seen:
-                seen.add((lvl, pos))
-                reducer.peer_recvs += 1
-                reducer.settle(lvl, pos, val)
-        elif tag == "leaf":  # a partial (computed by a thief) for a leaf I OWN -> I settle it
-            settle_leaf(payload[1], payload[2])
-        elif tag == "steal_req":
-            # Hand ONE leaf from the FAR end (steal-one, Blumofe-Leiserson / Cilk). NOT steal-half:
-            # under many idle thieves hitting one victim, serialized "half each" drains the victim
-            # geometrically (keeps W/2^k) and over-concentrates work on the first thief -> worse
-            # makespan for our coarse, independent partitions. Steal-one lets k thieves each take
-            # one leaf fairly with no cascade; steals are cheap relative to a partition, so the
-            # extra steal attempts cost ~nothing. (`len > 1`: never give away the leaf I'm about to
-            # run.) Each grant carries its own id (a negative level, never a node's), so the thief
-            # keeps a response retried by an at-least-once transport once, and a leaf granted twice
-            # twice. Only an owned leaf is granted: the thief returns it to its owner, and the
-            # victim is the only owner guaranteed to be in the thief's bounded overlay.
-            thief = payload[1]
-            if steal and len(mine) > 1 and owner(mine[-1][0]) == address:
-                stats["given"] += 1
-                outbox.send(thief, ("steal_resp", [mine.pop()], (-1 - me, stats["given"])))
-            else:
-                outbox.send(thief, ("steal_resp", [], (-1 - me, 0)))
-        elif tag == "steal_resp":
-            _, granted, grant = payload
-            if grant not in seen:
-                seen.add(grant)
-                mine.extend(granted)
-                stats["steals"] += len(granted)
-        elif tag == "pause":
-            paused = True
-        elif tag == "resume":
-            paused = False
-        elif tag == "cancel" and not cancelled:
-            # Between leaves, so nothing is in flight here: hand in the count and the parked nodes.
-            cancelled = True
-            mine.clear()
-            outbox.send(DRIVER, ("cancelled", address, stats["processed"], reducer.hand_in()))
-        elif tag == "done":
-            done = True
-
     try:
-        while not done:
+        while not actor.done:
             if released(release):  # the driver's run ended, however it ended
                 break
             # a failed send (an unpicklable partial) never reaches the root
-            if outbox.error is not None:
-                raise outbox.error
-            while pending and not done:
-                handle(pending.pop(0))
-            for _sender, payload in transport.poll():  # cheap non-blocking drain between leaves
-                handle(payload)
-                if done:
-                    break
-            if done:
+            if actor.outbox.error is not None:
+                raise actor.outbox.error
+            actor.drain()
+            if actor.done:
                 break
             if emit:
                 # batch off-path: one send per leaf-ish, negligible for coarse partitions
-                ship_events()
+                actor.ship_events()
             if profiler is not None and time.monotonic() - last_flush >= PROFILE_FLUSH_INTERVAL:
                 with contextlib.suppress(Exception):
-                    ship_profile(profiler.flush())
+                    actor.ship_profile(profiler.flush())
                 last_flush = time.monotonic()
-            if mine and not (paused or cancelled):
-                # have work again (incl. a successful steal) -> reset steal backoff
-                idle_since = None
-                backoff = STEAL_DELAY
-                leaf, part = mine.popleft()
-                if emit:
-                    emit_event(TaskPhase.STARTED, leaf, part)
-                try:
-                    partial = process(part, resources)  # HOT PATH (read + compute)
-                except BaseException as exc:
-                    if emit:
-                        msg = (
-                            str(exc)
-                            if isinstance(exc, StageError)
-                            else f"{type(exc).__name__}: {exc}"
-                        )
-                        emit_event(TaskPhase.ERRORED, leaf, part, error=msg)
-                        # surface the error to the dashboard before the run tears down
-                        ship_events()
-                    raise
-                stats["processed"] += 1
-                if emit:
-                    emit_event(TaskPhase.FINISHED, leaf, part)
-                if owner(leaf) == address:
-                    settle_leaf(leaf, partial)  # my leaf -> reduce here
-                else:
-                    # stolen -> back to its owner
-                    outbox.send(owner(leaf), ("leaf", leaf, partial))
-            elif steal and peers and not (paused or cancelled):
-                # no local work: request a steal once idle past STEAL_DELAY, then back off on each
-                # denial so a balanced run's reduction tail isn't flooded with steal-requests.
-                now = time.monotonic()
-                if idle_since is None:
-                    idle_since, next_steal_at, backoff = now, now + STEAL_DELAY, STEAL_DELAY
-                if now >= next_steal_at:
-                    outbox.send(peers[victim % len(peers)], ("steal_req", address))
-                    stats["asked"] += 1
-                    victim += 1
-                    next_steal_at = now + backoff
-                    backoff = min(backoff * 2, MAX_STEAL_BACKOFF)
-                got = transport.recv(timeout=0.01)  # stay responsive to node/leaf/done while idle
-                if got is not None:
-                    handle(got[1])
-            else:
-                got = transport.recv(timeout=0.05)
-                if got is not None:
-                    handle(got[1])
+            actor.step(resources)
         if emit:
-            ship_events()  # final flush after `done` — the driver drains until workers finish
+            # final flush after `done` — the driver drains until workers finish
+            actor.ship_events()
         if profiler is not None:
             with contextlib.suppress(Exception):
-                ship_profile(profiler.stop())  # final sample tree + join the sampler thread
+                actor.ship_profile(profiler.stop())  # final sample tree + join the sampler thread
         # let the queued sends land, but never hang here
-        send_error = outbox.close(OUTBOX_EXIT_WAIT_S)
+        send_error = actor.outbox.close(OUTBOX_EXIT_WAIT_S)
     except BaseException:
         # this run is already failing: don't wait on sends to a peer that may never read again
         # (unless the monitor asked for complete events), and don't let a send failure displace the
         # actor's own exception.
-        outbox.close(OUTBOX_EXIT_WAIT_S if complete else 0.0)
+        actor.outbox.close(OUTBOX_EXIT_WAIT_S if complete else 0.0)
         raise
     finally:
         if close_resources:
             resources.close()
     if send_error is not None:
         raise send_error
-    return {
-        "n_combines": reducer.n_combines,
-        "peer_sends": reducer.peer_sends,
-        "peer_recvs": reducer.peer_recvs,
-        **stats,
-    }
+    return actor.witness()
+
+
+class _PeerActor(Generic[R]):
+    """One worker's peer-reduction state, driven a step at a time by :func:`process_and_reduce`.
+
+    It owns the leaves left to process (its own and stolen ones), the reducer it settles them
+    into, the steal backoff, and the run-control tags the driver sent.
+    """
+
+    def __init__(
+        self,
+        address: str,
+        transport: Any,
+        n: int,
+        bounds: list[int],
+        worker_addresses: tuple[str, ...],
+        process: Callable[[Partition, Any], R],
+        combine: Callable[[R, R], R],
+        items: Sequence[tuple[int, Partition]],
+        *,
+        steal: bool,
+        steal_peers: tuple[str, ...] | None,
+        emit: bool,
+        prebuffered: Sequence[tuple[str, Any]],
+        monitor_factory: Callable[[], Any] | None,
+        lean: bool,
+        keys: Sequence[int] | None,
+    ) -> None:
+        self.address = address
+        self.transport = transport
+        self.outbox = Outbox(transport)  # the reducer's node/root sends go through it too
+        self.reducer: PeerReducer[R] = PeerReducer(
+            address, self.outbox, n, bounds, worker_addresses, combine
+        )
+        self._bounds = bounds
+        self._worker_addresses = worker_addresses
+        self._process = process
+        self._steal = steal
+        self._emit = emit
+        self._lean = lean
+        self._keys = keys
+        self.mine: deque[tuple[int, Partition]] = deque(items)  # leaves to PROCESS (own + stolen)
+        # dedup settled nodes/leaves (a reliable transport may retry)
+        self.seen: set[tuple[int, int]] = set()
+        # victims this worker may steal from: the bounded lifeline overlay when given (O(log N), so
+        # the IPC registry stays sub-quadratic), else every peer (the in-process / full-mesh case).
+        self.peers = (
+            steal_peers
+            if steal_peers is not None
+            else tuple(a for a in worker_addresses if a != address)
+        )
+        self.me = worker_addresses.index(address)
+        # asked: steal-requests I sent
+        self.stats = {"steals": 0, "given": 0, "asked": 0, "processed": 0}
+        self.victim = 0
+        # when this worker ran out of local work (gates the steal delay)
+        self.idle_since: float | None = None
+        # current wait between steal-requests; grows on denial, resets on a grant
+        self.backoff = STEAL_DELAY
+        self.next_steal_at = 0.0  # monotonic time of the next allowed steal-request
+        self.pending = [payload for _sender, payload in prebuffered]
+        self.done = False
+        self.paused = self.cancelled = False  # the driver's run-control tags (plan-A2 A2-2)
+        self.events: list[TaskEvent] = []  # M37 monitor events, batched to the driver off-path
+        self.monitor = None
+        if monitor_factory is not None:
+            with contextlib.suppress(Exception):  # a monitor that won't build disables telemetry
+                self.monitor = monitor_factory()
+
+    def emit_event(
+        self, phase: TaskPhase, leaf: int, part: Partition, error: str | None = None
+    ) -> None:
+        if self._lean and phase is TaskPhase.STARTED:
+            return
+        ev = TaskEvent(
+            phase,
+            leaf if self._keys is None else self._keys[leaf],
+            self.address,
+            time.perf_counter(),
+            "" if self._lean else partition_label(part),
+            part.n_entries,
+            error=error,
+        )
+        if self.monitor is not None:
+            emit_task(self.monitor, ev)
+        else:
+            self.events.append(ev)
+
+    def ship_events(self) -> None:
+        if self.events:
+            # the driver forwards them to the monitor
+            self.outbox.send(DRIVER, ("events", self.events.copy()))
+            self.events.clear()
+
+    def ship_profile(self, payload: bytes | None) -> None:
+        if payload and self.monitor is not None:
+            with contextlib.suppress(Exception):
+                self.monitor.on_profile(self.address, payload)
+        elif payload:
+            self.outbox.send(DRIVER, ("profile", self.address, payload))
+
+    def owner(self, leaf: int) -> str:
+        return self._worker_addresses[worker_of(leaf, self._bounds)]
+
+    def settle_leaf(self, leaf: int, value: R) -> None:
+        # idempotent: own-processing and a thief's `leaf` can't double-count
+        if (0, leaf) not in self.seen:
+            self.seen.add((0, leaf))
+            self.reducer.settle(0, leaf, value)
+
+    def handle(self, payload: Any) -> None:
+        tag = payload[0]
+        if tag == "node":
+            _, lvl, pos, val = payload
+            if (lvl, pos) not in self.seen:
+                self.seen.add((lvl, pos))
+                self.reducer.peer_recvs += 1
+                self.reducer.settle(lvl, pos, val)
+        elif tag == "leaf":  # a partial (computed by a thief) for a leaf I OWN -> I settle it
+            self.settle_leaf(payload[1], payload[2])
+        elif tag == "steal_req":
+            self._grant(payload[1])
+        elif tag == "steal_resp":
+            _, granted, grant = payload
+            if grant not in self.seen:
+                self.seen.add(grant)
+                self.mine.extend(granted)
+                self.stats["steals"] += len(granted)
+        elif tag == "pause":
+            self.paused = True
+        elif tag == "resume":
+            self.paused = False
+        elif tag == "cancel" and not self.cancelled:
+            # Between leaves, so nothing is in flight here: hand in the count and the parked nodes.
+            self.cancelled = True
+            self.mine.clear()
+            self.outbox.send(
+                DRIVER,
+                ("cancelled", self.address, self.stats["processed"], self.reducer.hand_in()),
+            )
+        elif tag == "done":
+            self.done = True
+
+    def _grant(self, thief: str) -> None:
+        # Hand ONE leaf from the FAR end (steal-one, Blumofe-Leiserson / Cilk). NOT steal-half:
+        # under many idle thieves hitting one victim, serialized "half each" drains the victim
+        # geometrically (keeps W/2^k) and over-concentrates work on the first thief -> worse
+        # makespan for our coarse, independent partitions. Steal-one lets k thieves each take
+        # one leaf fairly with no cascade; steals are cheap relative to a partition, so the
+        # extra steal attempts cost ~nothing. (`len > 1`: never give away the leaf I'm about to
+        # run.) Each grant carries its own id (a negative level, never a node's), so the thief
+        # keeps a response retried by an at-least-once transport once, and a leaf granted twice
+        # twice. Only an owned leaf is granted: the thief returns it to its owner, and the
+        # victim is the only owner guaranteed to be in the thief's bounded overlay.
+        if self._steal and len(self.mine) > 1 and self.owner(self.mine[-1][0]) == self.address:
+            self.stats["given"] += 1
+            self.outbox.send(
+                thief, ("steal_resp", [self.mine.pop()], (-1 - self.me, self.stats["given"]))
+            )
+        else:
+            self.outbox.send(thief, ("steal_resp", [], (-1 - self.me, 0)))
+
+    def drain(self) -> None:
+        """Handle the buffered messages, then a cheap non-blocking drain between leaves."""
+        while self.pending and not self.done:
+            self.handle(self.pending.pop(0))
+        for _sender, payload in self.transport.poll():
+            self.handle(payload)
+            if self.done:
+                break
+
+    def step(self, resources: LocalResources) -> None:
+        """Process one leaf, or ask a peer for work, or wait briefly for a message."""
+        if self.mine and not (self.paused or self.cancelled):
+            # have work again (incl. a successful steal) -> reset steal backoff
+            self.idle_since = None
+            self.backoff = STEAL_DELAY
+            self._process_leaf(resources)
+            return
+        if self._steal and self.peers and not (self.paused or self.cancelled):
+            # no local work: request a steal once idle past STEAL_DELAY, then back off on each
+            # denial so a balanced run's reduction tail isn't flooded with steal-requests.
+            now = time.monotonic()
+            if self.idle_since is None:
+                self.idle_since, self.next_steal_at, self.backoff = (
+                    now,
+                    now + STEAL_DELAY,
+                    STEAL_DELAY,
+                )
+            if now >= self.next_steal_at:
+                self.outbox.send(
+                    self.peers[self.victim % len(self.peers)], ("steal_req", self.address)
+                )
+                self.stats["asked"] += 1
+                self.victim += 1
+                self.next_steal_at = now + self.backoff
+                self.backoff = min(self.backoff * 2, MAX_STEAL_BACKOFF)
+            got = self.transport.recv(timeout=0.01)  # stay responsive to node/leaf/done while idle
+        else:
+            got = self.transport.recv(timeout=0.05)
+        if got is not None:
+            self.handle(got[1])
+
+    def _process_leaf(self, resources: LocalResources) -> None:
+        leaf, part = self.mine.popleft()
+        if self._emit:
+            self.emit_event(TaskPhase.STARTED, leaf, part)
+        try:
+            partial = self._process(part, resources)  # HOT PATH (read + compute)
+        except BaseException as exc:
+            if self._emit:
+                msg = str(exc) if isinstance(exc, StageError) else f"{type(exc).__name__}: {exc}"
+                self.emit_event(TaskPhase.ERRORED, leaf, part, error=msg)
+                # surface the error to the dashboard before the run tears down
+                self.ship_events()
+            raise
+        self.stats["processed"] += 1
+        if self._emit:
+            self.emit_event(TaskPhase.FINISHED, leaf, part)
+        if self.owner(leaf) == self.address:
+            self.settle_leaf(leaf, partial)  # my leaf -> reduce here
+        else:
+            # stolen -> back to its owner
+            self.outbox.send(self.owner(leaf), ("leaf", leaf, partial))
+
+    def witness(self) -> dict[str, int]:
+        return {
+            "n_combines": self.reducer.n_combines,
+            "peer_sends": self.reducer.peer_sends,
+            "peer_recvs": self.reducer.peer_recvs,
+            **self.stats,
+        }
 
 
 # A per-WORKER-PROCESS resource cache reused across run()s of a persistent pool, so a worker
