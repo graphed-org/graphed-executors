@@ -719,8 +719,8 @@ and a stand-in server answering ``2``:
 
    s = Session(AwkwardBackend())
    s.declare_service(ServiceSpec("sf", "http", check="http:/"))
-   events = from_parquet(s, "events", f"{root}/events.parquet")
-   lumi = from_parquet(s, "lumi", f"{root}/lumi.parquet")
+   events = from_parquet("events", f"{root}/events.parquet", session=s)
+   lumi = from_parquet("lumi", f"{root}/lumi.parquet", session=s)
    scaled = record_external(s, SF, b"sf-v1", [events], params={"service": "sf"})
    joined = join(scaled, lumi, on=["run"], how="inner")
    plan = join_plan(joined.MET_pt * joined.lumi_w)
