@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import http.client
 import importlib
 import logging
 import os
@@ -350,7 +351,7 @@ def _check_http(url: str, timeout: float) -> str | None:
             status, ctype = int(resp.status), str(resp.headers.get("content-type", ""))
     except urllib.error.HTTPError as exc:  # urllib raises for every answer but a 2xx
         return f"GET {url} answered {exc.code}"
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, http.client.HTTPException) as exc:  # a non-HTTP answer
         return f"GET {url} failed: {exc}"
     if ctype.startswith("application/grpc"):
         return f"GET {url} answered {status} {ctype}: a gRPC endpoint, not an HTTP service"
