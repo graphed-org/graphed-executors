@@ -88,6 +88,23 @@ def test_a_closed_port_and_forms_that_are_refused_undialled() -> None:
     assert "grpcs" in str(svc.check_ready("127.0.0.1:1", "tcp", TIMEOUT_S))  # not an endpoint
 
 
+def test_a_non_http_answer_is_a_reason() -> None:
+    # e.g. a TCP self-connect on a closed ephemeral port reads back its own request line
+    with socket.socket() as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+
+        def answer() -> None:
+            conn, _ = srv.accept()
+            with conn:
+                conn.recv(4096)
+                conn.sendall(b"GET / HTTP/1.1\r\n\r\n")
+
+        threading.Thread(target=answer, daemon=True).start()
+        reason = svc.check_ready(f"http://127.0.0.1:{srv.getsockname()[1]}", "http:/", TIMEOUT_S)
+    assert "failed" in str(reason), reason
+
+
 def test_a_missing_grpcio_is_a_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "grpc", None)
     assert "needs grpcio" in str(svc.check_ready("grpc://127.0.0.1:1", "grpc:", TIMEOUT_S))

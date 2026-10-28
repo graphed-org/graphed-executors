@@ -18,6 +18,9 @@ Requires ``graphed`` 0.0.10 or later.
 * ``StageError.cause_type`` follows the renames: a pilot task past ``task_timeout_s`` reports
   ``TaskTimedOutError`` (was ``TaskTimedOut``), and an unreachable parsl peer overlay reports
   ``ProbeUnreachableError`` (was ``ProbeUnreachable``).
+* An ``http:`` readiness check that gets a non-HTTP answer reports the service unreachable: the
+  parse error (``http.client.BadStatusLine``) escaped the probe, e.g. on a TCP self-connect to a
+  closed loopback port.
 
 0.0.6
 -----
