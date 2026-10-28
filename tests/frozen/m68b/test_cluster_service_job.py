@@ -835,6 +835,7 @@ def test_host_service_returns_the_announced_endpoint_and_releases_in_order(
         announce_hex = (found / "graphed-secret").read_text().strip()
         pilot_hex = (log_dir / "graphed-secret").read_text().strip()
         assert announce_hex != pilot_hex, "the service job carries the pilots' secret"
+        wait_for(lambda: bool(submits(schedd.log)), 60.0)
         (service_desc,) = submits(schedd.log)
         leaked = [
             k for k, v in service_desc.items() if announce_hex in str(v) or pilot_hex in str(v)
