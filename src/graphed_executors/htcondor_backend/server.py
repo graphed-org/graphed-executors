@@ -338,6 +338,32 @@ class TaskServer:
 
     # ---- the reaper ----
 
+    def _time_out(self, now: float, failed: list[tuple[Future[Any], BaseException]]) -> None:
+        """Fail each task leased longer than the task timeout into ``failed``; under ``_cond``."""
+        limit = self._task_timeout_s
+        if limit is None:
+            return
+        for tid, task in list(self._tasks.items()):
+            if task.leased_to is not None and now - task.leased_at > limit:
+                del self._tasks[tid]  # its pilot's late result is dropped
+                # a pilot runs one task: it stops at its next beat
+                self._lost.add(task.leased_to)
+                failed.append((task.fut, TaskTimedOutError(task.key, task.leased_to, limit)))
+
+    def _lose(self, pilot: str, failed: list[tuple[Future[Any], BaseException]]) -> None:
+        """Requeue lost ``pilot``'s task once, else fail it into ``failed``; under ``_cond``."""
+        self._lost.add(pilot)
+        for tid, task in list(self._tasks.items()):
+            if task.leased_to != pilot:
+                continue
+            if task.requeued:
+                del self._tasks[tid]
+                failed.append((task.fut, WorkerLostError(task.key, pilot)))
+            else:
+                task.requeued, task.leased_to = True, None
+                self._queue.appendleft(tid)
+                self._cond.notify()
+
     def _reap(self) -> None:
         while not self._closed:
             time.sleep(LEASE_S / 6)
@@ -347,32 +373,11 @@ class TaskServer:
         """Fail tasks past the timeout and requeue the tasks of lost pilots, once."""
         failed: list[tuple[Future[Any], BaseException]] = []
         now = time.monotonic()
-        limit = self._task_timeout_s
         with self._cond:
-            for tid, task in list(self._tasks.items()):
-                if (
-                    limit is not None
-                    and task.leased_to is not None
-                    and now - task.leased_at > limit
-                ):
-                    del self._tasks[tid]  # its pilot's late result is dropped
-                    # a pilot runs one task: it stops at its next beat
-                    self._lost.add(task.leased_to)
-                    failed.append((task.fut, TaskTimedOutError(task.key, task.leased_to, limit)))
+            self._time_out(now, failed)
             for pilot, beat in self._beats.items():
-                if pilot in self._lost or now - beat <= LEASE_S:
-                    continue
-                self._lost.add(pilot)
-                for tid, task in list(self._tasks.items()):
-                    if task.leased_to != pilot:
-                        continue
-                    if task.requeued:
-                        del self._tasks[tid]
-                        failed.append((task.fut, WorkerLostError(task.key, pilot)))
-                    else:
-                        task.requeued, task.leased_to = True, None
-                        self._queue.appendleft(tid)
-                        self._cond.notify()
+                if pilot not in self._lost and now - beat > LEASE_S:
+                    self._lose(pilot, failed)
             starving = bool(self._queue) and set(self._beats) <= self._lost
         # the launcher is asked only when work waits with no pilot: a schedd query is not free
         if starving and self._launcher.alive() == 0:
