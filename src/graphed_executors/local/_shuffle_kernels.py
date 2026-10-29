@@ -13,9 +13,10 @@ import zlib
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from graphed.core import ShuffleBackend
+from graphed.core.execution import JoinBackend
 from graphed.shuffle import (
     broadcast_join_choice,
     join_blocks,  # the generic radix-hash join kernel over a JoinBackend
@@ -337,9 +338,42 @@ def join_dest(
     return join_with_budget(backend, build, probe, on, how_here, budget, cluster, node_i)
 
 
+def join_probe_block(
+    backend: JoinBackend[Any, Any],
+    build: Any,
+    probe: Any,
+    on: Sequence[str],
+    how: str,
+    mem_budget: int | None,
+    cluster: Any,
+    node_i: int,
+    *,
+    track_unmatched: bool,
+) -> tuple[tuple[int, ...] | None, JoinResult]:
+    """Join one probe block against the whole build side (a broadcast join's per-block body).
+
+    With ``track_unmatched`` the build rows this block matched come back too, so the caller can
+    emit the never-matched ones exactly once (F2); otherwise ``None``.
+    """
+    matched: tuple[int, ...] | None = None
+    if track_unmatched:
+        b_idx, _p_idx = backend.match_indices(build, probe, on=list(on), how="inner")
+        matched = tuple(int(x) for x in b_idx)
+    return matched, join_with_budget(backend, build, probe, on, how, mem_budget, cluster, node_i)
+
+
 def _pass_through(backend: ShuffleBackend[Any, Any], blocks: list[Any]) -> JoinResult:
     blk = backend.concat(blocks)
     return [blk], [sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), 0
+
+
+class JoinCounters(TypedDict):
+    """The join counters, keyed by their ``ShuffleWitness`` field names."""
+
+    peak_join_bytes: int
+    join_spilled_partitions: int
+    join_chunks_read: int
+    join_output_rows: int
 
 
 @dataclass
@@ -380,6 +414,15 @@ class JoinTally:
         if out.matched is not None:
             self.matched.update(out.matched)
         self.add(key, (out.chunks, out.hashes, out.peak, out.spilled, out.rows, out.read))
+
+    def counters(self) -> JoinCounters:
+        """Return the summed join counters."""
+        return {
+            "peak_join_bytes": self.peak,
+            "join_spilled_partitions": self.spilled,
+            "join_chunks_read": self.read,
+            "join_output_rows": self.rows,
+        }
 
     def unmatched(self, n_build: int) -> tuple[int, ...]:
         """Return the build rows no broadcast probe block matched, ascending."""

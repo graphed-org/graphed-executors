@@ -57,7 +57,7 @@ from graphed_executors.local._shuffle_kernels import (
     choose_broadcast,
     coalesce_task,
     join_dest,
-    join_with_budget,
+    join_probe_block,
     sha256_hex,
 )
 from graphed_executors.submit.engine import current_env
@@ -286,14 +286,18 @@ def _dask_broadcast_join_part(
     build = backend.from_wire(build_wire)
     if take_indices is not None:
         build = backend.take(build, list(take_indices))
-    matched: tuple[int, ...] | None = None
-    if track_unmatched:
-        b_idx, _p_idx = backend.match_indices(build, probe_block, on=list(on), how="inner")
-        matched = tuple(int(x) for x in b_idx)
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, read = join_with_budget(
-            backend, build, probe_block, on, how, mem_budget, store, 0
+        matched, (chunks, hashes, peak, spilled, rows, read) = join_probe_block(
+            backend,
+            build,
+            probe_block,
+            on,
+            how,
+            mem_budget,
+            store,
+            0,
+            track_unmatched=track_unmatched,
         )
     finally:
         store.cleanup()
@@ -327,10 +331,10 @@ def _submit_maps(
     parts: int,
     salt: int,
     t: int,
-    key: tuple[str, str],
+    nonce: str,
+    tag: str,
 ) -> list[Any]:
     """Submit ``t`` producer maps over contiguous ascending ranges of ``blocks``."""
-    nonce, tag = key
     return [
         runner.backend.submit(
             _dask_map_write,
@@ -348,7 +352,8 @@ def _pick_tier(
     runner: SubmitRunner,
     map_futs: list[Any],
     parts: int,
-    key: tuple[str, str],
+    nonce: str,
+    tag: str,
     *,
     relay: bool,
 ) -> tuple[list[list[Any]], int, list[_MapOut] | None]:
@@ -365,7 +370,6 @@ def _pick_tier(
         outs = [cast("_MapOut", f.result()) for f in map_futs]
         relay_bytes = sum(len(w) for mo in outs for w in mo.payload.values())
         return [[_dask_pick(mo, dest) for mo in outs] for dest in range(parts)], relay_bytes, outs
-    nonce, tag = key
     picks = {
         (i, dest): runner.backend.submit(_dask_pick, f, dest, key=_skey(nonce, tag, i, dest))
         for i, f in enumerate(map_futs)
@@ -386,10 +390,8 @@ def _repartition(
     n_src = len(src_blocks)
     t = min(runner.backend.n_workers(), n_src) if n_src else 1
     nonce = uuid.uuid4().hex[:8]
-    map_futs = _submit_maps(runner, backend, src_blocks, parts, salt, t, (nonce, "map"))
-    picks, relay_bytes, map_outs = _pick_tier(
-        runner, map_futs, parts, (nonce, "pick"), relay=relay
-    )
+    map_futs = _submit_maps(runner, backend, src_blocks, parts, salt, t, nonce, "map")
+    picks, relay_bytes, map_outs = _pick_tier(runner, map_futs, parts, nonce, "pick", relay=relay)
     gather_futs = [
         runner.backend.submit(
             _dask_gather, backend, dest, *picks[dest], key=_skey(nonce, "gather", dest)
@@ -462,15 +464,11 @@ def _shuffle_join(
     t_r = min(n_workers, len(right_blocks)) if right_blocks else 0
     # submit ALL maps (both sides) before any pick tier resolves them, so the whole map phase runs
     # in parallel across the pool
-    left_maps = _submit_maps(runner, backend, left_blocks, parts, spec.salt, t_l, (nonce, "lmap"))
-    right_maps = _submit_maps(
-        runner, backend, right_blocks, parts, spec.salt, t_r, (nonce, "rmap")
-    )
-    left_picks, left_relayed, _ = _pick_tier(
-        runner, left_maps, parts, (nonce, "lpick"), relay=relay
-    )
+    left_maps = _submit_maps(runner, backend, left_blocks, parts, spec.salt, t_l, nonce, "lmap")
+    right_maps = _submit_maps(runner, backend, right_blocks, parts, spec.salt, t_r, nonce, "rmap")
+    left_picks, left_relayed, _ = _pick_tier(runner, left_maps, parts, nonce, "lpick", relay=relay)
     right_picks, right_relayed, _ = _pick_tier(
-        runner, right_maps, parts, (nonce, "rpick"), relay=relay
+        runner, right_maps, parts, nonce, "rpick", relay=relay
     )
     # F1 schema carriers for one-sided dests (None when a whole side is partitionless)
     left_carrier = left_blocks[0] if left_blocks else None

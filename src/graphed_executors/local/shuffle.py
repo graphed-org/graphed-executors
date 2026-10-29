@@ -62,6 +62,7 @@ from ._shuffle_kernels import (
     choose_broadcast,
     coalesce_task,
     join_dest,
+    join_probe_block,
     join_with_budget,
     routing_hash_measurement,
     sha256_hex,
@@ -384,10 +385,8 @@ def _gather_side(
 
 
 def _record_join(witness: ShuffleWitness, tally: JoinTally) -> None:
-    witness.peak_join_bytes = tally.peak
-    witness.join_spilled_partitions = tally.spilled
-    witness.join_chunks_read = tally.read
-    witness.join_output_rows = tally.rows
+    for name, value in tally.counters().items():
+        setattr(witness, name, value)
 
 
 def _run_shuffle_join(
@@ -486,14 +485,18 @@ def _run_broadcast_join(
         build_here = backend.from_wire(cluster.get(node_i, build_digest))
         if node_i != 0:
             witness.cross_node_fetches += 1
-        if track_unmatched:
-            b_idx, _p_idx = backend.match_indices(
-                build_here, probe_block, on=list(on), how="inner"
-            )
-            tally.matched.update(int(x) for x in b_idx)
-        joined = join_with_budget(
-            backend, build_here, probe_block, on, per_block_how, mem_budget, cluster, node_i
+        matched, joined = join_probe_block(
+            backend,
+            build_here,
+            probe_block,
+            on,
+            per_block_how,
+            mem_budget,
+            cluster,
+            node_i,
+            track_unmatched=track_unmatched,
         )
+        tally.matched.update(matched or ())
         tally.add(pidx, joined)
 
     unmatched = tally.unmatched(len(build_concat)) if track_unmatched else ()

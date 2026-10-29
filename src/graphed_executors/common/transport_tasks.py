@@ -29,7 +29,7 @@ from graphed_executors.local._shuffle_kernels import (
     ShuffleWitness,
     coalesce_task,
     join_dest,
-    join_with_budget,
+    join_probe_block,
     sha256_hex,
     stage2_gather,
 )
@@ -198,14 +198,18 @@ def broadcast_join_part_body(
     build = backend.from_wire(build_wire)
     if take_indices is not None:
         build = backend.take(build, list(take_indices))
-    matched: tuple[int, ...] | None = None
-    if track_unmatched:
-        b_idx, _p_idx = backend.match_indices(build, probe_block, on=list(on), how="inner")
-        matched = tuple(int(x) for x in b_idx)
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, read = join_with_budget(
-            backend, build, probe_block, on, how, mem_budget, store, 0
+        matched, (chunks, hashes, peak, spilled, rows, read) = join_probe_block(
+            backend,
+            build,
+            probe_block,
+            on,
+            how,
+            mem_budget,
+            store,
+            0,
+            track_unmatched=track_unmatched,
         )
     finally:
         store.cleanup()

@@ -46,7 +46,7 @@ from .._plan_queue import PlanQueue
 from .._window import Window
 from ..common import refuse_staged
 from ._peer import PeerControl, make_bounds, slice_items
-from ._reduce import LazyReducer, plan_tree, running_fold, tree_reduce
+from ._reduce import LazyReducer, TreeProgress, running_fold, tree_reduce
 
 R = TypeVar("R")
 
@@ -497,23 +497,12 @@ class _BaseExecutor:
         n = len(tasks)
         if n == 0:
             return ExecResult(plan.empty(), 0, 0, StopReason.EXHAUSTED)
-        combines, root = plan_tree(n)
-        assert root is not None  # n >= 1
-        waiting: dict[int, list[int]] = {}  # input node -> combine indices needing it
-        remaining: dict[int, set[int]] = {}  # combine index -> still-unready inputs
-        first = list(range(n))  # node -> its first leaf (a combine's left input comes first)
-        for ci, (_out, a, b) in enumerate(combines):
-            remaining[ci] = {a, b}
-            waiting.setdefault(a, []).append(ci)
-            waiting.setdefault(b, []).append(ci)
-            first.append(first[a])
-
+        tree: TreeProgress[R] = TreeProgress(n)
         window = Window(control, self.max_workers, enumerate(tasks))
         with self._acquired_pool() as pool:
             submit = self._leaf_submit(pool, plan.process)
             self._emit_submitted(tasks)
             node_of: dict[Future[object], int] = {}
-            ready: dict[int, R] = {}
             n_combines = 0
             leaves_done = 0
             sent = 0
@@ -525,21 +514,15 @@ class _BaseExecutor:
                     break
                 for fut in window.wait(list(node_of)):
                     node = node_of.pop(fut)
-                    ready[node] = cast(R, fut.result())  # re-raises a worker error intact
+                    value = cast(R, fut.result())  # re-raises a worker error intact
                     if node < n:
                         leaves_done += 1
-                    for ci in waiting.get(node, ()):
-                        remaining[ci].discard(node)
-                        if not remaining[ci]:
-                            out, a, b = combines[ci]
-                            # a<b -> deterministic left/right grouping, same tree as the driver
-                            # path
-                            combine = cast("Callable[[object, object], object]", plan.combine)
-                            f2 = self._submit_combine(pool, combine, ready.pop(a), ready.pop(b))
-                            node_of[f2] = out
-                            n_combines += 1
-                            self._combine_cb(leaves_done)
-        pieces = [(first[node], v) for node, v in ready.items()]
+                    for out, a, b in tree.complete(node, value):
+                        combine = cast("Callable[[object, object], object]", plan.combine)
+                        node_of[self._submit_combine(pool, combine, a, b)] = out
+                        n_combines += 1
+                        self._combine_cb(leaves_done)
+        pieces = [(tree.first[node], v) for node, v in tree.ready.items()]
         return self._folded(
             plan, sorted(pieces, key=lambda p: p[0]), leaves_done, n_combines, window.stopped
         )

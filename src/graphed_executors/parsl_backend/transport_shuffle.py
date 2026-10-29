@@ -473,8 +473,8 @@ _PROBE_COLLECT_S = 15.0
 def _owned(blocks: Any, k: int, i: int) -> list[Any]:
     """Peer ``i``'s contiguous ascending range of ``blocks`` when ``k`` peers split them."""
     n = len(blocks)
-    t = min(k, n) if n else 0
-    return [blocks[s] for s in assign(n, t)[i]] if (n and i < t) else []
+    t = min(k, n)
+    return [blocks[s] for s in assign(n, t)[i]] if i < t else []
 
 
 def transport_run_repartition(
@@ -622,7 +622,7 @@ def transport_run_join(
         worker_addrs: tuple[str, ...],
         k: int,
     ) -> Any:
-        n_tasks = max(min(k, n_left) if n_left else 0, min(k, n_right) if n_right else 0)
+        n_tasks = max(min(k, n_left), min(k, n_right))
         return _assemble_join(results, worker_addrs, parts, n_tasks)
 
     return _run_shuffle(

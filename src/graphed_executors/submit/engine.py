@@ -59,7 +59,7 @@ from graphed.shuffle import pick
 
 from graphed_executors._plan_queue import PlanQueue
 from graphed_executors._window import PAUSED_WAKE_S, Window, wait_until
-from graphed_executors.local._reduce import plan_tree, running_fold
+from graphed_executors.local._reduce import TreeProgress, plan_tree, running_fold
 
 from .protocol import SubmitBackend, SubmitFuture
 from .services import ServiceSet
@@ -142,38 +142,6 @@ class _RunTasks:
             pending = [fut for fut in self._pending if not fut.done()]
         if pending:
             self._backend.cancel(pending)
-
-
-class _TreeProgress:
-    """The ``plan_tree`` of ``n`` leaves, completed node by node.
-
-    Each completed node's future is held in ``ready`` until the combine that takes it can start.
-    """
-
-    def __init__(self, n: int) -> None:
-        self.combines, _root = plan_tree(n)
-        self.first = list(range(n))  # node -> its first leaf (a combine's left input comes first)
-        self.ready: dict[int, SubmitFuture] = {}
-        self._waiting: dict[int, list[int]] = {}  # input node -> combine indices needing it
-        self._remaining: dict[int, set[int]] = {}  # combine index -> still-incomplete inputs
-        for ci, (_out, a, b) in enumerate(self.combines):
-            self._remaining[ci] = {a, b}
-            self._waiting.setdefault(a, []).append(ci)
-            self._waiting.setdefault(b, []).append(ci)
-            self.first.append(self.first[a])
-
-    def complete(
-        self, node: int, fut: SubmitFuture
-    ) -> list[tuple[int, SubmitFuture, SubmitFuture]]:
-        """Record ``node`` done; return each combine it readied as ``(out, left, right)``."""
-        self.ready[node] = fut
-        readied = []
-        for ci in self._waiting.get(node, ()):
-            self._remaining[ci].discard(node)
-            if not self._remaining[ci]:
-                out, a, b = self.combines[ci]
-                readied.append((out, self.ready.pop(a), self.ready.pop(b)))
-        return readied
 
 
 class SubmitRunner:
@@ -395,7 +363,7 @@ class SubmitRunner:
         """
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
         n = len(tasks)
-        tree = _TreeProgress(n)
+        tree: TreeProgress[SubmitFuture] = TreeProgress(n)
         plan_fp, ptoken, phandle = self._broadcast(plan.process, ctx)
         _cfp, ctoken, chandle = self._broadcast(plan.combine, ctx)
         if monitor is not None:

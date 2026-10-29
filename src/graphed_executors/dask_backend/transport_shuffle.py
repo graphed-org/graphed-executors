@@ -352,20 +352,11 @@ def transport_run_join(
     def _attempt(
         spec: Any, addresses: Sequence[str], k: int, _t: int
     ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
+        run = _Attempt(dbackend, spec, backend, addresses, k)
         if chosen:
             return _broadcast_join_attempt(
-                spec,
-                backend,
-                dbackend,
-                left_blocks,
-                right_blocks,
-                on_t,
-                how,
-                mem_budget_bytes,
-                addresses,
-                k,
+                run, left_blocks, right_blocks, on_t, how, mem_budget_bytes
             )
-        run = _Attempt(dbackend, spec, backend, addresses, k)
         return _shuffle_join_attempt(
             run,
             left_blocks,
@@ -402,8 +393,8 @@ def _shuffle_join_attempt(
     mem_budget: int | None,
     holder_budget: int | None,
 ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
-    t_l = min(run.k, len(left)) if left else 0
-    t_r = min(run.k, len(right)) if right else 0
+    t_l = min(run.k, len(left))
+    t_r = min(run.k, len(right))
     left_maps = run.maps(left, parts, salt, holder_budget, "lmap", t_l)
     right_maps = run.maps(right, parts, salt, holder_budget, "rmap", t_r)
     left_manifests = _collect_maps(left_maps, run.k)[0]
@@ -437,26 +428,19 @@ def _shuffle_join_attempt(
         broadcast_chosen=False,
         build_side_blocks=sum(len(m) for m in left_manifests.values()),
         large_side_blocks=sum(len(m) for m in right_manifests.values()),
-        peak_join_bytes=tally.peak,
-        join_spilled_partitions=tally.spilled,
-        join_chunks_read=tally.read,
-        join_output_rows=tally.rows,
+        **tally.counters(),
         manifest_fetch_is_per_dest=True,
     )
     return tally.value, tally.hashes, witness
 
 
 def _broadcast_join_attempt(
-    spec: Any,
-    backend: Any,
-    dbackend: Any,
+    run: _Attempt,
     left: Sequence[Any],
     right: Sequence[Any],
     on: tuple[str, ...],
     how: str,
     mem_budget: int | None,
-    addresses: Sequence[str],
-    k: int,
 ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
     if not left:
         return (
@@ -465,11 +449,11 @@ def _broadcast_join_attempt(
             ShuffleWitness(broadcast_chosen=True, n_producer_tasks=1, large_side_blocks=0),
         )
 
-    run = _Attempt(dbackend, spec, backend, addresses, k)
+    backend = run.backend
     build_concat = backend.concat(list(left))
     build_wire = bytes(backend.to_wire(build_concat))
-    handle = dbackend.broadcast(
-        build_wire, token=f"bjoin-{spec.epoch}-{sha256_hex(build_wire)[:12]}"
+    handle = run.dbackend.broadcast(
+        build_wire, token=f"bjoin-{run.spec.epoch}-{sha256_hex(build_wire)[:12]}"
     )
     per_block_how = BROADCAST_PER_BLOCK_HOW[how]
     track_unmatched = how in ("left", "outer")
@@ -517,11 +501,8 @@ def _broadcast_join_attempt(
         broadcast_chosen=True,
         large_side_blocks=0,
         # DISTINCT workers that resolved the build handle (== k here)
-        broadcast_puts=len({addresses[pidx % k] for pidx in range(len(right))}),
-        peak_join_bytes=tally.peak,
-        join_spilled_partitions=tally.spilled,
-        join_chunks_read=tally.read,
-        join_output_rows=tally.rows,
+        broadcast_puts=len({run.addresses[pidx % run.k] for pidx in range(len(right))}),
+        **tally.counters(),
     )
     return tally.value, tally.hashes, witness
 
