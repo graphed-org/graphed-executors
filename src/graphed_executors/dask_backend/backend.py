@@ -15,10 +15,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
-from graphed_executors.submit.engine import _identity
 from graphed_executors.submit.protocol import SubmitFuture
 
 from ._lazy import _distributed
+
+
+def _identity(x: bytes) -> bytes:
+    """Serve as the broadcast identity future's body: it places ``x`` once for many tasks."""
+    return x
 
 
 class DaskBackend:

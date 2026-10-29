@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from graphed_executors.common.tasks_engine import TaskJoinTally
 from graphed_executors.common.transport_run import harvest, run_epochs
 from graphed_executors.common.transport_tasks import (
     _GatherOut,
@@ -36,7 +37,6 @@ from graphed_executors.common.transport_tasks import (
 )
 from graphed_executors.local._shuffle_kernels import (
     BROADCAST_PER_BLOCK_HOW,
-    JoinTally,
     ShuffleWitness,
     assign,
     choose_broadcast,
@@ -419,7 +419,7 @@ def _shuffle_join_attempt(
         )
         for dest in range(parts)
     }
-    tally = JoinTally(next_key=parts)
+    tally = TaskJoinTally(next_key=parts)
     for dest, out in run.results(gather_futs).items():
         if out is not None:
             tally.add_out(dest, out)
@@ -473,7 +473,7 @@ def _broadcast_join_attempt(
         )
         for pidx, probe_block in enumerate(right)
     }
-    tally = JoinTally(next_key=len(right))
+    tally = TaskJoinTally(next_key=len(right))
     for pidx, out in run.results(part_futs).items():
         tally.add_out(pidx, out)
 

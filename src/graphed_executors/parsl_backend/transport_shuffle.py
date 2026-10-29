@@ -22,6 +22,7 @@ from typing import Any
 from graphed.debug import SourceFrame, StageError
 
 from graphed_executors.common.http_plane import PullTimeoutError
+from graphed_executors.common.tasks_engine import TaskJoinTally
 from graphed_executors.common.transport_run import (
     TransportShuffleResult,
     TransportWitness,
@@ -34,7 +35,6 @@ from graphed_executors.common.transport_tasks import (
     replay_reader_plane,
 )
 from graphed_executors.local._shuffle_kernels import (
-    JoinTally,
     ShuffleWitness,
     assign,
     sha256_hex,
@@ -227,7 +227,7 @@ def _gather_join(
     right_carrier = spec.get("right_carrier")
     # local placeholder keys; the driver re-keys overflow into ONE global sequence at assemble
     # (raw per-peer keys would collide across peers)
-    tally = JoinTally(next_key=spec["parts"])
+    tally = TaskJoinTally(next_key=spec["parts"])
     for dest in sorted(assign):
         per_side = assign[dest]
         out = gather_join_body(

@@ -409,12 +409,6 @@ class JoinTally:
             self.value[self.next_key], self.hashes[self.next_key] = ch, h
             self.next_key += 1
 
-    def add_out(self, key: int | None, out: Any) -> None:
-        """File one task's ``_JoinOut``, recording the build rows it matched."""
-        if out.matched is not None:
-            self.matched.update(out.matched)
-        self.add(key, (out.chunks, out.hashes, out.peak, out.spilled, out.rows, out.read))
-
     def counters(self) -> JoinCounters:
         """Return the summed join counters."""
         return {

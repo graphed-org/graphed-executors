@@ -66,7 +66,6 @@ from .services import ServiceSet
 from .worker import RunContext as RunContext
 from .worker import WorkerEnv as WorkerEnv
 from .worker import _combine_task, _event_from_dict, _leaf_task, _map_task, _stage_task
-from .worker import _identity as _identity
 from .worker import _reset_worker_env as _reset_worker_env
 from .worker import _service_checked as _service_checked
 from .worker import current_env as current_env

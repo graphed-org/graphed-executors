@@ -304,6 +304,17 @@ def _dask_broadcast_join_part(
     return _JoinOut(-1, chunks, hashes, peak, spilled, rows, _site(), matched, read)
 
 
+@dataclass
+class TaskJoinTally(JoinTally):
+    """A :class:`JoinTally` the task engines file their ``_JoinOut`` returns into."""
+
+    def add_out(self, key: int | None, out: Any) -> None:
+        """File one task's ``_JoinOut``, recording the build rows it matched."""
+        if out.matched is not None:
+            self.matched.update(out.matched)
+        self.add(key, (out.chunks, out.hashes, out.peak, out.spilled, out.rows, out.read))
+
+
 # ---- the shared driver: the peer engine picks on the holders, the relay on the driver ----------
 @dataclass
 class RelayShuffleWitness(DaskShuffleWitness):
@@ -491,7 +502,7 @@ def _shuffle_join(
         for dest in range(parts)
     ]
 
-    tally = JoinTally(next_key=parts)
+    tally = TaskJoinTally(next_key=parts)
     gather_sites: dict[int, tuple[int, str]] = {}
     for dest, fut in enumerate(gather_futs):
         out = cast("_JoinOut | None", fut.result())
@@ -549,7 +560,7 @@ def _broadcast_join(
         for pidx, probe_block in enumerate(right_blocks)
     ]
 
-    tally = JoinTally(next_key=len(right_blocks))
+    tally = TaskJoinTally(next_key=len(right_blocks))
     gather_sites: dict[int, tuple[int, str]] = {}
     for pidx, fut in enumerate(part_futs):
         out = cast("_JoinOut", fut.result())

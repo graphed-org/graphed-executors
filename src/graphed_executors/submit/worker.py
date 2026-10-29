@@ -142,14 +142,6 @@ def _shared_payload(token: str, raw: bytes) -> object:
 # ---- module-level spawn-safe task entry points (pickled BY REFERENCE, never by value) -----------
 
 
-def _identity(x: bytes) -> bytes:
-    """Serve as the broadcast identity future's body.
-
-    It places ``x`` once, referenced by many tasks.
-    """
-    return x
-
-
 def _event_dict(
     phase: TaskPhase, key: int, worker: str, label: str, n_entries: int, error: str | None
 ) -> dict[str, object]:
