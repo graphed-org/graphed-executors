@@ -13,7 +13,7 @@ from typing import Any
 
 def _distributed() -> Any:
     try:
-        import distributed  # noqa: PLC0415  (lazy: dask is the optional extra)
+        import distributed
     except (
         ImportError
     ) as exc:  # pragma: no cover - exercised via the no-dask frozen test (subprocess)
