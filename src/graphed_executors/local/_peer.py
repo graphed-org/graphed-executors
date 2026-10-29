@@ -131,18 +131,6 @@ def process_and_reduce(
     Run ``process`` on its leaves, peer-reduce over the transport, and return witness counters.
     Runs in a thread (ThreadExecutor) or a worker process (ProcessExecutor).
 
-    **Work-stealing** (``steal=True``, the default): a worker that drains its own leaves steals
-    from a busy peer. Stealing redistributes only the ``process`` work — the leaf's **owner still
-    settles it** into the reduction (a thief ships the computed partial back as a ``leaf``
-    message), so the fixed tree and the result are **unchanged**: stealing moves *where* a leaf is
-    computed, never *where* it reduces. The loop interleaves a non-blocking inbox drain between
-    leaves, so a busy worker answers steal requests; every send is handed to the :class:`Outbox`
-    thread, so the actor never blocks writing to a peer (the R20.7 rule) and its own inbox is
-    always being drained — the property that makes a send cycle between peers impossible for
-    partials larger than the OS pipe buffer. The actor also RETURNS in bounded time: a peer that
-    crashed stops reading, so the exit wait for queued sends is capped (``OUTBOX_EXIT_WAIT_S``) and
-    an abandoned write dies with the worker process.
-
     ``resources`` (its ``open_once`` cache) is supplied by the caller; ``close_resources=False``
     keeps it open across runs (a persistent pool reusing file handles, like the hub path).
 
@@ -172,39 +160,15 @@ def process_and_reduce(
         lean=lean,
         keys=keys,
     )
-    # off-thread profiler parity with the hub: a worker samples its task thread and ships the
-    # flamegraph tree to the driver (forwarded to monitor.on_profile), throttled so the serialize
-    # is never per-leaf.
+    # off-thread profiler parity with the hub: the worker samples its task thread, and run() ships
+    # the flamegraph tree to the driver at most once per PROFILE_FLUSH_INTERVAL
     profiler = None
-    last_flush = time.monotonic()
     if profiler_factory is not None:
         with contextlib.suppress(Exception):  # a profiler that won't start just disables sampling
             profiler = profiler_factory()
             profiler.start()
     try:
-        while not actor.done:
-            if released(release):  # the driver's run ended, however it ended
-                break
-            # a failed send (an unpicklable partial) never reaches the root
-            if actor.outbox.error is not None:
-                raise actor.outbox.error
-            actor.drain()
-            if actor.done:
-                break
-            if emit:
-                # batch off-path: one send per leaf-ish, negligible for coarse partitions
-                actor.ship_events()
-            if profiler is not None and time.monotonic() - last_flush >= PROFILE_FLUSH_INTERVAL:
-                with contextlib.suppress(Exception):
-                    actor.ship_profile(profiler.flush())
-                last_flush = time.monotonic()
-            actor.step(resources)
-        if emit:
-            # final flush after `done` — the driver drains until workers finish
-            actor.ship_events()
-        if profiler is not None:
-            with contextlib.suppress(Exception):
-                actor.ship_profile(profiler.stop())  # final sample tree + join the sampler thread
+        actor.run(resources, release, profiler)
         # let the queued sends land, but never hang here
         send_error = actor.outbox.close(OUTBOX_EXIT_WAIT_S)
     except BaseException:
@@ -222,10 +186,22 @@ def process_and_reduce(
 
 
 class _PeerActor(Generic[R]):
-    """One worker's peer-reduction state, driven a step at a time by :func:`process_and_reduce`.
+    """One worker's peer-reduction state, run by :func:`process_and_reduce` through :meth:`run`.
 
     It owns the leaves left to process (its own and stolen ones), the reducer it settles them
     into, the steal backoff, and the run-control tags the driver sent.
+
+    **Work-stealing** (``steal=True``, the default): a worker that drains its own leaves steals
+    from a busy peer. Stealing redistributes only the ``process`` work — the leaf's **owner still
+    settles it** into the reduction (a thief ships the computed partial back as a ``leaf``
+    message), so the fixed tree and the result are **unchanged**: stealing moves *where* a leaf is
+    computed, never *where* it reduces. The loop interleaves a non-blocking inbox drain between
+    leaves, so a busy worker answers steal requests; every send is handed to the :class:`Outbox`
+    thread, so the actor never blocks writing to a peer (the R20.7 rule) and its own inbox is
+    always being drained — the property that makes a send cycle between peers impossible for
+    partials larger than the OS pipe buffer. The actor also RETURNS in bounded time: a peer that
+    crashed stops reading, so the exit wait for queued sends is capped (``OUTBOX_EXIT_WAIT_S``) and
+    an abandoned write dies with the worker process.
     """
 
     def __init__(
@@ -380,6 +356,33 @@ class _PeerActor(Generic[R]):
             )
         else:
             self.outbox.send(thief, ("steal_resp", [], (-1 - self.me, 0)))
+
+    def run(self, resources: LocalResources, release: Any, profiler: Any) -> None:
+        """Process, steal and settle until ``done`` or the release, then ship the last events."""
+        last_flush = time.monotonic()
+        while not self.done:
+            if released(release):  # the driver's run ended, however it ended
+                break
+            # a failed send (an unpicklable partial) never reaches the root
+            if self.outbox.error is not None:
+                raise self.outbox.error
+            self.drain()
+            if self.done:
+                break
+            if self._emit:
+                # batch off-path: one send per leaf-ish, negligible for coarse partitions
+                self.ship_events()
+            if profiler is not None and time.monotonic() - last_flush >= PROFILE_FLUSH_INTERVAL:
+                with contextlib.suppress(Exception):
+                    self.ship_profile(profiler.flush())
+                last_flush = time.monotonic()
+            self.step(resources)
+        if self._emit:
+            # final flush after `done` — the driver drains until workers finish
+            self.ship_events()
+        if profiler is not None:
+            with contextlib.suppress(Exception):
+                self.ship_profile(profiler.stop())  # final sample tree + join the sampler thread
 
     def drain(self) -> None:
         """Handle the buffered messages, then a cheap non-blocking drain between leaves."""
