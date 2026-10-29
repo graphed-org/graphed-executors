@@ -347,7 +347,7 @@ def transport_run_join(
 
     ensure_engine_plugins(dbackend.client)
     on_t = tuple(on)
-    chosen = choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast)
+    chosen = choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast=broadcast)
 
     def _attempt(
         spec: Any, addresses: Sequence[str], k: int, _t: int

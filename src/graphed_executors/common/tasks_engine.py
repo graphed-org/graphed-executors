@@ -314,7 +314,7 @@ class RelayShuffleWitness(DaskShuffleWitness):
     driver_relay_bytes: int = 0
 
 
-def _witness(relay: bool, relay_bytes: int, **fields: Any) -> DaskShuffleWitness:
+def _witness(relay_bytes: int, *, relay: bool, **fields: Any) -> DaskShuffleWitness:
     if relay:
         return RelayShuffleWitness(**fields, driver_relay_bytes=relay_bytes)
     return DaskShuffleWitness(**fields)
@@ -345,7 +345,12 @@ def _submit_maps(
 
 
 def _pick_tier(
-    runner: SubmitRunner, map_futs: list[Any], parts: int, key: tuple[str, str], relay: bool
+    runner: SubmitRunner,
+    map_futs: list[Any],
+    parts: int,
+    key: tuple[str, str],
+    *,
+    relay: bool,
 ) -> tuple[list[list[Any]], int]:
     """Return each dest's picks in ascending-producer order, and the bytes relayed by the driver.
 
@@ -372,13 +377,14 @@ def _repartition(
     parts: int,
     runner: SubmitRunner,
     salt: int,
+    *,
     relay: bool,
 ) -> ShuffleResult:
     n_src = len(src_blocks)
     t = min(runner.backend.n_workers(), n_src) if n_src else 1
     nonce = uuid.uuid4().hex[:8]
     map_futs = _submit_maps(runner, backend, src_blocks, parts, salt, t, (nonce, "map"))
-    picks, relay_bytes = _pick_tier(runner, map_futs, parts, (nonce, "pick"), relay)
+    picks, relay_bytes = _pick_tier(runner, map_futs, parts, (nonce, "pick"), relay=relay)
     gather_futs = [
         runner.backend.submit(
             _dask_gather, backend, dest, *picks[dest], key=_skey(nonce, "gather", dest)
@@ -399,8 +405,8 @@ def _repartition(
     # small metadata pull; on the peer engine the payloads stay worker-side for the gathers
     map_outs = [cast("_MapOut", f.result()) for f in map_futs]
     witness = _witness(
-        relay,
         relay_bytes,
+        relay=relay,
         n_producer_tasks=t,
         blocks_per_producer_task={i: mo.blocks for i, mo in enumerate(map_outs)},
         peak_writer_buffer_bytes=max((mo.peak for mo in map_outs), default=0),
@@ -426,11 +432,12 @@ def _join(
     spec: _JoinSpec,
     runner: SubmitRunner,
     broadcast: bool | None,
+    *,
     relay: bool,
 ) -> ShuffleResult:
-    if choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast):
-        return _broadcast_join(backend, left_blocks, right_blocks, spec, runner, relay)
-    return _shuffle_join(backend, left_blocks, right_blocks, parts, spec, runner, relay)
+    if choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast=broadcast):
+        return _broadcast_join(backend, left_blocks, right_blocks, spec, runner, relay=relay)
+    return _shuffle_join(backend, left_blocks, right_blocks, parts, spec, runner, relay=relay)
 
 
 def _shuffle_join(
@@ -440,6 +447,7 @@ def _shuffle_join(
     parts: int,
     spec: _JoinSpec,
     runner: SubmitRunner,
+    *,
     relay: bool,
 ) -> ShuffleResult:
     nonce = uuid.uuid4().hex[:8]
@@ -452,8 +460,10 @@ def _shuffle_join(
     right_maps = _submit_maps(
         runner, backend, right_blocks, parts, spec.salt, t_r, (nonce, "rmap")
     )
-    left_picks, left_relayed = _pick_tier(runner, left_maps, parts, (nonce, "lpick"), relay)
-    right_picks, right_relayed = _pick_tier(runner, right_maps, parts, (nonce, "rpick"), relay)
+    left_picks, left_relayed = _pick_tier(runner, left_maps, parts, (nonce, "lpick"), relay=relay)
+    right_picks, right_relayed = _pick_tier(
+        runner, right_maps, parts, (nonce, "rpick"), relay=relay
+    )
     # F1 schema carriers for one-sided dests (None when a whole side is partitionless)
     left_carrier = left_blocks[0] if left_blocks else None
     right_carrier = right_blocks[0] if right_blocks else None
@@ -483,8 +493,8 @@ def _shuffle_join(
             gather_sites[dest] = out.site
             tally.add_out(dest, out)
     witness = _witness(
-        relay,
         left_relayed + right_relayed,
+        relay=relay,
         n_producer_tasks=max(t_l, t_r),
         broadcast_chosen=False,
         peak_join_bytes=tally.peak,
@@ -501,10 +511,11 @@ def _broadcast_join(
     right_blocks: Sequence[Any],
     spec: _JoinSpec,
     runner: SubmitRunner,
+    *,
     relay: bool,
 ) -> ShuffleResult:
     if not left_blocks:
-        return _result({}, {}, _witness(relay, 0, broadcast_chosen=True, n_producer_tasks=1))
+        return _result({}, {}, _witness(0, relay=relay, broadcast_chosen=True, n_producer_tasks=1))
     submit = runner.backend.submit
     nonce = uuid.uuid4().hex[:8]
     build_concat = backend.concat(list(left_blocks))
@@ -557,8 +568,8 @@ def _broadcast_join(
         tally.add_out(None, cast("_JoinOut", tail.result()))
 
     witness = _witness(
-        relay,
         len(build_wire),
+        relay=relay,
         n_producer_tasks=len(right_blocks) or 1,
         broadcast_chosen=True,
         peak_join_bytes=tally.peak,

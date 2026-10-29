@@ -552,7 +552,7 @@ def run_join(
     """
     faults = faults if faults is not None else ShuffleFaults()
     k = max(1, workers)
-    chosen = choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast)
+    chosen = choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast=broadcast)
     cluster = _make_cluster(comms, k, store_root, advertise_host)
     try:
         witness = ShuffleWitness()

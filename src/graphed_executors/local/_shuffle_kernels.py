@@ -276,6 +276,7 @@ def choose_broadcast(
     left_blocks: Sequence[Any],
     right_blocks: Sequence[Any],
     parts: int,
+    *,
     broadcast: bool | None,
 ) -> bool:
     """Honour a plan-recorded ``broadcast`` choice, else apply the pinned cost rule.
