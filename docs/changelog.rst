@@ -1,8 +1,8 @@
 What changed
 ============
 
-Unreleased
-----------
+0.0.7
+-----
 
 Requires ``graphed`` 0.0.10 or later.
 
@@ -21,6 +21,8 @@ Requires ``graphed`` 0.0.10 or later.
 * An ``http:`` readiness check that gets a non-HTTP answer reports the service unreachable: the
   parse error (``http.client.BadStatusLine``) escaped the probe, e.g. on a TCP self-connect to a
   closed loopback port.
+* A broadcast join whose build side is empty keeps every probe row for ``how="right"`` and
+  ``how="outer"``: the local, tasks/relay and dask-transport engines returned nothing (#91).
 
 0.0.6
 -----
