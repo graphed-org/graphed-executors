@@ -17,12 +17,16 @@ from __future__ import annotations
 
 import contextlib
 import traceback
-from collections.abc import Mapping
+import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from graphed.core import Plan
 from graphed.debug import SourceFrame, StageError
+
+K = TypeVar("K")
+R = TypeVar("R")
 
 
 @dataclass
@@ -68,6 +72,12 @@ class TransportExecResult:
 def finalized(plan: Plan[Any], value: Any) -> Any:
     """Return the root ``value`` through ``plan.finalize``, on the driver."""
     return value if plan.finalize is None else plan.finalize(value)
+
+
+def empty_run(plan: Plan[Any]) -> TransportExecResult:
+    """Return a task-less plan's result: its finalized identity, under one epoch that never ran."""
+    witness = TransportWitness(epoch_nonces=[uuid.uuid4().hex])
+    return TransportExecResult(finalized(plan, plan.empty()), 0, 0, witness)
 
 
 def merge_counters(
@@ -180,3 +190,46 @@ def build_stage_error(exc: BaseException, backend: Any) -> Any:
         cause_message=_with_frames(exc),
         opt_level=0,
     )
+
+
+def harvest(futures: Mapping[K, Any]) -> tuple[dict[K, Any], dict[K, BaseException]]:
+    """Resolve every future, keeping each one's result or exception.
+
+    All of them are resolved, never just up to the first failure: the restart decision and the
+    attributed error weigh every outcome.
+    """
+    results: dict[K, Any] = {}
+    errs: dict[K, BaseException] = {}
+    for key, fut in futures.items():
+        try:
+            results[key] = fut.result()
+        except BaseException as exc:  # any task outcome, including a worker death, is data here
+            errs[key] = exc
+    return results, errs
+
+
+def run_epochs(
+    attempt: Callable[[int, str], R | BaseException],
+    *,
+    restarts_allowed: int,
+    backend: Any,
+    witness: TransportWitness,
+    stage_error: Callable[[BaseException, Any], Any] = build_stage_error,
+) -> R:
+    """Run ``attempt(n, epoch_nonce)`` under a fresh epoch until it returns a result (§1.5).
+
+    ``attempt`` returns its result, or the exception that failed the run. A restart-worthy
+    failure re-runs the WHOLE run under a fresh epoch, up to ``restarts_allowed`` times; any
+    other failure, or the last one, raises as ``stage_error(exc, backend)``. An exception
+    ``attempt`` raises propagates as-is.
+    """
+    for n in range(restarts_allowed + 1):
+        nonce = uuid.uuid4().hex
+        witness.epoch_nonces.append(nonce)
+        out = attempt(n, nonce)
+        if not isinstance(out, BaseException):
+            witness.epoch_restarts = n
+            return out
+        if not is_restart_worthy(out, backend) or n >= restarts_allowed:
+            raise stage_error(out, backend) from out
+    raise RuntimeError("no epochs run")
