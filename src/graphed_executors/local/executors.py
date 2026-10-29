@@ -81,6 +81,8 @@ def _exceeds_fd_budget(w: int) -> bool:
 
 # ---- per-worker resources --------------------------------------------------
 _thread_local = threading.local()
+# the _proc_* state is module-global: _proc_init, the pool initializer, can reach the later task
+# calls in its worker process no other way
 _proc_resources: LocalResources | None = None
 # M37: a worker->driver side channel for dashboard events (a bounded queue proxy, set by the
 # process pool initializer) + a per-worker statistical profiler. Both are None unless a Monitor is
@@ -116,7 +118,7 @@ _HUB_EVENT_DRAIN_S = 2.0
 # worker's interpreter tears down module globals, or a late sample touches half-collected state.
 _live_profilers: list[WorkerProfiler] = []
 _profiler_lock = threading.Lock()
-_atexit_registered = False
+_atexit_registered = False  # atexit hooks are per process, so the once-flag is a module global
 
 
 def _register_profiler(profiler: WorkerProfiler) -> None:
