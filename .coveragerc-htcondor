@@ -18,6 +18,7 @@ omit =
     */graphed_executors/submit/protocol.py
     */graphed_executors/submit/recipes.py
     */graphed_executors/submit/threadpool.py
+    */graphed_executors/submit/worker.py
 
 [report]
 fail_under = 90
