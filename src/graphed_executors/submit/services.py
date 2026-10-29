@@ -39,6 +39,7 @@ started set and passing its :class:`Endpoints` as the runner's ``services`` (leg
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import errno
 import http.client
 import importlib
@@ -261,7 +262,6 @@ def physical_memory_mb() -> int:
     ``GlobalMemoryStatusEx`` on Windows, ``os.sysconf`` pages elsewhere.
     """
     if sys.platform == "win32":
-        import ctypes  # noqa: PLC0415  (Windows only)
 
         class _MemoryStatusEx(ctypes.Structure):
             _fields_ = [
