@@ -40,6 +40,7 @@ from graphed_executors.local._shuffle_kernels import (
     ShuffleWitness,
     assign,
     choose_broadcast,
+    empty_build_join,
     sha256_hex,
 )
 
@@ -443,11 +444,11 @@ def _broadcast_join_attempt(
     mem_budget: int | None,
 ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
     if not left:
-        return (
-            {},
-            {},
-            ShuffleWitness(broadcast_chosen=True, n_producer_tasks=1, large_side_blocks=0),
+        kept = empty_build_join(run.backend, right, how)
+        witness = ShuffleWitness(
+            broadcast_chosen=True, n_producer_tasks=1, large_side_blocks=0, **kept.counters()
         )
+        return kept.value, kept.hashes, witness
 
     backend = run.backend
     build_concat = backend.concat(list(left))

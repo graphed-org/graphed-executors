@@ -56,6 +56,7 @@ from graphed_executors.local._shuffle_kernels import (
     assign,
     choose_broadcast,
     coalesce_task,
+    empty_build_join,
     join_dest,
     join_probe_block,
     sha256_hex,
@@ -532,7 +533,18 @@ def _broadcast_join(
     relay: bool,
 ) -> ShuffleResult:
     if not left_blocks:
-        return _result({}, {}, _witness(0, relay=relay, broadcast_chosen=True, n_producer_tasks=1))
+        kept = empty_build_join(backend, right_blocks, spec.how)
+        return _result(
+            kept.hashes,
+            kept.value,
+            _witness(
+                0,
+                relay=relay,
+                broadcast_chosen=True,
+                n_producer_tasks=1,
+                join_output_rows=kept.rows,
+            ),
+        )
     submit = runner.backend.submit
     nonce = uuid.uuid4().hex[:8]
     build_concat = backend.concat(list(left_blocks))

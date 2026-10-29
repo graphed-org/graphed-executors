@@ -367,6 +367,21 @@ def _pass_through(backend: ShuffleBackend[Any, Any], blocks: list[Any]) -> JoinR
     return [blk], [sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), 0
 
 
+def empty_build_join(
+    backend: ShuffleBackend[Any, Any], right_blocks: Sequence[Any], how: str
+) -> JoinTally:
+    """Join against a build side with no partitions, as a broadcast join.
+
+    how=right/outer keeps every probe row as-is, keyed by probe-partition index (the shuffle
+    path's carrier-less pass-through); inner/left keep none.
+    """
+    tally = JoinTally(next_key=len(right_blocks))
+    if how in ("right", "outer"):
+        for pidx, block in enumerate(right_blocks):
+            tally.add(pidx, _pass_through(backend, [block]))
+    return tally
+
+
 class JoinCounters(TypedDict):
     """The join counters, keyed by their ``ShuffleWitness`` field names."""
 

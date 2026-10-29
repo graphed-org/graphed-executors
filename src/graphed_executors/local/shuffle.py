@@ -61,6 +61,7 @@ from ._shuffle_kernels import (
     assign,
     choose_broadcast,
     coalesce_task,
+    empty_build_join,
     join_dest,
     join_probe_block,
     join_with_budget,
@@ -467,7 +468,9 @@ def _run_broadcast_join(
     exactly-once.
     """
     if not left_blocks:
-        return {}, {}
+        tally = empty_build_join(backend, right_blocks, how)
+        _record_join(witness, tally)
+        return tally.value, tally.hashes
     build_concat = backend.concat(list(left_blocks))
     build_wire = backend.to_wire(build_concat)
     build_digest = sha256_hex(build_wire)
