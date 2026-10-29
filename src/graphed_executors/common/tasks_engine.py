@@ -47,13 +47,16 @@ from typing import TYPE_CHECKING, Any, cast
 
 from graphed.core import ShuffleBackend
 from graphed.core.execution import JoinBackend
-from graphed.shuffle import broadcast_join_choice
 
 from graphed_executors.local._shuffle_kernels import (
+    BROADCAST_PER_BLOCK_HOW,
+    JoinTally,
     ShuffleResult,
     ShuffleWitness,
     assign,
+    choose_broadcast,
     coalesce_task,
+    join_dest,
     join_with_budget,
     sha256_hex,
 )
@@ -189,6 +192,7 @@ class _JoinOut:
     rows: int
     site: tuple[int, str]
     matched: tuple[int, ...] | None = None
+    read: int = 0
 
 
 def _dask_map_write(backend: Any, owned_blocks: Sequence[Any], parts: int, salt: int) -> _MapOut:
@@ -237,45 +241,29 @@ def _dask_gather_join(
 ) -> _JoinOut | None:
     """Gather one dest's co-partitioned build/probe blocks (ascending-task order) and join them.
 
-    Spilling under ``mem_budget`` via the reused ``join_with_budget``. F1 one-sided-dest handling
-    mirrors ``_run_shuffle_join``: a build-only dest under how=left/outer null-fills against the
-    probe schema carrier (``right_carrier``), and vice versa; a partitionless absent side (carrier
-    ``None``) keeps the present rows as-is.
+    Spilling under ``mem_budget``, one-sided dests included (the shared ``join_dest``, F1).
     """
     build_side = [backend.from_wire(w) for w in picks[:n_left] if w is not None]
     probe_side = [backend.from_wire(w) for w in picks[n_left:] if w is not None]
-    if not build_side and not probe_side:
-        return None
-    if not build_side and how not in ("right", "outer"):
-        return None  # probe-only dest, but how keeps no unmatched-probe rows
-    if not probe_side and how not in ("left", "outer"):
-        return None  # build-only dest, but how keeps no unmatched-build rows
-
-    if build_side and probe_side:
-        build, probe, how_here = backend.concat(build_side), backend.concat(probe_side), how
-    elif build_side:
-        if right_carrier is None:  # partitionless probe side -> keep the build rows (never drop)
-            blk = backend.concat(build_side)
-            return _JoinOut(
-                dest, [blk], [sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
-            )
-        build, probe, how_here = backend.concat(build_side), right_carrier, "left"
-    else:
-        if left_carrier is None:  # partitionless build side -> keep the probe rows (never drop)
-            blk = backend.concat(probe_side)
-            return _JoinOut(
-                dest, [blk], [sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), _site()
-            )
-        build, probe, how_here = left_carrier, backend.concat(probe_side), "right"
-
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, _read = join_with_budget(
-            backend, build, probe, on, how_here, mem_budget, store, 0
+        joined = join_dest(
+            backend,
+            build_side,
+            probe_side,
+            on,
+            how,
+            mem_budget,
+            (left_carrier, right_carrier),
+            store,
+            0,
         )
     finally:
         store.cleanup()
-    return _JoinOut(dest, chunks, hashes, peak, spilled, rows, _site())
+    if joined is None:
+        return None
+    chunks, hashes, peak, spilled, rows, read = joined
+    return _JoinOut(dest, chunks, hashes, peak, spilled, rows, _site(), read=read)
 
 
 def _dask_broadcast_join_part(
@@ -304,12 +292,281 @@ def _dask_broadcast_join_part(
         matched = tuple(int(x) for x in b_idx)
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, _read = join_with_budget(
+        chunks, hashes, peak, spilled, rows, read = join_with_budget(
             backend, build, probe_block, on, how, mem_budget, store, 0
         )
     finally:
         store.cleanup()
-    return _JoinOut(-1, chunks, hashes, peak, spilled, rows, _site(), matched)
+    return _JoinOut(-1, chunks, hashes, peak, spilled, rows, _site(), matched, read)
+
+
+# ---- the shared driver: the peer engine picks on the holders, the relay on the driver ----------
+@dataclass
+class RelayShuffleWitness(DaskShuffleWitness):
+    """The :class:`DaskShuffleWitness` mechanism counters PLUS the head-node-routing witnesses.
+
+    ``head_node_routed`` is True on every relay result, and ``driver_relay_bytes`` is the Σ of all
+    map-payload wire sizes resolved at the driver barrier (design-M2) — an unlabeled relay or a
+    stubbed tally fails the frozen witness.
+    """
+
+    head_node_routed: bool = True
+    driver_relay_bytes: int = 0
+
+
+def _witness(relay: bool, relay_bytes: int, **fields: Any) -> DaskShuffleWitness:
+    if relay:
+        return RelayShuffleWitness(**fields, driver_relay_bytes=relay_bytes)
+    return DaskShuffleWitness(**fields)
+
+
+def _submit_maps(
+    runner: SubmitRunner,
+    backend: Any,
+    blocks: Sequence[Any],
+    parts: int,
+    salt: int,
+    t: int,
+    key: tuple[str, str],
+) -> list[Any]:
+    """Submit ``t`` producer maps over contiguous ascending ranges of ``blocks`` (none if 0)."""
+    nonce, tag = key
+    return [
+        runner.backend.submit(
+            _dask_map_write,
+            backend,
+            [blocks[s] for s in owned],
+            parts,
+            salt,
+            key=_skey(nonce, tag, i),
+        )
+        for i, owned in enumerate(assign(len(blocks), t) if t else [])
+    ]
+
+
+def _pick_tier(
+    runner: SubmitRunner, map_futs: list[Any], parts: int, key: tuple[str, str], relay: bool
+) -> tuple[list[list[Any]], int]:
+    """Return each dest's picks in ascending-producer order, and the bytes relayed by the driver.
+
+    The peer engine submits one pick per (producer, dest), which runs ON the holder so a gather
+    pulls one block. The relay resolves every map at a driver barrier and picks locally — zero
+    pick submits, the T·P tier's ~P-fold driver-traffic amplification avoided.
+    """
+    if relay:
+        outs = [cast("_MapOut", f.result()) for f in map_futs]
+        relay_bytes = sum(len(w) for mo in outs for w in mo.payload.values())
+        return [[_dask_pick(mo, dest) for mo in outs] for dest in range(parts)], relay_bytes
+    nonce, tag = key
+    picks = {
+        (i, dest): runner.backend.submit(_dask_pick, f, dest, key=_skey(nonce, tag, i, dest))
+        for i, f in enumerate(map_futs)
+        for dest in range(parts)
+    }
+    return [[picks[(i, dest)] for i in range(len(map_futs))] for dest in range(parts)], 0
+
+
+def _repartition(
+    backend: ShuffleBackend[Any, Any],
+    src_blocks: Sequence[Any],
+    parts: int,
+    runner: SubmitRunner,
+    salt: int,
+    relay: bool,
+) -> ShuffleResult:
+    n_src = len(src_blocks)
+    t = min(runner.backend.n_workers(), n_src) if n_src else 1
+    nonce = uuid.uuid4().hex[:8]
+    map_futs = _submit_maps(runner, backend, src_blocks, parts, salt, t, (nonce, "map"))
+    picks, relay_bytes = _pick_tier(runner, map_futs, parts, (nonce, "pick"), relay)
+    gather_futs = [
+        runner.backend.submit(
+            _dask_gather, backend, dest, *picks[dest], key=_skey(nonce, "gather", dest)
+        )
+        for dest in range(parts)
+    ]
+
+    value: dict[int, Any] = {}
+    dest_block_hashes: dict[int, str] = {}
+    gather_sites: dict[int, tuple[int, str]] = {}
+    for fut in gather_futs:
+        out = cast("_GatherOut | None", fut.result())
+        if out is not None:
+            value[out.dest] = out.block
+            dest_block_hashes[out.dest] = out.hash
+            gather_sites[out.dest] = out.site
+
+    # small metadata pull; on the peer engine the payloads stay worker-side for the gathers
+    map_outs = [cast("_MapOut", f.result()) for f in map_futs]
+    witness = _witness(
+        relay,
+        relay_bytes,
+        n_producer_tasks=t,
+        blocks_per_producer_task={i: mo.blocks for i, mo in enumerate(map_outs)},
+        peak_writer_buffer_bytes=max((mo.peak for mo in map_outs), default=0),
+        producer_sites={i: mo.site for i, mo in enumerate(map_outs)},
+        gather_sites=gather_sites,
+    )
+    return _result(dest_block_hashes, value, witness)
+
+
+@dataclass(frozen=True)
+class _JoinSpec:
+    on: tuple[str, ...]
+    how: str
+    salt: int
+    mem_budget: int | None
+
+
+def _join(
+    backend: JoinBackend[Any, Any],
+    left_blocks: Sequence[Any],
+    right_blocks: Sequence[Any],
+    parts: int,
+    spec: _JoinSpec,
+    runner: SubmitRunner,
+    broadcast: bool | None,
+    relay: bool,
+) -> ShuffleResult:
+    if choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast):
+        return _broadcast_join(backend, left_blocks, right_blocks, spec, runner, relay)
+    return _shuffle_join(backend, left_blocks, right_blocks, parts, spec, runner, relay)
+
+
+def _shuffle_join(
+    backend: Any,
+    left_blocks: Sequence[Any],
+    right_blocks: Sequence[Any],
+    parts: int,
+    spec: _JoinSpec,
+    runner: SubmitRunner,
+    relay: bool,
+) -> ShuffleResult:
+    nonce = uuid.uuid4().hex[:8]
+    n_workers = runner.backend.n_workers()
+    t_l = min(n_workers, len(left_blocks)) if left_blocks else 0
+    t_r = min(n_workers, len(right_blocks)) if right_blocks else 0
+    # submit ALL maps (both sides) before any pick tier resolves them, so the whole map phase runs
+    # in parallel across the pool
+    left_maps = _submit_maps(runner, backend, left_blocks, parts, spec.salt, t_l, (nonce, "lmap"))
+    right_maps = _submit_maps(
+        runner, backend, right_blocks, parts, spec.salt, t_r, (nonce, "rmap")
+    )
+    left_picks, left_relayed = _pick_tier(runner, left_maps, parts, (nonce, "lpick"), relay)
+    right_picks, right_relayed = _pick_tier(runner, right_maps, parts, (nonce, "rpick"), relay)
+    # F1 schema carriers for one-sided dests (None when a whole side is partitionless)
+    left_carrier = left_blocks[0] if left_blocks else None
+    right_carrier = right_blocks[0] if right_blocks else None
+    gather_futs = [
+        runner.backend.submit(
+            _dask_gather_join,
+            backend,
+            dest,
+            spec.on,
+            spec.how,
+            spec.mem_budget,
+            left_carrier,
+            right_carrier,
+            t_l,
+            *left_picks[dest],
+            *right_picks[dest],
+            key=_skey(nonce, "gjoin", dest),
+        )
+        for dest in range(parts)
+    ]
+
+    tally = JoinTally(next_key=parts)
+    gather_sites: dict[int, tuple[int, str]] = {}
+    for dest, fut in enumerate(gather_futs):
+        out = cast("_JoinOut | None", fut.result())
+        if out is not None:
+            gather_sites[dest] = out.site
+            tally.add_out(dest, out)
+    witness = _witness(
+        relay,
+        left_relayed + right_relayed,
+        n_producer_tasks=max(t_l, t_r),
+        broadcast_chosen=False,
+        peak_join_bytes=tally.peak,
+        join_spilled_partitions=tally.spilled,
+        join_output_rows=tally.rows,
+        gather_sites=gather_sites,
+    )
+    return _result(tally.hashes, tally.value, witness)
+
+
+def _broadcast_join(
+    backend: Any,
+    left_blocks: Sequence[Any],
+    right_blocks: Sequence[Any],
+    spec: _JoinSpec,
+    runner: SubmitRunner,
+    relay: bool,
+) -> ShuffleResult:
+    if not left_blocks:
+        return _result({}, {}, _witness(relay, 0, broadcast_chosen=True, n_producer_tasks=1))
+    submit = runner.backend.submit
+    nonce = uuid.uuid4().hex[:8]
+    build_concat = backend.concat(list(left_blocks))
+    build_wire = bytes(backend.to_wire(build_concat))
+    # on a scatter_broadcast=False backend the build side crosses the driver once: the relay
+    # tallies it like the map barrier
+    handle = runner.backend.broadcast(
+        build_wire, token=f"bjoin-{nonce}-{sha256_hex(build_wire)[:12]}"
+    )
+    track_unmatched = spec.how in ("left", "outer")
+    part_futs = [
+        submit(
+            _dask_broadcast_join_part,
+            backend,
+            handle,
+            probe_block,
+            spec.on,
+            BROADCAST_PER_BLOCK_HOW[spec.how],
+            spec.mem_budget,
+            track_unmatched,
+            None,
+            key=_skey(nonce, "bpart", pidx),
+        )
+        for pidx, probe_block in enumerate(right_blocks)
+    ]
+
+    tally = JoinTally(next_key=len(right_blocks))
+    gather_sites: dict[int, tuple[int, str]] = {}
+    for pidx, fut in enumerate(part_futs):
+        out = cast("_JoinOut", fut.result())
+        gather_sites[pidx] = out.site
+        tally.add_out(pidx, out)
+
+    # emit the never-matched build rows exactly once (F2); an empty probe has no schema carrier,
+    # so the tail is dropped there, as the local engine does
+    unmatched = tally.unmatched(len(build_concat)) if track_unmatched else ()
+    if unmatched and right_blocks:
+        tail = submit(
+            _dask_broadcast_join_part,
+            backend,
+            handle,
+            right_blocks[0],
+            spec.on,
+            "left",
+            spec.mem_budget,
+            False,
+            unmatched,
+            key=_skey(nonce, "btail", 0),
+        )
+        tally.add_out(None, cast("_JoinOut", tail.result()))
+
+    witness = _witness(
+        relay,
+        len(build_wire),
+        n_producer_tasks=len(right_blocks) or 1,
+        broadcast_chosen=True,
+        peak_join_bytes=tally.peak,
+        join_spilled_partitions=tally.spilled,
+        join_output_rows=tally.rows,
+        gather_sites=gather_sites,
+    )
+    return _result(tally.hashes, tally.value, witness)
 
 
 # ---- public entry points (plan §2 m43) ----------------------------------------------------------
@@ -328,67 +585,7 @@ def dask_run_repartition(
     pinned route (skew).
     """
     _require_peer(runner.backend)
-    submit = runner.backend.submit
-    n_src = len(src_blocks)
-    t = min(runner.backend.n_workers(), n_src) if n_src else 1
-    nonce = uuid.uuid4().hex[:8]
-
-    map_futs = [
-        submit(
-            _dask_map_write,
-            backend,
-            [src_blocks[s] for s in owned],
-            parts,
-            salt,
-            key=_skey(nonce, "map", i),
-        )
-        for i, owned in enumerate(assign(n_src, t))
-    ]
-    picks = {
-        (i, dest): submit(_dask_pick, f, dest, key=_skey(nonce, "pick", i, dest))
-        for i, f in enumerate(map_futs)
-        for dest in range(parts)
-    }
-    gather_futs = {
-        dest: submit(
-            _dask_gather,
-            backend,
-            dest,
-            *[picks[(i, dest)] for i in range(t)],
-            key=_skey(nonce, "gather", dest),
-        )
-        for dest in range(parts)
-    }
-
-    value: dict[int, Any] = {}
-    dest_block_hashes: dict[int, str] = {}
-    gather_sites: dict[int, tuple[int, str]] = {}
-    for dest in range(parts):
-        out = cast("_GatherOut | None", gather_futs[dest].result())
-        if out is None:
-            continue
-        value[out.dest] = out.block
-        dest_block_hashes[out.dest] = out.hash
-        gather_sites[out.dest] = out.site
-
-    producer_sites: dict[int, tuple[int, str]] = {}
-    blocks_per: dict[int, int] = {}
-    peak = 0
-    # small metadata pull; payloads stay worker-side for the gathers
-    for i, f in enumerate(map_futs):
-        mo = cast("_MapOut", f.result())
-        producer_sites[i] = mo.site
-        blocks_per[i] = mo.blocks
-        peak = max(peak, mo.peak)
-
-    witness = DaskShuffleWitness(
-        n_producer_tasks=t,
-        blocks_per_producer_task=blocks_per,
-        peak_writer_buffer_bytes=peak,
-        producer_sites=producer_sites,
-        gather_sites=gather_sites,
-    )
-    return _result(dest_block_hashes, value, witness)
+    return _repartition(backend, src_blocks, parts, runner, salt, relay=False)
 
 
 def dask_run_join(
@@ -412,227 +609,5 @@ def dask_run_join(
     ``join_with_budget``).
     """
     _require_peer(runner.backend)
-    build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
-    probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
-    chosen = (
-        broadcast_join_choice(build_bytes, probe_bytes, parts)
-        if broadcast is None
-        else bool(broadcast)
-    )
-    if chosen:
-        return _broadcast_join(
-            backend, left_blocks, right_blocks, on, how, mem_budget_bytes, runner
-        )
-    return _shuffle_join(
-        backend, left_blocks, right_blocks, parts, on, how, salt, mem_budget_bytes, runner
-    )
-
-
-def _shuffle_join(
-    backend: Any,
-    left_blocks: Sequence[Any],
-    right_blocks: Sequence[Any],
-    parts: int,
-    on: Sequence[str],
-    how: str,
-    salt: int,
-    mem_budget: int | None,
-    runner: SubmitRunner,
-) -> ShuffleResult:
-    submit = runner.backend.submit
-    on_t = tuple(on)
-    nonce = uuid.uuid4().hex[:8]
-    n_left, n_right = len(left_blocks), len(right_blocks)
-    t_l = min(runner.backend.n_workers(), n_left) if n_left else 0
-    t_r = min(runner.backend.n_workers(), n_right) if n_right else 0
-
-    left_maps = (
-        [
-            submit(
-                _dask_map_write,
-                backend,
-                [left_blocks[s] for s in owned],
-                parts,
-                salt,
-                key=_skey(nonce, "lmap", i),
-            )
-            for i, owned in enumerate(assign(n_left, t_l))
-        ]
-        if t_l
-        else []
-    )
-    right_maps = (
-        [
-            submit(
-                _dask_map_write,
-                backend,
-                [right_blocks[s] for s in owned],
-                parts,
-                salt,
-                key=_skey(nonce, "rmap", i),
-            )
-            for i, owned in enumerate(assign(n_right, t_r))
-        ]
-        if t_r
-        else []
-    )
-    left_picks = {
-        (i, dest): submit(_dask_pick, f, dest, key=_skey(nonce, "lpick", i, dest))
-        for i, f in enumerate(left_maps)
-        for dest in range(parts)
-    }
-    right_picks = {
-        (i, dest): submit(_dask_pick, f, dest, key=_skey(nonce, "rpick", i, dest))
-        for i, f in enumerate(right_maps)
-        for dest in range(parts)
-    }
-    # F1 schema carriers for one-sided dests (None when a whole side is partitionless)
-    left_carrier = left_blocks[0] if left_blocks else None
-    right_carrier = right_blocks[0] if right_blocks else None
-    gather_futs = {
-        dest: submit(
-            _dask_gather_join,
-            backend,
-            dest,
-            on_t,
-            how,
-            mem_budget,
-            left_carrier,
-            right_carrier,
-            t_l,
-            *[left_picks[(i, dest)] for i in range(t_l)],
-            *[right_picks[(i, dest)] for i in range(t_r)],
-            key=_skey(nonce, "gjoin", dest),
-        )
-        for dest in range(parts)
-    }
-
-    value: dict[int, Any] = {}
-    dest_block_hashes: dict[int, str] = {}
-    gather_sites: dict[int, tuple[int, str]] = {}
-    peak_join = spilled_total = rows_total = 0
-    next_key = parts  # spilled sub-partitions get fresh keys beyond the dest range (mirrors local)
-    for dest in range(parts):
-        out = cast("_JoinOut | None", gather_futs[dest].result())
-        if out is None:
-            continue
-        gather_sites[dest] = out.site
-        peak_join = max(peak_join, out.peak)
-        spilled_total += out.spilled
-        rows_total += out.rows
-        if len(out.chunks) == 1:
-            value[dest], dest_block_hashes[dest] = out.chunks[0], out.hashes[0]
-        else:
-            for ch, h in zip(out.chunks, out.hashes, strict=True):
-                value[next_key], dest_block_hashes[next_key] = ch, h
-                next_key += 1
-
-    witness = DaskShuffleWitness(
-        n_producer_tasks=max(t_l, t_r),
-        broadcast_chosen=False,
-        peak_join_bytes=peak_join,
-        join_spilled_partitions=spilled_total,
-        join_output_rows=rows_total,
-        gather_sites=gather_sites,
-    )
-    return _result(dest_block_hashes, value, witness)
-
-
-def _broadcast_join(
-    backend: Any,
-    left_blocks: Sequence[Any],
-    right_blocks: Sequence[Any],
-    on: Sequence[str],
-    how: str,
-    mem_budget: int | None,
-    runner: SubmitRunner,
-) -> ShuffleResult:
-    submit = runner.backend.submit
-    on_t = tuple(on)
-    nonce = uuid.uuid4().hex[:8]
-    value: dict[int, Any] = {}
-    dest_block_hashes: dict[int, str] = {}
-    if not left_blocks:
-        return _result(
-            dest_block_hashes, value, DaskShuffleWitness(broadcast_chosen=True, n_producer_tasks=1)
-        )
-
-    build_concat = backend.concat(list(left_blocks))
-    build_wire = bytes(backend.to_wire(build_concat))
-    handle = runner.backend.broadcast(
-        build_wire, token=f"bjoin-{nonce}-{sha256_hex(build_wire)[:12]}"
-    )
-    per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
-    track_unmatched = how in ("left", "outer")
-
-    part_futs = [
-        submit(
-            _dask_broadcast_join_part,
-            backend,
-            handle,
-            probe_block,
-            on_t,
-            per_block_how,
-            mem_budget,
-            track_unmatched,
-            None,
-            key=_skey(nonce, "bpart", pidx),
-        )
-        for pidx, probe_block in enumerate(right_blocks)
-    ]
-
-    gather_sites: dict[int, tuple[int, str]] = {}
-    peak_join = spilled_total = rows_total = 0
-    matched: set[int] = set()
-    next_key = len(right_blocks)  # spilled sub-partitions get fresh keys beyond the pidx range
-    for pidx, f in enumerate(part_futs):
-        out = cast("_JoinOut", f.result())
-        gather_sites[pidx] = out.site
-        peak_join = max(peak_join, out.peak)
-        spilled_total += out.spilled
-        rows_total += out.rows
-        if out.matched is not None:
-            matched.update(out.matched)
-        if len(out.chunks) == 1:
-            value[pidx], dest_block_hashes[pidx] = out.chunks[0], out.hashes[0]
-        else:
-            for ch, h in zip(out.chunks, out.hashes, strict=True):
-                value[next_key], dest_block_hashes[next_key] = ch, h
-                next_key += 1
-
-    # emit the never-matched build rows exactly once (F2 of _run_broadcast_join)
-    if track_unmatched:
-        unmatched = tuple(sorted(set(range(len(build_concat))) - matched))
-        # empty probe -> no schema carrier: local drops the tail (no crash)
-        if unmatched and right_blocks:
-            tail = cast(
-                "_JoinOut",
-                submit(
-                    _dask_broadcast_join_part,
-                    backend,
-                    handle,
-                    right_blocks[0],
-                    on_t,
-                    "left",
-                    mem_budget,
-                    False,
-                    unmatched,
-                    key=_skey(nonce, "btail", 0),
-                ).result(),
-            )
-            peak_join = max(peak_join, tail.peak)
-            spilled_total += tail.spilled
-            rows_total += tail.rows
-            for ch, h in zip(tail.chunks, tail.hashes, strict=True):
-                value[next_key], dest_block_hashes[next_key] = ch, h
-                next_key += 1
-
-    witness = DaskShuffleWitness(
-        n_producer_tasks=len(right_blocks) or 1,
-        broadcast_chosen=True,
-        peak_join_bytes=peak_join,
-        join_spilled_partitions=spilled_total,
-        join_output_rows=rows_total,
-        gather_sites=gather_sites,
-    )
-    return _result(dest_block_hashes, value, witness)
+    spec = _JoinSpec(tuple(on), how, salt, mem_budget_bytes)
+    return _join(backend, left_blocks, right_blocks, parts, spec, runner, broadcast, relay=False)

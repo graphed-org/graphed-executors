@@ -50,14 +50,18 @@ from graphed.shuffle import broadcast_join_choice
 
 from ._routable_store import RoutableClusterSim, launch_routable_cluster
 from ._shuffle_kernels import (
+    BROADCAST_PER_BLOCK_HOW,
     MANIFEST_ENTRY_BYTES,
     PINNED_ROUTING_HASH,
     ROW_GROUP_BYTES,
+    JoinTally,
     ShuffleFaults,
     ShuffleResult,
     ShuffleWitness,
     assign,
+    choose_broadcast,
     coalesce_task,
+    join_dest,
     join_with_budget,
     routing_hash_measurement,
     sha256_hex,
@@ -379,32 +383,11 @@ def _gather_side(
     return blocks
 
 
-def _record_join(
-    witness: ShuffleWitness,
-    value: dict[int, Any],
-    dest_block_hashes: dict[int, str],
-    key: int | None,
-    next_key: int,
-    joined: tuple[list[Any], list[str], int, int, int, int],
-) -> int:
-    """Count one :func:`join_with_budget` result into ``witness`` and file its blocks.
-
-    A single chunk is filed under ``key`` (stable for determinism); spilled sub-partitions, or any
-    result with no ``key``, take fresh keys from ``next_key`` (their union is that key's join).
-    Returns the next fresh key.
-    """
-    chunks, hashes, peak, spilled, rows, chunks_read = joined
-    witness.peak_join_bytes = max(witness.peak_join_bytes, peak)
-    witness.join_spilled_partitions += spilled
-    witness.join_chunks_read += chunks_read
-    witness.join_output_rows += rows
-    if key is not None and len(chunks) == 1:
-        value[key], dest_block_hashes[key] = chunks[0], hashes[0]
-        return next_key
-    for ch, h in zip(chunks, hashes, strict=True):
-        value[next_key], dest_block_hashes[next_key] = ch, h
-        next_key += 1
-    return next_key
+def _record_join(witness: ShuffleWitness, tally: JoinTally) -> None:
+    witness.peak_join_bytes = tally.peak
+    witness.join_spilled_partitions = tally.spilled
+    witness.join_chunks_read = tally.read
+    witness.join_output_rows = tally.rows
 
 
 def _run_shuffle_join(
@@ -425,19 +408,7 @@ def _run_shuffle_join(
     """Shuffle both sides on ``__joinkey__`` (same ``parts`` + ``salt`` ⇒ co-partitioned).
 
     Then gather the two sides per dest in ascending-task order and join them (spilling under
-    ``mem_budget``).
-
-    F1: a dest that only got rows from ONE side is not dropped — how=left/outer keeps a BUILD-only
-    dest, how=right/outer keeps a PROBE-only dest. The absent side's ORIGINAL other-side block
-    (``left_blocks[0]``/``right_blocks[0]``) stands in as a SCHEMA carrier and the internal ``how``
-    is forced to only the direction being filled (``left``/``right``): by the routing invariant any
-    row sharing a key with this dest would itself route here, so an empty gather PROVES the carrier
-    shares no key with it and ``match_indices``' opposite arm is never taken — only THIS dest's
-    real rows emit, each null-filled against the carrier's schema. The carrier may itself be a
-    ZERO-ROW block (a cut-emptied partition): ``backend.take`` null-fills an empty carrier, so no
-    non-emptiness is assumed. An ENTIRELY partitionless absent side
-    (``right_blocks``/``left_blocks`` == ``[]``) carries no schema at all — its present-side rows
-    are emitted as-is (no null columns to add), never silently dropped.
+    ``mem_budget``), one-sided dests included (:func:`join_dest`, F1).
     """
     n_tasks_l = min(k, len(left_blocks)) if left_blocks else 1
     n_tasks_r = min(k, len(right_blocks)) if right_blocks else 1
@@ -452,9 +423,8 @@ def _run_shuffle_join(
     witness.large_side_blocks = sum(len(m) for m in right_manifests.values())
     witness.manifest_fetch_is_per_dest = True
 
-    value: dict[int, Any] = {}
-    dest_block_hashes: dict[int, str] = {}
-    next_key = parts  # sub-partition (budget) blocks get fresh keys beyond the dest range
+    carriers = (left_blocks[0] if left_blocks else None, right_blocks[0] if right_blocks else None)
+    tally = JoinTally(next_key=parts)
     for dest in range(parts):
         gather_i = dest % k
         build_side = _gather_side(
@@ -463,34 +433,13 @@ def _run_shuffle_join(
         probe_side = _gather_side(
             backend, right_manifests, dest, n_tasks_r, gather_i, cluster, witness
         )
-        if not build_side and not probe_side:
-            continue  # no rows on either side for this dest
-        if not build_side and how not in ("right", "outer"):
-            continue  # probe-only dest, but `how` keeps no unmatched-probe rows (F1)
-        if not probe_side and how not in ("left", "outer"):
-            continue  # build-only dest, but `how` keeps no unmatched-build rows (F1)
-        if build_side and probe_side:
-            build, probe, how_here = backend.concat(build_side), backend.concat(probe_side), how
-        elif build_side:
-            # partitionless probe side -> no schema; keep the build rows (never drop)
-            if not right_blocks:
-                blk = backend.concat(build_side)
-                value[dest], dest_block_hashes[dest] = blk, sha256_hex(backend.to_wire(blk))
-                witness.join_output_rows += len(blk)
-                continue
-            build, probe, how_here = backend.concat(build_side), right_blocks[0], "left"
-        else:
-            if not left_blocks:  # partitionless build side -> keep the probe rows (never drop)
-                blk = backend.concat(probe_side)
-                value[dest], dest_block_hashes[dest] = blk, sha256_hex(backend.to_wire(blk))
-                witness.join_output_rows += len(blk)
-                continue
-            build, probe, how_here = left_blocks[0], backend.concat(probe_side), "right"
-        joined = join_with_budget(
-            backend, build, probe, on, how_here, mem_budget, cluster, gather_i
+        joined = join_dest(
+            backend, build_side, probe_side, on, how, mem_budget, carriers, cluster, gather_i
         )
-        next_key = _record_join(witness, value, dest_block_hashes, dest, next_key, joined)
-    return value, dest_block_hashes
+        if joined is not None:
+            tally.add(dest, joined)
+    _record_join(witness, tally)
+    return tally.value, tally.hashes
 
 
 def _run_broadcast_join(
@@ -518,10 +467,8 @@ def _run_broadcast_join(
     such tracking — a probe row belongs to exactly one block, so its unmatched survivor is already
     exactly-once.
     """
-    value: dict[int, Any] = {}
-    dest_block_hashes: dict[int, str] = {}
     if not left_blocks:
-        return value, dest_block_hashes
+        return {}, {}
     build_concat = backend.concat(list(left_blocks))
     build_wire = backend.to_wire(build_concat)
     build_digest = sha256_hex(build_wire)
@@ -531,12 +478,9 @@ def _run_broadcast_join(
     witness.large_side_blocks = 0
     witness.n_producer_tasks = max(1, min(k, len(right_blocks))) if right_blocks else 1
 
-    per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
+    per_block_how = BROADCAST_PER_BLOCK_HOW[how]
     track_unmatched = how in ("left", "outer")
-    matched_build_idx: set[int] = set()
-
-    # sub-partition (budget) blocks get fresh keys beyond the pidx range
-    next_key = len(right_blocks)
+    tally = JoinTally(next_key=len(right_blocks))
     for pidx, probe_block in enumerate(right_blocks):
         node_i = pidx % k
         build_here = backend.from_wire(cluster.get(node_i, build_digest))
@@ -546,30 +490,28 @@ def _run_broadcast_join(
             b_idx, _p_idx = backend.match_indices(
                 build_here, probe_block, on=list(on), how="inner"
             )
-            matched_build_idx.update(int(x) for x in b_idx)
+            tally.matched.update(int(x) for x in b_idx)
         joined = join_with_budget(
             backend, build_here, probe_block, on, per_block_how, mem_budget, cluster, node_i
         )
-        next_key = _record_join(witness, value, dest_block_hashes, pidx, next_key, joined)
+        tally.add(pidx, joined)
 
-    if track_unmatched:
-        unmatched = sorted(set(range(len(build_concat))) - matched_build_idx)
-        # ponytail: a probe-less broadcast run (a forced ``broadcast=True`` on an entirely empty
-        # right) leaves the unmatched build rows unemitted — outside the frozen contract and
-        # unreachable via the cost model (which never broadcasts an empty probe: build*parts <
-        # build is false); the SHUFFLE path, the cost-model-reachable one, is where an
-        # entirely-empty side is pinned.
-        if unmatched and right_blocks:
-            # `right_blocks[0]` is the probe SCHEMA carrier and may itself be a ZERO-ROW block —
-            # ``backend.take`` null-fills an empty carrier, so no non-emptiness is assumed.
-            # `unmatched` rows are, by construction, unmatched against EVERY probe block, so
-            # forcing how="left" here can never spuriously match.
-            build_unmatched = backend.take(build_concat, unmatched)
-            joined = join_with_budget(
-                backend, build_unmatched, right_blocks[0], on, "left", mem_budget, cluster, 0
-            )
-            _record_join(witness, value, dest_block_hashes, None, next_key, joined)
-    return value, dest_block_hashes
+    unmatched = tally.unmatched(len(build_concat)) if track_unmatched else ()
+    # ponytail: a probe-less broadcast run (a forced ``broadcast=True`` on an entirely empty
+    # right) leaves the unmatched build rows unemitted — outside the frozen contract and
+    # unreachable via the cost model (which never broadcasts an empty probe: build*parts <
+    # build is false); the SHUFFLE path, the cost-model-reachable one, is where an
+    # entirely-empty side is pinned.
+    if unmatched and right_blocks:
+        # `right_blocks[0]` is the probe SCHEMA carrier (a zero-row one is null-filled by
+        # ``backend.take``); `unmatched` rows match no probe block, so how="left" cannot match.
+        build_unmatched = backend.take(build_concat, list(unmatched))
+        joined = join_with_budget(
+            backend, build_unmatched, right_blocks[0], on, "left", mem_budget, cluster, 0
+        )
+        tally.add(None, joined)
+    _record_join(witness, tally)
+    return tally.value, tally.hashes
 
 
 def run_join(
@@ -610,13 +552,7 @@ def run_join(
     """
     faults = faults if faults is not None else ShuffleFaults()
     k = max(1, workers)
-    build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
-    probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
-    chosen = (
-        broadcast_join_choice(build_bytes, probe_bytes, parts)
-        if broadcast is None
-        else bool(broadcast)
-    )
+    chosen = choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast)
     cluster = _make_cluster(comms, k, store_root, advertise_host)
     try:
         witness = ShuffleWitness()

@@ -10,13 +10,16 @@ from __future__ import annotations
 import hashlib
 import time
 import zlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from graphed.core import ShuffleBackend
-from graphed.shuffle import join_blocks  # the generic radix-hash join kernel over a JoinBackend
+from graphed.shuffle import (
+    broadcast_join_choice,
+    join_blocks,  # the generic radix-hash join kernel over a JoinBackend
+)
 
 #: one parquet row-group's worth of writer-buffer staging (the documented O(P*rg) memory knob,
 #: §5.1).
@@ -26,6 +29,11 @@ PINNED_ROUTING_HASH: str = "sha256"
 #: fixed on-wire size charged per per-dest manifest entry (hash + holder address) — keeps the
 #: metadata accounting O(N*P) linear in P (guidance 1).
 MANIFEST_ENTRY_BYTES: int = 80
+
+
+#: :func:`join_with_budget`'s ``(chunks, chunk_hashes, peak_output_bytes, spilled_partitions,
+#: output_rows, chunks_read)``
+JoinResult = tuple[list[Any], list[str], int, int, int, int]
 
 
 def sha256_hex(data: bytes) -> str:
@@ -196,7 +204,7 @@ def join_with_budget(
     budget: int | None,
     cluster: Any,
     node_i: int,
-) -> tuple[list[Any], list[str], int, int, int, int]:
+) -> JoinResult:
     """Gather-join one dest's co-partitioned ``build``/``probe`` blocks with the generic kernel.
 
     As a LIST of joined sub-partition blocks (one when unbudgeted). With a budget it
@@ -261,6 +269,120 @@ def join_with_budget(
     # the spill is load-bearing I/O instead of write-once-never-read.
     chunks = [backend.from_wire((obj_dir / digest).read_bytes()) for digest in hashes]
     return chunks, hashes, peak, spilled, rows, len(hashes)
+
+
+def choose_broadcast(
+    backend: ShuffleBackend[Any, Any],
+    left_blocks: Sequence[Any],
+    right_blocks: Sequence[Any],
+    parts: int,
+    broadcast: bool | None,
+) -> bool:
+    """Honour a plan-recorded ``broadcast`` choice, else apply the pinned cost rule.
+
+    F6: the rule is keyed on ``parts``, never the live worker count, so the same logical join
+    makes the same choice however the pool is sized.
+    """
+    if broadcast is not None:
+        return bool(broadcast)
+    build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
+    probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
+    return broadcast_join_choice(build_bytes, probe_bytes, parts)
+
+
+#: the per-probe-block ``how`` of a broadcast join: an unmatched build row is emitted once, after
+#: every block (F2), so ``left``/``outer`` keep only their probe-side half per block.
+BROADCAST_PER_BLOCK_HOW = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}
+
+
+def join_dest(
+    backend: ShuffleBackend[Any, Any],
+    build_side: list[Any],
+    probe_side: list[Any],
+    on: Sequence[str],
+    how: str,
+    budget: int | None,
+    carriers: tuple[Any, Any],
+    cluster: Any,
+    node_i: int,
+) -> JoinResult | None:
+    """Join one dest's gathered build/probe blocks; ``None`` when ``how`` keeps none of its rows.
+
+    F1: a dest that got rows from ONE side is not dropped — how=left/outer keeps a build-only
+    dest, how=right/outer a probe-only one. The absent side's schema carrier (``carriers`` holds
+    the first left and right input block, ``None`` for a partitionless side) stands in, with the
+    internal ``how`` forced to the one direction being filled: by the routing invariant a row
+    sharing a key with this dest would itself route here, so only this dest's rows emit,
+    null-filled against the carrier's schema (``backend.take`` null-fills a zero-row carrier too).
+    With no carrier the present rows pass through as-is.
+    """
+    if not build_side and not probe_side:
+        return None
+    if not build_side and how not in ("right", "outer"):
+        return None  # probe-only dest, but how keeps no unmatched-probe rows
+    if not probe_side and how not in ("left", "outer"):
+        return None  # build-only dest, but how keeps no unmatched-build rows
+    left_carrier, right_carrier = carriers
+    if build_side and probe_side:
+        build, probe, how_here = backend.concat(build_side), backend.concat(probe_side), how
+    elif build_side:
+        if right_carrier is None:
+            return _pass_through(backend, build_side)
+        build, probe, how_here = backend.concat(build_side), right_carrier, "left"
+    else:
+        if left_carrier is None:
+            return _pass_through(backend, probe_side)
+        build, probe, how_here = left_carrier, backend.concat(probe_side), "right"
+    return join_with_budget(backend, build, probe, on, how_here, budget, cluster, node_i)
+
+
+def _pass_through(backend: ShuffleBackend[Any, Any], blocks: list[Any]) -> JoinResult:
+    blk = backend.concat(blocks)
+    return [blk], [sha256_hex(backend.to_wire(blk))], 0, 0, len(blk), 0
+
+
+@dataclass
+class JoinTally:
+    """Join results filed under block keys, with the join counters summed over them.
+
+    A result's lone chunk is filed under its key (stable for determinism); spilled
+    sub-partitions, or a result with no key, take fresh keys counting up from ``next_key`` (their
+    union is that key's join).
+    """
+
+    next_key: int
+    value: dict[int, Any] = field(default_factory=dict)
+    hashes: dict[int, str] = field(default_factory=dict)
+    peak: int = 0
+    spilled: int = 0
+    rows: int = 0
+    read: int = 0
+    #: build-row indices any broadcast probe block matched
+    matched: set[int] = field(default_factory=set)
+
+    def add(self, key: int | None, joined: JoinResult) -> None:
+        """File one :func:`join_with_budget` result."""
+        chunks, hashes, peak, spilled, rows, read = joined
+        self.peak = max(self.peak, peak)
+        self.spilled += spilled
+        self.rows += rows
+        self.read += read
+        if key is not None and len(chunks) == 1:
+            self.value[key], self.hashes[key] = chunks[0], hashes[0]
+            return
+        for ch, h in zip(chunks, hashes, strict=True):
+            self.value[self.next_key], self.hashes[self.next_key] = ch, h
+            self.next_key += 1
+
+    def add_out(self, key: int | None, out: Any) -> None:
+        """File one task's ``_JoinOut``, recording the build rows it matched."""
+        if out.matched is not None:
+            self.matched.update(out.matched)
+        self.add(key, (out.chunks, out.hashes, out.peak, out.spilled, out.rows, out.read))
+
+    def unmatched(self, n_build: int) -> tuple[int, ...]:
+        """Return the build rows no broadcast probe block matched, ascending."""
+        return tuple(sorted(set(range(n_build)) - self.matched))
 
 
 # ---- stage 2: gather (M41: coalesced fetch + reader-plane RAM/disk budgets) ---------------------
@@ -342,24 +464,10 @@ def stage2_gather(
         live_bytes = 0
 
         for holder_i in sorted(by_holder):
-            # ONE coalesced fetch per (gather, holder) node-pair (T2)
-            witness.bulk_fetch_count += 1
-            # digests already billed to bytes_transferred + queued for eviction: byte-identical
-            # hot-key blocks (steal can co-locate them) share ONE content-address, so bill each
-            # digest to bytes_transferred once, and evict it once — AFTER all its (dest,t) refs
-            # pull.
-            billed: set[str] = set()
-            for dest, t, digest in by_holder[holder_i]:
-                # pull the block from its holder (thief if stolen)
-                wire = cluster.get(holder_i, digest)
-                if digest not in billed:
-                    # UNIQUE bytes: re-fetch of a digest adds 0
-                    witness.bytes_transferred += len(wire)
-                    billed.add(digest)
-                if holder_i != gather_i:
-                    # M39 per-block cross-node witness (kept for cross-check)
-                    witness.cross_node_fetches += 1
-                resident[(dest, t)] = wire
+            for key, wire in _pull_holder(
+                cluster, holder_i, gather_i, by_holder[holder_i], witness
+            ):
+                resident[key] = wire
                 live_bytes += len(wire)
                 witness.peak_fetch_bytes = max(witness.peak_fetch_bytes, live_bytes)
                 if fetch_budget_bytes is not None and live_bytes >= fetch_budget_bytes:
@@ -374,10 +482,6 @@ def stage2_gather(
                         cluster,
                     )
                     live_bytes = 0
-            # evict each unique block ONCE, after all its (dest,t) refs are pulled —
-            for digest in billed:
-                # a mid-loop evict KeyErrors the next ref to a shared digest
-                cluster.evict(holder_i, digest)
 
         for dest in dests_here:
             gathered = _reassemble(backend, dest, n_tasks, resident, spilled)
@@ -388,6 +492,33 @@ def stage2_gather(
     if witness.bulk_fetch_count:
         witness.bytes_per_fetch = witness.bytes_transferred / witness.bulk_fetch_count
     return value, dest_block_hashes
+
+
+def _pull_holder(
+    cluster: Any,
+    holder_i: int,
+    gather_i: int,
+    blocks: list[tuple[int, int, str]],
+    witness: ShuffleWitness,
+) -> Iterator[tuple[tuple[int, int], bytes]]:
+    """Yield each ``(dest, task)`` wire pulled from one holder: ONE coalesced fetch (T2).
+
+    Byte-identical hot-key blocks (steal can co-locate them) share one content address, so each
+    digest is billed to ``bytes_transferred`` once and evicted once, after all its refs are
+    pulled — a mid-loop evict would KeyError the next ref.
+    """
+    witness.bulk_fetch_count += 1
+    billed: set[str] = set()
+    for dest, t, digest in blocks:
+        wire = cluster.get(holder_i, digest)  # from its holder (the thief if stolen)
+        if digest not in billed:
+            witness.bytes_transferred += len(wire)
+            billed.add(digest)
+        if holder_i != gather_i:
+            witness.cross_node_fetches += 1  # the M39 per-block witness, kept for cross-check
+        yield (dest, t), wire
+    for digest in billed:
+        cluster.evict(holder_i, digest)
 
 
 def _blocks_by_holder(
