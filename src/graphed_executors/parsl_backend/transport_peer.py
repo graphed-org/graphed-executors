@@ -24,7 +24,6 @@ import os
 import socket
 import tempfile
 import time
-import uuid
 from pathlib import Path
 from typing import Any, cast
 
@@ -37,10 +36,11 @@ from graphed_executors.common.http_plane import EscalatingHttpTransport, Transpo
 from graphed_executors.common.transport_run import (
     TransportExecResult,
     TransportWitness,
-    build_stage_error,
+    empty_run,
     finalized,
-    is_restart_worthy,
+    harvest,
     pick_attributable,
+    run_epochs,
 )
 from graphed_executors.local._peer import make_bounds, process_and_reduce, slice_items
 
@@ -75,6 +75,19 @@ class _BarrierTimeoutError(Exception):
 
 def _worker_addrs(k: int) -> tuple[str, ...]:
     return tuple(f"w{i}" for i in range(k))
+
+
+def rendezvous_spec(
+    nonce: str, driver_ep: Any, worker_addrs: tuple[str, ...], addr: str
+) -> dict[str, Any]:
+    """Return the fields every peer spec starts from: who it is and where the driver listens."""
+    return {
+        "addr": addr,
+        "epoch": nonce,
+        "driver_host": driver_ep.host,
+        "driver_port": driver_ep.port,
+        "worker_addrs": worker_addrs,
+    }
 
 
 # ---- the peer actor (module-level: pickled BY REFERENCE, runs on an HTEX worker) ----------------
@@ -414,21 +427,16 @@ def parsl_run_plan(
     require_bound(plan)  # resolves no services: an unbound plan is refused before any task
     tasks = sorted(plan.tasks, key=lambda t: t.key)
     n = len(tasks)
-    witness = TransportWitness()
     if n == 0:
-        witness.epoch_nonces.append(uuid.uuid4().hex)
-        return TransportExecResult(finalized(plan, plan.empty()), 0, 0, witness)
+        return empty_run(plan)
+    witness = TransportWitness()
 
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
     idle_deadline_s = root_timeout_s + _IDLE_SLACK_S  # derived: always ≥ the root wait (§1.4)
     budget_dir = _write_budget_files(inject_recv_failures)
-    per_worker: dict[str, dict[str, int]] = {}
-    last_exc: BaseException | None = None
 
-    for attempt in range(epoch_restarts_allowed + 1):
-        nonce = uuid.uuid4().hex
-        witness.epoch_nonces.append(nonce)
-        k = max(1, min(_resolve_k(pbackend, workers, restart=attempt > 0), n))
+    def attempt(n_attempt: int, nonce: str) -> TransportExecResult | BaseException:
+        k = max(1, min(_resolve_k(pbackend, workers, restart=n_attempt > 0), n))
         worker_addrs = _worker_addrs(k)
         bounds = make_bounds(n, k)
         items = slice_items([t.partition for t in tasks], bounds, worker_addrs)
@@ -438,12 +446,8 @@ def parsl_run_plan(
             addr: pbackend.submit(
                 _parsl_peer_main,
                 {
+                    **rendezvous_spec(nonce, driver_ep, worker_addrs, addr),
                     "kind": "reduce",
-                    "addr": addr,
-                    "epoch": nonce,
-                    "driver_host": driver_ep.host,
-                    "driver_port": driver_ep.port,
-                    "worker_addrs": worker_addrs,
                     "n": n,
                     "bounds": bounds,
                     "items": items[addr],
@@ -460,26 +464,23 @@ def parsl_run_plan(
             for i, addr in enumerate(worker_addrs)
         }
         errs, root, has_captured = _drive_reduce(
-            driver_ep, pbackend, futures, k, barrier_s, driver_counts, per_worker, root_timeout_s
+            driver_ep,
+            pbackend,
+            futures,
+            k,
+            barrier_s,
+            driver_counts,
+            witness.per_worker,
+            root_timeout_s,
         )
-        _merge_peer(per_worker, DRIVER, driver_counts)
+        _merge_peer(witness.per_worker, DRIVER, driver_counts)
         driver_ep.close()
-
         if not errs and has_captured:
-            witness.epoch_restarts = attempt
-            witness.per_worker = per_worker
             return TransportExecResult(finalized(plan, root), n, max(0, n - 1), witness)
+        return _reduce_failure(errs, pbackend)
 
-        last_exc = _reduce_failure(errs, pbackend)
-        if not is_restart_worthy(last_exc, pbackend) or attempt >= epoch_restarts_allowed:
-            witness.per_worker = per_worker
-            raise build_stage_error(last_exc, pbackend) from last_exc
-
-    witness.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise (  # pragma: no cover
-        build_stage_error(last_exc, pbackend)
-        if last_exc is not None
-        else RuntimeError("no epochs run")
+    return run_epochs(
+        attempt, restarts_allowed=epoch_restarts_allowed, backend=pbackend, witness=witness
     )
 
 
@@ -528,15 +529,21 @@ def _drive_reduce(
             break  # a peer errored — stop waiting for a root that will never form; restart
     _release(driver_ep, seated, ("done",))
 
-    errs: dict[str, BaseException] = {}
-    for addr, fut in futures.items():
-        try:
-            res = fut.result()
-            _merge_peer(per_worker, addr, res["counters"])
-        except BaseException as exc:  # harvest every peer's outcome for the restart decision
-            errs[addr] = exc
-            _merge_peer(per_worker, addr, getattr(exc, "peer_counters", {}) or {})
+    _results, errs = _harvest(futures, per_worker)
     return errs, root, got_root
+
+
+def _harvest(
+    futures: dict[str, Any], per_worker: dict[str, dict[str, int]]
+) -> tuple[dict[str, Any], dict[str, BaseException]]:
+    """Resolve every peer, merging each one's counters (a failed peer's ride its exception)."""
+    results, errs = harvest(futures)
+    for addr in futures:
+        if addr in results:
+            _merge_peer(per_worker, addr, results[addr].get("counters", {}))
+        else:
+            _merge_peer(per_worker, addr, getattr(errs[addr], "peer_counters", {}) or {})
+    return results, errs
 
 
 def _future_errored(fut: Any) -> bool:

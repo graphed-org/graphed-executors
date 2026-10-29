@@ -17,24 +17,28 @@ imports NOTHING from parsl or ``dask_backend`` (F13 / G9).
 from __future__ import annotations
 
 import time
-import uuid
 from typing import Any
 
 from graphed.debug import SourceFrame, StageError
 
 from graphed_executors.common.http_plane import PullTimeoutError
+from graphed_executors.common.tasks_engine import TaskJoinTally
 from graphed_executors.common.transport_run import (
     TransportShuffleResult,
     TransportWitness,
-    is_restart_worthy,
     pick_attributable,
+    run_epochs,
 )
 from graphed_executors.common.transport_tasks import (
     gather_join_body,
     map_task_body,
     replay_reader_plane,
 )
-from graphed_executors.local._shuffle_kernels import ShuffleWitness, assign, sha256_hex
+from graphed_executors.local._shuffle_kernels import (
+    ShuffleWitness,
+    assign,
+    sha256_hex,
+)
 
 from .transport_peer import (
     _BARRIER_DEFAULT_S,
@@ -47,6 +51,7 @@ from .transport_peer import (
     _cleanup_after_barrier,
     _collect_probes,
     _future_errored,
+    _harvest,
     _merge_peer,
     _open_driver_endpoint,
     _parsl_peer_main,
@@ -54,6 +59,7 @@ from .transport_peer import (
     _resolve_k,
     _sender_counters,
     _worker_addrs,
+    rendezvous_spec,
     sorted_addrs_seen,
 )
 
@@ -219,11 +225,9 @@ def _gather_join(
     mem_budget = spec.get("mem_budget_bytes")
     left_carrier = spec.get("left_carrier")
     right_carrier = spec.get("right_carrier")
-    value: dict[int, Any] = {}
-    hashes: dict[int, str] = {}
-    peak = spilled = rows = read = 0
-    next_key = spec["parts"]  # local placeholder keys; the driver re-keys overflow into ONE global
-    #                           sequence at assemble (raw per-peer keys would collide across peers)
+    # local placeholder keys; the driver re-keys overflow into ONE global sequence at assemble
+    # (raw per-peer keys would collide across peers)
+    tally = TaskJoinTally(next_key=spec["parts"])
     for dest in sorted(assign):
         per_side = assign[dest]
         out = gather_join_body(
@@ -239,26 +243,16 @@ def _gather_join(
             per_side.get("right", []),
             pull_timeout_s,
         )
-        if out is None:
-            continue
-        peak = max(peak, out.peak)
-        spilled += out.spilled
-        rows += out.rows
-        read += out.read
-        if len(out.chunks) == 1:
-            value[dest], hashes[dest] = out.chunks[0], out.hashes[0]
-        else:
-            for ch, h in zip(out.chunks, out.hashes, strict=True):
-                value[next_key], hashes[next_key] = ch, h
-                next_key += 1
+        if out is not None:
+            tally.add_out(dest, out)
     return (
-        value,
-        hashes,
+        tally.value,
+        tally.hashes,
         {
-            "peak_join_bytes": peak,
-            "join_spilled_partitions": spilled,
-            "join_chunks_read": read,
-            "join_output_rows": rows,
+            "peak_join_bytes": tally.peak,
+            "join_spilled_partitions": tally.spilled,
+            "join_chunks_read": tally.read,
+            "join_output_rows": tally.rows,
         },
     )
 
@@ -322,26 +316,9 @@ def _collect_tagged(
     return collected, len(collected) < k
 
 
-def _harvest(
-    futures: dict[str, Any], per_worker: dict[str, dict[str, int]]
-) -> tuple[dict[str, Any], dict[str, BaseException]]:
-    results: dict[str, Any] = {}
-    errs: dict[str, BaseException] = {}
-    for addr, fut in futures.items():
-        try:
-            res = fut.result()
-            results[addr] = res
-            _merge_peer(per_worker, addr, res.get("counters", {}))
-        except BaseException as exc:  # harvest every peer for the restart decision
-            errs[addr] = exc
-            _merge_peer(per_worker, addr, getattr(exc, "peer_counters", {}) or {})
-    return results, errs
-
-
 def _run_shuffle(
     pbackend: Any,
     *,
-    kind: str,
     make_peer_spec: Any,
     n_producer_bound: int,
     sides: tuple[str, ...],
@@ -358,17 +335,10 @@ def _run_shuffle(
     """
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
     transport = TransportWitness()
-    per_worker: dict[str, dict[str, int]] = {}
-    last_exc: BaseException | None = None
 
-    for attempt in range(epoch_restarts_allowed + 1):
-        nonce = uuid.uuid4().hex
-        transport.epoch_nonces.append(nonce)
-        k = (
-            max(1, min(_resolve_k(pbackend, workers, restart=attempt > 0), n_producer_bound))
-            if n_producer_bound
-            else max(1, _resolve_k(pbackend, workers, restart=attempt > 0))
-        )
+    def attempt(n_attempt: int, nonce: str) -> TransportShuffleResult | BaseException:
+        fresh_k = _resolve_k(pbackend, workers, restart=n_attempt > 0)
+        k = max(1, min(fresh_k, n_producer_bound) if n_producer_bound else fresh_k)
         worker_addrs = _worker_addrs(k)
         driver_ep = _open_driver_endpoint(nonce)
         driver_counts: dict[str, int] = {}
@@ -396,40 +366,29 @@ def _run_shuffle(
                 barrier_s=barrier_s,
                 registry_rewrite=registry_rewrite,
                 driver_counts=driver_counts,
-                per_worker=per_worker,
+                per_worker=transport.per_worker,
             )
         except _BarrierTimeoutError as bt:
             _cleanup_after_barrier(driver_ep, pbackend, futures, sorted_addrs_seen(driver_ep))
-            _merge_peer(per_worker, DRIVER, driver_counts)
-            driver_ep.close()
             raise _barrier_stage_error(bt) from bt
         except ProbeUnreachableError:
-            _merge_peer(per_worker, DRIVER, driver_counts)
+            raise  # the facade decides: an attributed error, or the relay fallback
+        except BaseException as exc:  # run_epochs classifies it: restart or attributed StageError
+            return exc
+        finally:
+            _merge_peer(transport.per_worker, DRIVER, driver_counts)
             driver_ep.close()
-            raise
-        except BaseException as exc:  # a restart-worthy shuffle failure
-            _merge_peer(per_worker, DRIVER, driver_counts)
-            driver_ep.close()
-            last_exc = exc
-            if not is_restart_worthy(exc, pbackend) or attempt >= epoch_restarts_allowed:
-                transport.per_worker = per_worker
-                raise _shuffle_stage_error(exc, pbackend) from exc
-            continue
-
-        _merge_peer(per_worker, DRIVER, driver_counts)
-        driver_ep.close()
-        transport.epoch_restarts = attempt
-        transport.per_worker = per_worker
         value, hashes, witness = assemble(manifests, results, worker_addrs, k)
         return TransportShuffleResult(
             dest_block_hashes=hashes, value=value, witness=witness, transport=transport
         )
 
-    transport.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise (  # pragma: no cover
-        _shuffle_stage_error(last_exc, pbackend)
-        if last_exc is not None
-        else RuntimeError("no epochs run")
+    return run_epochs(
+        attempt,
+        restarts_allowed=epoch_restarts_allowed,
+        backend=pbackend,
+        witness=transport,
+        stage_error=_shuffle_stage_error,
     )
 
 
@@ -511,6 +470,13 @@ _PROBE_COLLECT_S = 15.0
 
 
 # ---- public entry points ------------------------------------------------------------------------
+def _owned(blocks: Any, k: int, i: int) -> list[Any]:
+    """Peer ``i``'s contiguous ascending range of ``blocks`` when ``k`` peers split them."""
+    n = len(blocks)
+    t = min(k, n)
+    return [blocks[s] for s in assign(n, t)[i]] if i < t else []
+
+
 def transport_run_repartition(
     backend: Any,
     src_blocks: Any,
@@ -536,21 +502,15 @@ def transport_run_repartition(
     def make_peer_spec(
         nonce: str, driver_ep: Any, worker_addrs: tuple[str, ...], k: int, i: int, addr: str
     ) -> dict[str, Any]:
-        t = min(k, n_src) if n_src else 0
-        owned = [src_blocks[s] for s in assign(n_src, t)[i]] if (n_src and i < t) else []
         return {
-            "kind": "repartition",
-            "addr": addr,
+            **rendezvous_spec(nonce, driver_ep, worker_addrs, addr),
             "idx": i,
-            "epoch": nonce,
-            "driver_host": driver_ep.host,
-            "driver_port": driver_ep.port,
-            "worker_addrs": worker_addrs,
             "k": k,
+            "kind": "repartition",
             "backend": backend,
             "parts": parts,
             "salt": salt,
-            "owned": owned,
+            "owned": _owned(src_blocks, k, i),
             "pull_timeout_s": pull_timeout_s,
         }
 
@@ -569,7 +529,6 @@ def transport_run_repartition(
 
     return _run_shuffle(
         pbackend,
-        kind="repartition",
         make_peer_spec=make_peer_spec,
         n_producer_bound=n_src,
         sides=("src",),
@@ -635,88 +594,39 @@ def transport_run_join(
     ``mem_budget_bytes`` bounds the per-dest ``join_with_budget``.
     """
     n_left, n_right = len(left_blocks), len(right_blocks)
-    left_carrier = left_blocks[0] if left_blocks else None
-    right_carrier = right_blocks[0] if right_blocks else None
 
     def make_peer_spec(
         nonce: str, driver_ep: Any, worker_addrs: tuple[str, ...], k: int, i: int, addr: str
     ) -> dict[str, Any]:
-        t_l = min(k, n_left) if n_left else 0
-        t_r = min(k, n_right) if n_right else 0
-        owned_left = (
-            [left_blocks[s] for s in assign(n_left, t_l)[i]] if (n_left and i < t_l) else []
-        )
-        owned_right = (
-            [right_blocks[s] for s in assign(n_right, t_r)[i]] if (n_right and i < t_r) else []
-        )
         return {
-            "kind": "join",
-            "addr": addr,
+            **rendezvous_spec(nonce, driver_ep, worker_addrs, addr),
             "idx": i,
-            "epoch": nonce,
-            "driver_host": driver_ep.host,
-            "driver_port": driver_ep.port,
-            "worker_addrs": worker_addrs,
             "k": k,
+            "kind": "join",
             "backend": backend,
             "parts": parts,
             "salt": salt,
-            "owned_left": owned_left,
-            "owned_right": owned_right,
+            "owned_left": _owned(left_blocks, k, i),
+            "owned_right": _owned(right_blocks, k, i),
             "on": tuple(on),
             "how": how,
             "mem_budget_bytes": mem_budget_bytes,
-            "left_carrier": left_carrier,
-            "right_carrier": right_carrier,
+            "left_carrier": left_blocks[0] if left_blocks else None,
+            "right_carrier": right_blocks[0] if right_blocks else None,
             "pull_timeout_s": pull_timeout_s,
         }
 
     def assemble(
-        manifests: dict[str, Any], results: dict[str, Any], worker_addrs: tuple[str, ...], k: int
+        _manifests: dict[str, Any],
+        results: dict[str, Any],
+        worker_addrs: tuple[str, ...],
+        k: int,
     ) -> Any:
-        value: dict[int, Any] = {}
-        hashes: dict[int, str] = {}
-        # spilled sub-partition (block, hash) pairs, driver-rekeyed
-        overflow: list[tuple[Any, str]] = []
-        peak = spilled = read = rows = 0
-        for addr in worker_addrs:  # deterministic producer order; peers own disjoint base dests
-            res = results.get(addr)
-            if res is None:
-                continue
-            res_value, res_hashes = res["value"], res["hashes"]
-            for key in sorted(res_value):
-                # a base dest key — globally unique (owner = worker_addrs[dest % k])
-                if key < parts:
-                    value[key], hashes[key] = res_value[key], res_hashes[key]
-                # a per-peer overflow (spill) key: collect, then rekey into ONE global sequence
-                else:
-                    overflow.append((res_value[key], res_hashes[key]))
-            jw = res.get("join_witness") or {}
-            peak = max(peak, jw.get("peak_join_bytes", 0))
-            spilled += jw.get("join_spilled_partitions", 0)
-            read += jw.get("join_chunks_read", 0)
-            rows += jw.get("join_output_rows", 0)
-        # spilled sub-partitions get fresh keys beyond the dest range (mirrors local)
-        next_key = parts
-        for block, h in overflow:
-            value[next_key], hashes[next_key] = block, h
-            next_key += 1
-        witness = ShuffleWitness(
-            n_producer_tasks=max(
-                min(k, n_left) if n_left else 0, min(k, n_right) if n_right else 0
-            ),
-            broadcast_chosen=False,
-            peak_join_bytes=peak,
-            join_spilled_partitions=spilled,
-            join_chunks_read=read,
-            join_output_rows=rows,
-            manifest_fetch_is_per_dest=True,
-        )
-        return value, hashes, witness
+        n_tasks = max(min(k, n_left), min(k, n_right))
+        return _assemble_join(results, worker_addrs, parts, n_tasks)
 
     return _run_shuffle(
         pbackend,
-        kind="join",
         make_peer_spec=make_peer_spec,
         n_producer_bound=max(n_left, n_right),
         sides=("left", "right"),
@@ -726,3 +636,45 @@ def transport_run_join(
         registry_rewrite=None,
         assemble=assemble,
     )
+
+
+def _assemble_join(
+    results: dict[str, Any], worker_addrs: tuple[str, ...], parts: int, n_tasks: int
+) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
+    """Merge the peers' joined dests, re-keying their spill overflow into ONE global sequence.
+
+    A base dest key (``< parts``) is globally unique (owner = ``worker_addrs[dest % k]``); each
+    peer's overflow keys are local placeholders, collected in producer order and re-keyed from
+    ``parts`` up (mirrors local).
+    """
+    value: dict[int, Any] = {}
+    hashes: dict[int, str] = {}
+    overflow: list[tuple[Any, str]] = []
+    peak = spilled = read = rows = 0
+    for addr in worker_addrs:  # deterministic producer order; peers own disjoint base dests
+        res = results.get(addr)
+        if res is None:
+            continue
+        res_value, res_hashes = res["value"], res["hashes"]
+        for key in sorted(res_value):
+            if key < parts:
+                value[key], hashes[key] = res_value[key], res_hashes[key]
+            else:
+                overflow.append((res_value[key], res_hashes[key]))
+        jw = res.get("join_witness") or {}
+        peak = max(peak, jw.get("peak_join_bytes", 0))
+        spilled += jw.get("join_spilled_partitions", 0)
+        read += jw.get("join_chunks_read", 0)
+        rows += jw.get("join_output_rows", 0)
+    for next_key, (block, h) in enumerate(overflow, start=parts):
+        value[next_key], hashes[next_key] = block, h
+    witness = ShuffleWitness(
+        n_producer_tasks=n_tasks,
+        broadcast_chosen=False,
+        peak_join_bytes=peak,
+        join_spilled_partitions=spilled,
+        join_chunks_read=read,
+        join_output_rows=rows,
+        manifest_fetch_is_per_dest=True,
+    )
+    return value, hashes, witness

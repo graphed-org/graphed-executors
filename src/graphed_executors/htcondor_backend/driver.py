@@ -45,7 +45,8 @@ import pickle
 import sys
 import time
 import traceback
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -157,7 +158,7 @@ def _result_blob(ok: bool, payload: object) -> bytes:
             blob = pickle.dumps((ok, Portable(payload)))
         pickle.loads(blob)
         return blob
-    except Exception as exc:
+    except Exception as exc:  # a payload's own pickling code may raise anything
         text = (
             f"{type(payload).__name__} did not round-trip through pickle "
             f"({type(exc).__name__}: {exc})"
@@ -192,8 +193,71 @@ def _attempt(
         runner.services = endpoints
         try:
             return runner.run(plan), None, EXIT_DONE
-        except Exception as exc:
+        except Exception as exc:  # the plan's error, whatever its type, is the run's outcome
             return None, exc, _exit_code(exc)
+
+
+@contextmanager
+def _logged_to(log: TextIO) -> Iterator[None]:
+    """Copy graphed's INFO records into ``log`` while inside; restore the loggers after."""
+    handler = logging.StreamHandler(log)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    # service statuses, failed releases and the store's reused count, in driver.log
+    loggers = [logging.getLogger(name) for name in ("graphed_executors", "graphed.checkpoint")]
+    levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    try:
+        yield
+    finally:
+        for logger, level in zip(loggers, levels, strict=True):
+            logger.removeHandler(handler)
+            logger.setLevel(level)
+        handler.close()
+
+
+def _run_job(job: Path, log: TextIO, start: float) -> tuple[object, Exception | None, int]:
+    """Run the job dir's plan, rerun while a SERVICE node's new endpoint asks; close the runner.
+
+    ``(result, error, exit code)`` of the last attempt.
+    """
+    run = json.loads((job / RUN_FILE).read_text())
+    with open(job / PLAN_FILE, "rb") as f:
+        loaded = pickle.load(f)
+
+    def wrapped() -> Any:
+        """Return ``loaded`` resumable on ``run.json["store"]``.
+
+        ``resumable`` reads the done tasks as it wraps.
+        """
+        if not run.get("store"):
+            return loaded
+        return resumable(
+            loaded,
+            run["store"],
+            storage_options=run.get("storage_options"),
+            salt=run.get("salt", ""),
+            accept_environment=bool(run.get("accept_environment")),
+        )
+
+    plan = wrapped()
+    runner = _runner(run, job, log)
+    try:
+        announced = run.get("announce_only") or {}
+        while True:
+            result, error, code = _attempt(plan, runner, run.get("endpoints") or {}, log, start)
+            # a run binds its endpoints once: a SERVICE node's new one takes a new run
+            if not (isinstance(error, ServiceUnreachableError) and error.name in announced):
+                return result, error, code
+            print(f"rerun: {error}", file=log, flush=True)
+            plan = wrapped()
+    finally:
+        try:
+            runner.close()
+        except Exception:  # the run's outcome stands; the close failure is only logged
+            print("runner.close() failed:", file=log)
+            traceback.print_exc(file=log)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -205,67 +269,15 @@ def main(argv: list[str] | None = None) -> int:
     start = time.monotonic()
     result: object = None
     error: BaseException | None = None
-    code = EXIT_FAILED
     with open(job / LOG_FILE, "a") as log:
         print(f"driver pid={os.getpid()} dir={job}", file=log, flush=True)
-        handler = logging.StreamHandler(log)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-        # service statuses, failed releases and the store's reused count, in driver.log
-        loggers = [logging.getLogger(name) for name in ("graphed_executors", "graphed.checkpoint")]
-        levels = [logger.level for logger in loggers]
-        for logger in loggers:
-            logger.addHandler(handler)
-            logger.setLevel(logging.INFO)
-        try:
-            run = json.loads((job / RUN_FILE).read_text())
-            with open(job / PLAN_FILE, "rb") as f:
-                loaded = pickle.load(f)
-
-            def wrapped() -> Any:
-                """Return ``loaded`` resumable on ``run.json["store"]``.
-
-                ``resumable`` reads the done tasks as it wraps.
-                """
-                if not run.get("store"):
-                    return loaded
-                return resumable(
-                    loaded,
-                    run["store"],
-                    storage_options=run.get("storage_options"),
-                    salt=run.get("salt", ""),
-                    accept_environment=bool(run.get("accept_environment")),
-                )
-
-            plan = wrapped()
-            runner = _runner(run, job, log)
+        with _logged_to(log):
             try:
-                announced = run.get("announce_only") or {}
-                while True:
-                    result, error, code = _attempt(
-                        plan, runner, run.get("endpoints") or {}, log, start
-                    )
-                    # a run binds its endpoints once: a SERVICE node's new one takes a new run
-                    if not (
-                        isinstance(error, ServiceUnreachableError) and error.name in announced
-                    ):
-                        break
-                    print(f"rerun: {error}", file=log, flush=True)
-                    plan = wrapped()
-            finally:
-                try:
-                    runner.close()
-                except Exception:  # the run's outcome stands; the close failure is only logged
-                    print("runner.close() failed:", file=log)
-                    traceback.print_exc(file=log)
-        except EnvironmentChanged as exc:  # only resumable raises it; a retry would refuse again
-            error, code = exc, EXIT_PLAN_ERROR
-        except Exception as exc:
-            error, code = exc, EXIT_FAILED
-        finally:
-            for logger, level in zip(loggers, levels, strict=True):
-                logger.removeHandler(handler)
-                logger.setLevel(level)
-            handler.close()
+                result, error, code = _run_job(job, log, start)
+            except EnvironmentChanged as exc:  # only resumable raises it; a retry would refuse
+                error, code = exc, EXIT_PLAN_ERROR
+            except Exception as exc:  # the job's boundary: every failure reaches result.pkl
+                error, code = exc, EXIT_FAILED
         blob = _result_blob(True, result) if error is None else _result_blob(False, error)
         if error is not None:
             traceback.print_exception(error, file=log)

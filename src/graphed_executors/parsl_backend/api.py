@@ -14,15 +14,14 @@ could drift the m45-frozen truth table), then dispatch honestly per instance:
 
 A transport-only knob explicitly set while resolution lands on ``"tasks"`` is a loud ``ValueError``
 BEFORE any submit. Imports only ``common.facade`` (the shared resolver) + the parsl-free probe
-primitives at load; the relay + transport engines are deferred (G9: never couple to
-``dask_backend``, never import the heavy engine bodies until dispatch).
+primitives and the relay + transport engines, none of which couple to ``dask_backend`` (G9).
 """
 
 from __future__ import annotations
 
 import contextlib
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +33,7 @@ from graphed_executors.common.facade import (
     _reject_transport_only_knobs,
     resolve_shuffle_method,
 )
+from graphed_executors.common.relay_engine import relay_run_join, relay_run_repartition
 from graphed_executors.submit import SubmitRunner
 
 from .transport_peer import (
@@ -46,7 +46,9 @@ from .transport_peer import (
     _parsl_peer_main,
     _release,
     _worker_addrs,
+    rendezvous_spec,
 )
+from .transport_shuffle import transport_run_join, transport_run_repartition
 
 __all__ = [
     "_VALID_METHODS",
@@ -105,32 +107,27 @@ def run_repartition(
             "registry_rewrite": registry_rewrite,
         },
     )
-    if resolved == "transport":
-        _require_peer_transport(pbackend)
-        from .transport_shuffle import transport_run_repartition  # noqa: PLC0415  (G9: deferred)
-
-        try:
-            return transport_run_repartition(
-                backend,
-                src_blocks,
-                parts,
-                pbackend=pbackend,
-                salt=salt,
-                workers=workers,
-                fetch_budget_bytes=fetch_budget_bytes,
-                pull_timeout_s=pull_timeout_s,
-                epoch_restarts_allowed=1
-                if epoch_restarts_allowed is None
-                else epoch_restarts_allowed,
-                registry_rewrite=registry_rewrite,
-            )
-        except ProbeUnreachableError as pu:
-            return _on_probe_failure(
-                pu,
-                on_unreachable,
-                lambda: _relay_repartition(backend, src_blocks, parts, _runner(pbackend), salt),
-            )
-    return _relay_repartition(backend, src_blocks, parts, _runner(pbackend), salt)
+    restarts = 1 if epoch_restarts_allowed is None else epoch_restarts_allowed
+    return _dispatch(
+        resolved,
+        pbackend,
+        on_unreachable,
+        lambda: transport_run_repartition(
+            backend,
+            src_blocks,
+            parts,
+            pbackend=pbackend,
+            salt=salt,
+            workers=workers,
+            fetch_budget_bytes=fetch_budget_bytes,
+            pull_timeout_s=pull_timeout_s,
+            epoch_restarts_allowed=restarts,
+            registry_rewrite=registry_rewrite,
+        ),
+        lambda: relay_run_repartition(
+            backend, src_blocks, parts, runner=SubmitRunner(pbackend), salt=salt
+        ),
+    )
 
 
 def run_join(
@@ -167,56 +164,38 @@ def run_join(
             "on_unreachable": on_unreachable,
         },
     )
-    if resolved == "transport":
-        _require_peer_transport(pbackend)
-        from .transport_shuffle import transport_run_join  # noqa: PLC0415  (G9: deferred)
-
-        try:
-            return transport_run_join(
-                backend,
-                left_blocks,
-                right_blocks,
-                parts,
-                on=on,
-                how=how,
-                pbackend=pbackend,
-                broadcast=broadcast,
-                salt=salt,
-                mem_budget_bytes=mem_budget_bytes,
-                workers=workers,
-                pull_timeout_s=pull_timeout_s,
-                epoch_restarts_allowed=1
-                if epoch_restarts_allowed is None
-                else epoch_restarts_allowed,
-            )
-        except ProbeUnreachableError as pu:
-            return _on_probe_failure(
-                pu,
-                on_unreachable,
-                lambda: _relay_join(
-                    backend,
-                    left_blocks,
-                    right_blocks,
-                    parts,
-                    on,
-                    how,
-                    _runner(pbackend),
-                    broadcast,
-                    salt,
-                    mem_budget_bytes,
-                ),
-            )
-    return _relay_join(
-        backend,
-        left_blocks,
-        right_blocks,
-        parts,
-        on,
-        how,
-        _runner(pbackend),
-        broadcast,
-        salt,
-        mem_budget_bytes,
+    restarts = 1 if epoch_restarts_allowed is None else epoch_restarts_allowed
+    return _dispatch(
+        resolved,
+        pbackend,
+        on_unreachable,
+        lambda: transport_run_join(
+            backend,
+            left_blocks,
+            right_blocks,
+            parts,
+            on=on,
+            how=how,
+            pbackend=pbackend,
+            broadcast=broadcast,
+            salt=salt,
+            mem_budget_bytes=mem_budget_bytes,
+            workers=workers,
+            pull_timeout_s=pull_timeout_s,
+            epoch_restarts_allowed=restarts,
+        ),
+        lambda: relay_run_join(
+            backend,
+            left_blocks,
+            right_blocks,
+            parts,
+            on=on,
+            how=how,
+            runner=SubmitRunner(pbackend),
+            broadcast=broadcast,
+            salt=salt,
+            mem_budget_bytes=mem_budget_bytes,
+        ),
     )
 
 
@@ -237,12 +216,8 @@ def probe_peer_reachability(
         addr: pbackend.submit(
             _parsl_peer_main,
             {
+                **rendezvous_spec(nonce, driver_ep, worker_addrs, addr),
                 "kind": "probe",
-                "addr": addr,
-                "epoch": nonce,
-                "driver_host": driver_ep.host,
-                "driver_port": driver_ep.port,
-                "worker_addrs": worker_addrs,
                 "probe_timeout_s": timeout_s,
             },
             key=f"graphed-parsl-probe-{nonce}-{i}",
@@ -272,6 +247,23 @@ def probe_peer_reachability(
 
 
 # ---- helpers ------------------------------------------------------------------------------------
+def _dispatch(
+    resolved: str,
+    pbackend: Any,
+    on_unreachable: str | None,
+    run_transport: Callable[[], Any],
+    run_relay: Callable[[], Any],
+) -> Any:
+    """Run the resolved engine; a transport probe failure routes through ``on_unreachable``."""
+    if resolved != "transport":
+        return run_relay()
+    _require_peer_transport(pbackend)
+    try:
+        return run_transport()
+    except ProbeUnreachableError as pu:
+        return _on_probe_failure(pu, on_unreachable, run_relay)
+
+
 def _require_peer_transport(pbackend: Any) -> None:
     if not getattr(pbackend, "peer_transport", False):
         raise NotImplementedError(
@@ -307,41 +299,3 @@ def _on_probe_failure(
         f"{list(pu.failed_pairs)}",
         opt_level=0,
     ) from pu
-
-
-def _runner(pbackend: Any) -> Any:
-    return SubmitRunner(pbackend)
-
-
-def _relay_repartition(backend: Any, src_blocks: Any, parts: int, runner: Any, salt: int) -> Any:
-    from graphed_executors.common.relay_engine import relay_run_repartition  # noqa: PLC0415  (G9: deferred)
-
-    return relay_run_repartition(backend, src_blocks, parts, runner=runner, salt=salt)
-
-
-def _relay_join(
-    backend: Any,
-    left_blocks: Any,
-    right_blocks: Any,
-    parts: int,
-    on: Sequence[str],
-    how: str,
-    runner: Any,
-    broadcast: bool | None,
-    salt: int,
-    mem_budget_bytes: int | None,
-) -> Any:
-    from graphed_executors.common.relay_engine import relay_run_join  # noqa: PLC0415  (G9: deferred)
-
-    return relay_run_join(
-        backend,
-        left_blocks,
-        right_blocks,
-        parts,
-        on=on,
-        how=how,
-        runner=runner,
-        broadcast=broadcast,
-        salt=salt,
-        mem_budget_bytes=mem_budget_bytes,
-    )

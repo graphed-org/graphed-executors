@@ -11,7 +11,7 @@ pytest.importorskip("parsl", reason="graphed-executors[parsl] extra not installe
 
 from graphed.debug import StageError
 
-import graphed_executors.parsl_backend.transport_shuffle as ts
+import graphed_executors.parsl_backend.api as api
 from graphed_executors.common.http_plane import EscalatingHttpTransport, PullTimeoutError
 from graphed_executors.parsl_backend.api import run_join
 from graphed_executors.parsl_backend.transport_peer import ProbeUnreachableError, _peer_rendezvous
@@ -55,7 +55,7 @@ def test_join_probe_failure_routes_to_an_attributed_stage_error(monkeypatch: Any
     def unreachable(*args: Any, **kwargs: Any) -> Any:
         raise ProbeUnreachableError([("p0", "p1")])
 
-    monkeypatch.setattr(ts, "transport_run_join", unreachable)
+    monkeypatch.setattr(api, "transport_run_join", unreachable)
     pbackend = SimpleNamespace(capabilities=None, peer_transport=True)
     with pytest.raises(StageError) as info:
         run_join(None, [], [], 2, pbackend=pbackend, shuffle_method="transport")

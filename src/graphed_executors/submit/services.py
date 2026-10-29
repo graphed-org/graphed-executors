@@ -261,7 +261,7 @@ def physical_memory_mb() -> int:
     ``GlobalMemoryStatusEx`` on Windows, ``os.sysconf`` pages elsewhere.
     """
     if sys.platform == "win32":
-        import ctypes  # noqa: PLC0415  (Windows only)
+        import ctypes
 
         class _MemoryStatusEx(ctypes.Structure):
             _fields_ = [

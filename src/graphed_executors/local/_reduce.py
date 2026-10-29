@@ -46,6 +46,36 @@ def plan_tree(n: int) -> tuple[list[Combine], int | None]:
     return combines, level[0]
 
 
+class TreeProgress(Generic[R]):
+    """The ``plan_tree`` of ``n`` leaves, completed node by node.
+
+    Each completed node's value is held in ``ready`` until the combine that takes it can start.
+    """
+
+    def __init__(self, n: int) -> None:
+        self.combines, _root = plan_tree(n)
+        self.first = list(range(n))  # node -> its first leaf (a combine's left input comes first)
+        self.ready: dict[int, R] = {}
+        self._waiting: dict[int, list[int]] = {}  # input node -> combine indices needing it
+        self._remaining: dict[int, set[int]] = {}  # combine index -> still-incomplete inputs
+        for ci, (_out, a, b) in enumerate(self.combines):
+            self._remaining[ci] = {a, b}
+            self._waiting.setdefault(a, []).append(ci)
+            self._waiting.setdefault(b, []).append(ci)
+            self.first.append(self.first[a])
+
+    def complete(self, node: int, value: R) -> list[tuple[int, R, R]]:
+        """Record ``node`` done; return each combine it readied as ``(out, left, right)``."""
+        self.ready[node] = value
+        readied = []
+        for ci in self._waiting.get(node, ()):
+            self._remaining[ci].discard(node)
+            if not self._remaining[ci]:
+                out, a, b = self.combines[ci]
+                readied.append((out, self.ready.pop(a), self.ready.pop(b)))
+        return readied
+
+
 def tree_reduce(
     n: int,
     completed: Iterable[tuple[int, R]],

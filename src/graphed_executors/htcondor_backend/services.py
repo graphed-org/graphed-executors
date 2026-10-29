@@ -226,7 +226,7 @@ def queued_refusal(
     ``Memory``/``Cpus``/``GPUs``/``Disk`` are a partitionable slot's totals, so a busy pool still
     matches, less what ``claims`` (running ads, by holder) hold there.
     """
-    import classad2  # noqa: PLC0415  (ships with the htcondor2 bindings)
+    import classad2  # ships with the htcondor2 bindings
 
     slots = [_as_whole(classad2.ClassAd(str(machine))) for machine in machines]
     held = {who: running for who, running in (claims or {}).items() if running}

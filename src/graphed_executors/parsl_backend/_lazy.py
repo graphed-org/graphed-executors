@@ -20,7 +20,7 @@ def _parsl_executor_types() -> tuple[Any, Any]:
     Deferred so the module imports parsl-free.
     """
     try:
-        from parsl.executors import (  # noqa: PLC0415  (lazy: parsl is the optional extra)
+        from parsl.executors import (
             HighThroughputExecutor,
             ThreadPoolExecutor,
         )

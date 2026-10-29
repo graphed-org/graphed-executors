@@ -76,10 +76,10 @@ def _run(data: bytes) -> tuple[bool, bytes]:
             return True, pickle.dumps(value)
         except PICKLE_ERRORS:
             return True, pickle.dumps(Portable(value))
-    except Exception as exc:
+    except Exception as exc:  # the task's boundary: every failure goes back to the driver
         try:
             return False, pickle.dumps(exc)
-        except Exception:
+        except Exception:  # an exception's own pickling code may raise anything
             return False, pickle.dumps(
                 RuntimeError(f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}")
             )

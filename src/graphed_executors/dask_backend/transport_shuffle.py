@@ -19,12 +19,12 @@ F13).
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
-from graphed.shuffle import broadcast_join_choice
-
+from graphed_executors.common.tasks_engine import TaskJoinTally
+from graphed_executors.common.transport_run import harvest, run_epochs
 from graphed_executors.common.transport_tasks import (
     _GatherOut,
     _JoinOut,
@@ -35,14 +35,19 @@ from graphed_executors.common.transport_tasks import (
     map_task_body,
     replay_reader_plane,
 )
-from graphed_executors.local._shuffle_kernels import ShuffleWitness, assign, sha256_hex
+from graphed_executors.local._shuffle_kernels import (
+    BROADCAST_PER_BLOCK_HOW,
+    ShuffleWitness,
+    assign,
+    choose_broadcast,
+    empty_build_join,
+    sha256_hex,
+)
 
 from ._transport_run import (
     TransportShuffleResult,
     TransportWitness,
-    build_stage_error,
     collect_and_purge,
-    is_restart_worthy,
     pick_attributable,
     require_pin,
     sorted_addresses,
@@ -80,7 +85,7 @@ class _DaskBlockPlane:
     def pull_blocks(
         self, holder_addr: str, digests: Sequence[str], *, timeout_s: float
     ) -> list[bytes]:
-        from .transport import pull_blocks  # noqa: PLC0415  (deferred: distributed-touching)
+        from .transport import pull_blocks
 
         return list(pull_blocks(self._epoch, holder_addr, digests, timeout_s=timeout_s))
 
@@ -94,7 +99,7 @@ def _transport_map_task(
     salt: int,
     holder_budget: int | None,
 ) -> _MapFrag:
-    from .transport import _get_plugin  # noqa: PLC0415  (deferred: distributed-touching)
+    from .transport import _get_plugin
 
     plugin = _get_plugin()
     plugin.ensure_run(spec)
@@ -153,6 +158,66 @@ def _transport_broadcast_join_part(
     )
 
 
+@dataclass(frozen=True)
+class _Attempt:
+    """One epoch's submit context: every task strict-pinned to a worker, never retried by dask."""
+
+    dbackend: Any
+    spec: Any
+    backend: Any
+    addresses: Sequence[str]
+    k: int
+
+    def submit(self, fn: Any, *args: Any, key: tuple[object, ...], worker: int) -> Any:
+        return self.dbackend.submit(
+            fn,
+            *args,
+            key=_skey(self.spec.epoch, *key),
+            workers=[self.addresses[worker % self.k]],
+            retries=0,
+        )
+
+    def maps(
+        self,
+        blocks: Sequence[Any],
+        parts: int,
+        salt: int,
+        holder_budget: int | None,
+        tag: str,
+        t: int,
+    ) -> list[Any]:
+        """Submit ``t`` producers over contiguous ascending ranges of ``blocks``."""
+        return [
+            self.submit(
+                _transport_map_task,
+                self.spec,
+                self.backend,
+                [blocks[s] for s in owned],
+                parts,
+                salt,
+                holder_budget,
+                key=(tag, i),
+                worker=i,
+            )
+            for i, owned in enumerate(assign(len(blocks), t) if blocks or t else [])
+        ]
+
+    def pulls(
+        self, manifests: dict[int, dict[int, tuple[str, int]]], dest: int
+    ) -> list[tuple[str, str]]:
+        """``dest``'s ``(holder address, digest)`` pulls in ascending-producer order."""
+        return [
+            (self.addresses[t % self.k], m[dest][0]) for t, m in manifests.items() if dest in m
+        ]
+
+    def results(self, futures: dict[int, Any]) -> dict[int, Any]:
+        """Resolve every future; any failure raises the most attributable one."""
+        results, errs = harvest(futures)
+        if errs:
+            raise pick_attributable(errs, self.dbackend)
+        return results
+
+
 def _collect_maps(
     map_futs: Sequence[Any], k: int
 ) -> tuple[dict[int, dict[int, tuple[str, int]]], dict[str, int], dict[int, int], int]:
@@ -204,29 +269,15 @@ def transport_run_repartition(
     ``StageError`` (§1.5).
     """
     require_pin(dbackend)
-    from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
+    from .transport import ensure_engine_plugins
 
     ensure_engine_plugins(dbackend.client)  # the submit shim needs graphed-worker; idempotent
-    n_src = len(src_blocks)
 
     def _attempt(
         spec: Any, addresses: Sequence[str], k: int, t: int
     ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
-        map_futs = [
-            dbackend.submit(
-                _transport_map_task,
-                spec,
-                backend,
-                [src_blocks[s] for s in owned],
-                parts,
-                salt,
-                holder_budget_bytes,
-                key=_skey(spec.epoch, "map", i),
-                workers=[addresses[i % k]],
-                retries=0,
-            )
-            for i, owned in enumerate(assign(n_src, t))
-        ]
+        run = _Attempt(dbackend, spec, backend, addresses, k)
+        map_futs = run.maps(src_blocks, parts, salt, holder_budget_bytes, "map", t)
         manifests, size_of, blocks_per, peak_writer = _collect_maps(map_futs, k)
         witness = replay_reader_plane(
             manifests,
@@ -244,39 +295,22 @@ def transport_run_repartition(
             digest: addresses[hi] for m in manifests.values() for _d, (digest, hi) in m.items()
         }
         gather_futs = {
-            dest: dbackend.submit(
+            dest: run.submit(
                 _transport_gather_task,
                 spec,
                 backend,
                 dest,
-                [
-                    (addresses[gt % k], manifests[gt][dest][0])
-                    for gt in range(t)
-                    if dest in manifests[gt]
-                ],
-                key=_skey(spec.epoch, "gather", dest),
-                workers=[addresses[dest % k]],
-                retries=0,
+                run.pulls(manifests, dest),
+                key=("gather", dest),
+                worker=dest,
             )
             for dest in range(parts)
         }
-        value: dict[int, Any] = {}
-        hashes: dict[int, str] = {}
-        errs: dict[int, BaseException] = {}
-        for dest in range(parts):
-            try:
-                out = gather_futs[dest].result()
-            except BaseException as exc:  # (harvest every gather for restart classification)
-                errs[dest] = exc
-                continue
-            if out is not None:
-                value[out.dest], hashes[out.dest] = out.value, out.hash
-        if errs:
-            raise pick_attributable(errs, dbackend)
-        return value, hashes, witness
+        outs = [out for out in run.results(gather_futs).values() if out is not None]
+        return {o.dest: o.value for o in outs}, {o.dest: o.hash for o in outs}, witness
 
     return _run_with_restarts(
-        dbackend, n_src, n_tasks, epoch_restarts_allowed, _attempt, pull_timeout_s
+        dbackend, len(src_blocks), n_tasks, epoch_restarts_allowed, _attempt, pull_timeout_s
     )
 
 
@@ -310,55 +344,31 @@ def transport_run_join(
     holder store).
     """
     require_pin(dbackend)
-    from .transport import ensure_engine_plugins  # noqa: PLC0415  (deferred: distributed-touching)
+    from .transport import ensure_engine_plugins
 
     ensure_engine_plugins(dbackend.client)
     on_t = tuple(on)
-    build_bytes = sum(backend.estimated_bytes(b) for b in left_blocks)
-    probe_bytes = sum(backend.estimated_bytes(b) for b in right_blocks)
-    chosen = (
-        broadcast_join_choice(build_bytes, probe_bytes, parts)
-        if broadcast is None
-        else bool(broadcast)
-    )
+    chosen = choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast=broadcast)
 
-    if chosen:
-
-        def _attempt(
-            spec: Any, addresses: Sequence[str], k: int, _t: int
-        ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
+    def _attempt(
+        spec: Any, addresses: Sequence[str], k: int, _t: int
+    ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
+        run = _Attempt(dbackend, spec, backend, addresses, k)
+        if chosen:
             return _broadcast_join_attempt(
-                spec,
-                backend,
-                dbackend,
-                left_blocks,
-                right_blocks,
-                on_t,
-                how,
-                mem_budget_bytes,
-                addresses,
-                k,
+                run, left_blocks, right_blocks, on_t, how, mem_budget_bytes
             )
-    else:
-
-        def _attempt(
-            spec: Any, addresses: Sequence[str], k: int, _t: int
-        ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
-            return _shuffle_join_attempt(
-                spec,
-                backend,
-                dbackend,
-                left_blocks,
-                right_blocks,
-                parts,
-                on_t,
-                how,
-                salt,
-                mem_budget_bytes,
-                holder_budget_bytes,
-                addresses,
-                k,
-            )
+        return _shuffle_join_attempt(
+            run,
+            left_blocks,
+            right_blocks,
+            parts,
+            on_t,
+            how,
+            salt,
+            mem_budget_bytes,
+            holder_budget_bytes,
+        )
 
     # join task granularity keys on the side block counts, not a caller n_tasks; the restart
     # driver's ``t`` arg is unused (``_t``) — the map fan-out is min(k, n_side) inside each
@@ -374,9 +384,7 @@ def transport_run_join(
 
 
 def _shuffle_join_attempt(
-    spec: Any,
-    backend: Any,
-    dbackend: Any,
+    run: _Attempt,
     left: Sequence[Any],
     right: Sequence[Any],
     parts: int,
@@ -385,145 +393,73 @@ def _shuffle_join_attempt(
     salt: int,
     mem_budget: int | None,
     holder_budget: int | None,
-    addresses: Sequence[str],
-    k: int,
 ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
-    n_left, n_right = len(left), len(right)
-    t_l = min(k, n_left) if n_left else 0
-    t_r = min(k, n_right) if n_right else 0
-    left_maps = [
-        dbackend.submit(
-            _transport_map_task,
-            spec,
-            backend,
-            [left[s] for s in owned],
-            parts,
-            salt,
-            holder_budget,
-            key=_skey(spec.epoch, "lmap", i),
-            workers=[addresses[i % k]],
-            retries=0,
-        )
-        for i, owned in enumerate(assign(n_left, t_l) if t_l else [])
-    ]
-    right_maps = [
-        dbackend.submit(
-            _transport_map_task,
-            spec,
-            backend,
-            [right[s] for s in owned],
-            parts,
-            salt,
-            holder_budget,
-            key=_skey(spec.epoch, "rmap", i),
-            workers=[addresses[i % k]],
-            retries=0,
-        )
-        for i, owned in enumerate(assign(n_right, t_r) if t_r else [])
-    ]
-    left_manifests, _lsz, _lbp, _lpw = _collect_maps(left_maps, k)
-    right_manifests, _rsz, _rbp, _rpw = _collect_maps(right_maps, k)
+    t_l = min(run.k, len(left))
+    t_r = min(run.k, len(right))
+    left_maps = run.maps(left, parts, salt, holder_budget, "lmap", t_l)
+    right_maps = run.maps(right, parts, salt, holder_budget, "rmap", t_r)
+    left_manifests = _collect_maps(left_maps, run.k)[0]
+    right_manifests = _collect_maps(right_maps, run.k)[0]
     left_carrier = left[0] if left else None
     right_carrier = right[0] if right else None
-
     gather_futs = {
-        dest: dbackend.submit(
+        dest: run.submit(
             _transport_gather_join,
-            spec,
-            backend,
+            run.spec,
+            run.backend,
             dest,
             on,
             how,
             mem_budget,
             left_carrier,
             right_carrier,
-            [
-                (addresses[t % k], left_manifests[t][dest][0])
-                for t in range(t_l)
-                if dest in left_manifests[t]
-            ],
-            [
-                (addresses[t % k], right_manifests[t][dest][0])
-                for t in range(t_r)
-                if dest in right_manifests[t]
-            ],
-            key=_skey(spec.epoch, "gjoin", dest),
-            workers=[addresses[dest % k]],
-            retries=0,
+            run.pulls(left_manifests, dest),
+            run.pulls(right_manifests, dest),
+            key=("gjoin", dest),
+            worker=dest,
         )
         for dest in range(parts)
     }
-    value: dict[int, Any] = {}
-    hashes: dict[int, str] = {}
-    errs: dict[int, BaseException] = {}
-    peak_join = spilled_total = rows_total = reads_total = 0
-    next_key = parts  # spilled sub-partitions get fresh keys beyond the dest range (mirrors local)
-    for dest in range(parts):
-        try:
-            out = gather_futs[dest].result()
-        except BaseException as exc:  # (harvest every dest for restart classification)
-            errs[dest] = exc
-            continue
-        if out is None:
-            continue
-        peak_join = max(peak_join, out.peak)
-        spilled_total += out.spilled
-        rows_total += out.rows
-        reads_total += out.read
-        if len(out.chunks) == 1:
-            value[dest], hashes[dest] = out.chunks[0], out.hashes[0]
-        else:
-            for ch, h in zip(out.chunks, out.hashes, strict=True):
-                value[next_key], hashes[next_key] = ch, h
-                next_key += 1
-    if errs:
-        raise pick_attributable(errs, dbackend)
+    tally = TaskJoinTally(next_key=parts)
+    for dest, out in run.results(gather_futs).items():
+        if out is not None:
+            tally.add_out(dest, out)
     witness = ShuffleWitness(
         n_producer_tasks=max(t_l, t_r),
         broadcast_chosen=False,
         build_side_blocks=sum(len(m) for m in left_manifests.values()),
         large_side_blocks=sum(len(m) for m in right_manifests.values()),
-        peak_join_bytes=peak_join,
-        join_spilled_partitions=spilled_total,
-        join_chunks_read=reads_total,
-        join_output_rows=rows_total,
+        **tally.counters(),
         manifest_fetch_is_per_dest=True,
     )
-    return value, hashes, witness
+    return tally.value, tally.hashes, witness
 
 
 def _broadcast_join_attempt(
-    spec: Any,
-    backend: Any,
-    dbackend: Any,
+    run: _Attempt,
     left: Sequence[Any],
     right: Sequence[Any],
     on: tuple[str, ...],
     how: str,
     mem_budget: int | None,
-    addresses: Sequence[str],
-    k: int,
 ) -> tuple[dict[int, Any], dict[int, str], ShuffleWitness]:
-    value: dict[int, Any] = {}
-    hashes: dict[int, str] = {}
     if not left:
-        return (
-            value,
-            hashes,
-            ShuffleWitness(broadcast_chosen=True, n_producer_tasks=1, large_side_blocks=0),
+        kept = empty_build_join(run.backend, right, how)
+        witness = ShuffleWitness(
+            broadcast_chosen=True, n_producer_tasks=1, large_side_blocks=0, **kept.counters()
         )
+        return kept.value, kept.hashes, witness
 
+    backend = run.backend
     build_concat = backend.concat(list(left))
     build_wire = bytes(backend.to_wire(build_concat))
-    handle = dbackend.broadcast(
-        build_wire, token=f"bjoin-{spec.epoch}-{sha256_hex(build_wire)[:12]}"
+    handle = run.dbackend.broadcast(
+        build_wire, token=f"bjoin-{run.spec.epoch}-{sha256_hex(build_wire)[:12]}"
     )
-    per_block_how = {"inner": "inner", "left": "inner", "right": "right", "outer": "right"}[how]
+    per_block_how = BROADCAST_PER_BLOCK_HOW[how]
     track_unmatched = how in ("left", "outer")
-
-    pins = [addresses[pidx % k] for pidx in range(len(right))]
-    part_futs = [
-        dbackend.submit(
+    part_futs = {
+        pidx: run.submit(
             _transport_broadcast_join_part,
             backend,
             handle,
@@ -533,76 +469,43 @@ def _broadcast_join_attempt(
             mem_budget,
             track_unmatched,
             None,
-            key=_skey(spec.epoch, "bpart", pidx),
-            workers=[pins[pidx]],
-            retries=0,
+            key=("bpart", pidx),
+            worker=pidx,
         )
         for pidx, probe_block in enumerate(right)
-    ]
-    errs: dict[int, BaseException] = {}
-    peak_join = spilled_total = rows_total = reads_total = 0
-    matched: set[int] = set()
-    next_key = len(right)  # spilled sub-partitions get fresh keys beyond the pidx range
-    for pidx, fut in enumerate(part_futs):
-        try:
-            out = fut.result()
-        except BaseException as exc:  # (harvest every probe task for restart classification)
-            errs[pidx] = exc
-            continue
-        peak_join = max(peak_join, out.peak)
-        spilled_total += out.spilled
-        rows_total += out.rows
-        reads_total += out.read
-        if out.matched is not None:
-            matched.update(out.matched)
-        if len(out.chunks) == 1:
-            value[pidx], hashes[pidx] = out.chunks[0], out.hashes[0]
-        else:
-            for ch, h in zip(out.chunks, out.hashes, strict=True):
-                value[next_key], hashes[next_key] = ch, h
-                next_key += 1
-    if errs:
-        raise pick_attributable(errs, dbackend)
+    }
+    tally = TaskJoinTally(next_key=len(right))
+    for pidx, out in run.results(part_futs).items():
+        tally.add_out(pidx, out)
 
-    # emit the never-matched build rows exactly once (F2 of _run_broadcast_join)
-    if track_unmatched:
-        unmatched = tuple(sorted(set(range(len(build_concat))) - matched))
-        # empty probe -> no schema carrier: local drops the tail (no crash)
-        if unmatched and right:
-            tail = dbackend.submit(
-                _transport_broadcast_join_part,
-                backend,
-                handle,
-                right[0],
-                on,
-                "left",
-                mem_budget,
-                False,
-                unmatched,
-                key=_skey(spec.epoch, "btail", 0),
-                workers=[addresses[0]],
-                retries=0,
-            ).result()
-            peak_join = max(peak_join, tail.peak)
-            spilled_total += tail.spilled
-            rows_total += tail.rows
-            reads_total += tail.read
-            for ch, h in zip(tail.chunks, tail.hashes, strict=True):
-                value[next_key], hashes[next_key] = ch, h
-                next_key += 1
+    # emit the never-matched build rows exactly once (F2); an empty probe has no schema carrier,
+    # so the tail is dropped there, as the local engine does
+    unmatched = tally.unmatched(len(build_concat)) if track_unmatched else ()
+    if unmatched and right:
+        tail = run.submit(
+            _transport_broadcast_join_part,
+            backend,
+            handle,
+            right[0],
+            on,
+            "left",
+            mem_budget,
+            False,
+            unmatched,
+            key=("btail", 0),
+            worker=0,
+        )
+        tally.add_out(None, tail.result())
 
     witness = ShuffleWitness(
         n_producer_tasks=len(right) or 1,
         broadcast_chosen=True,
         large_side_blocks=0,
         # DISTINCT workers that resolved the build handle (== k here)
-        broadcast_puts=len(set(pins)),
-        peak_join_bytes=peak_join,
-        join_spilled_partitions=spilled_total,
-        join_chunks_read=reads_total,
-        join_output_rows=rows_total,
+        broadcast_puts=len({run.addresses[pidx % run.k] for pidx in range(len(right))}),
+        **tally.counters(),
     )
-    return value, hashes, witness
+    return tally.value, tally.hashes, witness
 
 
 # ---- the §1.5 whole-run restart driver ----------------------------------------------------------
@@ -614,45 +517,30 @@ def _run_with_restarts(
     attempt_fn: Any,
     pull_timeout_s: float | None = None,
 ) -> TransportShuffleResult:
-    """Run ``attempt_fn`` under a fresh epoch.
+    """Run ``attempt_fn`` under fresh epochs (``run_epochs``), re-reading the worker addresses.
 
-    Restarting the WHOLE run on a restart-worthy failure (worker death / exhausted send / pull
-    timeout) up to ``epoch_restarts_allowed`` — else an attributed ``StageError``. Worker addresses
-    are re-read each attempt so a restart after a death pins onto the SURVIVORS. ``pull_timeout_s``
-    (when given) overrides the spec's block-pull ceiling (R4).
+    Each attempt pins onto the workers alive at its start, so a restart after a death lands on
+    the SURVIVORS. ``pull_timeout_s`` (when given) overrides the spec's block-pull ceiling (R4).
     """
-    transport = TransportWitness()
-    per_worker: dict[str, dict[str, int]] = {}
-    last_exc: BaseException | None = None
-    for attempt in range(epoch_restarts_allowed + 1):
-        # deferred: distributed-touching
-        from .transport import make_transport_spec  # noqa: PLC0415
+    from .transport import make_transport_spec
 
-        nonce = uuid.uuid4().hex
-        transport.epoch_nonces.append(nonce)
+    transport = TransportWitness()
+
+    def attempt(_n: int, nonce: str) -> TransportShuffleResult | BaseException:
         addresses = sorted_addresses(dbackend)
         k = max(1, len(addresses))
         t = n_tasks if n_tasks is not None else (min(k, n_src) if n_src else 1)
         spec = make_transport_spec(nonce, addresses, pull_timeout_s=pull_timeout_s)
         try:
             value, hashes, witness = attempt_fn(spec, addresses, k, t)
-        except BaseException as exc:  # (classify: restart or attributed StageError)
-            collect_and_purge(dbackend.client, nonce, per_worker)
-            last_exc = exc
-            if not is_restart_worthy(exc, dbackend) or attempt >= epoch_restarts_allowed:
-                transport.per_worker = per_worker
-                raise build_stage_error(exc, dbackend) from exc
-            continue
-        collect_and_purge(dbackend.client, nonce, per_worker)
-        transport.epoch_restarts = attempt
-        transport.per_worker = per_worker
+        except BaseException as exc:  # run_epochs classifies it: restart or attributed StageError
+            return exc
+        finally:
+            collect_and_purge(dbackend.client, nonce, transport.per_worker)
         return TransportShuffleResult(
             dest_block_hashes=hashes, value=value, witness=witness, transport=transport
         )
 
-    transport.per_worker = per_worker  # pragma: no cover (the loop returns or raises)
-    raise (  # pragma: no cover
-        build_stage_error(last_exc, dbackend)
-        if last_exc is not None
-        else RuntimeError("no epochs run")
+    return run_epochs(
+        attempt, restarts_allowed=epoch_restarts_allowed, backend=dbackend, witness=transport
     )
