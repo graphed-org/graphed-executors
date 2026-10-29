@@ -431,7 +431,14 @@ def _submitted(
             result = launcher._submit(htc, schedd, desc, 1, on_error)
             on_error.pop_all()  # submitted: the job outlives this session
     else:
-        result = _submit_dag(htc, schedd, name, launcher, run_dir, desc, nodes)
+        _write_dag(run_dir, desc, nodes, launcher.extra_submit)
+        # never spooled: the run dir lies under job_root, which the schedd reads
+        # from_dag names the condor_dagman on this host's PATH; the scheduler universe runs the
+        # schedd's
+        bindir = htc.RemoteParam(htc.Collector().locate(htc.DaemonType.Schedd, name))["BIN"]
+        options = {**DAG_OPTIONS, "dagman": f"{bindir}/condor_dagman"}
+        launch.ensure_credential(htc, desc)  # the DAG's own description sends none; its nodes do
+        result = schedd.submit(htc.Submit.from_dag(str(run_dir / DAG_FILE), options))
     return RunHandle(
         site=run["site"],
         schedd=name,
@@ -442,16 +449,13 @@ def _submitted(
     )
 
 
-def _submit_dag(
-    htc: Any,
-    schedd: Any,
-    name: str,
-    launcher: CondorPilots,
+def _write_dag(
     run_dir: Path,
     desc: Mapping[str, str],
     nodes: Mapping[str, ServiceJob],
-) -> Any:
-    """Write the run's DAG (``JOB driver`` and its SERVICE nodes) and submit it to ``schedd``."""
+    extra_submit: Mapping[str, str],
+) -> None:
+    """Write the run's DAG: ``JOB driver`` and its SERVICE nodes, each with its submit file."""
     _write_sub(run_dir / "driver.sub", desc)
     lines = ["JOB driver driver.sub"]
     for node, job in nodes.items():
@@ -460,18 +464,11 @@ def _submit_dag(
         # a held node frees its slot (a GPU, say) at once; the user's extra_submit still wins
         _write_sub(
             run_dir / f"{node}.sub",
-            {**keys, "periodic_remove": "JobStatus == 5", **launcher.extra_submit},
+            {**keys, "periodic_remove": "JobStatus == 5", **extra_submit},
         )
         lines.append(f"SERVICE {node} {node}.sub")
     lines.append("RETRY driver 2 UNLESS-EXIT 3")
     (run_dir / DAG_FILE).write_text("\n".join(lines) + "\n")
-    # never spooled: the run dir lies under job_root, which the schedd reads
-    # from_dag names the condor_dagman on this host's PATH; the scheduler universe runs the
-    # schedd's
-    bindir = htc.RemoteParam(htc.Collector().locate(htc.DaemonType.Schedd, name))["BIN"]
-    options = {**DAG_OPTIONS, "dagman": f"{bindir}/condor_dagman"}
-    launch.ensure_credential(htc, desc)  # the DAG's own description sends none; its nodes do
-    return schedd.submit(htc.Submit.from_dag(str(run_dir / DAG_FILE), options))
 
 
 def submit_driverless(
