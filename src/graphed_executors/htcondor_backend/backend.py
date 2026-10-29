@@ -227,6 +227,46 @@ class HTCondorBackend:
         self.launcher = launcher
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
         profile: SiteProfile = getattr(launcher, "profile", SITES["generic"])
+        self._place_services(profile, in_job, service_hosts)
+        self.advertise_host = host or socket.getfqdn()
+        self._in_job = in_job
+        low, high = port_range if port_range is not None else profile.driver_ports
+        try:
+            self._server = TaskServer(self.advertise_host, (low, high), launcher, task_timeout_s)
+        except OSError as exc:
+            raise OSError(
+                f"no free port for the task server: site={profile.name} ports={low}-{high}"
+            ) from exc
+        # every service job submitted and not yet released
+        self._services: dict[str, ServiceJob] = {}
+        # a service job is recorded before close() reads the record, or refused
+        self._lock = threading.Lock()
+        # set: a service job still waiting for a slot ends its wait
+        self._closing = threading.Event()
+        self._announced = dict(announced or {})
+        self._schedd_locate = schedd_locate
+        self._dag_dir = None if dag_dir is None else Path(dag_dir)
+        self._bind_service_hosting()
+        # pilot jobs submitted with the services' jobs would hold the room those need: they wait
+        deferred = isinstance(launcher, CondorPilots) and hasattr(self, "host_service")
+        self.min_pilots = 1  # the first need of a worker waits for this many
+        self._n_pilots = n_pilots
+        self._pilots_lock = threading.Lock()
+        self._submitted_at = None if deferred else time.monotonic()
+        self._held = False  # the queued pilots are held while a later plan's services start
+        self._waited = False
+        self._starting = 0  # plans whose services are starting (ServiceSet resolve phases)
+        # held by the one service set starting, through its probe
+        self._set_start = threading.Lock()
+        self._wanted = False  # a need of a worker arrived during one
+        self._closed = False
+        self._start_pilots(deferred)
+
+    def _place_services(
+        self, profile: SiteProfile, in_job: SiteProfile | None, service_hosts: Sequence[str] | None
+    ) -> None:
+        """Set where services run, from the site row or the driver job's; refuse other hosts."""
+        launcher = self.launcher
         # a driver job's services stay beside it, reached like its task server
         offered = profile.service_hosts if in_job is None else ("driver",)
         if service_hosts is not None and not set(service_hosts) <= set(offered):
@@ -235,8 +275,6 @@ class HTCondorBackend:
                 f"service_hosts={tuple(service_hosts)!r} names a host {where} does not offer: "
                 f"it offers {offered!r}"
             )
-        self.advertise_host = host or socket.getfqdn()
-        self._in_job = in_job
         self.service_hosts = (
             offered if service_hosts is None else tuple(h for h in offered if h in service_hosts)
         )
@@ -254,53 +292,31 @@ class HTCondorBackend:
             )
             slot = machine_ad("Memory")  # the job's slot, not the node it shares
             self.driver_memory_mb = None if slot is None else int(slot)
-        low, high = port_range if port_range is not None else profile.driver_ports
-        try:
-            self._server = TaskServer(self.advertise_host, (low, high), launcher, task_timeout_s)
-        except OSError as exc:
-            raise OSError(
-                f"no free port for the task server: site={profile.name} ports={low}-{high}"
-            ) from exc
-        # every service job submitted and not yet released
-        self._services: dict[str, ServiceJob] = {}
-        # a service job is recorded before close() reads the record, or refused
-        self._lock = threading.Lock()
-        # set: a service job still waiting for a slot ends its wait
-        self._closing = threading.Event()
-        self._announced = dict(announced or {})
-        self._schedd_locate = schedd_locate
-        self._dag_dir = None if dag_dir is None else Path(dag_dir)
+
+    def _bind_service_hosting(self) -> None:
+        """Set ``host_service``/``release_service`` when this backend can host a service."""
         # the capability IS this pair of attributes: absent, the engine refuses naming it
         if self._announced:
             self.host_service = self._host_announced
             self.release_service = self._release_announced
         elif (
-            in_job is None
-            and isinstance(launcher, CondorPilots)
+            self._in_job is None
+            and isinstance(self.launcher, CondorPilots)
             and "cluster" in self.service_hosts
         ):
             self.host_service = self._host_service
             self.release_service = self._release_service
-        # pilot jobs submitted with the services' jobs would hold the room those need: they wait
-        deferred = isinstance(launcher, CondorPilots) and hasattr(self, "host_service")
-        self.min_pilots = 1  # the first need of a worker waits for this many
-        self._n_pilots = n_pilots
-        self._pilots_lock = threading.Lock()
-        self._submitted_at = None if deferred else time.monotonic()
-        self._held = False  # the queued pilots are held while a later plan's services start
-        self._waited = False
-        self._starting = 0  # plans whose services are starting (ServiceSet resolve phases)
-        # held by the one service set starting, through its probe
-        self._set_start = threading.Lock()
-        self._wanted = False  # a need of a worker arrived during one
-        self._closed = False
+
+    def _start_pilots(self, deferred: bool) -> None:
+        """Start the pilots, or only prepare deferred ones; a refused start frees the server."""
+        launcher = self.launcher
         with ExitStack() as stack:  # a refused start must not leave the server holding its port
             stack.callback(release_quietly, "the task server's port", self._server.shutdown)
             stack.callback(release_quietly, "the task server", self._server.close)
             if deferred and isinstance(launcher, CondorPilots):
                 launcher.prepare(self._server.url, self._server.secret)
             else:
-                launcher.start(self._server.url, self._server.secret, n_pilots)
+                launcher.start(self._server.url, self._server.secret, self._n_pilots)
             stack.callback(release_quietly, "the pilots", launcher.stop)
             # closed first: pilots see 410 and exit before they are stopped (a second close is a
             # no-op)
