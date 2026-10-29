@@ -469,24 +469,21 @@ class ThreadExecutor(_BaseExecutor):
         monitor, lean = self._run_monitor, self._run_lean
         return lambda task: pool.submit(_thread_task, process, task, monitor, lean)
 
-    def _peer_execute(
+    def _peer_threads(
         self,
         plan: Plan[R],
         n: int,
-        w: int,
         bounds: list[int],
         worker_addrs: tuple[str, ...],
         items: dict[str, list[tuple[int, Partition]]],
-        control: RunControl | None = None,
-    ) -> tuple[R, int]:
-        # threads share the process, so the in-process transports (queue.Queue or loopback HTTP)
-        # are built once by the driver and handed to each worker thread directly.
-        transports = build_transports(self._comms or "ipc", ("driver", *worker_addrs))
+        transports: dict[str, Any],
+        release: Any,
+    ) -> tuple[list[threading.Thread], dict[str, dict[str, int]], dict[str, BaseException]]:
+        """Build an unstarted actor thread per worker and the dicts its witness and error go to."""
         witness: dict[str, dict[str, int]] = {}
         complete = complete_events(self._run_monitor)
         # a worker thread's exception (captured, then re-raised)
         errors: dict[str, BaseException] = {}
-        release_r, release_w = multiprocessing.Pipe(duplex=False)  # EOF once the driver closes it
 
         def actor(addr: str) -> None:
             try:
@@ -506,7 +503,7 @@ class ThreadExecutor(_BaseExecutor):
                     lean=self._run_lean,
                     keys=self._run_keys,
                     complete=complete,
-                    release=release_r,
+                    release=release,
                 )
             # a thread exception is otherwise lost -> capture + propagate
             except BaseException as exc:
@@ -516,6 +513,25 @@ class ThreadExecutor(_BaseExecutor):
             threading.Thread(target=actor, args=(a,), name=f"graphed-peer-{a}", daemon=True)
             for a in worker_addrs
         ]
+        return threads, witness, errors
+
+    def _peer_execute(
+        self,
+        plan: Plan[R],
+        n: int,
+        w: int,
+        bounds: list[int],
+        worker_addrs: tuple[str, ...],
+        items: dict[str, list[tuple[int, Partition]]],
+        control: RunControl | None = None,
+    ) -> tuple[R, int]:
+        # threads share the process, so the in-process transports (queue.Queue or loopback HTTP)
+        # are built once by the driver and handed to each worker thread directly.
+        transports = build_transports(self._comms or "ipc", ("driver", *worker_addrs))
+        release_r, release_w = multiprocessing.Pipe(duplex=False)  # EOF once the driver closes it
+        threads, witness, errors = self._peer_threads(
+            plan, n, bounds, worker_addrs, items, transports, release_r
+        )
         driver_t = transports["driver"]
         ctl = (
             PeerControl(control, driver_t, n, plan.combine, plan.empty)
@@ -525,27 +541,12 @@ class ThreadExecutor(_BaseExecutor):
         try:
             for t in threads:
                 t.start()
-            deadline = time.monotonic() + self._peer_root_timeout_s
-            out: tuple[R, int] | None = None
-            while out is None:
-                got = driver_t.recv(timeout=0.05)
-                if got is not None and got[1][0] == "root":
-                    out = got[1][1], n
-                    break
-                if got is not None and not self._forward_peer_events(got[1]) and ctl is not None:
-                    out = ctl.take(got[1])  # a cancel hand-in; the fold once all are in
+            try:
                 # a worker failed -> the root will never form; stop waiting and re-raise
-                if errors:
-                    break
-                if ctl is not None and ctl.relay():
-                    # paused time does not count
-                    deadline = time.monotonic() + self._peer_root_timeout_s
-                if time.monotonic() >= deadline:
-                    driver_t.broadcast(("done",))  # release the actors the finally joins
-                    raise TimeoutError(
-                        f"peer reduction did not produce a root within "
-                        f"{self._peer_root_timeout_s}s"
-                    )
+                out = self._await_peer_root(driver_t, n, ctl, lambda: bool(errors))
+            except TimeoutError:
+                driver_t.broadcast(("done",))  # release the actors the finally joins
+                raise
             if ctl is not None:  # a queued tag lands before `done`
                 ctl.close(0.0 if errors else OUTBOX_EXIT_WAIT_S)
             driver_t.broadcast(("done",))

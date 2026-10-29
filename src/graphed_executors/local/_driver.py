@@ -45,7 +45,7 @@ from graphed.services import require_bound
 from .._plan_queue import PlanQueue
 from .._window import Window
 from ..common import refuse_staged
-from ._peer import make_bounds, slice_items
+from ._peer import PeerControl, make_bounds, slice_items
 from ._reduce import LazyReducer, plan_tree, running_fold, tree_reduce
 
 R = TypeVar("R")
@@ -438,6 +438,43 @@ class _BaseExecutor:
                 self._run_monitor.on_profile(payload[1], payload[2])
             return True
         return False
+
+    def _await_peer_root(
+        self,
+        driver_t: Any,
+        n: int,
+        ctl: PeerControl[R] | None,
+        failed: Callable[[], bool],
+        on_via: Callable[[Any], None] | None = None,
+    ) -> tuple[R, int] | None:
+        """Poll the driver transport until the root arrives or a cancel's hand-ins fold.
+
+        Forwards monitor events, hands ``via`` messages to ``on_via`` and relays run control;
+        paused time does not count against ``_peer_root_timeout_s``. Returns what is in hand once
+        ``failed()`` reports a worker failure, and raises ``TimeoutError`` past the deadline.
+        """
+        deadline = time.monotonic() + self._peer_root_timeout_s
+        out: tuple[R, int] | None = None
+        while out is None:
+            got = driver_t.recv(timeout=0.05)
+            if got is not None and got[1][0] == "root":
+                return got[1][1], n
+            if got is not None and on_via is not None and got[1][0] == "via":
+                on_via(got[1])
+                continue
+            # worker STARTED/FINISHED/ERRORED -> monitor; a cancel hand-in -> the fold once all
+            # are in
+            if got is not None and not self._forward_peer_events(got[1]) and ctl is not None:
+                out = ctl.take(got[1])
+            if failed():
+                break
+            if ctl is not None and ctl.relay():
+                deadline = time.monotonic() + self._peer_root_timeout_s
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"peer reduction did not produce a root within {self._peer_root_timeout_s}s"
+                )
+        return out
 
     def _peer_execute(
         self,
