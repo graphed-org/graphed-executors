@@ -260,7 +260,7 @@ class HTCondorBackend:
         self._set_start = threading.Lock()
         self._wanted = False  # a need of a worker arrived during one
         self._closed = False
-        self._start_pilots(deferred)
+        self._start_pilots(deferred=deferred)
 
     def _place_services(
         self, profile: SiteProfile, in_job: SiteProfile | None, service_hosts: Sequence[str] | None
@@ -307,7 +307,7 @@ class HTCondorBackend:
             self.host_service = self._host_service
             self.release_service = self._release_service
 
-    def _start_pilots(self, deferred: bool) -> None:
+    def _start_pilots(self, *, deferred: bool) -> None:
         """Start the pilots, or only prepare deferred ones; a refused start frees the server."""
         launcher = self.launcher
         with ExitStack() as stack:  # a refused start must not leave the server holding its port

@@ -306,6 +306,7 @@ def _announce_only(
     plan: Plan[Any] | DurablePlanV2,
     endpoints: Mapping[str, str],
     pilots: str,
+    site: str,
 ) -> dict[str, str]:
     """Refuse a driver job ``launcher`` or its site cannot run; return :func:`_service_nodes`."""
     launcher._refuse()
@@ -323,8 +324,7 @@ def _announce_only(
             else f"the SERVICE nodes of {sorted(announce_only)}"
         )
         raise ValueError(
-            f"site {profile.name!r} has no worker_ports: {who} cannot reach the driver job's task "
-            "server"
+            f"site {site!r} has no worker_ports: {who} cannot reach the driver job's task server"
         )
     return announce_only
 
@@ -377,6 +377,7 @@ def _driver_description(
     plan: Plan[Any] | DurablePlanV2,
     run_dir: Path,
     nonce: str,
+    *,
     dag: bool,
 ) -> dict[str, str]:
     """Stage the driver job in ``run_dir`` and return its submit description."""
@@ -523,7 +524,7 @@ def submit_driverless(
         env=env,
         extra_submit=extra_submit,
     )
-    announce_only = _announce_only(launcher, plan, endpoints, pilots)
+    announce_only = _announce_only(launcher, plan, endpoints, pilots, site)
     run_dir, nonce, nodes = _run_dir(launcher, plan, announce_only, pilots, log_dir)
     desc = _driver_description(launcher, plan, run_dir, nonce, dag=bool(nodes))
     run = {

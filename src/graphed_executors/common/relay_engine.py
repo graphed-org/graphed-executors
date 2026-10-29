@@ -87,4 +87,6 @@ def relay_run_join(
     ``join_with_budget`` spill.
     """
     spec = _JoinSpec(tuple(on), how, salt, mem_budget_bytes)
-    return _join(backend, left_blocks, right_blocks, parts, spec, runner, broadcast, relay=True)
+    return _join(
+        backend, left_blocks, right_blocks, parts, spec, runner, broadcast=broadcast, relay=True
+    )

@@ -103,7 +103,7 @@ convention = "pep257"
 # the translation keeps the HiggsDNA processor's names so it reads line for line against the original
 "examples/hgg/analysis.py" = ["N802", "N803", "N806", "N815"]
 # distributed, parsl and the htcondor2 bindings are optional extras: these modules import without
-# them and load them on first use (the dask-free and parsl-free import probes pin this)
+# them and load them on first use
 "src/graphed_executors/dask_backend/_lazy.py" = ["PLC0415"]
 "src/graphed_executors/dask_backend/backend.py" = ["PLC0415"]
 "src/graphed_executors/dask_backend/transport_peer.py" = ["PLC0415"]
@@ -112,6 +112,8 @@ convention = "pep257"
 "src/graphed_executors/parsl_backend/launch.py" = ["PLC0415"]
 "src/graphed_executors/htcondor_backend/launch.py" = ["PLC0415"]
 "src/graphed_executors/htcondor_backend/services.py" = ["PLC0415"]
+# ctypes is absent from CPython builds without libffi; only the Windows branch needs it
+"src/graphed_executors/submit/services.py" = ["PLC0415"]
 # the fakes stand in for htcondor2's class-named factories (Schedd, Collector, Credd, ...)
 "tests/extra/m66/test_m66_launcher.py" = ["N802"]
 "tests/extra/m68b/test_m68b_dag.py" = ["N802"]

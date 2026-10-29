@@ -202,12 +202,7 @@ def _reduce_epoch(
     root_timeout_s: float,
 ) -> TransportExecResult | BaseException:
     """Run one epoch: its result, or the failure ``run_epochs`` classifies."""
-    from .transport import (
-        TransportDeliveryError,
-        _ensure_run_probe,
-        make_transport_spec,
-        open_driver_endpoint,
-    )
+    from .transport import _ensure_run_probe, make_transport_spec, open_driver_endpoint
 
     spec = make_transport_spec(
         nonce, peers.worker_addrs, inbox_maxsize=inbox_maxsize, overlay=peers.overlay
@@ -246,7 +241,7 @@ def _reduce_epoch(
         return pick_attributable(errs, backend)
     try:
         root = _select_root(root, results, _MISSING)
-    except TransportDeliveryError as exc:  # no root captured: restart-worthy, like a lost send
+    except BaseException as exc:  # a no-root run is restart-worthy, like an exhausted send
         return exc
     n = peers.n
     return TransportExecResult(finalized(plan, root), n, max(0, n - 1), witness)

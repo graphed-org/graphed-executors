@@ -185,7 +185,7 @@ class _Attempt:
         tag: str,
         t: int,
     ) -> list[Any]:
-        """Submit ``t`` producers over contiguous ascending ranges of ``blocks`` (none if 0)."""
+        """Submit ``t`` producers over contiguous ascending ranges of ``blocks``."""
         return [
             self.submit(
                 _transport_map_task,
@@ -198,7 +198,7 @@ class _Attempt:
                 key=(tag, i),
                 worker=i,
             )
-            for i, owned in enumerate(assign(len(blocks), t) if t else [])
+            for i, owned in enumerate(assign(len(blocks), t) if blocks or t else [])
         ]
 
     def pulls(
@@ -471,6 +471,7 @@ def _broadcast_join_attempt(
     handle = dbackend.broadcast(
         build_wire, token=f"bjoin-{spec.epoch}-{sha256_hex(build_wire)[:12]}"
     )
+    per_block_how = BROADCAST_PER_BLOCK_HOW[how]
     track_unmatched = how in ("left", "outer")
     part_futs = {
         pidx: run.submit(
@@ -479,7 +480,7 @@ def _broadcast_join_attempt(
             handle,
             probe_block,
             on,
-            BROADCAST_PER_BLOCK_HOW[how],
+            per_block_how,
             mem_budget,
             track_unmatched,
             None,

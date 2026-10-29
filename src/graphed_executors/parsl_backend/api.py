@@ -27,13 +27,12 @@ from typing import Any
 
 from graphed.debug import SourceFrame, StageError
 
+# THE shared resolver objects (identity-pinned across the dask + parsl facades).
 from graphed_executors.common.facade import (
     _VALID_METHODS,
     _reject_transport_only_knobs,
     resolve_shuffle_method,
 )
-
-# THE shared resolver objects (identity-pinned across the dask + parsl facades).
 from graphed_executors.common.relay_engine import relay_run_join, relay_run_repartition
 from graphed_executors.submit import SubmitRunner
 

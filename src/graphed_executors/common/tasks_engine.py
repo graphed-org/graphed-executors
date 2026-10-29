@@ -329,7 +329,7 @@ def _submit_maps(
     t: int,
     key: tuple[str, str],
 ) -> list[Any]:
-    """Submit ``t`` producer maps over contiguous ascending ranges of ``blocks`` (none if 0)."""
+    """Submit ``t`` producer maps over contiguous ascending ranges of ``blocks``."""
     nonce, tag = key
     return [
         runner.backend.submit(
@@ -340,7 +340,7 @@ def _submit_maps(
             salt,
             key=_skey(nonce, tag, i),
         )
-        for i, owned in enumerate(assign(len(blocks), t) if t else [])
+        for i, owned in enumerate(assign(len(blocks), t) if blocks or t else [])
     ]
 
 
@@ -351,8 +351,11 @@ def _pick_tier(
     key: tuple[str, str],
     *,
     relay: bool,
-) -> tuple[list[list[Any]], int]:
-    """Return each dest's picks in ascending-producer order, and the bytes relayed by the driver.
+) -> tuple[list[list[Any]], int, list[_MapOut] | None]:
+    """Return each dest's picks in ascending-producer order, the driver-relayed bytes, the maps.
+
+    The maps are the ones the relay resolved, so its caller never pulls them twice (``None`` on
+    the peer engine).
 
     The peer engine submits one pick per (producer, dest), which runs ON the holder so a gather
     pulls one block. The relay resolves every map at a driver barrier and picks locally — zero
@@ -361,14 +364,14 @@ def _pick_tier(
     if relay:
         outs = [cast("_MapOut", f.result()) for f in map_futs]
         relay_bytes = sum(len(w) for mo in outs for w in mo.payload.values())
-        return [[_dask_pick(mo, dest) for mo in outs] for dest in range(parts)], relay_bytes
+        return [[_dask_pick(mo, dest) for mo in outs] for dest in range(parts)], relay_bytes, outs
     nonce, tag = key
     picks = {
         (i, dest): runner.backend.submit(_dask_pick, f, dest, key=_skey(nonce, tag, i, dest))
         for i, f in enumerate(map_futs)
         for dest in range(parts)
     }
-    return [[picks[(i, dest)] for i in range(len(map_futs))] for dest in range(parts)], 0
+    return [[picks[(i, dest)] for i in range(len(map_futs))] for dest in range(parts)], 0, None
 
 
 def _repartition(
@@ -384,7 +387,9 @@ def _repartition(
     t = min(runner.backend.n_workers(), n_src) if n_src else 1
     nonce = uuid.uuid4().hex[:8]
     map_futs = _submit_maps(runner, backend, src_blocks, parts, salt, t, (nonce, "map"))
-    picks, relay_bytes = _pick_tier(runner, map_futs, parts, (nonce, "pick"), relay=relay)
+    picks, relay_bytes, map_outs = _pick_tier(
+        runner, map_futs, parts, (nonce, "pick"), relay=relay
+    )
     gather_futs = [
         runner.backend.submit(
             _dask_gather, backend, dest, *picks[dest], key=_skey(nonce, "gather", dest)
@@ -403,7 +408,8 @@ def _repartition(
             gather_sites[out.dest] = out.site
 
     # small metadata pull; on the peer engine the payloads stay worker-side for the gathers
-    map_outs = [cast("_MapOut", f.result()) for f in map_futs]
+    if map_outs is None:
+        map_outs = [cast("_MapOut", f.result()) for f in map_futs]
     witness = _witness(
         relay_bytes,
         relay=relay,
@@ -431,8 +437,8 @@ def _join(
     parts: int,
     spec: _JoinSpec,
     runner: SubmitRunner,
-    broadcast: bool | None,
     *,
+    broadcast: bool | None,
     relay: bool,
 ) -> ShuffleResult:
     if choose_broadcast(backend, left_blocks, right_blocks, parts, broadcast=broadcast):
@@ -460,8 +466,10 @@ def _shuffle_join(
     right_maps = _submit_maps(
         runner, backend, right_blocks, parts, spec.salt, t_r, (nonce, "rmap")
     )
-    left_picks, left_relayed = _pick_tier(runner, left_maps, parts, (nonce, "lpick"), relay=relay)
-    right_picks, right_relayed = _pick_tier(
+    left_picks, left_relayed, _ = _pick_tier(
+        runner, left_maps, parts, (nonce, "lpick"), relay=relay
+    )
+    right_picks, right_relayed, _ = _pick_tier(
         runner, right_maps, parts, (nonce, "rpick"), relay=relay
     )
     # F1 schema carriers for one-sided dests (None when a whole side is partitionless)
@@ -525,6 +533,7 @@ def _broadcast_join(
     handle = runner.backend.broadcast(
         build_wire, token=f"bjoin-{nonce}-{sha256_hex(build_wire)[:12]}"
     )
+    per_block_how = BROADCAST_PER_BLOCK_HOW[spec.how]
     track_unmatched = spec.how in ("left", "outer")
     part_futs = [
         submit(
@@ -533,7 +542,7 @@ def _broadcast_join(
             handle,
             probe_block,
             spec.on,
-            BROADCAST_PER_BLOCK_HOW[spec.how],
+            per_block_how,
             spec.mem_budget,
             track_unmatched,
             None,
@@ -621,4 +630,6 @@ def dask_run_join(
     """
     _require_peer(runner.backend)
     spec = _JoinSpec(tuple(on), how, salt, mem_budget_bytes)
-    return _join(backend, left_blocks, right_blocks, parts, spec, runner, broadcast, relay=False)
+    return _join(
+        backend, left_blocks, right_blocks, parts, spec, runner, broadcast=broadcast, relay=False
+    )
