@@ -158,7 +158,7 @@ def _result_blob(ok: bool, payload: object) -> bytes:
             blob = pickle.dumps((ok, Portable(payload)))
         pickle.loads(blob)
         return blob
-    except Exception as exc:
+    except Exception as exc:  # a payload's own pickling code may raise anything
         text = (
             f"{type(payload).__name__} did not round-trip through pickle "
             f"({type(exc).__name__}: {exc})"
@@ -193,7 +193,7 @@ def _attempt(
         runner.services = endpoints
         try:
             return runner.run(plan), None, EXIT_DONE
-        except Exception as exc:
+        except Exception as exc:  # the plan's error, whatever its type, is the run's outcome
             return None, exc, _exit_code(exc)
 
 
@@ -276,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
                 result, error, code = _run_job(job, log, start)
             except EnvironmentChanged as exc:  # only resumable raises it; a retry would refuse
                 error, code = exc, EXIT_PLAN_ERROR
-            except Exception as exc:
+            except Exception as exc:  # the job's boundary: every failure reaches result.pkl
                 error, code = exc, EXIT_FAILED
         blob = _result_blob(True, result) if error is None else _result_blob(False, error)
         if error is not None:

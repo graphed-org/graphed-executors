@@ -423,7 +423,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             self._route(tasks, pickle.loads(body))
-        except Exception:
+        except Exception:  # a bad message is answered 400 with why, not a dropped connection
             self._reply(HTTPStatus.BAD_REQUEST, traceback.format_exc().encode())
 
     def _route(self, tasks: TaskServer, msg: Any) -> None:

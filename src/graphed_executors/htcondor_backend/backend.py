@@ -159,7 +159,7 @@ class _Node:
             rows = list(
                 self._schedd.history(node, projection=["JobStatus", "ExitCode", *_GONE], match=1)
             )
-        except Exception as exc:
+        except Exception as exc:  # best effort: the row only says why the node left
             logger.warning(
                 "SERVICE node %s left the queue; its history is unreadable (%r)", self.key, exc
             )
