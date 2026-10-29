@@ -8,6 +8,7 @@ leaves and settles them into the :class:`PeerReducer` of :mod:`._peer_tree`; the
 from __future__ import annotations
 
 import contextlib
+import functools
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -460,14 +461,9 @@ class _PeerActor(Generic[R]):
 # reopens a file at most once over its whole life (file locality across runs — the hub path's
 # _proc_resources does the same). One peer actor runs at a time per process, so no intra-process
 # concurrency.
-_peer_proc_resources: LocalResources | None = None
-
-
+@functools.cache
 def _worker_proc_resources() -> LocalResources:
-    global _peer_proc_resources
-    if _peer_proc_resources is None:
-        _peer_proc_resources = LocalResources()
-    return _peer_proc_resources
+    return LocalResources()
 
 
 # ---- identity-pinned worker specialisation (M38 P7), driven by PinnedProcessPool ----------------
@@ -479,7 +475,8 @@ def _worker_proc_resources() -> LocalResources:
 # from the reduction transport, so reduction/steal messages that race ahead simply wait in the
 # transport inbox (no buffering hack) and the witness/error come back as the call's Future result.
 
-# (address, transport, steal_peers) per worker
+# (address, transport, steal_peers) per worker; a module global because the pool initializer can
+# hand state to the later calls in its process no other way
 _pinned: tuple[str, Any, tuple[str, ...]] | None = None
 
 
@@ -554,6 +551,7 @@ def pinned_peer_actor(
 # (PinnedProcessPool) only when N approaches that limit (large many-core machines) — see
 # ``ProcessExecutor._peer_ipc``.
 
+# set by the pool initializer, a module global for the same reason as ``_pinned``
 _peer_registry: dict[str, Any] | None = None
 
 
