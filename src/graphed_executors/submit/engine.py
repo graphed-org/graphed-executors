@@ -27,7 +27,7 @@ import queue
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
 from dataclasses import replace
 from typing import Any, TypeVar, cast, overload
@@ -95,6 +95,15 @@ def _key(plan_fp: str, run_nonce: str, kind: str, idx: int) -> str:
     return f"graphed-{plan_fp}-{run_nonce}-{kind}-{idx}"
 
 
+def _drain(ctx: RunContext, events_seen: list[int], n_leaves: int) -> None:
+    """Wait, at most ``_DRAIN_TIMEOUT_S``, for the worker events of ``n_leaves`` consumed leaves.
+
+    Run before unsubscribing, so a leaf's trailing events still reach the monitor.
+    """
+    if ctx.monitor_topic is not None:
+        wait_until(lambda: events_seen[0] >= ctx.events_per_leaf * n_leaves, _DRAIN_TIMEOUT_S)
+
+
 class _RunTasks:
     """One run's plan-task submits (the ``_RunLeaves`` idiom).
 
@@ -133,6 +142,38 @@ class _RunTasks:
             pending = [fut for fut in self._pending if not fut.done()]
         if pending:
             self._backend.cancel(pending)
+
+
+class _TreeProgress:
+    """The ``plan_tree`` of ``n`` leaves, completed node by node.
+
+    Each completed node's future is held in ``ready`` until the combine that takes it can start.
+    """
+
+    def __init__(self, n: int) -> None:
+        self.combines, _root = plan_tree(n)
+        self.first = list(range(n))  # node -> its first leaf (a combine's left input comes first)
+        self.ready: dict[int, SubmitFuture] = {}
+        self._waiting: dict[int, list[int]] = {}  # input node -> combine indices needing it
+        self._remaining: dict[int, set[int]] = {}  # combine index -> still-incomplete inputs
+        for ci, (_out, a, b) in enumerate(self.combines):
+            self._remaining[ci] = {a, b}
+            self._waiting.setdefault(a, []).append(ci)
+            self._waiting.setdefault(b, []).append(ci)
+            self.first.append(self.first[a])
+
+    def complete(
+        self, node: int, fut: SubmitFuture
+    ) -> list[tuple[int, SubmitFuture, SubmitFuture]]:
+        """Record ``node`` done; return each combine it readied as ``(out, left, right)``."""
+        self.ready[node] = fut
+        readied = []
+        for ci in self._waiting.get(node, ()):
+            self._remaining[ci].discard(node)
+            if not self._remaining[ci]:
+                out, a, b = self.combines[ci]
+                readied.append((out, self.ready.pop(a), self.ready.pop(b)))
+        return readied
 
 
 class SubmitRunner:
@@ -289,14 +330,11 @@ class SubmitRunner:
         events_seen: list[int],
         submits: _RunTasks,
     ) -> ExecResult[R]:
-        backend = self.backend
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
         n = len(tasks)
         if n == 0:
             return ExecResult(plan.empty(), 0, 0, StopReason.EXHAUSTED)
-        plan_fp, ppayload = _fingerprint(plan.process)
-        ptoken = f"{plan_fp}-{ctx.run_nonce}"
-        phandle = backend.broadcast(ppayload, token=ptoken)
+        plan_fp, ptoken, phandle = self._broadcast(plan.process, ctx)
         key_to_task: dict[str, Task] = {}
         futs: dict[int, SubmitFuture] = {}
         # a raise drains nothing: a piggyback backend ships a leaf's events only in its result()
@@ -313,9 +351,7 @@ class SubmitRunner:
                 )
             combines, root = plan_tree(n)
             assert root is not None  # n >= 1
-            _cfp, cpayload = _fingerprint(plan.combine)
-            ctoken = f"{_cfp}-{ctx.run_nonce}"
-            chandle = backend.broadcast(cpayload, token=ctoken)
+            _cfp, ctoken, chandle = self._broadcast(plan.combine, ctx)
             for out, a, b in combines:  # a < b: deterministic left/right, the plan_tree shape
                 key = _key(plan_fp, ctx.run_nonce, "combine", out)
                 futs[out] = submits.submit(
@@ -341,10 +377,7 @@ class SubmitRunner:
             drained = n
             return ExecResult(value, n, len(combines), StopReason.EXHAUSTED)
         finally:
-            if ctx.monitor_topic is not None:  # drain trailing worker events before unsubscribe
-                wait_until(
-                    lambda: events_seen[0] >= ctx.events_per_leaf * drained, _DRAIN_TIMEOUT_S
-                )
+            _drain(ctx, events_seen, drained)
 
     def _run_fixed_windowed(
         self,
@@ -360,32 +393,17 @@ class SubmitRunner:
         The same ``plan_tree``, with each combine submitted once both inputs completed, so
         a cancel leaves completed subtrees to fold by first leaf.
         """
-        backend = self.backend
         tasks = sorted(plan.tasks, key=lambda t: t.key)  # deterministic leaf order
         n = len(tasks)
-        combines, _root = plan_tree(n)
-        waiting: dict[int, list[int]] = {}  # input node -> combine indices needing it
-        remaining: dict[int, set[int]] = {}  # combine index -> still-incomplete inputs
-        first = list(range(n))  # node -> its first leaf (a combine's left input comes first)
-        for ci, (_out, a, b) in enumerate(combines):
-            remaining[ci] = {a, b}
-            waiting.setdefault(a, []).append(ci)
-            waiting.setdefault(b, []).append(ci)
-            first.append(first[a])
-        plan_fp, ppayload = _fingerprint(plan.process)
-        ptoken = f"{plan_fp}-{ctx.run_nonce}"
-        phandle = backend.broadcast(ppayload, token=ptoken)
-        _cfp, cpayload = _fingerprint(plan.combine)
-        ctoken = f"{_cfp}-{ctx.run_nonce}"
-        chandle = backend.broadcast(cpayload, token=ctoken)
+        tree = _TreeProgress(n)
+        plan_fp, ptoken, phandle = self._broadcast(plan.process, ctx)
+        _cfp, ctoken, chandle = self._broadcast(plan.combine, ctx)
         if monitor is not None:
             for task in tasks:
                 emit_task(monitor, self._submitted_event(task))
         window = Window(control, self._task_slots(), enumerate(tasks))
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         node_of: dict[SubmitFuture, int] = {}  # outstanding future -> its plan_tree node
-        # completed node -> its future, until a combine takes it
-        ready: dict[int, SubmitFuture] = {}
         key_to_task: dict[str, Task] = {}
         sent = done = n_combines = 0  # leaves submitted, leaves completed, combines submitted
         # a raise drains nothing: a piggyback backend ships a leaf's events only in its result()
@@ -403,45 +421,25 @@ class SubmitRunner:
             node_of[fut] = i
             fut.add_done_callback(done_q.put)
 
+        def in_flight() -> int:
+            return sent - done
+
         try:
-            while True:
-                if window.held:
-                    self._fill(window, sent - done, start)
-                if not node_of and not window.held:
-                    break
-                if not node_of:  # paused with nothing running
-                    control.wait()
-                    continue
-                try:
-                    fut = done_q.get(timeout=PAUSED_WAKE_S if window.held else None)
-                except queue.Empty:
-                    continue
+            for fut in self._completions(window, done_q, node_of, in_flight, start):
                 node = node_of.pop(fut)
                 if fut.exception() is not None:  # exception() transfers no result on dask
                     self._result(fut, key_to_task)  # raises it, translated
                 done += node < n
-                ready[node] = fut
-                for ci in waiting.get(node, ()):
-                    remaining[ci].discard(node)
-                    if not remaining[ci]:
-                        out, a, b = combines[ci]
-                        fa, fb = ready.pop(a), ready.pop(b)
-                        key = _key(plan_fp, ctx.run_nonce, "combine", out)
-                        f2 = submits.submit(
-                            _combine_task,
-                            ctx,
-                            chandle,
-                            ctoken,
-                            fa,
-                            fb,
-                            key=key,
-                            retries=self._retries,
-                        )
-                        n_combines += 1
-                        node_of[f2] = out
-                        f2.add_done_callback(done_q.put)
+                for out, fa, fb in tree.complete(node, fut):
+                    key = _key(plan_fp, ctx.run_nonce, "combine", out)
+                    f2 = submits.submit(
+                        _combine_task, ctx, chandle, ctoken, fa, fb, key=key, retries=self._retries
+                    )
+                    n_combines += 1
+                    node_of[f2] = out
+                    f2.add_done_callback(done_q.put)
             pieces = sorted(
-                ((first[m], self._result(f, key_to_task)) for m, f in ready.items()),
+                ((tree.first[m], self._result(f, key_to_task)) for m, f in tree.ready.items()),
                 key=lambda p: p[0],
             )
             value, k = running_fold(
@@ -451,10 +449,7 @@ class SubmitRunner:
             drained = sent
             return ExecResult(value, done, n_combines + k, stopped)
         finally:
-            if ctx.monitor_topic is not None:  # drain trailing worker events before unsubscribe
-                wait_until(
-                    lambda: events_seen[0] >= ctx.events_per_leaf * drained, _DRAIN_TIMEOUT_S
-                )
+            _drain(ctx, events_seen, drained)
 
     # ---- adaptive path + stop (plan §1.2.4) ----
 
@@ -467,11 +462,8 @@ class SubmitRunner:
         submits: _RunTasks,
     ) -> ExecResult[R]:
         assert plan.next_tasks is not None
-        backend = self.backend
         next_tasks = plan.next_tasks
-        plan_fp, ppayload = _fingerprint(plan.process)
-        ptoken = f"{plan_fp}-{ctx.run_nonce}"
-        phandle = backend.broadcast(ppayload, token=ptoken)
+        plan_fp, ptoken, phandle = self._broadcast(plan.process, ctx)
         exec_ctx = ExecContext()
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
@@ -514,19 +506,14 @@ class SubmitRunner:
                 if reason is not None:
                     stopped = reason
                     # best-effort; cancel_running=False backend no-ops
-                    backend.cancel(list(outstanding))
+                    self.backend.cancel(list(outstanding))
                     break
                 refill()
 
             value, n_combines = running_fold(iter(results), plan.combine, plan.empty)
             return ExecResult(value, exec_ctx.n_done, n_combines, stopped or StopReason.EXHAUSTED)
         finally:
-            # F2a: drain trailing worker events of every consumed leaf
-            if ctx.monitor_topic is not None:
-                wait_until(
-                    lambda: events_seen[0] >= ctx.events_per_leaf * exec_ctx.n_done,
-                    _DRAIN_TIMEOUT_S,
-                )
+            _drain(ctx, events_seen, exec_ctx.n_done)  # F2a: every consumed leaf
 
     def _run_adaptive_windowed(
         self,
@@ -539,11 +526,8 @@ class SubmitRunner:
     ) -> ExecResult[R]:
         """``_run_adaptive`` with each ``next_tasks`` batch held in a :class:`Window`."""
         assert plan.next_tasks is not None
-        backend = self.backend
         next_tasks = plan.next_tasks
-        plan_fp, ppayload = _fingerprint(plan.process)
-        ptoken = f"{plan_fp}-{ctx.run_nonce}"
-        phandle = backend.broadcast(ppayload, token=ptoken)
+        plan_fp, ptoken, phandle = self._broadcast(plan.process, ctx)
         exec_ctx = ExecContext()
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
@@ -577,20 +561,8 @@ class SubmitRunner:
 
         try:
             refill()
-            while True:
-                if window.held:  # an empty window has nothing to start or drop
-                    self._fill(window, len(outstanding), start)
-                if not outstanding and not window.held:
-                    break
-                if not outstanding:  # paused with nothing running
-                    control.wait()
-                    continue
-                try:
-                    fut = done_q.get(timeout=PAUSED_WAKE_S if window.held else None)
-                except queue.Empty:  # a timed wake only re-reads the slots and re-runs take
-                    continue
-                if fut not in outstanding:  # a cancelled/duplicate callback
-                    continue
+            in_flight = outstanding.__len__
+            for fut in self._completions(window, done_q, outstanding, in_flight, start):
                 key, n_entries = outstanding.pop(fut)
                 # F2b: real map, not {}
                 results.append((key, cast(R, self._result(fut, key_to_task))))
@@ -602,7 +574,7 @@ class SubmitRunner:
                 if reason is not None:
                     stopped = reason
                     # best-effort; cancel_running=False backend no-ops
-                    backend.cancel(list(outstanding))
+                    self.backend.cancel(list(outstanding))
                     break
                 refill()
 
@@ -610,12 +582,7 @@ class SubmitRunner:
             stopped = stopped or (StopReason.CANCELLED if window.stopped else StopReason.EXHAUSTED)
             return ExecResult(value, exec_ctx.n_done, n_combines, stopped)
         finally:
-            # F2a: drain trailing worker events of every consumed leaf
-            if ctx.monitor_topic is not None:
-                wait_until(
-                    lambda: events_seen[0] >= ctx.events_per_leaf * exec_ctx.n_done,
-                    _DRAIN_TIMEOUT_S,
-                )
+            _drain(ctx, events_seen, exec_ctx.n_done)  # F2a: every consumed leaf
 
     # ---- staged path: a DurablePlanV2's stages as barriers ----
 
@@ -628,8 +595,7 @@ class SubmitRunner:
         picked in a task beside it where the backend moves data between workers, else
         picked here from its one fetch.
         """
-        backend = self.backend
-        peer = backend.capabilities.peer_data_movement
+        peer = self.backend.capabilities.peer_data_movement
         plan_fp = plan.ir_fingerprint()[:12]
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         # stage task not yet seen done -> its stage has inputs
@@ -658,9 +624,7 @@ class SubmitRunner:
             ):
                 return ExecResult(None, ran[0], ran[1], StopReason.CANCELLED)
             # by value: a resolved opaque process is a copy stdlib pickle cannot name by reference
-            fp, payload = _fingerprint(stage.process.resolve(), cloudpickle.dumps)
-            token = f"{fp}-{ctx.run_nonce}"
-            handle = backend.broadcast(payload, token=token)
+            _fp, token, handle = self._broadcast(stage.process.resolve(), ctx, cloudpickle.dumps)
             fn = _map_task if stage.kind == "map_write" else _stage_task
             # driver edge: each map result is fetched once, then sliced per dest here
             fetched = {
@@ -702,6 +666,44 @@ class SubmitRunner:
         return ExecResult(plan.value(last), ran[0], ran[1], StopReason.EXHAUSTED)
 
     # ---- helpers ----
+
+    def _broadcast(
+        self, obj: object, ctx: RunContext, dumps: Callable[[object], bytes] = pickle.dumps
+    ) -> tuple[str, str, object]:
+        """Broadcast ``obj`` for this run; return its fingerprint, token and handle."""
+        fp, payload = _fingerprint(obj, dumps)
+        token = f"{fp}-{ctx.run_nonce}"
+        return fp, token, self.backend.broadcast(payload, token=token)
+
+    def _completions(
+        self,
+        window: Window[T],
+        done_q: queue.Queue[SubmitFuture],
+        outstanding: Mapping[SubmitFuture, object],
+        in_flight: Callable[[], int],
+        start: Callable[[T], None],
+    ) -> Iterator[SubmitFuture]:
+        """Yield each completion of ``outstanding`` while ``window`` starts its held work.
+
+        Ends once nothing is outstanding or held; paused with nothing running, it waits on the
+        window's control.
+        """
+        control = window.control
+        assert control is not None  # a windowed run always has a control
+        while True:
+            if window.held:  # an empty window has nothing to start or drop
+                self._fill(window, in_flight(), start)
+            if not outstanding and not window.held:
+                return
+            if not outstanding:  # paused with nothing running
+                control.wait()
+                continue
+            try:
+                fut = done_q.get(timeout=PAUSED_WAKE_S if window.held else None)
+            except queue.Empty:  # a timed wake only re-reads the slots and re-runs take
+                continue
+            if fut in outstanding:  # else a cancelled/duplicate callback
+                yield fut
 
     def _task_slots(self) -> int:
         """Return the controlled window's size, floored at one.
