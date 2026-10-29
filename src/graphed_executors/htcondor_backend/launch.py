@@ -77,7 +77,7 @@ class CondorReason(tuple[str, None]):
 def _htcondor() -> Any:
     """Return the ``htcondor2`` module, imported on first use."""
     try:
-        import htcondor2  # noqa: PLC0415  (lazy: the bindings are the optional extra)
+        import htcondor2  # lazy: the bindings are the optional extra
     except ImportError as exc:  # pragma: no cover - the htcondor CI job has the bindings installed
         raise ImportError(
             "CondorPilots needs the htcondor bindings (Linux wheels only): "

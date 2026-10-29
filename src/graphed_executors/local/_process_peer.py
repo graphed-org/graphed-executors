@@ -329,41 +329,28 @@ class _ProcessPeerBase(_BaseExecutor):
             if control is not None
             else None
         )
-        deadline = time.monotonic() + self._peer_root_timeout_s
-        out: tuple[R, int] | None = None
         forward: Outbox | None = None  # asynchronous, so a >64 KB node never parks this loop
         self._last_peer_relays = 0
+
+        def via(payload: Any) -> None:
+            nonlocal forward
+            forward = forward or Outbox(driver_t)
+            forward.send(payload[1], payload[2])
+            self._last_peer_relays += 1
+
+        def failed() -> bool:
+            for f in futs:  # a dead worker -> re-raise the real cause now, not 300s from now
+                if f.done() and f.exception() is not None:
+                    f.result()
+            # PinnedProcessPool backstop: a HARD worker crash ships no error + leaves its Future
+            # unresolved, so the future check above can't see it — detect the dead process
+            # directly.
+            if pool is not None and not getattr(pool, "workers_alive", lambda: True)():
+                raise RuntimeError("a peer worker process died before producing the root")
+            return False
+
         try:
-            while out is None:
-                got = driver_t.recv(timeout=0.05)
-                if got is not None and got[1][0] == "root":
-                    out = got[1][1], n
-                    break
-                if got is not None and got[1][0] == "via":
-                    forward = forward or Outbox(driver_t)
-                    forward.send(got[1][1], got[1][2])
-                    self._last_peer_relays += 1
-                    continue
-                # worker STARTED/FINISHED/ERRORED -> monitor; a cancel hand-in -> the fold once all
-                # are in
-                if got is not None and not self._forward_peer_events(got[1]) and ctl is not None:
-                    out = ctl.take(got[1])
-                for f in futs:  # a dead worker -> re-raise the real cause now, not 300s from now
-                    if f.done() and f.exception() is not None:
-                        f.result()
-                # PinnedProcessPool backstop: a HARD worker crash ships no error + leaves its
-                # Future unresolved, so the future check above can't see it — detect the dead
-                # process directly.
-                if pool is not None and not getattr(pool, "workers_alive", lambda: True)():
-                    raise RuntimeError("a peer worker process died before producing the root")
-                if ctl is not None and ctl.relay():
-                    # paused time does not count
-                    deadline = time.monotonic() + self._peer_root_timeout_s
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(
-                        f"peer reduction did not produce a root within "
-                        f"{self._peer_root_timeout_s}s"
-                    )
+            out = self._await_peer_root(driver_t, n, ctl, failed, via)
         except BaseException as exc:
             # EVERY exit releases the workers — including a KeyboardInterrupt delivered while
             # parked in ``recv``. An unreleased actor waits for ``done`` forever, and the pool
@@ -383,6 +370,7 @@ class _ProcessPeerBase(_BaseExecutor):
             forward.close(OUTBOX_EXIT_WAIT_S)
         release_workers(driver_t)
         self._last_peer_witness = self._finish_peer(driver_t, futs)
+        assert out is not None  # failed() raises instead of reporting
         return out
 
     def _drain_failing_batch(self, driver_t: Any) -> None:

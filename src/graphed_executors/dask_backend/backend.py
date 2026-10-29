@@ -15,10 +15,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
-from graphed_executors.submit.engine import _identity
 from graphed_executors.submit.protocol import SubmitFuture
 
 from ._lazy import _distributed
+
+
+def _identity(x: bytes) -> bytes:
+    """Serve as the broadcast identity future's body: it places ``x`` once for many tasks."""
+    return x
 
 
 class DaskBackend:
@@ -50,7 +54,7 @@ class DaskBackend:
         self._client = client
         self._replicate_broadcast = replicate_broadcast
         # lazy: keeps distributed out of __init__
-        from ._shim import _dask_task_shim  # noqa: PLC0415
+        from ._shim import _dask_task_shim
 
         self._shim = _dask_task_shim
 
@@ -181,7 +185,7 @@ def dask_runner(
     ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``).
     """
     # lazy: distributed is the optional extra
-    from .plugin import GraphedWorkerPlugin  # noqa: PLC0415
+    from .plugin import GraphedWorkerPlugin
 
     client.register_plugin(GraphedWorkerPlugin())
     backend = DaskBackend(client, replicate_broadcast=replicate_broadcast)

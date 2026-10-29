@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 import socket
-import threading
 from collections.abc import Callable
 
 from graphed.core.execution import LocalResources, WorkerResources
@@ -28,21 +27,11 @@ from graphed_executors.submit.engine import _reset_worker_env, set_worker_env
 # One LocalResources per worker PROCESS: open_once caches a uri's handle across the tasks a reused
 # HTEX worker runs (the §1.2 file-locality contract), distinct across worker processes by
 # construction.
-_WORKER_RESOURCES: LocalResources | None = None
-_WORKER_RESOURCES_LOCK = threading.Lock()
+_WORKER_RESOURCES = LocalResources()
 
 # A monitor event batch as buffered by the shim: (topic, events) — dispatched driver-side on
 # completion.
 EventBatch = tuple[str, list[dict[str, object]]]
-
-
-def _worker_resources() -> LocalResources:
-    global _WORKER_RESOURCES
-    if _WORKER_RESOURCES is None:
-        with _WORKER_RESOURCES_LOCK:
-            if _WORKER_RESOURCES is None:
-                _WORKER_RESOURCES = LocalResources()
-    return _WORKER_RESOURCES
 
 
 def _worker_identity() -> str:
@@ -67,7 +56,7 @@ class _ParslWorkerEnv:
     """
 
     def __init__(self) -> None:
-        self.resources: WorkerResources = _worker_resources()
+        self.resources: WorkerResources = _WORKER_RESOURCES
         self.worker = _worker_identity()
         self.events: list[EventBatch] = []
 

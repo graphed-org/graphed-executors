@@ -181,11 +181,17 @@ def test_broadcast_empty_build_side_returns_gracefully(
         adapter.backend, [], right, PARTS, how=how, runner=_runner(client), broadcast=True
     )
     local = run_join(adapter.backend, [], right, PARTS, how=how, broadcast=True)
-    assert res.dest_block_hashes == local.dest_block_hashes == {}, (
-        f"how={how}: an empty build side under broadcast must return the local engine's "
-        "early-empty"
+    assert res.dest_block_hashes == local.dest_block_hashes, (
+        f"how={how}: dask != local for an empty build side under broadcast"
     )
-    assert len(res.value) == len(local.value) == 0
+    if how == "inner":
+        assert res.dest_block_hashes == {} and len(res.value) == 0
+        return
+    rk, rv = _flat(_A_PROBE)
+    observed_rows = Counter(r for b in res.value.values() for r in adapter.side_rows(b, "rval"))
+    assert observed_rows == Counter(zip(rk, rv, strict=True)), (
+        "outer: every probe row must survive an empty build side exactly once (#91)"
+    )
 
 
 @pytest.mark.parametrize("how", ["left", "outer"])

@@ -68,7 +68,7 @@ if __name__ == "__main__":
                                    [80.0], [15.0, 45.0], [70.0, 10.0]]}), "events.parquet")
 
     session = Session(AwkwardBackend())
-    events = from_parquet(session, "events", "events.parquet", steps_per_file=3)
+    events = from_parquet("events", "events.parquet", steps_per_file=3, session=session)
 
     h = gh.boost.Histogram(bh.axis.Regular(4, 0.0, 100.0), storage=bh.storage.Int64())
     h.fill(events.pt)                     # records the fill; nothing is read yet

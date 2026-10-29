@@ -28,7 +28,8 @@ from graphed_executors.common.tasks_engine import _WorkerStore
 from graphed_executors.local._shuffle_kernels import (
     ShuffleWitness,
     coalesce_task,
-    join_with_budget,
+    join_dest,
+    join_probe_block,
     sha256_hex,
     stage2_gather,
 )
@@ -156,45 +157,26 @@ def gather_join_body(
 ) -> _JoinOut | None:
     """Gather one dest's co-partitioned build/probe fragments and join them.
 
-    Under ``mem_budget`` via the reused ``join_with_budget``. F1 one-sided-dest handling mirrors
-    ``_run_shuffle_join``: a build-only dest under how=left/outer null-fills against the probe
-    carrier, and vice versa; a partitionless absent side (carrier ``None``) keeps the present rows
-    as-is (never dropped).
+    Spilling under ``mem_budget``, one-sided dests included (the shared ``join_dest``, F1).
     """
     build_side = pull_ordered(plane, backend, left_pulls, timeout_s)
     probe_side = pull_ordered(plane, backend, right_pulls, timeout_s)
-    if not build_side and not probe_side:
-        return None
-    if not build_side and how not in ("right", "outer"):
-        return None  # probe-only dest, but how keeps no unmatched-probe rows
-    if not probe_side and how not in ("left", "outer"):
-        return None  # build-only dest, but how keeps no unmatched-build rows
-
-    if build_side and probe_side:
-        build, probe, how_here = backend.concat(build_side), backend.concat(probe_side), how
-    elif build_side:
-        if right_carrier is None:  # partitionless probe side -> keep the build rows (never drop)
-            blk = backend.concat(build_side)
-            return _JoinOut(
-                dest, [blk], [sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0
-            )
-        build, probe, how_here = backend.concat(build_side), right_carrier, "left"
-    else:
-        if left_carrier is None:  # partitionless build side -> keep the probe rows (never drop)
-            blk = backend.concat(probe_side)
-            return _JoinOut(
-                dest, [blk], [sha256_hex(bytes(backend.to_wire(blk)))], 0, 0, len(blk), 0
-            )
-        build, probe, how_here = left_carrier, backend.concat(probe_side), "right"
-
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, read = join_with_budget(
-            backend, build, probe, on, how_here, mem_budget, store, 0
+        joined = join_dest(
+            backend,
+            build_side,
+            probe_side,
+            on,
+            how,
+            mem_budget,
+            (left_carrier, right_carrier),
+            store,
+            0,
         )
     finally:
         store.cleanup()
-    return _JoinOut(dest, chunks, hashes, peak, spilled, rows, read)
+    return None if joined is None else _JoinOut(dest, *joined)
 
 
 def broadcast_join_part_body(
@@ -216,14 +198,18 @@ def broadcast_join_part_body(
     build = backend.from_wire(build_wire)
     if take_indices is not None:
         build = backend.take(build, list(take_indices))
-    matched: tuple[int, ...] | None = None
-    if track_unmatched:
-        b_idx, _p_idx = backend.match_indices(build, probe_block, on=list(on), how="inner")
-        matched = tuple(int(x) for x in b_idx)
     store = _WorkerStore()
     try:
-        chunks, hashes, peak, spilled, rows, read = join_with_budget(
-            backend, build, probe_block, on, how, mem_budget, store, 0
+        matched, (chunks, hashes, peak, spilled, rows, read) = join_probe_block(
+            backend,
+            build,
+            probe_block,
+            on,
+            how,
+            mem_budget,
+            store,
+            0,
+            track_unmatched=track_unmatched,
         )
     finally:
         store.cleanup()

@@ -18,14 +18,14 @@ matrix (F13).
 
 from __future__ import annotations
 
-import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from graphed.core.execution import LocalResources, Plan
 from graphed.services import require_bound
 
 from graphed_executors.common import refuse_staged
-from graphed_executors.common.transport_run import finalized
+from graphed_executors.common.transport_run import empty_run, finalized, harvest, run_epochs
 from graphed_executors.local._peer import (
     collect_peer_root,
     make_bounds,
@@ -37,9 +37,7 @@ from graphed_executors.local._peer import (
 from ._transport_run import (
     TransportExecResult,
     TransportWitness,
-    build_stage_error,
     collect_and_purge,
-    is_restart_worthy,
     pick_attributable,
     require_pin,
     sorted_addresses,
@@ -68,7 +66,7 @@ def _select_root(driver_root: Any, results: dict[str, Any], missing: Any) -> Any
         if r.get("has_root"):
             return r["root"]
     # deferred: distributed-touching
-    from .transport import TransportDeliveryError  # noqa: PLC0415
+    from .transport import TransportDeliveryError
 
     raise TransportDeliveryError(
         f"peer reduction completed with no captured root across {len(results)} peer(s): the "
@@ -97,9 +95,9 @@ def _dask_peer_main(
     endpoint captured (the §1.1.3 belt-and-braces fallback: worker 0 also ships the root to the
     driver over ``log_event``).
     """
-    import distributed  # noqa: PLC0415  (worker-side only)
+    import distributed  # worker-side only
 
-    from .transport import open_endpoint  # noqa: PLC0415  (deferred: distributed-touching)
+    from .transport import open_endpoint
 
     endpoint = open_endpoint(spec)
     # research §5: free the ThreadPool slot; the worker keeps serving handlers
@@ -154,17 +152,11 @@ def transport_run_plan(
     require_pin(backend)
     tasks = sorted(plan.tasks, key=lambda t: t.key)
     n = len(tasks)
-    witness = TransportWitness()
     if n == 0:
-        witness.epoch_nonces.append(uuid.uuid4().hex)
-        return TransportExecResult(finalized(plan, plan.empty()), 0, 0, witness)
+        return empty_run(plan)
+    witness = TransportWitness()
 
-    from .transport import (  # noqa: PLC0415  (deferred: distributed-touching)
-        _ensure_run_probe,
-        ensure_engine_plugins,
-        make_transport_spec,
-        open_driver_endpoint,
-    )
+    from .transport import ensure_engine_plugins
 
     # the shim needs graphed-worker; idempotent for transport
     ensure_engine_plugins(backend.client)
@@ -172,74 +164,84 @@ def transport_run_plan(
     k = max(1, min(len(addresses), n))
     worker_addrs = tuple(addresses[:k])
     bounds = make_bounds(n, k)
-    items = slice_items([t.partition for t in tasks], bounds, worker_addrs)
-    overlay = {a: tuple(v) for a, v in worker_outbox_addresses(n, bounds, worker_addrs).items()}
-
-    per_worker: dict[str, dict[str, int]] = {}
-    last_exc: BaseException | None = None
-    for attempt in range(epoch_restarts_allowed + 1):
-        nonce = uuid.uuid4().hex
-        witness.epoch_nonces.append(nonce)
-        spec = make_transport_spec(
-            nonce, worker_addrs, inbox_maxsize=inbox_maxsize, overlay=overlay
-        )
-        driver_ep = open_driver_endpoint(backend, spec)
-        # pre-create every worker's inbox so an early boundary-node send can never be
-        # stale-rejected (hard constraint 8); the peer tasks then attach to the SAME per-epoch
-        # state.
-        backend.client.run(_ensure_run_probe, spec, workers=list(worker_addrs))
-        futures = {
-            addr: backend.submit(
-                _dask_peer_main,
-                spec,
-                plan.process,
-                plan.combine,
-                items[addr],
-                n,
-                bounds,
-                worker_addrs,
-                overlay.get(addr, ()),
-                key=f"graphed-transport-{nonce}-peer-{i}",
-                workers=[addr],
-                retries=0,
-            )
-            for i, addr in enumerate(worker_addrs)
-        }
-        root: Any = _MISSING
-        try:
-            root = collect_peer_root(driver_ep, plan.empty, n, timeout_s=root_timeout_s)
-        except TimeoutError:
-            pass  # F3: a lost root falls back to the peer future's returned root (below)
-        finally:
-            driver_ep.close()
-
-        results: dict[str, Any] = {}
-        errs: dict[str, BaseException] = {}
-        for addr, fut in futures.items():
-            try:
-                results[addr] = fut.result()
-            except BaseException as exc:  # harvest every peer's outcome for the restart decision
-                errs[addr] = exc
-        collect_and_purge(backend.client, nonce, per_worker)
-
-        if not errs:
-            try:
-                root = _select_root(root, results, _MISSING)  # RAISES if no root captured (R2)
-            except BaseException as exc:  # a no-root run is restart-worthy, like an exhausted send
-                errs["__no_root__"] = exc
-            else:
-                witness.epoch_restarts = attempt
-                witness.per_worker = per_worker
-                return TransportExecResult(finalized(plan, root), n, max(0, n - 1), witness)
-
-        last_exc = pick_attributable(errs, backend)
-        if not is_restart_worthy(last_exc, backend) or attempt >= epoch_restarts_allowed:
-            witness.per_worker = per_worker
-            raise build_stage_error(last_exc, backend) from last_exc
-
-    witness.per_worker = per_worker  # pragma: no cover  (the loop returns or raises)
-    raise (  # pragma: no cover
-        build_stage_error(last_exc, backend)
-        if last_exc is not None
-        else RuntimeError("no epochs run")
+    peers = _PeerLayout(
+        n,
+        bounds,
+        worker_addrs,
+        slice_items([t.partition for t in tasks], bounds, worker_addrs),
+        {a: tuple(v) for a, v in worker_outbox_addresses(n, bounds, worker_addrs).items()},
     )
+    return run_epochs(
+        lambda _n, nonce: _reduce_epoch(
+            backend, plan, nonce, peers, witness, inbox_maxsize, root_timeout_s
+        ),
+        restarts_allowed=epoch_restarts_allowed,
+        backend=backend,
+        witness=witness,
+    )
+
+
+@dataclass(frozen=True)
+class _PeerLayout:
+    """Which worker reduces which leaves, and the overlay it sends on; fixed across epochs."""
+
+    n: int
+    bounds: list[int]
+    worker_addrs: tuple[str, ...]
+    items: dict[str, Any]
+    overlay: dict[str, tuple[str, ...]]
+
+
+def _reduce_epoch(
+    backend: Any,
+    plan: Plan[Any],
+    nonce: str,
+    peers: _PeerLayout,
+    witness: TransportWitness,
+    inbox_maxsize: int | None,
+    root_timeout_s: float,
+) -> TransportExecResult | BaseException:
+    """Run one epoch: its result, or the failure ``run_epochs`` classifies."""
+    from .transport import _ensure_run_probe, make_transport_spec, open_driver_endpoint
+
+    spec = make_transport_spec(
+        nonce, peers.worker_addrs, inbox_maxsize=inbox_maxsize, overlay=peers.overlay
+    )
+    driver_ep = open_driver_endpoint(backend, spec)
+    # pre-create every worker's inbox so an early boundary-node send can never be stale-rejected
+    # (hard constraint 8); the peer tasks then attach to the SAME per-epoch state.
+    backend.client.run(_ensure_run_probe, spec, workers=list(peers.worker_addrs))
+    futures = {
+        addr: backend.submit(
+            _dask_peer_main,
+            spec,
+            plan.process,
+            plan.combine,
+            peers.items[addr],
+            peers.n,
+            peers.bounds,
+            peers.worker_addrs,
+            peers.overlay.get(addr, ()),
+            key=f"graphed-transport-{nonce}-peer-{i}",
+            workers=[addr],
+            retries=0,
+        )
+        for i, addr in enumerate(peers.worker_addrs)
+    }
+    root: Any = _MISSING
+    try:
+        root = collect_peer_root(driver_ep, plan.empty, peers.n, timeout_s=root_timeout_s)
+    except TimeoutError:
+        pass  # F3: a lost root falls back to the peer future's returned root (below)
+    finally:
+        driver_ep.close()
+    results, errs = harvest(futures)
+    collect_and_purge(backend.client, nonce, witness.per_worker)
+    if errs:
+        return pick_attributable(errs, backend)
+    try:
+        root = _select_root(root, results, _MISSING)
+    except BaseException as exc:  # a no-root run is restart-worthy, like an exhausted send
+        return exc
+    n = peers.n
+    return TransportExecResult(finalized(plan, root), n, max(0, n - 1), witness)
