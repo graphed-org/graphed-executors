@@ -232,4 +232,4 @@ def run_epochs(
             return out
         if not is_restart_worthy(out, backend) or n >= restarts_allowed:
             raise stage_error(out, backend) from out
-    raise RuntimeError("no epochs run")
+    raise RuntimeError("no epochs run")  # pragma: no cover  (restarts_allowed < 0)
