@@ -3,9 +3,9 @@
 The repo's optional-dep idiom (no ``HAS_X`` flag), mirroring ``dask_backend/_lazy.py``.
 
 ``graphed_executors.parsl_backend`` imports NOTHING from parsl at module import time; only
-constructing :class:`ParslBackend` (which needs a real parsl executor anyway) touches this
-accessor, so ``test_parsl_no_cross_import`` (imports the package, asserts ``"parsl" not in
-sys.modules``) stays satisfiable.
+constructing :class:`ParslBackend` or calling :func:`start_htex` touches this accessor, so
+``test_parsl_no_cross_import`` (imports the package, asserts ``"parsl" not in sys.modules``) stays
+satisfiable.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def _parsl_executor_types() -> tuple[Any, Any]:
             HighThroughputExecutor,
             ThreadPoolExecutor,
         )
-    except ImportError as exc:  # pragma: no cover - a ParslBackend needs a parsl executor to exist
+    except ImportError as exc:  # pragma: no cover - the job gating this file has parsl installed
         raise ImportError(
             "the parsl backend needs parsl — install the optional extra: "
             "pip install 'graphed-executors[parsl]'"

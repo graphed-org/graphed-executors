@@ -12,9 +12,9 @@ Run a plan
 ``graphed_executors.local`` is the single-machine side: ``ThreadExecutor``,
 ``ProcessPoolExecutor``, ``PinnedPoolExecutor``, and the tree-reduction helpers
 (``plan_tree``, ``tree_reduce``, ``running_fold``) underneath them. The two cluster modules
-give you a one-line runner each — ``dask_runner(client)`` and ``parsl_runner(executor)`` —
-and are importable only with their extra installed (``[dask]``, ``[parsl]``). Importing
-either module does *not* import dask or parsl; that happens when you construct a runner.
+give you a one-line runner each — ``dask_runner(client)`` and ``parsl_runner(executor)``. Both
+need their extra (``[dask]``, ``[parsl]``) when you construct a runner, and the error names it if
+it is missing; importing either module does *not* import dask or parsl.
 ``htcondor_runner(site=..., n_pilots=...)`` submits its own pilot jobs; the HTCondor bindings are
 imported only when it is built. A ``SiteProfile`` describes a pool, down to ``job_root``, the tree its
 jobs read and write directly, under which a driverless run's DAG and a self-submitting driver's
@@ -26,6 +26,11 @@ attribute on what ``dask_runner`` and ``parsl_runner`` return. A plan that calls
 (``plan.services``) gets its endpoints from ``SubmitRunner``'s ``services=`` or a started
 ``graphed_executors.submit.services.ServiceSet``, the site, or a start from its recipe
 (``graphed_executors.submit.recipes``); :doc:`htcondor` has the details.
+
+The pools, the ``*_runner`` functions and ``start_htex``/``stop_htex`` also import from the top
+level, along with ``graphed.core``'s ``SequentialRunner``:
+``from graphed_executors import ProcessPoolExecutor, dask_runner``. Those names load on first use,
+so ``import graphed_executors`` imports neither ``graphed`` nor a backend.
 
 .. autosummary::
    :toctree: generated

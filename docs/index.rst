@@ -40,7 +40,7 @@ launched from.
 
    import numpy as np
    from graphed.core import Partition, Plan, Task
-   from graphed_executors.local import ProcessPoolExecutor
+   from graphed_executors import ProcessPoolExecutor
 
    def count(partition, resources):        # module-level, so a worker can import it
        return np.asarray([partition.entry_stop - partition.entry_start])
@@ -112,17 +112,17 @@ Which runner do I want?
      - Use
      - Notes
    * - A laptop or one big node
-     - ``ProcessPoolExecutor`` from ``graphed_executors.local``
+     - ``ProcessPoolExecutor``
      - The default. Real parallelism; your ``process``, ``combine`` and ``empty`` must be
        importable in a worker process.
    * - A very large core count, or a low open-file limit
-     - ``PinnedPoolExecutor`` from ``graphed_executors.local``
+     - ``PinnedPoolExecutor``
      - Identical results, but each worker talks to a bounded set of peers instead of all of
        them. ``ProcessPoolExecutor`` warns and points here when its worker count would strain
        the file-descriptor budget.
    * - No extra dependencies, or a notebook
-     - ``ThreadExecutor`` from ``graphed_executors.local``, or
-       ``SubmitRunner(ThreadBackend())``
+     - ``ThreadExecutor``, or
+       ``SubmitRunner(ThreadBackend())`` from ``graphed_executors.submit``
      - Threads share your address space, so nothing has to be picklable.
    * - A ``dask.distributed`` cluster
      - ``dask_runner(client)`` — see :doc:`dask`
@@ -135,6 +135,9 @@ Which runner do I want?
      - Submits its own pilot jobs; no scheduler to start. Task functions go in a module you pass
        in ``user_modules``.
 
+The pools and the ``*_runner`` functions import from the top level:
+``from graphed_executors import ProcessPoolExecutor``.
+
 Going to a cluster is one substitution. Everything above the ``plan = ...`` line stays as it
 is; only the runner changes.
 
@@ -142,7 +145,7 @@ is; only the runner changes.
 
    # A recipe: this needs a running cluster, so it is not runnable as written.
    from dask.distributed import Client
-   from graphed_executors.dask_backend import dask_runner
+   from graphed_executors import dask_runner
 
    with Client("tcp://scheduler.example:8786") as client:
        result = dask_runner(client).run(plan)          # same plan, same answer

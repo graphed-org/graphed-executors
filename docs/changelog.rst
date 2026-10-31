@@ -1,6 +1,16 @@
 What changed
 ============
 
+Unreleased
+----------
+
+* ``SequentialRunner``, ``ThreadExecutor``, ``ProcessPoolExecutor``, ``PinnedPoolExecutor``,
+  ``dask_runner``, ``parsl_runner``, ``htcondor_runner``, ``start_htex`` and ``stop_htex`` import from
+  ``graphed_executors`` directly. They load on first use, so ``import graphed_executors`` still imports no backend, and
+  ``dir(graphed_executors)`` lists just these names and ``__version__``.
+* ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
+  bare ``ModuleNotFoundError``.
+
 0.0.7
 -----
 
