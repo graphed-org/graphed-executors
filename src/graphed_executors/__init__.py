@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .htcondor_backend import htcondor_runner
     from .local import PinnedPoolExecutor, ProcessPoolExecutor, ThreadExecutor
     from .parsl_backend import parsl_runner, start_htex, stop_htex
+    from .vine_graph_backend import vine_graph_runner
 
 __version__ = "0.0.7"
 
@@ -37,6 +38,7 @@ __all__ = [
     "parsl_runner",
     "start_htex",
     "stop_htex",
+    "vine_graph_runner",
 ]
 
 # Resolved on first use, so importing this package loads neither graphed nor a backend.
@@ -50,6 +52,7 @@ _HOMES = {
     "parsl_runner": "graphed_executors.parsl_backend",
     "start_htex": "graphed_executors.parsl_backend",
     "stop_htex": "graphed_executors.parsl_backend",
+    "vine_graph_runner": "graphed_executors.vine_graph_backend",
 }
 
 

@@ -3,14 +3,20 @@ Current limitations
 
 What does not work yet, and what to do instead.
 
-- **No TaskVine or WorkQueue support, and no direct Slurm submission.**
+- **No WorkQueue support, and no direct Slurm submission.**
   ``ParslBackend`` accepts parsl's ``HighThroughputExecutor`` and ``ThreadPoolExecutor`` and
-  refuses any other executor type with a ``TypeError``. HTCondor has its own runner
-  (:doc:`htcondor`). To run on another batch system, keep the graphed side unchanged and let the
+  refuses any other executor type with a ``TypeError``. HTCondor and TaskVine have their own
+  runners (:doc:`htcondor`, :doc:`vine_graph`). To run on another batch system, keep the graphed side unchanged and let the
   pool layer do the submission: parsl's providers (``SlurmProvider``) under an HTEX pool, or
   `dask-jobqueue <https://jobqueue.dask.org/>`__ in front of the dask backend. :doc:`dask`
   carries worked recipes for the dask side; on parsl the provider goes in your own parsl
   config and you hand the started executor to ``parsl_runner`` exactly as in :doc:`parsl`.
+
+- **vine_graph does not retry a function that raises, and is not released.**
+  The backend needs a CCTools build of the ``vine-graph`` branch, and no CI job runs real TaskVine:
+  tests there use a stand-in ``Executor`` (``tests/extra/vine_graph``), and
+  ``test_real_taskvine.py`` runs only where a build is installed. Retry transient errors inside
+  ``process``; :doc:`vine_graph` has what vine_graph retries itself.
 
 - **Stopping on statistical convergence is not implemented.**
   ``graphed.core.execution.StopCondition`` ends a run on an event target

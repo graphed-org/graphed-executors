@@ -18,7 +18,8 @@ it is missing; importing either module does *not* import dask or parsl.
 ``htcondor_runner(site=..., n_pilots=...)`` submits its own pilot jobs; the HTCondor bindings are
 imported only when it is built. A ``SiteProfile`` describes a pool, down to ``job_root``, the tree its
 jobs read and write directly, under which a driverless run's DAG and a self-submitting driver's
-``log_dir`` must lie. Every
+``log_dir`` must lie. ``vine_graph_runner(executor)`` runs on a vine_graph ``Executor`` you create
+(:doc:`vine_graph`). Every
 executor and runner has ``run(plan)`` and ``submit(plan)``, which returns a future so you can
 record the next plan while this one runs, and honours a ``graphed.core.RunControl`` for pausing
 and cancelling — ``control=`` on the local executors and ``SubmitRunner``, the ``control``
@@ -40,6 +41,7 @@ so ``import graphed_executors`` imports neither ``graphed`` nor a backend.
    graphed_executors.dask_backend
    graphed_executors.parsl_backend
    graphed_executors.htcondor_backend
+   graphed_executors.vine_graph_backend
 
 Reshape data between steps
 --------------------------

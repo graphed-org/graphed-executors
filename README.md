@@ -115,12 +115,13 @@ The vine_graph backend runs plans on TaskVine through `ndcctools.taskvine.vine_g
 build of the [`vine-graph`](https://github.com/JinZhou5042/cctools/tree/vine-graph)
 branch. `vine_graph_runner(executor)` runs plans on a vine_graph `Executor` that the caller creates and
 closes; vine_graph moves partial results between workers, keeps a copy of each in the manager, and
-recomputes those lost with a worker. Workers need this package, graphed, and the analysis's
+recomputes those lost with a worker. It retries what the infrastructure broke (the Executor's
+`max-retries`), not a function that raises. Workers need this package, graphed, and the analysis's
 dependencies in their environment:
 
 ```python
 from ndcctools.taskvine import vine_graph as vg
-from graphed_executors.vine_graph_backend import vine_graph_runner
+from graphed_executors import vine_graph_runner
 
 with vg.Executor(9123, "my-analysis") as executor, vine_graph_runner(executor) as runner:
     result = runner.run(plan)  # workers: vine_worker -M my-analysis
