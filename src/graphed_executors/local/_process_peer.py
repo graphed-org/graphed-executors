@@ -139,11 +139,11 @@ class _ProcessPeerBase(_BaseExecutor):
         self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
 
-    def run(self, plan: Plan[R]) -> ExecResult[R]:
+    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             os._exit(_UNGUARDED_EXIT)
-        return super().run(plan)
+        return super().run(plan, skip_failed=skip_failed)
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         return _InFlight(fn, self._in_flight, label)

@@ -202,6 +202,10 @@ Two things bite people on HTEX:
 - Call `resources.open_once(uri, opener)` inside your `process` and the worker keeps that handle
   for its lifetime, so ten partitions of one file on one worker open it once instead of ten
   times. The dask backend gives you the same per-worker handle through its worker plugin.
+- `run(plan, skip_failed=10)` gives up only after 10 failed chunks. `res.value` merges the chunks
+  that succeeded, `res.failed` lists the others, and the run warns with the count. One failure
+  past the budget raises `TooManyFailedChunksError`. A plan with `stop=StopCondition(max_errors=10)`
+  gets the same budget, through `submit(plan)` too.
 - `submit(plan)`, on every runner here, returns a `concurrent.futures.Future` straight away, so
   you can record and compile the next plan while this one runs; `.result()` is what `run(plan)`
   would have returned. Plans still run one at a time, in the order you submitted them.

@@ -791,13 +791,15 @@ class HTCondorRunner(SubmitRunner):
         return self.backend.wait_for_pilots(self._min_pilots)
 
     @overload
-    def run(self, plan: Plan[R]) -> ExecResult[R]: ...
+    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]: ...
     @overload
-    def run(self, plan: DurablePlanV2) -> ExecResult[Any]: ...
-    def run(self, plan: Plan[R] | DurablePlanV2) -> ExecResult[R] | ExecResult[Any]:
+    def run(self, plan: DurablePlanV2, *, skip_failed: int = 0) -> ExecResult[Any]: ...
+    def run(
+        self, plan: Plan[R] | DurablePlanV2, *, skip_failed: int = 0
+    ) -> ExecResult[R] | ExecResult[Any]:
         """Run ``plan``, refusing one the pilots cannot import."""
         _require_plan_importable(plan, ("process", "combine"))
-        return super().run(plan)
+        return super().run(plan, skip_failed=skip_failed)
 
     def __exit__(self, *exc: object) -> None:
         """Close the runner; on an exception, stop waiting for slots first."""

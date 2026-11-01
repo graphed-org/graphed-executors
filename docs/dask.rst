@@ -365,7 +365,9 @@ raised it — not an opaque scheduler string.
 graphed turns that into a ``graphed.WorkerLostError``, a ``StageError`` naming the chunk and the
 last worker that held it.
 Under co-located tasks the blame can land on an innocent partition, so treat the attribution as a
-strong hint rather than a verdict.
+strong hint rather than a verdict. ``run(plan, skip_failed=N)`` inherits that: it leaves out the
+chunk dask blamed, which may be a neighbour of the one that killed the worker, and every chunk it
+leaves out is in ``res.failed``. Blame that lands on a combine names no chunk, so the run raises.
 
 **A driver that dies** takes the run with it, and a plain rerun starts over. Wrap the plan with
 ``graphed.checkpoint.resumable(plan, store)`` and a rerun recomputes only the tasks the store does

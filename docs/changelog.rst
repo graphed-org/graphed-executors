@@ -33,6 +33,9 @@ Unreleased
   ``dask_runner``, ``parsl_runner`` and ``htcondor_runner``.
 * ``htcondor_runner`` and ``submit_driverless`` agree on their defaults: 2 workers and
   ``request_memory_mb=2048``.
+* ``run(plan, skip_failed=N)`` on every runner goes on past ``N`` failed chunks; see graphed's
+  changelog for ``ExecResult.failed``. A lost worker's chunk counts, after ``retries``, by rerunning
+  the plan with that chunk left out. ``StopCondition(max_errors=N)`` is the same budget.
 * ``ParslRunner.local(workers=4)`` starts HTEX on this machine and stops it when the ``with`` block
   ends. ``ParslRunner(executor)`` is ``parsl_runner(executor)``, which now returns one, and leaves
   a caller's executor running.

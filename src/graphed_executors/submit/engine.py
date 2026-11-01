@@ -45,6 +45,9 @@ from graphed.core import (
     StopReason,
     Task,
     chunk_label,
+    n_failed,
+    skipping,
+    without_lost,
 )
 from graphed.core.execution import (
     Monitor,
@@ -208,26 +211,37 @@ class SubmitRunner:
         self.backend.close()
 
     @overload
-    def run(self, plan: Plan[R]) -> ExecResult[R]: ...
+    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]: ...
     @overload
-    def run(self, plan: DurablePlanV2) -> ExecResult[Any]: ...
-    def run(self, plan: Plan[R] | DurablePlanV2) -> ExecResult[R] | ExecResult[Any]:
-        """Run ``plan``.
+    def run(self, plan: DurablePlanV2, *, skip_failed: int = 0) -> ExecResult[Any]: ...
+    def run(
+        self, plan: Plan[R] | DurablePlanV2, *, skip_failed: int = 0
+    ) -> ExecResult[R] | ExecResult[Any]:
+        """Run ``plan``, past ``skip_failed`` failed chunks.
 
         Its services are resolved, checked, probed and bound before the first plan task is
         submitted, and released, with any of its tasks not yet done, when ``run`` returns
         or raises. A :class:`~graphed.core.DurablePlanV2` (a join or repartition) runs
         stage by stage to ``plan.value`` of its last stage; a cancel returns
         ``value=None``. The plan's ``finalize`` runs here, after its services are released.
+        A lost worker's chunk counts as failed once the backend gives up on it.
         """
         monitor = self.monitor
         control = self.control
         given = self.services
-        ctx = self._context(uuid.uuid4().hex[:8], monitor)
-        # the submission's scope: released in reverse on exit
-        with contextlib.ExitStack() as scope:
-            result = self._run_scoped(plan, monitor, control, given, ctx, scope)
-        return finalize_result(plan, result)
+        retried = self.backend.capabilities.per_task_retries
+        plan = skipping(plan, skip_failed, attempts=1 + (self._retries if retried else 0))
+        while True:
+            ctx = self._context(uuid.uuid4().hex[:8], monitor)
+            try:
+                # the submission's scope: released in reverse on exit
+                with contextlib.ExitStack() as scope:
+                    result = self._run_scoped(plan, monitor, control, given, ctx, scope)
+                return finalize_result(plan, result)
+            except WorkerLostError as err:
+                # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs the
+                # fixed tree to rewire a failed leaf's dependents
+                plan = without_lost(plan, err)
 
     def _run_scoped(
         self,
@@ -486,6 +500,7 @@ class SubmitRunner:
                     continue
                 key, n_entries = outstanding.pop(fut)
                 results.append((key, cast(R, fut.result())))
+                exec_ctx.errors += n_failed(results[-1][1])
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 reason = plan.stop.reason(exec_ctx) if plan.stop else None
@@ -554,6 +569,7 @@ class SubmitRunner:
             for fut in self._completions(window, done_q, outstanding, in_flight, start):
                 key, n_entries = outstanding.pop(fut)
                 results.append((key, cast(R, fut.result())))
+                exec_ctx.errors += n_failed(results[-1][1])
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 if window.cancelled():  # then no next_tasks and no stop exit
