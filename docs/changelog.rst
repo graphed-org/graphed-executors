@@ -10,6 +10,19 @@ Unreleased
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
+* A dead worker raises ``graphed.WorkerLostError`` on every runner, with the chunk's label in
+  ``partition`` and the worker in ``worker``. It replaces a raw ``BrokenProcessPool`` on the process
+  pools, a raw ``WorkerLost`` on parsl, and a ``StageError`` with a data file in its source-line
+  slot on dask and HTCondor. Catch it with ``except graphed.WorkerLostError``; ``cause_type`` is
+  still ``"KilledWorker"``. ``htcondor_backend.WorkerLostError`` is now a subclass of it.
+* ``ThreadExecutor``, ``ProcessPoolExecutor`` and ``PinnedPoolExecutor`` take ``retries=`` (default
+  0): a ``WorkerLostError`` re-runs the whole plan, except one that pulls from ``next_tasks``.
+* A process pool notices a dead worker within a poll. A kill could wait out the 300 s
+  peer-root timeout, with every other worker idle.
+* A peer run longer than 300 s finishes. It raised ``TimeoutError`` after 300 s however healthy it
+  was; that timeout now only counts time with no chunk running.
+* A persistent process pool that lost a worker respawns for the next run; it raised
+  ``BrokenProcessPool`` on every later run.
 
 0.0.7
 -----

@@ -60,6 +60,18 @@ _N_WORKERS_WAIT_S = 30.0
 _WORKER_DEATH_NAMES = ("WorkerLost", "ManagerLost")
 
 
+def _worker_death(exc: BaseException) -> BaseException | None:
+    """Return the parsl worker loss in ``exc``'s chain, matched by class name, or ``None``."""
+    seen: set[int] = set()
+    node: BaseException | None = exc
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
+        if type(node).__name__ in _WORKER_DEATH_NAMES:
+            return node
+        node = node.__cause__ if node.__cause__ is not None else node.__context__
+    return None
+
+
 class _ParslFuture:
     """A thin :class:`SubmitFuture` over a parsl future.
 
@@ -69,17 +81,26 @@ class _ParslFuture:
     delegate.
     """
 
-    __slots__ = ("_dispatched", "_handlers", "_raw")
+    __slots__ = ("_dispatched", "_handlers", "_key", "_raw")
 
     def __init__(
-        self, raw: Any, handlers: dict[str, Callable[[list[dict[str, object]]], None]]
+        self,
+        raw: Any,
+        handlers: dict[str, Callable[[list[dict[str, object]]], None]],
+        key: str = "",
     ) -> None:
         self._raw = raw
+        self._key = key
         self._handlers = handlers
         self._dispatched = False
 
     def result(self, timeout: float | None = None) -> object:
-        result, events = cast("tuple[object, list[EventBatch]]", self._raw.result(timeout))
+        try:
+            result, events = cast("tuple[object, list[EventBatch]]", self._raw.result(timeout))
+        except BaseException as exc:
+            if _worker_death(exc) is not None:  # parsl's own carries no task key
+                exc.graphed_key = self._key  # type: ignore[attr-defined]
+            raise
         if not self._dispatched:
             self._dispatched = True
             dispatch_events(events, self._handlers)
@@ -202,7 +223,7 @@ class ParslBackend:
             if retries <= 0
             else _resubmitting(attempt, retries, cancels=not self._is_htex)
         )
-        return _ParslFuture(raw, self._handlers)
+        return _ParslFuture(raw, self._handlers, key)
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
         # degenerate on scatter_broadcast=False (the ThreadBackend form): the task fn receives the
@@ -245,27 +266,16 @@ class ParslBackend:
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
         """Map a parsl ``WorkerLost``/``ManagerLost`` to an attributable worker death.
 
-        Map a parsl ``WorkerLost``/``ManagerLost`` (matched by CLASS NAME anywhere in the exception
-        chain — never by parsl identity, so this module stays parsl-import-free at load) to the
-        ``(failing_key, last_worker)`` string 2-tuple the engine turns into an attributed
-        :class:`StageError`. Unlike a dask ``KilledWorker`` (whose ``.task`` is the graphed key
-        that ``key_to_task`` resolves to a partition), a parsl worker-loss exception carries no
-        graphed task key — so BOTH slots are the death message (``str(exc)``: parsl's
-        ``WorkerLost`` / ``ManagerLost`` render as "…loss of worker N on host H", naming the dead
-        worker). The engine then attributes to a NON-EMPTY, meaningful unit
-        (``StageError.partition`` / ``frame.filename`` = the death message) rather than to an empty
-        key; an m47 worker-death driver, which knows which partitions the dead peer owned, layers
-        its partition context on top. Anything unrelated returns ``None``.
+        Matched by CLASS NAME anywhere in the exception chain, so this module stays parsl-free at
+        load. The key is the one :class:`_ParslFuture` tagged the exception with; an exception
+        that reached here another way has none, and its message stands in. Anything unrelated
+        returns ``None``.
         """
-        seen: set[int] = set()
-        node: BaseException | None = exc
-        while node is not None and id(node) not in seen:
-            seen.add(id(node))
-            if type(node).__name__ in _WORKER_DEATH_NAMES:
-                label = str(node) or type(node).__name__
-                return label, label
-            node = node.__cause__ if node.__cause__ is not None else node.__context__
-        return None
+        death = _worker_death(exc)
+        if death is None:
+            return None
+        label = str(death) or type(death).__name__
+        return getattr(exc, "graphed_key", "") or label, label.rpartition("loss of worker ")[2]
 
 
 def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) -> Future[Any]:

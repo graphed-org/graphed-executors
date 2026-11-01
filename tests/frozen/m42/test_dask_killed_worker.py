@@ -50,7 +50,7 @@ def test_killed_worker_becomes_an_attributed_stage_error(client: Any) -> None:
     err = excinfo.value
 
     assert not isinstance(err, distributed.KilledWorker)  # translated, not leaked
-    assert type(err) is StageError
+    assert isinstance(err, StageError)
     assert partition.uri in err.partition  # names the user's chunk, not a scheduler key
     text = f"{err.cause_type} {err.cause_message} {err}"
     assert "KilledWorker" in text  # the cause is named for the user

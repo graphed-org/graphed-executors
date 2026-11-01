@@ -94,7 +94,7 @@ def test_a_task_past_the_timeout_fails_and_its_pilot_stops(tmp_path: Path) -> No
         _run(_plan(tmp_path, hangs=1, hang_s=120.0), task_timeout_s=3.0, exits=exits)
     (hung,) = tmp_path.iterdir()
     stage = excinfo.value
-    assert stage.partition.startswith(HUNG + "::") and stage.cause_type == "TaskTimedOutError"
+    assert stage.partition.endswith(HUNG) and stage.cause_type == "TaskTimedOutError"
     assert "task_timeout_s=3.0" in stage.cause_message
     err = stage.__cause__
     assert isinstance(err, TaskTimedOutError)

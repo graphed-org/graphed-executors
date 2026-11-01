@@ -347,17 +347,29 @@ carrying the operation that failed, the partition it was on, and your source fra
 stringified. "The remote error was an opaque string" is the failure this stack exists to avoid.
 
 **The process died.** A segfault, an OOM kill, or a preemption leaves no exception to propagate.
-On a cluster this arrives as a scheduler-level event — dask raises ``KilledWorker`` once a task
-has cost more than the allowed number of worker deaths — and the backend turns it into an
-attributed ``StageError`` naming the partition and the last worker that held it, rather than
-handing you the raw scheduler error. The attribution can be unfair when several tasks shared the
-dead worker, and the message says so.
+Every runner reports it the same way, as ``graphed.WorkerLostError``, a ``StageError`` whose
+``partition`` is the chunk's label and whose ``worker`` names the worker. On a cluster the death
+arrives as a scheduler-level event — dask raises ``KilledWorker`` once a task has cost more than
+the allowed number of worker deaths, parsl ``WorkerLost``, HTCondor a pilot lost twice — and on the
+process pools as a worker process that exited, which the driver watches for directly. A worker
+that dies leaves no source line to point at, so the error says that rather than filling the slot
+with a data file. The attribution can be unfair when several tasks shared the dead worker, and the
+message says so.
 
 Retries are the underlying library's where it has them: ``dask_runner``'s ``retries`` forwards to
 dask's per-task retries, which resubmit on another worker, with no graphed-level loop on top.
 parsl keeps its retries in the DataFlowKernel, which ``parsl_runner`` does not use, so there the
 driver resubmits a failed task itself. The default is 3, so a deterministic exception in your
 ``process`` is executed four times before the driver sees it; ``retries=0`` while debugging.
+
+The process pools default to ``retries=0``. ``ProcessPoolExecutor(retries=1)`` re-runs the whole
+plan after a ``WorkerLostError``, and only then: your own exception raises at once. Chunks that had
+finished run again, and a monitor sees their events again. A plan that pulls its tasks from
+``next_tasks`` is not re-run, because the stream it was pulling from has moved on.
+
+A peer run also waits for a root with nothing left running, in case the reduction itself is lost.
+That wait is 300 s and never counts a running chunk, so a long chunk is not a stall, and a chunk
+that hangs in your own code hangs the run.
 
 .. _design-epoch-restart:
 

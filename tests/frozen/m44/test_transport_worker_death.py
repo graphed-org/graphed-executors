@@ -167,7 +167,7 @@ def test_exhausted_restart_budget_is_an_attributed_stage_error(tmp_path: Path) -
             "with epoch_restarts_allowed=0 a participating-worker death must FAIL the run"
         )
         err = outcome["error"]
-        assert type(err) is StageError, (
+        assert isinstance(err, StageError), (
             f"expected an attributed StageError, got {type(err).__name__}: a raw "
             "KilledWorker/comm error must never leak to the user (§1.5, describe_failure path)"
         )

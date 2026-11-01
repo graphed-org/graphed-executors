@@ -10,11 +10,18 @@ from __future__ import annotations
 
 import contextlib
 import multiprocessing
+import signal
 import time
+from collections.abc import Iterator, Sequence
+from concurrent.futures import Executor as _PoolExecutor
 from concurrent.futures import Future
 from concurrent.futures import ProcessPoolExecutor as _StdProcessPool
+from concurrent.futures.process import BrokenProcessPool
+from multiprocessing.process import BaseProcess
+from pathlib import Path
 from typing import Any, TypeVar, cast
 
+from graphed import WorkerLostError
 from graphed.core import Partition, Plan, RunControl
 from graphed.core.execution import complete_events
 
@@ -60,6 +67,13 @@ def _close_registry(registry: dict[str, Any]) -> None:
             q.close()
 
 
+def _worker_processes(pool: Any) -> list[BaseProcess]:
+    """Return ``pool``'s worker processes, which the stdlib pool's public API does not name."""
+    if pool is None:
+        return []
+    return pool.workers if isinstance(pool, PinnedProcessPool) else list(pool._processes.values())
+
+
 class _ProcessPeerBase(_BaseExecutor):
     """Peer reduction on spawned worker processes, reused across runs when ``persistent=True``.
 
@@ -83,6 +97,36 @@ class _ProcessPeerBase(_BaseExecutor):
     _peer_registry: dict[str, Any] | None = None  # the inbox per address
     _peer_driver: QueueTransport | None = None
     _last_peer_relays = 0  # nodes the driver forwarded in the last pinned run
+
+    def _lost_in(self, workers: Sequence[BaseProcess]) -> WorkerLostError | None:
+        """Return the error for the first dead one of ``workers``, ``None`` if all are alive."""
+        exited = [p for p in workers if p.exitcode is not None]
+        if not exited:
+            return None
+        # a broken stdlib pool SIGTERMs the survivors; the worker that broke it exited otherwise
+        dead = next((p for p in exited if p.exitcode != -signal.SIGTERM), exited[0])
+        chunk = "no chunk (it died between chunks)"
+        for marker in Path(self._in_flight).iterdir():  # a retry starts from an empty directory
+            with contextlib.suppress(OSError):
+                text = marker.read_text()
+                marker.unlink()
+                if marker.name.startswith(f"{dead.pid}."):
+                    chunk = text or chunk
+        return WorkerLostError(partition=chunk, worker=f"pid {dead.pid}")
+
+    @contextlib.contextmanager
+    def _lost_workers(self, pool: _PoolExecutor) -> Iterator[None]:
+        try:
+            yield
+        except BrokenProcessPool as exc:
+            workers = _worker_processes(pool)
+            pool.shutdown()  # joins them, so every exit code is in; a broken pool cannot be reused
+            if self._kept_pool is pool:
+                self._kept_pool = None
+            lost = self._lost_in(workers)
+            if lost is None:
+                raise
+            raise lost from exc
 
     def _close_peer(self) -> None:
         if self._peer_pool is not None:
@@ -318,7 +362,7 @@ class _ProcessPeerBase(_BaseExecutor):
         pool: Any = None,
         control: RunControl | None = None,
     ) -> tuple[R, int]:
-        """Wait for the root while watching the worker futures.
+        """Wait for the root while watching the worker futures and processes.
 
         A worker exception means the root will never form, so we must detect it PROMPTLY
         (not after the 300s safety timeout) and re-raise it intact (a picklable
@@ -339,14 +383,15 @@ class _ProcessPeerBase(_BaseExecutor):
             self._last_peer_relays += 1
 
         def failed() -> bool:
-            for f in futs:  # a dead worker -> re-raise the real cause now, not 300s from now
-                if f.done() and f.exception() is not None:
-                    f.result()
-            # PinnedProcessPool backstop: a HARD worker crash ships no error + leaves its Future
-            # unresolved, so the future check above can't see it — detect the dead process
-            # directly.
-            if pool is not None and not getattr(pool, "workers_alive", lambda: True)():
-                raise RuntimeError("a peer worker process died before producing the root")
+            with self._lost_workers(pool):
+                for f in futs:
+                    if f.done() and f.exception() is not None:
+                        f.result()
+            # Nothing above sees a pinned worker's crash, or the crash of the last worker a stdlib
+            # pool spawned: submit wakes the pool's watcher before adding that process.
+            lost = self._lost_in(_worker_processes(pool))
+            if lost is not None:
+                raise lost
             return False
 
         try:
@@ -369,7 +414,8 @@ class _ProcessPeerBase(_BaseExecutor):
         if forward is not None:
             forward.close(OUTBOX_EXIT_WAIT_S)
         release_workers(driver_t)
-        self._last_peer_witness = self._finish_peer(driver_t, futs)
+        with self._lost_workers(pool):
+            self._last_peer_witness = self._finish_peer(driver_t, futs)
         assert out is not None  # failed() raises instead of reporting
         return out
 

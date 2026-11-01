@@ -62,7 +62,7 @@ def test_adaptive_worker_death_names_the_partition_not_the_dask_key(client: Any)
     err = excinfo.value
 
     assert not isinstance(err, distributed.KilledWorker)  # translated, not leaked
-    assert type(err) is StageError
+    assert isinstance(err, StageError)
     # THE F2b pin — on current HEAD err.partition is the raw "graphed-…-leaf-0" scheduler key
     assert partition.uri in err.partition, (
         f"the adaptive path must attribute a worker death to the user's chunk; got partition "

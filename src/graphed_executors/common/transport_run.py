@@ -22,6 +22,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from graphed import WorkerLostError
 from graphed.core import Plan
 from graphed.debug import SourceFrame, StageError
 
@@ -168,19 +169,7 @@ def build_stage_error(exc: BaseException, backend: Any) -> Any:
     info = describe(exc) if describe is not None else None
     if info is not None:
         key, last_worker = info
-        return StageError(
-            op="run",
-            frames=(SourceFrame(filename=str(key), lineno=0),),
-            input_forms=(),
-            partition=str(key),
-            cause_type="KilledWorker",
-            cause_message=(
-                f"worker {last_worker} died (segfault/OOM/preemption suspected; note: blame can "
-                "be "
-                "unfair under co-located tasks)"
-            ),
-            opt_level=0,
-        )
+        return WorkerLostError(partition=str(key), worker=last_worker)
     return StageError(
         op="run",
         frames=(SourceFrame(filename="transport-run", lineno=0),),

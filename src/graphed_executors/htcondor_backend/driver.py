@@ -25,7 +25,7 @@ fresh announce, so the loop is bounded by the node's restarts.
 - 1: environment, which the job's retries may get past. Anything raised before or after
   ``runner.run(plan)``: reading ``run.json`` or the plan, starting the pilots, and the driver's own
   service set (its endpoints and placement are environment; *this plan's decision*, plan-services
-  D6). Inside ``runner.run``: a run whose workers were lost (a ``KilledWorker`` ``StageError``,
+  D6). Inside ``runner.run``: a run whose workers were lost (a ``graphed.WorkerLostError``,
   e.g. every pilot preempted; *owner ruling 2026-09-25*), a ``StoreUnavailable``, and the run's own
   service phase or a failed task's re-check of its services (``ServiceUnavailableError``,
   ``ServiceUnreachableError`` and a probe's raw ``WorkerLostError``; *this plan's decision*).
@@ -50,8 +50,8 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, TextIO
 
+from graphed import WorkerLostError
 from graphed.checkpoint import EnvironmentChanged, StoreUnavailable, resumable
-from graphed.debug import StageError
 
 from graphed_executors.local._portable import PICKLE_ERRORS, Portable
 from graphed_executors.submit.services import (
@@ -74,7 +74,6 @@ from .launch import (
     LocalPilots,
     publish,
 )
-from .server import WorkerLostError
 from .sites import SITES
 
 EXIT_DONE, EXIT_FAILED, EXIT_PLAN_ERROR = 0, 1, 3
@@ -172,11 +171,10 @@ def _exit_code(exc: Exception) -> int:
     1 (retried) for lost workers and for the run's service phase and the checkpoint store, 3
     (not retried) for everything else, the plan's own error.
     """
-    lost = isinstance(exc, StageError) and exc.cause_type == "KilledWorker"
     environment = isinstance(
         exc, ServiceUnavailableError | ServiceUnreachableError | WorkerLostError | StoreUnavailable
     )
-    return EXIT_FAILED if lost or environment else EXIT_PLAN_ERROR
+    return EXIT_FAILED if environment else EXIT_PLAN_ERROR
 
 
 def _attempt(
