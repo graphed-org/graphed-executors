@@ -1,7 +1,9 @@
-"""m47 packaging/coverage-allocation pins (MAIN matrix) — the §1.6 pre-authorized m47 deltas as
-file content, so a drift is caught mechanically, not by eyeball (plan §1.6 item 2, §2 m47 IT5;
-the m46 `test_parsl_packaging_pins` precedent; a coverage-config change OUTSIDE the pre-authorized
-allocation is indistinguishable from gate tampering).
+"""m47 packaging/coverage-allocation pins (MAIN matrix).
+
+The §1.6 pre-authorized m47 deltas as file content, so a drift is caught mechanically, not by
+eyeball (plan §1.6 item 2, §2 m47 IT5; the m46 `test_parsl_packaging_pins` precedent; a
+coverage-config change OUTSIDE the pre-authorized allocation is indistinguishable from gate
+tampering).
 
 Pins: `.coveragerc-parsl` [run] source gains ``common.http_plane`` (the m47 parsl-only module —
 its reject/timeout/evict branches gate HERE) while ``tasks_engine``/``transport_run``/``facade``/
@@ -11,7 +13,8 @@ suites execute them through the shims); `.coveragerc-dask` [run] source gains
 ``http_plane`` stay banned (no dask-suite caller — they would sit at 0%); ``fail_under = 90`` and
 ``branch = true`` UNTOUCHED in both; the `test-parsl` pytest step runs ``tests/frozen/m47``, keeps
 the bare ``--cov`` (activation — without it the modifiers are a silent no-op, empirically
-verified), and carries NO path-valued ``--cov=`` (which would OVERRIDE the config sources)."""
+verified), and carries NO path-valued ``--cov=`` (which would OVERRIDE the config sources).
+"""
 
 from __future__ import annotations
 

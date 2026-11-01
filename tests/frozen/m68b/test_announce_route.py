@@ -1,12 +1,14 @@
-"""m68b B1: the task server's ``/announce`` route (plan-services.md §3.3, B1 ``TaskServer`` bullet).
+"""m68b B1: the task server's ``/announce`` route.
+
+Plan-services.md §3.3, B1 ``TaskServer`` bullet.
 
 A ``ServiceJob`` never carries the pilots' secret: the task server mints a per-call announce secret
-(``announce_secret(keys)``) valid only on ``/announce`` and only for those keys. The route takes UTF-8 text
-``key host:port identity``, verifies its signature against the key's announce secret before anything else
-(no key, no secret: 403), then wants exactly three fields with an integer port (400). ``wait_announce``
-pops what an announce recorded. The pickled routes verify only the pilots' secret, so an announce secret
-signs no pickle. Every OS; a real ``TaskServer`` on loopback; nothing recorded is witnessed by
-``wait_announce`` returning ``None``, nothing unpickled by the m66 marker.
+(``announce_secret(keys)``) valid only on ``/announce`` and only for those keys. The route takes
+UTF-8 text ``key host:port identity``, verifies its signature against the key's announce secret
+before anything else (no key, no secret: 403), then wants exactly three fields with an integer port
+(400). ``wait_announce`` pops what an announce recorded. The pickled routes verify only the pilots'
+secret, so an announce secret signs no pickle. Every OS; a real ``TaskServer`` on loopback; nothing
+recorded is witnessed by ``wait_announce`` returning ``None``, nothing unpickled by the m66 marker.
 """
 
 from __future__ import annotations
@@ -41,12 +43,17 @@ def test_a_signed_announce_is_recorded_once_and_wakes_the_waiter() -> None:
         time.sleep(0.3)
         started = time.monotonic()
         assert (
-            post_announce(server.url, announce_body("k1", "wn3.example:10005", "wn3.example"), secret) == 200
+            post_announce(
+                server.url, announce_body("k1", "wn3.example:10005", "wn3.example"), secret
+            )
+            == 200
         )
         assert get_within(waiter, 10.0, "wait_announce") == ("wn3.example:10005", "wn3.example")
         assert time.monotonic() - started < 5.0, "wait_announce was not woken by the announce"
         before = time.monotonic()
-        assert wait_announce(server, "k1", 0.5) is None, "wait_announce did not pop the record it returned"
+        assert wait_announce(server, "k1", 0.5) is None, (
+            "wait_announce did not pop the record it returned"
+        )
         assert time.monotonic() - before >= 0.45
 
 
@@ -64,7 +71,10 @@ def test_another_key_s_announce_secret_does_not_sign_this_key() -> None:
         server.announce_secret(["k1"])
         other = server.announce_secret(["k2"])
         assert (
-            post_announce(server.url, announce_body("k1", "wn3.example:10005", "wn3.example"), other) == 403
+            post_announce(
+                server.url, announce_body("k1", "wn3.example:10005", "wn3.example"), other
+            )
+            == 403
         )
         assert wait_announce(server, "k1", NOTHING_S) is None
         assert wait_announce(server, "k2", NOTHING_S) is None
@@ -72,17 +82,25 @@ def test_another_key_s_announce_secret_does_not_sign_this_key() -> None:
 
 @pytest.mark.parametrize(
     "fields",
-    ["k1 wn3.example:10005", "k1 wn3.example:10005 wn3.example extra", "k1 wn3.example:http wn3.example"],
+    [
+        "k1 wn3.example:10005",
+        "k1 wn3.example:10005 wn3.example extra",
+        "k1 wn3.example:http wn3.example",
+    ],
     ids=["two", "four", "non-integer-port"],
 )
-def test_a_signed_body_that_is_not_three_fields_with_an_integer_port_is_a_bad_request(fields: str) -> None:
+def test_a_signed_body_that_is_not_three_fields_with_an_integer_port_is_a_bad_request(
+    fields: str,
+) -> None:
     with task_server() as server:
         secret = server.announce_secret(["k1"])
         assert post_announce(server.url, fields.encode(), secret) == 400
         assert wait_announce(server, "k1", NOTHING_S) is None
 
 
-@pytest.mark.parametrize("body", [b"k1 wn3.example:10005 wn\xff\xfe3", b""], ids=["not-utf8", "empty"])
+@pytest.mark.parametrize(
+    "body", [b"k1 wn3.example:10005 wn\xff\xfe3", b""], ids=["not-utf8", "empty"]
+)
 def test_a_body_without_a_readable_key_is_forbidden(body: bytes) -> None:
     with task_server() as server:
         secret = server.announce_secret(["k1"])
@@ -101,7 +119,9 @@ def test_a_forgotten_key_is_refused() -> None:
         assert wait_announce(server, "k1", NOTHING_S) is None
 
 
-def test_an_announce_secret_signs_no_pickle_and_the_pilot_secret_still_settles(tmp_path: Path) -> None:
+def test_an_announce_secret_signs_no_pickle_and_the_pilot_secret_still_settles(
+    tmp_path: Path,
+) -> None:
     with task_server() as server:
         secret = server.announce_secret(["k1"])
         marker = tmp_path / "unpickled.marker"
@@ -132,6 +152,9 @@ def test_a_waiting_announce_takes_no_wake_up_meant_for_a_leasing_pilot() -> None
         got = get_within(leased, 5.0, "a pilot's lease while an announce waits")
         assert got is not None, "the pilot's lease returned nothing although a task was queued"
         assert (
-            post_announce(server.url, announce_body("k1", "wn3.example:10005", "wn3.example"), secret) == 200
+            post_announce(
+                server.url, announce_body("k1", "wn3.example:10005", "wn3.example"), secret
+            )
+            == 200
         )
         assert get_within(announced, 10.0, "wait_announce") == ("wn3.example:10005", "wn3.example")

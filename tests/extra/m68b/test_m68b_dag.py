@@ -1,5 +1,7 @@
-"""m68b part B2 extras: the in-job backend's SERVICE-node paths and a driver-node state the frozen suite
-does not reach."""
+"""m68b part B2 extras.
+
+The in-job backend's SERVICE-node paths and a driver-node state the frozen suite does not reach.
+"""
 
 from __future__ import annotations
 
@@ -49,7 +51,9 @@ def test_a_node_that_never_announces_times_out_and_a_release_keeps_its_pending_a
         body = b"svc0 127.0.0.1:4242 node.m68b.example"
         assert backend._server.announce(body, sign(secret, body).encode()) == HTTPStatus.OK
         got = backend.host_service(spec, "scope")
-        assert got == ("http://127.0.0.1:4242", "node.m68b.example", "svc0"), "control: an announce resolves"
+        assert got == ("http://127.0.0.1:4242", "node.m68b.example", "svc0"), (
+            "control: an announce resolves"
+        )
         assert backend._server.announce(body, sign(secret, body).encode()) == HTTPStatus.OK
         backend.release_service("svc0")  # a restart's announce, pending: the next set resolves it
         assert backend.host_service(spec, "scope") == got
@@ -68,9 +72,13 @@ class _Schedd:
 
 
 def test_a_driver_node_held_only_while_its_input_spools_is_queued(tmp_path: Path) -> None:
-    handle = RunHandle(site="generic", schedd="s", cluster=7, log_dir=tmp_path, submitted_at=0.0, dag=True)
+    handle = RunHandle(
+        site="generic", schedd="s", cluster=7, log_dir=tmp_path, submitted_at=0.0, dag=True
+    )
     assert handle._poll(_Schedd({"JobStatus": 5, "HoldReasonCode": 16}))[0] == "queued"
-    assert handle._poll(_Schedd({"JobStatus": 5, "HoldReasonCode": 12}))[0] == "held", "control: a real hold"
+    assert handle._poll(_Schedd({"JobStatus": 5, "HoldReasonCode": 12}))[0] == "held", (
+        "control: a real hold"
+    )
 
 
 def _leaf(partition: Partition, resources: object) -> tuple[str, ...]:
@@ -101,7 +109,9 @@ def test_a_refused_run_leaves_no_temporary_log_dir(
     inputs = (str(tmp_path / "missing"),) if case == "service-input" else ()
     spec = ServiceSpec("web", "http", check="http:/", launch=replace(gpu, inputs=inputs))
     root = {"log_dir": tmp_path / "root", "service-input": "/", "user_modules": temp}[case]
-    monkeypatch.setitem(SITES, "m68b-x", replace(SITES["generic"], name="m68b-x", job_root=str(root)))
+    monkeypatch.setitem(
+        SITES, "m68b-x", replace(SITES["generic"], name="m68b-x", job_root=str(root))
+    )
     services = () if case == "log_dir" else (spec,)
     plan = Plan(process=_leaf, combine=_concat, empty=_empty, tasks=(), services=services)
     kwargs: dict[str, Any] = {
@@ -127,7 +137,9 @@ def test_a_refused_run_leaves_no_temporary_log_dir(
             site="m68b-x",
             request_memory_mb=1024,
         )
-    assert len(list(temp.iterdir())) == 1, "control: a run past its refusals keeps its temporary log_dir"
+    assert len(list(temp.iterdir())) == 1, (
+        "control: a run past its refusals keeps its temporary log_dir"
+    )
 
 
 class _Submits:
@@ -163,7 +175,12 @@ def test_driverless_pilots_take_the_run_s_extra_submit_last(
     plan = Plan(process=_leaf, combine=_concat, empty=_empty, tasks=())
     job = tmp_path / "run"
     submit_driverless(
-        plan, site="m68b-x", pilots="condor", request_memory_mb=1024, log_dir=job, extra_submit=extra
+        plan,
+        site="m68b-x",
+        pilots="condor",
+        request_memory_mb=1024,
+        log_dir=job,
+        extra_submit=extra,
     )
     run = json.loads((job / "run.json").read_text())
     with open(tmp_path / "driver.log", "a") as log:
@@ -183,7 +200,10 @@ def _gpu_plan() -> Plan[tuple[str, ...]]:
 
 
 class _SubmitType:
-    """``htcondor2.Submit``: a call's ``issue_credentials`` and each ``from_dag``'s options are recorded."""
+    """``htcondor2.Submit``.
+
+    A call's ``issue_credentials`` and each ``from_dag``'s options are recorded.
+    """
 
     def __init__(self, bindings: _DagBindings) -> None:
         self.bindings = bindings
@@ -197,8 +217,10 @@ class _SubmitType:
 
 
 class _DagBindings:
-    """Bindings whose schedd's ``BIN`` is ``/schedd/bin`` and whose credd holds ``stored``; ``log`` records
-    the ``RemoteParam`` lookups, credential calls and submits in order."""
+    """Bindings whose schedd's ``BIN`` is ``/schedd/bin`` and whose credd holds ``stored``.
+
+    ``log`` records the ``RemoteParam`` lookups, credential calls and submits in order.
+    """
 
     param = {"SCHEDD_HOST": "s1", "COLLECTOR_HOST": "pool"}  # noqa: RUF012  (read only)
     DaemonType = SimpleNamespace(Schedd="schedd")
@@ -232,10 +254,14 @@ class _DagBindings:
         return SimpleNamespace(cluster=lambda: 7)
 
 
-def test_the_dag_names_the_schedd_s_condor_dagman(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_dag_names_the_schedd_s_condor_dagman(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake = _DagBindings()
     monkeypatch.setattr(launch, "_htcondor", lambda: fake)
-    handle = submit_driverless(_gpu_plan(), site="generic", request_memory_mb=1024, log_dir=tmp_path / "logs")
+    handle = submit_driverless(
+        _gpu_plan(), site="generic", request_memory_mb=1024, log_dir=tmp_path / "logs"
+    )
     assert handle.dag
     assert fake.options == [{**DAG_OPTIONS, "dagman": "/schedd/bin/condor_dagman"}]
     assert fake.log == ["RemoteParam s1", "submit ['dag_file']"]
@@ -249,21 +275,29 @@ def test_a_dag_whose_nodes_send_a_credential_stores_one_first(
     monkeypatch.setattr(launch, "_htcondor", lambda: fake)
     site = replace(SITES["generic"], name="m68b-x", submit={"MY.SendCredential": "True"})
     monkeypatch.setitem(SITES, "m68b-x", site)
-    submit_driverless(_gpu_plan(), site="m68b-x", request_memory_mb=1024, log_dir=tmp_path / "logs")
+    submit_driverless(
+        _gpu_plan(), site="m68b-x", request_memory_mb=1024, log_dir=tmp_path / "logs"
+    )
     assert fake.log == ["RemoteParam s1", "query krb", *issued, "submit ['dag_file']"]
 
 
 def test_the_dagman_job_runs_the_schedd_s_condor_dagman_not_the_one_on_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    htcondor2: Any = pytest.importorskip("htcondor2", reason="the live pool leg runs in test-htcondor")
+    htcondor2: Any = pytest.importorskip(
+        "htcondor2", reason="the live pool leg runs in test-htcondor"
+    )
     decoy = tmp_path / "decoy" / "condor_dagman"
     decoy.parent.mkdir()
     decoy.write_text("#!/bin/sh\nexit 1\n")
     decoy.chmod(0o755)
     monkeypatch.setenv("PATH", f"{decoy.parent}{os.pathsep}{os.environ['PATH']}")
-    assert shutil.which("condor_dagman") == str(decoy), "control: from_dag alone would name the decoy"
-    handle = submit_driverless(_gpu_plan(), site="generic", request_memory_mb=1024, log_dir=tmp_path / "logs")
+    assert shutil.which("condor_dagman") == str(decoy), (
+        "control: from_dag alone would name the decoy"
+    )
+    handle = submit_driverless(
+        _gpu_plan(), site="generic", request_memory_mb=1024, log_dir=tmp_path / "logs"
+    )
     schedd = htcondor2.Schedd()
     run = f"ClusterId == {handle.cluster} || DAGManJobId == {handle.cluster}"
     try:

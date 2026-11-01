@@ -1,18 +1,20 @@
-"""Peer reduction must not deadlock when a partial exceeds the OS pipe buffer (tests/extra — NOT
-frozen).
+"""Peer reduction must not deadlock when a partial exceeds the OS pipe buffer.
+
+Tests/extra — NOT frozen.
 
 The ``process_and_reduce`` actor sends before it polls its inbox, so a partial larger than the
-~64 KB pipe parks it mid-write until the peer reads — and work-stealing supplies the upward/sideways
-edge that closes a wait cycle, so nobody reads:
+~64 KB pipe parks it mid-write until the peer reads — and work-stealing supplies the
+upward/sideways edge that closes a wait cycle, so nobody reads:
 
 * **2-cycle** — the fast owner steals the slow owner's last leaf and sends the computed ``leaf``
   partial UP while the slow owner sends its ``node`` partial DOWN. Both block in the write.
-* **lock convoy** — an idle worker's tiny ``steal_req`` blocks on the victim inbox's write lock held
-  by a third worker mid-partial; the idle worker then stops reading, the victim routes a ``node`` to
-  it and blocks too. The request traffic alone closes the cycle — no leaf need be stolen.
+* **lock convoy** — an idle worker's tiny ``steal_req`` blocks on the victim inbox's write lock
+  held by a third worker mid-partial; the idle worker then stops reading, the victim routes a
+  ``node`` to it and blocks too. The request traffic alone closes the cycle — no leaf need be
+  stolen.
 
-Both hang forever — the driver's own recovery broadcast goes through the same blocking put — so each
-scenario runs in a spawn child under a hard timeout (see ``_big_partial``).
+Both hang forever — the driver's own recovery broadcast goes through the same blocking put — so
+each scenario runs in a spawn child under a hard timeout (see ``_big_partial``).
 """
 
 from __future__ import annotations
@@ -27,9 +29,11 @@ from graphed.core.execution import SequentialRunner
 from graphed_executors.local import ProcessPoolExecutor
 
 # (n_workers, per-leaf weight in ms). `make_bounds` gives contiguous ranges, so the shapes are:
-#   2-cycle: w0 = [fast, fast], w1 = [slow, slow, slow] -> w0 drains, steals w1's last leaf, and both
+#   2-cycle: w0 = [fast, fast], w1 = [slow, slow, slow] -> w0 drains, steals w1's last leaf, and
+#   both
 #            finish a slow leaf at the same moment (w0's steal lands as w1 starts its second).
-#   convoy:  w0 = [.3, .3], w1 = [.01, 1, 1], w2 = [.2, .5, .5] -> w0 idles into steal requests while
+#   convoy:  w0 = [.3, .3], w1 = [.01, 1, 1], w2 = [.2, .5, .5] -> w0 idles into steal requests
+#   while
 #            w2's partials are in flight to the busy w1.
 TWO_CYCLE = (2, (10, 10, 500, 500, 500))
 CONVOY = (3, (300, 300, 10, 1000, 1000, 200, 500, 500))
@@ -51,7 +55,9 @@ def _run(
     return result
 
 
-def _assert_sane(value: np.ndarray, witness: list[dict[str, int]], weights: tuple[int, ...]) -> None:
+def _assert_sane(
+    value: np.ndarray, witness: list[dict[str, int]], weights: tuple[int, ...]
+) -> None:
     assert sum(w["processed"] for w in witness) == len(weights)  # every leaf ran exactly once
     assert sum(w["peer_sends"] for w in witness) > 0  # partials really crossed the wire
     assert np.array_equal(value, np.full(value.size, float(len(weights))))
@@ -84,7 +90,8 @@ def test_lock_convoy_steal_request_behind_a_big_write(tmp_path: Path) -> None:
     big, wit = _run("convoy", n_workers, BIG, weights, tmp_path)
     _assert_sane(big, wit, weights)
     assert np.array_equal(big, baseline)
-    # the convoy is steal-REQUEST traffic colliding with a big write, so the witness that the scenario
-    # engaged is that an idle worker asked at all (`asked`), not that a leaf changed hands (`steals`).
+    # the convoy is steal-REQUEST traffic colliding with a big write, so the witness that the
+    # scenario engaged is that an idle worker asked at all (`asked`), not that a leaf changed hands
+    # (`steals`).
     assert sum(w["asked"] for w in wit) > 0
     assert sum(w["asked"] for w in small_wit) > 0

@@ -1,5 +1,9 @@
-"""m65 C: a ``complete_events`` monitor holds each run's events by the time ``run()`` returns or raises
-(plan-C C-8). Plain-Python processes; the graphed C API is read as module attributes inside the legs that use it."""
+"""m65 C: a ``complete_events`` monitor holds each run's events when ``run()`` ends.
+
+m65 C: a ``complete_events`` monitor holds each run's events by the time ``run()`` returns or
+raises (plan-C C-8). Plain-Python processes; the graphed C API is read as module attributes inside
+the legs that use it.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,7 @@ import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import awkward as ak
 import graphed.debug as gd
@@ -208,7 +212,12 @@ def test_switch_in_run_holds_only_its_own_events(before: str) -> None:
     for _ in range(SWITCH_IN[before]):
         d = Dash()
         peer = before == "adaptive-peer"
-        ex: Any = ProcessPoolExecutor(2, persistent=True, monitor=d, **({} if peer else {"comms": None}))
+        ex: Any = ProcessPoolExecutor(
+            2,
+            persistent=True,
+            monitor=d,
+            **(cast("dict[str, Any]", {} if peer else {"comms": None})),
+        )
         try:
             ex.run(_adaptive(_good, base=10) if peer else _plan(_good, base=10))
             time.sleep(0.3)
@@ -258,7 +267,10 @@ def test_peer_failing_run_reports_its_failing_task(route: str, tmp_path: Path) -
     events = ak.Array({"x": [1.0, 2.0, 3.0]})
     s = Session(AwkwardBackend())
     bundle = gp.build_bundle(
-        tmp_path / "b", session=s, value=from_awkward(s, "events", events).x * 2, datasets={"events": events}
+        tmp_path / "b",
+        session=s,
+        value=from_awkward(s, "events", events).x * 2,
+        datasets={"events": events},
     )
     digests = [gp.attach_run_report(bundle, r.to_json()) for r in reports]
     text = gp.inspect(bundle)

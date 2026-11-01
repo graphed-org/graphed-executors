@@ -23,24 +23,29 @@ from .protocol import SubmitCapabilities, SubmitFuture
 
 
 class _ThreadEnv:
-    """A per-worker-thread :class:`WorkerEnv`: its own ``open_once`` resources and an ``emit`` that
-    delivers event dicts straight to the driver handler (shared memory — no head-node copy)."""
+    """A per-worker-thread :class:`WorkerEnv`.
 
-    def __init__(self, backend: ThreadBackend) -> None:
+    Its own ``open_once`` resources and an ``emit`` that delivers event dicts straight to the
+    driver handler (shared memory — no head-node copy).
+    """
+
+    def __init__(self, handlers: Mapping[str, Callable[[list[dict[str, object]]], None]]) -> None:
         self.resources: WorkerResources = LocalResources()
         self.worker = threading.current_thread().name
-        self._backend = backend
+        self._handlers = handlers  # the backend's live topic registry
 
     def emit(self, topic: str, events: list[dict[str, object]]) -> None:
-        handler = self._backend._handlers.get(topic)
+        handler = self._handlers.get(topic)
         if handler is not None:
             handler(events)
 
 
 class ThreadBackend:
-    """A :class:`SubmitBackend` over a stdlib thread pool. ``peer_data_movement=True`` (shared
-    memory), everything else ``False`` — no scatter, no pin, no per-task retries/resources, no
-    running-cancel, no worker file cache."""
+    """A :class:`SubmitBackend` over a stdlib thread pool.
+
+    ``peer_data_movement=True`` (shared memory), everything else ``False`` — no scatter, no
+    pin, no per-task retries/resources, no running-cancel, no worker file cache.
+    """
 
     capabilities = SubmitCapabilities(
         peer_data_movement=True,
@@ -57,12 +62,14 @@ class ThreadBackend:
     advertise_host = "127.0.0.1"
 
     def __init__(self, max_workers: int = 2) -> None:
+        """Run tasks on ``max_workers`` threads."""
         self._max_workers = max_workers
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
         self._local = threading.local()
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
 
     def n_workers(self) -> int:
+        """Return the number of threads."""
         return self._max_workers
 
     def submit(
@@ -76,8 +83,9 @@ class ThreadBackend:
         resources: Mapping[str, float] | None = None,
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
-        # `key`/`retries`/`priority`/`resources`/`workers` are best-effort hints this backend has no
-        # capability for -- silently ignored (correctness never depends on them).
+        # `key`/`retries`/`priority`/`resources`/`workers` are best-effort hints this backend has
+        # no capability for -- silently ignored (correctness never depends on them).
+        """Run ``fn(*args)`` on a thread and return its future."""
         return self._pool.submit(self._invoke, fn, args)
 
     def _invoke(self, fn: Callable[..., object], args: tuple[object, ...]) -> object:
@@ -92,16 +100,18 @@ class ThreadBackend:
     def _env(self) -> _ThreadEnv:
         env: _ThreadEnv | None = getattr(self._local, "env", None)
         if env is None:
-            env = _ThreadEnv(self)
+            env = _ThreadEnv(self._handlers)
             self._local.env = env
         return env
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
+        """Return ``payload``: threads share memory."""
         return payload  # degenerate (shared memory): the task fn receives the raw bytes directly
 
     def subscribe_events(
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
+        """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
         self._handlers[topic] = handler
 
         def unsub() -> None:
@@ -110,8 +120,11 @@ class ThreadBackend:
         return unsub
 
     def cancel(self, futures: Sequence[Any]) -> None:
-        for fut in futures:  # best-effort: only not-yet-started work is prevented (cancel_running=False)
+        # best-effort: only not-yet-started work is prevented (cancel_running=False)
+        """Cancel ``futures``."""
+        for fut in futures:
             fut.cancel()
 
     def close(self) -> None:
+        """Wait for the running tasks and shut the threads down."""
         self._pool.shutdown(wait=True)

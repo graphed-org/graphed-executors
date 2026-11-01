@@ -1,4 +1,4 @@
-"""m69a: the 2024 golden and jet-ID JSONs placed where the original reads them, once per session."""
+"""m69a: the 2024 golden and jet-ID JSONs, placed where the original reads them once a session."""
 
 from __future__ import annotations
 

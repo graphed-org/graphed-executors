@@ -1,16 +1,19 @@
-"""m42 reroute: a worker killed MID-RUN (below the allowed-failures budget) costs nothing — the
-run completes bit-for-bit, the dead worker's task re-runs in a different process (plan §1.4
+"""m42 reroute: a worker killed MID-RUN (below the allowed-failures budget) costs nothing.
+
+The run completes bit-for-bit, the dead worker's task re-runs in a different process (plan §1.4
 bullets 2-3; blueprint §3 `test_dask_worker_death_reroute`).
 
 The poisoned leaf hard-kills its worker on the FIRST attempt (after atomically recording the pid),
 then succeeds when rescheduled — a deterministic mid-run death, no external kill races. A twin
 clean plan (same compute, no poison) provides the expected value, since running the poisoned plan
 through SequentialRunner would kill the test process. Discriminates: a runner that deadlocks on
-lost futures, and one whose result changes when a leaf is recomputed elsewhere."""
+lost futures, and one whose result changes when a leaf is recomputed elsewhere.
+"""
 
 from __future__ import annotations
 
 import pathlib
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from graphed.core.execution import Plan, StopReason, Task
@@ -26,17 +29,22 @@ from submit_backends import (
     worker_pids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture()
-def client():
+def client() -> Iterator[Any]:
     # dedicated cluster, generous death budget: one death must reroute, never blame the task
     with cluster_client(2, processes=True, allowed_failures=10) as c:
         yield c
 
 
-def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(client, tmp_path: pathlib.Path) -> None:
+def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(
+    client: Any, tmp_path: pathlib.Path
+) -> None:
     n = 8
     parts = mem_partitions(n, "reroute")
     poison_uri = parts[3].uri
@@ -65,9 +73,11 @@ def test_mid_run_worker_death_reroutes_and_completes_bit_for_bit(client, tmp_pat
     assert successful_pid in set(worker_pids(client).values())
 
 
-def test_clean_twin_matches_sequential(client) -> None:
-    """Control: the same compute without the poison equals the provenance run's payload — the
-    reroute test's expected value is anchored, not self-referential."""
+def test_clean_twin_matches_sequential(client: Any) -> None:
+    """Control: the same compute without the poison equals the provenance run's payload.
+
+    The reroute test's expected value is anchored, not self-referential.
+    """
     with make_dask_runner(client) as runner:
         prov = runner.run(prov_plan(8, "reroute")).value
     assert prov.payload == expected_concat(8, "reroute")

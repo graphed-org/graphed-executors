@@ -1,5 +1,6 @@
-"""m46 worker seam — the `_ParslWorkerEnv` shim contract on HTEX (plan §1.2 `_shim.py`; §3 m46
-`test_parsl_worker_env`).
+"""m46 worker seam.
+
+The `_ParslWorkerEnv` shim contract on HTEX (plan §1.2 `_shim.py`; §3 m46 `test_parsl_worker_env`).
 
 Three mechanisms, each with its own counter/identity witness:
 
@@ -16,7 +17,8 @@ Three mechanisms, each with its own counter/identity witness:
 
 Discriminates: a driver-env leak ("local"/driver pid in results), a fresh-env-per-task shim
 (open_once count), a synthesized worker id (mismatch vs the in-task env vars), and an emit path
-that drops, reorders, or driver-stamps events."""
+that drops, reorders, or driver-stamps events.
+"""
 
 from __future__ import annotations
 
@@ -53,7 +55,9 @@ def htex():  # type: ignore[no-untyped-def]
 
 def test_worker_identity_is_pool_id_colon_rank_and_stable_per_worker(htex) -> None:  # type: ignore[no-untyped-def]
     backend = make_parsl_backend(htex)
-    futs = [backend.submit(worker_identity_probe, i, key=f"graphed-m46env-id-{i}") for i in range(10)]
+    futs = [
+        backend.submit(worker_identity_probe, i, key=f"graphed-m46env-id-{i}") for i in range(10)
+    ]
     results = [run_bounded(lambda f=f: f.result(timeout=120)) for f in futs]
 
     driver_pid = os.getpid()
@@ -76,7 +80,9 @@ def test_worker_identity_is_pool_id_colon_rank_and_stable_per_worker(htex) -> No
 def test_open_once_resources_are_cached_per_worker_process(htex) -> None:  # type: ignore[no-untyped-def]
     backend = make_parsl_backend(htex)
     uri = "mem://m46env/shared-resource"
-    futs = [backend.submit(open_once_probe, uri, i, key=f"graphed-m46env-open-{i}") for i in range(12)]
+    futs = [
+        backend.submit(open_once_probe, uri, i, key=f"graphed-m46env-open-{i}") for i in range(12)
+    ]
     results = [run_bounded(lambda f=f: f.result(timeout=120)) for f in futs]
 
     tokens_by_pid: dict[int, set[str]] = {}
@@ -95,7 +101,8 @@ def test_open_once_resources_are_cached_per_worker_process(htex) -> None:  # typ
             "(a fresh-env-per-task shim; file locality across tasks is the §1.2 contract)"
         )
     assert max(tasks_by_pid.values()) >= 2, (
-        "scenario degenerate: no worker ran two tasks, the once-per-process claim was not exercised"
+        "scenario degenerate: no worker ran two tasks, the once-per-process claim was not "
+        "exercised"
     )
 
 

@@ -1,4 +1,7 @@
-"""m66: the driver-side port range is site data (lxplus batch nodes reach only 8786 on a login node)."""
+"""m66: the driver-side port range is site data.
+
+Lxplus batch nodes reach only 8786 on a login node.
+"""
 
 from __future__ import annotations
 
@@ -35,26 +38,29 @@ def test_the_lxplus_profile_drives_the_driver_port() -> None:
         backend.close()
 
 
-class BindingsReached(Exception):
+class BindingsReachedError(Exception):
     pass
 
 
-@pytest.mark.parametrize(("port_range", "expected"), [(None, LXPLUS_PORTS), (OTHER_PORTS, OTHER_PORTS)])
+@pytest.mark.parametrize(
+    ("port_range", "expected"), [(None, LXPLUS_PORTS), (OTHER_PORTS, OTHER_PORTS)]
+)
 def test_htcondor_runner_binds_the_site_ports_unless_overridden(
     port_range: tuple[int, int] | None, expected: tuple[int, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert (
-        not OTHER_PORTS[0] <= SITES["lxplus"].driver_ports[0] <= OTHER_PORTS[1]
-    )  # the override beats a real default
+    # the override beats a real default
+    assert not OTHER_PORTS[0] <= SITES["lxplus"].driver_ports[0] <= OTHER_PORTS[1]
     seen: list[str] = []
 
     def prepare(self: Any, url: str, secret: bytes) -> None:
         seen.append(url)
-        raise BindingsReached
+        raise BindingsReachedError
 
     monkeypatch.setattr(CondorPilots, "prepare", prepare)
-    with pytest.raises(BindingsReached):
-        htcondor_runner(n_pilots=1, site="lxplus", image="img", host="127.0.0.1", port_range=port_range)
+    with pytest.raises(BindingsReachedError):
+        htcondor_runner(
+            n_pilots=1, site="lxplus", image="img", host="127.0.0.1", port_range=port_range
+        )
     assert expected[0] <= bound_port(seen[0]) <= expected[1], seen
 
 

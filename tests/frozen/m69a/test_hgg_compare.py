@@ -1,4 +1,4 @@
-"""m69a: ``compare_part`` is silent on an identical part and names each kind of change by its own leg."""
+"""m69a: ``compare_part`` is silent on identical parts and names each kind of change by its leg."""
 
 from __future__ import annotations
 
@@ -73,7 +73,9 @@ def test_a_one_ulp_change_is_caught_by_the_values_leg(oracle: tuple[h.Part, Path
     assert h.compare_part((counters, table), (counters, ulp(table))) == [f"values {FLOAT_COL}"]
 
 
-def test_a_dropped_row_is_caught_by_validity_and_values_in_every_column(oracle: tuple[h.Part, Path]) -> None:
+def test_a_dropped_row_is_caught_by_validity_and_values_in_every_column(
+    oracle: tuple[h.Part, Path],
+) -> None:
     (counters, table), _ = oracle
     diffs = h.compare_part((counters, table), (counters, table.slice(1)))
     assert legs(diffs) == {"validity", "values"}
@@ -128,4 +130,6 @@ def test_a_changed_counter_is_caught_by_the_counters_leg(
     oracle: tuple[h.Part, Path], change: Callable[[Any], Any]
 ) -> None:
     (counters, table), _ = oracle
-    assert legs(h.compare_part((counters, table), (_counter(counters, change), table))) == {"counters"}
+    assert legs(h.compare_part((counters, table), (_counter(counters, change), table))) == {
+        "counters"
+    }

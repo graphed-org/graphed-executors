@@ -1,5 +1,8 @@
-"""m68c: a ``join_plan`` whose ``reduce``/``combine`` live in ``__main__`` (a notebook's) runs through
-``SubmitRunner(ThreadBackend)`` to ``SequentialRunner``'s value, with and without a bound service."""
+"""m68c: a ``join_plan`` whose ``reduce``/``combine`` live in ``__main__``.
+
+A ``join_plan`` whose ``reduce``/``combine`` live in ``__main__`` (a notebook's) runs through
+``SubmitRunner(ThreadBackend)`` to ``SequentialRunner``'s value, with and without a bound service.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +20,18 @@ from graphed.preserve import record_external
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68c"))
-from m68c_harness import LEFT, RIGHT, SCALE, StandIn, _source, cat, given_spec, no_rows, rows, sequential
+from m68c_harness import (
+    LEFT,
+    RIGHT,
+    SCALE,
+    StandIn,
+    _source,
+    cat,
+    given_spec,
+    no_rows,
+    rows,
+    sequential,
+)
 
 
 def _main_fold(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:

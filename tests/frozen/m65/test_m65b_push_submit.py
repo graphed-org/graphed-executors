@@ -1,5 +1,8 @@
-"""m65 B: ``SubmitRunner(ThreadBackend(2))`` emits lean events and pushes worker events through the
-monitor's per-worker factory, on the fixed and adaptive paths."""
+"""m65 B: ``SubmitRunner`` emits lean events and pushes worker events per worker.
+
+m65 B: ``SubmitRunner(ThreadBackend(2))`` emits lean events and pushes worker events through the
+monitor's per-worker factory, on the fixed and adaptive paths.
+"""
 
 from __future__ import annotations
 
@@ -44,7 +47,9 @@ def test_submit_runner_per_worker_push(tmp_path: Path) -> None:
         d.mkdir()
         driver = bp.PushRecorder(str(d), per_worker=True)
         t0 = time.perf_counter()
-        res = SubmitRunner(ThreadBackend(2), monitor=driver).run(mp.make_plan(mp.Probe(), adaptive=adaptive))
+        res = SubmitRunner(ThreadBackend(2), monitor=driver).run(
+            mp.make_plan(mp.Probe(), adaptive=adaptive)
+        )
         assert time.perf_counter() - t0 < 10.0
         assert res.value == (1,) * mp.N
         conns = bp.connections(str(d))

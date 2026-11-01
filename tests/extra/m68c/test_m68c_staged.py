@@ -1,5 +1,8 @@
-"""m68c ``SubmitRunner`` on a hand-built ``DurablePlanV2`` over ``ThreadBackend``: a failed stage task stops
-the run at its barrier, and a cancel during the last stage returns no value."""
+"""m68c ``SubmitRunner`` on a hand-built ``DurablePlanV2`` over ``ThreadBackend``.
+
+A failed stage task stops the run at its barrier, and a cancel during the last stage returns no
+value.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +11,16 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import pytest
-from graphed.core import DurablePlanV2, OpSpec, Partition, RunControl, RunState, StageSpec, StopReason, Task
+from graphed.core import (
+    DurablePlanV2,
+    OpSpec,
+    Partition,
+    RunControl,
+    RunState,
+    StageSpec,
+    StopReason,
+    Task,
+)
 from graphed.shuffle import split
 
 from graphed_executors.submit import SubmitFuture, SubmitRunner, ThreadBackend
@@ -57,7 +69,9 @@ class _Keys(ThreadBackend):
         super().__init__(1)
         self.keys: list[str] = []
 
-    def submit(self, fn: Callable[..., object], /, *args: object, key: str, **hints: Any) -> SubmitFuture:
+    def submit(
+        self, fn: Callable[..., object], /, *args: object, key: str, **hints: Any
+    ) -> SubmitFuture:
         self.keys.append(key)
         return super().submit(fn, *args, key=key, **hints)
 
@@ -66,13 +80,20 @@ def test_a_failed_map_task_raises_at_its_barrier_before_any_gather() -> None:
     backend = _Keys()
     with SubmitRunner(backend) as runner, pytest.raises(ValueError, match="failed"):
         runner.run(_plan(_boom, _gather))
-    assert backend.keys and not [k for k in backend.keys if "-gather" in k or "-pick." in k], backend.keys
+    assert backend.keys and not [k for k in backend.keys if "-gather" in k or "-pick." in k], (
+        backend.keys
+    )
 
 
 def test_a_cancel_during_the_last_stage_returns_no_value() -> None:
     with SubmitRunner(ThreadBackend(1), control=CONTROL) as runner:
         got = runner.run(_plan(_map, _gather_then_cancel))
-    assert (got.value, got.stopped, got.n_partitions, got.n_combines) == (None, StopReason.CANCELLED, 3, 1)
+    assert (got.value, got.stopped, got.n_partitions, got.n_combines) == (
+        None,
+        StopReason.CANCELLED,
+        3,
+        1,
+    )
     assert CONTROL.state is RunState.RUNNING
     with SubmitRunner(ThreadBackend(1)) as runner:
         assert runner.run(_plan(_map, _gather)).value == ([0, 1, 2],)

@@ -1,7 +1,9 @@
-"""m47 transport conformance — ``EscalatingHttpTransport`` IS a graphed ``WorkerTransport``
-(inside a real HTEX worker task), and its four §1.4 send/recv escalation arms are real mechanisms,
-not the base class's silent counters (plan §1.4 send design + design-A/design-B; blueprint §3
-`test_parsl_transport_conformance`; review N2 honored).
+"""m47 transport conformance.
+
+``EscalatingHttpTransport`` IS a graphed ``WorkerTransport`` (inside a real HTEX worker task), and
+its four §1.4 send/recv escalation arms are real mechanisms, not the base class's silent counters
+(plan §1.4 send design + design-A/design-B; blueprint §3 `test_parsl_transport_conformance`; review
+N2 honored).
 
 Witnesses: runtime_checkable isinstance IN-TASK on a worker pid != driver; send->True then a recv
 round-trip carrying the true (sender, message); recv(timeout)->None and poll()->[] on empty;
@@ -19,7 +21,8 @@ attempts ALL peers then raises the aggregate — a live peer ORDERED AFTER a dea
 Discriminates: a stub whose send always returns True (flood); a verbatim ``_Handler`` replica
 (always-200 unbounded — cannot 503); a base-``HttpTransport`` delegation (send never raises,
 recv never deadlines, broadcast never raises); a `.drops`-counting sender (wrong counter, no
-raise); a retry-then-raise 503 handler (flood raises instead of returning False)."""
+raise); a retry-then-raise 503 handler (flood raises instead of returning False).
+"""
 
 from __future__ import annotations
 
@@ -57,11 +60,15 @@ def htex():  # type: ignore[no-untyped-def]
 
 def test_endpoint_is_a_worker_transport_inside_an_htex_task(htex) -> None:  # type: ignore[no-untyped-def]
     backend = make_parsl_backend(htex)
-    fut = backend.submit(p2p_conformance_probe, f"m47-conf-{uuid.uuid4().hex}", key="m47-conf-probe")
+    fut = backend.submit(
+        p2p_conformance_probe, f"m47-conf-{uuid.uuid4().hex}", key="m47-conf-probe"
+    )
     obs = run_bounded(lambda: fut.result(), timeout_s=120.0)
 
     assert obs["pid"] != os.getpid(), "the conformance probe must run in a WORKER process"
-    assert obs["is_transport"] is True, "the endpoint must satisfy the runtime_checkable WorkerTransport"
+    assert obs["is_transport"] is True, (
+        "the endpoint must satisfy the runtime_checkable WorkerTransport"
+    )
     assert obs["port_pa"] > 0 and obs["port_pb"] > 0 and obs["port_pa"] != obs["port_pb"], (
         "each endpoint must self-mint a distinct OS-assigned port in-task"
     )
@@ -83,19 +90,27 @@ def test_flood_503_is_a_no_retry_false_with_both_counters() -> None:
     tx = make_endpoint("tx", epoch=epoch)
     try:
         wire_endpoints(rx, tx)
-        assert tx.send("rx", ("m", 0)) is True, "a bounded inbox must still accept the first message"
+        assert tx.send("rx", ("m", 0)) is True, (
+            "a bounded inbox must still accept the first message"
+        )
 
-        results = [tx.send("rx", ("m", i)) for i in range(1, 4)]  # nobody drains: the inbox stays full
+        # nobody drains: the inbox stays full
+        results = [tx.send("rx", ("m", i)) for i in range(1, 4)]
         assert False in results, (
             "flooding a maxsize=1 inbox with no consumer must surface send()==False (the 503 "
             "verdict) — a transport that never refuses has an unbounded inbox (the verbatim "
             "_Handler replica the plan forbids)"
         )
-        assert int(tx.sends_rejected) >= 1, "the sender must COUNT its 503 verdicts (sends_rejected)"
-        assert int(rx.recv_rejects) >= 1, "the receiver must COUNT its full-inbox 503s (recv_rejects)"
+        assert int(tx.sends_rejected) >= 1, (
+            "the sender must COUNT its 503 verdicts (sends_rejected)"
+        )
+        assert int(rx.recv_rejects) >= 1, (
+            "the receiver must COUNT its full-inbox 503s (recv_rejects)"
+        )
         assert int(tx.sends_retried) == 0, (
             "a 503 is the destination's verdict, not a transient: it must be special-cased BEFORE "
-            "the generic retry (review N2) — retrying into a full inbox only defers the same answer"
+            "the generic retry (review N2) — retrying into a full inbox only defers the same "
+            "answer"
         )
         got = rx.recv(timeout=10.0)
         assert got is not None and tuple(got) == ("tx", ("m", 0)), (
@@ -113,7 +128,9 @@ def test_exhausted_send_raises_transport_delivery_error() -> None:
         tx.set_registry({"tx": (tx.host, tx.port), "gone": ("127.0.0.1", closed_loopback_port())})
         with pytest.raises(delivery_error_cls()):
             run_bounded(lambda: tx.send("gone", ("node", 1, 0, 42)), timeout_s=120.0)
-        assert int(tx.send_failures) >= 1, "exhaustion must bump send_failures (the escalation witness)"
+        assert int(tx.send_failures) >= 1, (
+            "exhaustion must bump send_failures (the escalation witness)"
+        )
         assert int(tx.sends_retried) >= 1, (
             "the bounded retry must have engaged before the raise — a first-failure raise skips "
             "the at-least-once policy; a base-class delegation (drops += 1, return) never raises "

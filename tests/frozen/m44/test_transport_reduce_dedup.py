@@ -1,6 +1,7 @@
-"""m44 at-least-once safety — a retried send that DUPLICATES an already-landed reduction message
-must not double-combine (plan §1.1 dedup layer, F10 respecified witness; blueprint §3
-`test_transport_reduce_dedup`).
+"""m44 at-least-once safety.
+
+A retried send that DUPLICATES an already-landed reduction message must not double-combine (plan
+§1.1 dedup layer, F10 respecified witness; blueprint §3 `test_transport_reduce_dedup`).
 
 Mechanism: the §1.1 gated injection seam is armed for ONE message from the non-root worker
 (deliver-then-raise): the handler delivers the message into the inbox, then raises, so the
@@ -14,7 +15,8 @@ STILL bit-identical to ``SequentialRunner`` with zero epoch restarts.
 Discriminates: a transport relying on exactly-once (no consumer dedup) double-combines and fails
 the value equality; a transport that silently suppresses duplicates at the wire (digest-dedup)
 breaks the at-least-once contract and fails the duplicate-delivery counter; an engine whose
-"retry" is a fresh classifier-less resend never bumps ``sends_retried``."""
+"retry" is a fresh classifier-less resend never bumps ``sends_retried``.
+"""
 
 from __future__ import annotations
 
@@ -47,21 +49,28 @@ def test_duplicate_delivery_is_witnessed_and_combined_exactly_once() -> None:
         set_inject_recv_failures(client, a0, a1, 1)
 
         outcome = run_bounded(
-            lambda: transport_plan_run(make_peer_plan(N_LEAVES, "m44dedup"), build_dask_backend(client)),
+            lambda: transport_plan_run(
+                make_peer_plan(N_LEAVES, "m44dedup"), build_dask_backend(client)
+            ),
             timeout_s=240.0,
         )
-        assert "error" not in outcome, f"run with one injected transient failure raised: {outcome.get('error')!r}"
+        assert "error" not in outcome, (
+            f"run with one injected transient failure raised: {outcome.get('error')!r}"
+        )
         res = outcome["result"]
 
         assert res.value == oracle.value, (
             "value diverged under a duplicated reduction message — the (level,pos) dedup did not "
             "suppress the double combine (at-least-once is UNSAFE in this engine)"
         )
-        assert res.transport.epoch_restarts == 0, "one transient failure must ride the retry, not a restart"
+        assert res.transport.epoch_restarts == 0, (
+            "one transient failure must ride the retry, not a restart"
+        )
 
         pw = tw_per_worker(res)
         assert pw[a1].get("sends_retried", 0) >= 1, (
-            "the sender's own retry counter never advanced — the duplicate did not come from m44's "
+            "the sender's own retry counter never advanced — the duplicate did not come from "
+            "m44's "
             "retry path"
         )
         assert pw[a0].get("recv_duplicate_deliveries", 0) >= 1, (

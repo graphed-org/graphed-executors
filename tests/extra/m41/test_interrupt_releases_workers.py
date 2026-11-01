@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import _thread
 import threading
+from concurrent.futures import ProcessPoolExecutor as StdPool
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 from _big_partial import BIG, plan, run_in_child
@@ -36,3 +39,39 @@ def test_interrupted_driver_releases_the_workers(persistent: bool, tmp_path: Pat
     out = tmp_path / f"interrupt-{persistent}.txt"
     run_in_child(f"interrupt persistent={persistent}", _child, (persistent, str(out)))
     assert out.read_text() == "interrupted"
+
+
+def _child_interrupted_mid_submit(persistent: bool, comms: str, out_path: str) -> None:
+    real = StdPool.submit
+    submitted: list[object] = []
+
+    def submit(self: Any, *args: Any, **kwargs: Any) -> Any:
+        fut = real(self, *args, **kwargs)
+        submitted.append(fut)
+        if len(submitted) == 1:
+            # where a SIGINT lands while the first submit spawns the workers
+            raise KeyboardInterrupt
+        return fut
+
+    executor = ProcessPoolExecutor(
+        max_workers=2, steal=True, monitor=None, persistent=persistent, comms=comms
+    )
+    try:
+        with mock.patch.object(StdPool, "submit", submit):
+            executor.run(plan(BIG, (500, 500)))
+        outcome = "no-error"
+    except KeyboardInterrupt:
+        outcome = "interrupted"
+    executor.close()
+    Path(out_path).write_text(f"{outcome} after {len(submitted)} submit")
+
+
+@pytest.mark.parametrize("comms", ["ipc", "http"])
+@pytest.mark.parametrize("persistent", [False, True])
+def test_an_interrupt_between_submits_releases_the_started_worker(
+    persistent: bool, comms: str, tmp_path: Path
+) -> None:
+    out = tmp_path / f"mid-submit-{persistent}-{comms}.txt"
+    scenario = f"mid-submit persistent={persistent} comms={comms}"
+    run_in_child(scenario, _child_interrupted_mid_submit, (persistent, comms, str(out)))
+    assert out.read_text() == "interrupted after 1 submit"

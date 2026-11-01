@@ -168,6 +168,12 @@ holding its leftmost leaf. Because every node keeps its *global* position in the
 the merges around never changes the grouping — the answer is bit-for-bit what a driver-side
 merge would have produced, floats included. The driver waits only for the root.
 
+A plan's ``finalize`` (``graphed.core.Plan.finalize``) runs after that, once, on the driver,
+whichever runner or backend produced the value: the root of a peer merge, the driver's own fold,
+the ``empty()`` of a run with no tasks or one cancelled before it started. ``SubmitRunner`` calls
+it after the run's services are released. A partial can therefore stay in the form that merges
+and ships cheaply, while ``result.value`` is the final one.
+
 Two knobs shape this:
 
 * ``comms="ipc"`` (the default) runs the peer merges over per-worker inbox queues on one
@@ -225,7 +231,7 @@ or by leaving the ``with`` block:
 
    import numpy as np
    from graphed.core import Partition, Plan, Task
-   from graphed_executors.local import ProcessPoolExecutor
+   from graphed_executors import ProcessPoolExecutor
 
    def count(partition, resources):
        return np.asarray([partition.entry_stop - partition.entry_start])
@@ -273,7 +279,7 @@ it. Every executor and runner here has it — the local pools and ``SubmitRunner
 
    import numpy as np
    from graphed.core import Partition, Plan, Task
-   from graphed_executors.local import ProcessPoolExecutor
+   from graphed_executors import ProcessPoolExecutor
 
    def count(partition, resources):
        return np.asarray([partition.entry_stop - partition.entry_start])
@@ -396,7 +402,7 @@ the thread and process pools, ``SubmitRunner`` over any backend, ``dask_runner``
 
     from graphed.checkpoint import resumable
     from graphed.core import Partition, Plan, Task
-    from graphed_executors.local import ThreadExecutor
+    from graphed_executors import ThreadExecutor
 
 
     def chunk(partition, resources):
@@ -520,7 +526,7 @@ queued behind it by ``submit`` run as usual.
     import time
 
     from graphed.core import Partition, Plan, RunControl, Task
-    from graphed_executors.local import ThreadExecutor
+    from graphed_executors import ThreadExecutor
 
     ctl = RunControl()
 
@@ -713,8 +719,8 @@ and a stand-in server answering ``2``:
 
    s = Session(AwkwardBackend())
    s.declare_service(ServiceSpec("sf", "http", check="http:/"))
-   events = from_parquet(s, "events", f"{root}/events.parquet")
-   lumi = from_parquet(s, "lumi", f"{root}/lumi.parquet")
+   events = from_parquet("events", f"{root}/events.parquet", session=s)
+   lumi = from_parquet("lumi", f"{root}/lumi.parquet", session=s)
    scaled = record_external(s, SF, b"sf-v1", [events], params={"service": "sf"})
    joined = join(scaled, lumi, on=["run"], how="inner")
    plan = join_plan(joined.MET_pt * joined.lumi_w)
@@ -1060,7 +1066,7 @@ its ``driver`` node beside one ``SERVICE`` node per such service, each announcin
 the driver is running. DAGMan never retries a SERVICE node, so the node's own wrapper restarts a
 service that dies, on a port no earlier instance served, so that no worker's client cached by
 endpoint reaches the dead one; a run binds its endpoints once, so the driver answers a task's
-``ServiceUnreachable`` for such a service by running the plan again in the same job. While it waits,
+``ServiceUnreachableError`` for such a service by running the plan again in the same job. While it waits,
 the driver reads the node's queue ad on the DAG's schedd, so a node that ended, is held, or that no
 slot could ever run fails the try at once instead of after ``timeout_s``. The run's outcome is the
 driver node's last try, never DAGMan's own exit, which depends on how strictly the site's DAGMan treats

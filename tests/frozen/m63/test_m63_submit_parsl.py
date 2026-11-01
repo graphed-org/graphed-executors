@@ -6,7 +6,7 @@ import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -35,7 +35,9 @@ def htex(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
     # HTEX workers start from the process_worker_pool script: they need the venv on PATH and this
     # directory on PYTHONPATH to import the harness.
     with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
+        mp.setenv(
+            "PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+        )
         mp.setenv("PYTHONPATH", HARNESS_DIR + os.pathsep + os.environ.get("PYTHONPATH", ""))
         executor = start_htex(workers=2, run_dir=str(tmp_path_factory.mktemp("htex")))
         try:
@@ -55,7 +57,7 @@ def ex(htex: Any) -> Iterator[Any]:
 
 @pytest.fixture
 def bounded(htex: Any) -> Iterator[Any]:
-    runner = parsl_runner(htex, **{"max_in_flight": 2})
+    runner = parsl_runner(htex, **cast("dict[str, Any]", {"max_in_flight": 2}))
     try:
         yield runner
     finally:

@@ -17,10 +17,13 @@ from typing import Any, Protocol, runtime_checkable
 
 @dataclass(frozen=True)
 class SubmitCapabilities:
-    """What **this backend instance** can do (flags are per-instance, not per-library: a parsl
-    adapter over HTEX reports different flags than one over TaskVineExecutor). The engine may *use*
-    a capability only behind an ``if backend.capabilities.X`` check, and the fixed/adaptive Plan
-    paths must be correct with every flag ``False`` (the parsl floor)."""
+    """What **this backend instance** can do.
+
+    Flags are per-instance, not per-library: a parsl adapter over HTEX reports different flags
+    than one over TaskVineExecutor. The engine may *use* a capability only behind an ``if
+    backend.capabilities.X`` check, and the fixed/adaptive Plan paths must be correct with
+    every flag ``False`` (the parsl floor).
+    """
 
     peer_data_movement: bool  # future-dep data moves worker<->worker (dask: yes; parsl/HTEX: no)
     scatter_broadcast: bool  # a payload can be placed once and referenced by many tasks
@@ -33,23 +36,42 @@ class SubmitCapabilities:
 
 @runtime_checkable
 class SubmitFuture(Protocol):
-    """Structural — ``distributed.Future`` is NOT a ``concurrent.futures.Future`` subclass, parsl's
-    ``AppFuture`` is; both satisfy this shape, as does the stdlib future ``ThreadBackend`` returns."""
+    """A structural future: the shape every backend's futures share.
 
-    def result(self, timeout: float | None = None) -> object: ...
-    def done(self) -> bool: ...
-    def exception(self, timeout: float | None = None) -> BaseException | None: ...
-    def add_done_callback(self, fn: Callable[[Any], None]) -> None: ...
+    ``distributed.Future`` is NOT a ``concurrent.futures.Future`` subclass, parsl's ``AppFuture``
+    is; both satisfy this shape, as does the stdlib future ``ThreadBackend`` returns.
+    """
+
+    def result(self, timeout: float | None = None) -> object:
+        """Return the task's value, waiting at most ``timeout``."""
+        ...
+
+    def done(self) -> bool:
+        """Return whether the task has finished."""
+        ...
+
+    def exception(self, timeout: float | None = None) -> BaseException | None:
+        """Return the task's exception, or ``None``, waiting at most ``timeout``."""
+        ...
+
+    def add_done_callback(self, fn: Callable[[Any], None]) -> None:
+        """Call ``fn`` with the future once it is done."""
+        ...
 
 
 @runtime_checkable
 class SubmitBackend(Protocol):
-    """The portable intersection: ``submit`` future-graph, ``broadcast`` payload placement, a
-    driver-side event tap, best-effort ``cancel``, and ``close``. ``capabilities`` is per-instance."""
+    """The portable intersection.
+
+    ``submit`` future-graph, ``broadcast`` payload placement, a driver-side event tap,
+    best-effort ``cancel``, and ``close``. ``capabilities`` is per-instance.
+    """
 
     capabilities: SubmitCapabilities
 
-    def n_workers(self) -> int: ...
+    def n_workers(self) -> int:
+        """Return the number of workers."""
+        ...
 
     def submit(
         self,
@@ -62,27 +84,38 @@ class SubmitBackend(Protocol):
         resources: Mapping[str, float] | None = None,
         workers: Sequence[str] | None = None,
     ) -> SubmitFuture:
-        """``args`` may contain :class:`SubmitFuture`\\ s previously returned by THIS backend; the
-        backend guarantees ``fn`` receives their RESOLVED VALUES. ``key`` is a caller-owned unique
-        identity. ``retries``/``priority``/``resources``/``workers`` are best-effort hints a backend
-        without the matching capability silently ignores — correctness must never depend on them
-        (``workers`` is a strict worker pin only where ``pin_to_worker`` holds)."""
+        r"""``args`` may contain :class:`SubmitFuture`\ s previously returned by THIS backend.
+
+        The backend guarantees ``fn`` receives their RESOLVED VALUES. ``key`` is a
+        caller-owned unique identity. ``retries``/``priority``/``resources``/``workers``
+        are best-effort hints a backend without the matching capability silently ignores —
+        correctness must never depend on them (``workers`` is a strict worker pin only
+        where ``pin_to_worker`` holds).
+        """
         ...
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
-        """Return an arg-embeddable handle; the task fn receives the RAW BYTES on the worker. A
-        ``scatter_broadcast=False`` backend may return the bytes themselves (degenerate reship)."""
+        """Return an arg-embeddable handle; the task fn receives the RAW BYTES on the worker.
+
+        A ``scatter_broadcast=False`` backend may return the bytes themselves (degenerate
+        reship).
+        """
         ...
 
     def subscribe_events(
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
-        """Driver-side tap for the run's monitor topic; returns an unsubscribe callable. In-process
-        backends stash the handler and have their worker shim's ``emit`` call it directly."""
+        """Driver-side tap for the run's monitor topic; returns an unsubscribe callable.
+
+        In-process backends stash the handler and have their worker shim's ``emit`` call it
+        directly.
+        """
         ...
 
     def cancel(self, futures: Sequence[SubmitFuture]) -> None:
         """Best-effort; a ``cancel_running=False`` backend only prevents not-yet-started work."""
         ...
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Release what the backend holds."""
+        ...

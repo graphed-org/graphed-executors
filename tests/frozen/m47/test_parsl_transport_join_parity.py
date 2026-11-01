@@ -1,6 +1,7 @@
-"""m47 behavioral golden (m40 carried) — ``transport_run_join`` reproduces the local engine's
-relational semantics on both real backends over the peer-exchange plane (plan §1.4/§2 m47;
-blueprint §3 `test_parsl_transport_join_parity`).
+"""m47 behavioral golden (m40 carried).
+
+``transport_run_join`` reproduces the local engine's relational semantics on both real backends
+over the peer-exchange plane (plan §1.4/§2 m47; blueprint §3 `test_parsl_transport_join_parity`).
 
 Witnesses: inner rows == the duplicating multiset oracle (routes via the golden-pinned
 ``partition``, never the join kernel) == the local ``run_join``; inner ``dest_block_hashes``
@@ -11,11 +12,13 @@ OPTION-TYPED — the m40 sentinel trap re-armed on the p2p plane.
 
 pyarrow: MEASURED m46 fact — graphed.numpy wires MASKED blocks (every non-inner join output) over
 Arrow; the m46 packaging pins already hold pyarrow in the test-parsl job, and this module
-importorskips it loudly so it can never silently skip in CI."""
+importorskips it loudly so it can never silently skip in CI.
+"""
 
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import pytest
 from parsl_transport_harness import (
@@ -68,14 +71,14 @@ def htex():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> P2PAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> P2PAdapter:
     return request.param
 
 
 @pytest.mark.parametrize("how", ["inner", "left", "right", "outer"])
 def test_join_rows_match_local_engine_with_option_typed_unmatched_rows(
-    adapter: P2PAdapter, htex, how: str
-) -> None:  # type: ignore[no-untyped-def]
+    adapter: P2PAdapter, htex: Any, how: str
+) -> None:
     left, right = join_sides(adapter)
     local = run_join(adapter.backend, left, right, PARTS, how=how, broadcast=False)
     r = run_bounded(

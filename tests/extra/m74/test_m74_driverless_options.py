@@ -1,4 +1,4 @@
-"""m74 ``submit_driverless(store=...)`` refusals and store paths the frozen suite does not reach."""
+"""m74 ``submit_driverless(store=...)`` refusals and store paths the frozen suite misses."""
 
 from __future__ import annotations
 
@@ -41,7 +41,9 @@ def test_storage_options_json_cannot_hold_are_refused_before_the_bindings(
     assert not log_dir.exists()
 
 
-def test_unused_storage_options_are_not_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unused_storage_options_are_not_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake = record_bindings(monkeypatch, RecordingSchedd())
     submit_driverless(
         leaf_plan(tmp_path),
@@ -72,7 +74,11 @@ def test_run_json_holds_an_absolute_local_store(
     record_bindings(monkeypatch, RecordingSchedd())
     log_dir = tmp_path / "submit"
     submit_driverless(
-        leaf_plan(tmp_path), request_memory_mb=1024, log_dir=log_dir, user_modules=[HARNESS_FILE], store=store
+        leaf_plan(tmp_path),
+        request_memory_mb=1024,
+        log_dir=log_dir,
+        user_modules=[HARNESS_FILE],
+        store=store,
     )
     want = str(cwd / expected) if isinstance(expected, Path) else expected
     assert json.loads((log_dir / "run.json").read_text())["store"] == want

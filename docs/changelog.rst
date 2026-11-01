@@ -4,7 +4,40 @@ What changed
 Unreleased
 ----------
 
-Requires ``graphed`` 0.0.8 or later.
+* ``SequentialRunner``, ``ThreadExecutor``, ``ProcessPoolExecutor``, ``PinnedPoolExecutor``,
+  ``dask_runner``, ``parsl_runner``, ``htcondor_runner``, ``start_htex`` and ``stop_htex`` import from
+  ``graphed_executors`` directly. They load on first use, so ``import graphed_executors`` still imports no backend, and
+  ``dir(graphed_executors)`` lists just these names and ``__version__``.
+* ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
+  bare ``ModuleNotFoundError``.
+
+0.0.7
+-----
+
+Requires ``graphed`` 0.0.10 or later.
+
+* Every runner applies the plan's ``finalize`` once, on the driver, to the value it returns:
+  ``ThreadExecutor``, ``ProcessPoolExecutor`` and ``PinnedPoolExecutor`` on every path (peer,
+  hub, pooled, windowed, adaptive), ``SubmitRunner`` on every backend (dask, parsl, HTCondor,
+  ``ThreadBackend``) and on a ``DurablePlanV2``, and the dask and parsl peer runs
+  ``transport_run_plan`` and ``parsl_run_plan``.
+* The exception classes end in ``Error`` (PEP 8): ``WorkerLost``, ``TaskTimedOut``,
+  ``ServiceUnavailable``, ``ServiceUnreachable`` and ``ProbeUnreachable`` are now
+  ``WorkerLostError``, ``TaskTimedOutError``, ``ServiceUnavailableError``,
+  ``ServiceUnreachableError`` and ``ProbeUnreachableError``.
+* ``StageError.cause_type`` follows the renames: a pilot task past ``task_timeout_s`` reports
+  ``TaskTimedOutError`` (was ``TaskTimedOut``), and an unreachable parsl peer overlay reports
+  ``ProbeUnreachableError`` (was ``ProbeUnreachable``).
+* An ``http:`` readiness check that gets a non-HTTP answer reports the service unreachable: the
+  parse error (``http.client.BadStatusLine``) escaped the probe, e.g. on a TCP self-connect to a
+  closed loopback port.
+* A broadcast join whose build side is empty keeps every probe row for ``how="right"`` and
+  ``how="outer"``: the local, tasks/relay and dask-transport engines returned nothing (#91).
+
+0.0.6
+-----
+
+Requires ``graphed`` 0.0.9 or later.
 
 * A plan whose op is a lambda or closure, or whose partials carry a behavior holding a lambda, runs on
   ``ProcessPoolExecutor`` with ``comms=None`` and ``comms="ipc"``; it failed to pickle. The fix is in
@@ -23,6 +56,15 @@ Requires ``graphed`` 0.0.8 or later.
   through cloudpickle on every route (``comms=None``, ``pooled_combines``, ``"ipc"``, ``"http"``); it
   failed to pickle. HTCondor pilots and the HTCondor driver job carry such results the same way.
   Values stdlib pickle accepts are still sent with it (#65).
+* With ``comms="http"``, a peer partial that fails to pickle raises its pickling error at once, as it
+  does with ``comms="ipc"``; the run ended in the root timeout instead (#67).
+* A ``ProcessPoolExecutor`` peer run interrupted while its workers are being submitted releases the
+  workers already started; with ``comms="ipc"`` the pool shutdown that followed hung (#70).
+* Every exit of a peer run ends its workers' waits through one release pipe the driver closes. A
+  ``comms="http"`` run interrupted before the registry handshake no longer hangs its pool shutdown
+  (#72), and an interrupted ``ThreadExecutor`` peer run returns at once and leaves no actor thread
+  behind; it waited 30 s per thread.
+* Process-pool workers exit when their driver process dies; they waited for work forever.
 
 0.0.5
 -----

@@ -1,8 +1,10 @@
-"""m69b: the driver check on a dask runner, whose backend hosts nothing on a cluster. A managed service that fits
-``driver_memory_mb`` starts beside the driver and serves tasks the dask workers run; one that does not, or one
-above the host's physical memory when the backend sets no limit, is refused before it starts, naming both
-sizes. Runs in the ``test-dask`` job (``importorskip("distributed")`` in the fixture, so the file collects
-anywhere)."""
+"""m69b: the driver check on a dask runner, whose backend hosts nothing on a cluster.
+
+A managed service that fits ``driver_memory_mb`` starts beside the driver and serves tasks the dask
+workers run; one that does not, or one above the host's physical memory when the backend sets no
+limit, is refused before it starts, naming both sizes. Runs in the ``test-dask`` job
+(``importorskip("distributed")`` in the fixture, so the file collects anywhere).
+"""
 
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ import pytest
 from graphed.core.execution import Partition, Plan, Task
 from graphed.services import Launch, ServiceSpec, split_endpoint
 
-from graphed_executors.submit.services import ServiceUnavailable, physical_memory_mb
+from graphed_executors.submit.services import ServiceUnavailableError, physical_memory_mb
 
 # touches its marker, then listens: the marker is the witness that the service started
 LISTEN = (
@@ -99,20 +101,24 @@ def test_a_service_that_fits_driver_memory_starts_beside_the_driver(
     assert [(s.leg, s.host) for s in statuses] == [("managed", "driver")]
 
 
-def test_a_service_above_driver_memory_is_refused_before_it_starts(runner: Any, tmp_path: Path) -> None:
+def test_a_service_above_driver_memory_is_refused_before_it_starts(
+    runner: Any, tmp_path: Path
+) -> None:
     runner.backend.driver_memory_mb = 64
     marker = tmp_path / "started"
-    with pytest.raises(ServiceUnavailable) as err:
+    with pytest.raises(ServiceUnavailableError) as err:
         runner.run(plan(1024, marker))
     managed = err.value.legs["managed"]
     assert "1024 MiB" in managed and "driver_memory_mb of 64 MiB" in managed, managed
     assert not marker.exists()
 
 
-def test_without_a_limit_the_host_s_physical_memory_is_the_limit(runner: Any, tmp_path: Path) -> None:
+def test_without_a_limit_the_host_s_physical_memory_is_the_limit(
+    runner: Any, tmp_path: Path
+) -> None:
     host = physical_memory_mb()
     marker = tmp_path / "started"
-    with pytest.raises(ServiceUnavailable) as err:
+    with pytest.raises(ServiceUnavailableError) as err:
         runner.run(plan(host + 1, marker))
     managed = err.value.legs["managed"]
     assert f"{host + 1} MiB" in managed and f"physical memory of {host} MiB" in managed, managed

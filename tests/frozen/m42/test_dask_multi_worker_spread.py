@@ -1,14 +1,18 @@
-"""m42 coffea#1490 guard: on a fixed-size 2-worker cluster, the leaves of one run spread across
-BOTH workers (plan §1.2.2 mitigation 1; blueprint §3 `test_dask_multi_worker_spread`).
+"""m42 coffea#1490 guard.
+
+On a fixed-size 2-worker cluster, the leaves of one run spread across BOTH workers (plan §1.2.2
+mitigation 1; blueprint §3 `test_dask_multi_worker_spread`).
 
 The open upstream suspicion (scikit-hep/coffea#1490): the broadcast identity-future pins scheduling
 locality so every task lands on the single worker holding the payload. This frozen witness fails CI
 if the engine's broadcast pattern regresses to single-worker pinning — 16 leaves on 2 one-thread
-workers must not all co-locate."""
+workers must not all co-locate.
+"""
 
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from submit_backends import (
@@ -19,16 +23,19 @@ from submit_backends import (
     worker_pids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_leaves_spread_across_workers_on_a_fixed_size_cluster(client) -> None:
+def test_leaves_spread_across_workers_on_a_fixed_size_cluster(client: Any) -> None:
     with make_dask_runner(client) as runner:
         result = runner.run(prov_plan(16, "spread"))
     prov = result.value

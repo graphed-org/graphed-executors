@@ -1,4 +1,7 @@
-"""Module-level (picklable) plan callables for the M37 emit suite — importable by spawned workers."""
+"""Module-level (picklable) plan callables for the M37 emit suite.
+
+Importable by spawned workers.
+"""
 
 from __future__ import annotations
 

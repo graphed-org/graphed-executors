@@ -1,7 +1,9 @@
-"""m44 worker-death semantics — losing a participating worker mid-run triggers ONE whole-run
-restart under a fresh epoch (the P2P model, plan §1.5); with the restart budget exhausted it
-surfaces as an attributed ``StageError``, never a raw ``KilledWorker`` and NEVER a hang (plan
-§8 F2/F9; blueprint §3 `test_transport_worker_death`).
+"""m44 worker-death semantics.
+
+Losing a participating worker mid-run triggers ONE whole-run restart under a fresh epoch (the P2P
+model, plan §1.5); with the restart budget exhausted it surfaces as an attributed ``StageError``,
+never a raw ``KilledWorker`` and NEVER a hang (plan §8 F2/F9; blueprint §3
+`test_transport_worker_death`).
 
 Deterministic mid-run kill, no timing races (the m43 gated-kill mechanism, F9): the
 ``GatedTransportBackend`` marks every stage-1 ``partition`` call (``pmark``: pid+address) and
@@ -21,7 +23,8 @@ victim worker address.
 
 Discriminates: a silent-wrong-answer engine that reuses the dead holder's stale blocks (byte
 divergence), one that never restarts (pmark count stays n_src / hang), and raw-KilledWorker
-leakage to the user."""
+leakage to the user.
+"""
 
 from __future__ import annotations
 
@@ -54,9 +57,14 @@ pytest.importorskip("distributed")
 PARTS = 8
 
 
-def _run_death_scenario(client: Any, tmp_path: Path, *, epoch_restarts_allowed: int) -> tuple[dict[str, Any], Any, str, int, str]:
-    """Drive a gated repartition, kill one block-holding worker mid-gather, open the gate, join
-    under the F2 hard timeout. Returns (outcome, oracle, mark_dir, n_src, victim_address)."""
+def _run_death_scenario(
+    client: Any, tmp_path: Path, *, epoch_restarts_allowed: int
+) -> tuple[dict[str, Any], Any, str, int, str]:
+    """Drive a gated repartition that loses one block-holding worker mid-gather.
+
+    Drive a gated repartition, kill one block-holding worker mid-gather, open the gate, join under
+    the F2 hard timeout. Returns (outcome, oracle, mark_dir, n_src, victim_address).
+    """
     adapter = numpy_adapter()
     src = repartition_blocks(adapter)
     n_src = len(src)
@@ -87,14 +95,17 @@ def _run_death_scenario(client: Any, tmp_path: Path, *, epoch_restarts_allowed: 
             if len(mark_files(str(mark_dir), "pmark")) < n_src:
                 return False
             return bool(
-                set(mark_addresses(str(mark_dir), "pmark")) & set(mark_addresses(str(mark_dir), "gstart"))
+                set(mark_addresses(str(mark_dir), "pmark"))
+                & set(mark_addresses(str(mark_dir), "gstart"))
             )
 
         poll_until(lambda: victim_ready() or not thread.is_alive(), timeout_s=120.0)
         assert "error" not in outcome, f"run raised before the kill: {outcome.get('error')!r}"
         assert victim_ready(), "scenario misfired: stage 1 or a blocked gather never materialised"
 
-        victims = set(mark_addresses(str(mark_dir), "pmark")) & set(mark_addresses(str(mark_dir), "gstart"))
+        victims = set(mark_addresses(str(mark_dir), "pmark")) & set(
+            mark_addresses(str(mark_dir), "gstart")
+        )
         victim = sorted(victims)[0]
         pids_before = live_worker_pids(client)
         assert victim in pids_before, "victim address is not a live worker"
@@ -123,7 +134,8 @@ def test_one_epoch_restart_completes_bit_for_bit(tmp_path: Path) -> None:
         result = outcome["result"]
 
         assert result.dest_block_hashes == oracle.dest_block_hashes, (
-            "result diverged from the clean local oracle after the restart — stale blocks from the "
+            "result diverged from the clean local oracle after the restart — stale blocks from "
+            "the "
             "dead epoch were reused, or the rerun changed the bytes"
         )
         assert result.transport.epoch_restarts == 1, (
@@ -135,7 +147,8 @@ def test_one_epoch_restart_completes_bit_for_bit(tmp_path: Path) -> None:
 
         n_pmarks = len(mark_files(mark_dir, "pmark"))
         assert n_pmarks > n_src, (
-            f"only {n_pmarks} partition calls for {n_src} src blocks — stage 1 never re-ran, so the "
+            f"only {n_pmarks} partition calls for {n_src} src blocks — stage 1 never re-ran, so "
+            "the "
             "dead worker's blocks survived OUTSIDE the epoch (a stale store, not a restart)"
         )
 

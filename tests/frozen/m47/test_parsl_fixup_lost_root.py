@@ -1,6 +1,8 @@
-"""m47 FIXUP — root loss-safety (plan §1.4: ``collect_peer_root`` timeout → ``_select_root``
-raise, "No silent None anywhere"; obligation 12's ``_NO_ROOT`` disambiguation: a lost/withheld
-reduce root must NEVER default to the identity value).
+"""m47 FIXUP — root loss-safety.
+
+Plan §1.4: ``collect_peer_root`` timeout → ``_select_root`` raise, "No silent None anywhere";
+obligation 12's ``_NO_ROOT`` disambiguation: a lost/withheld reduce root must NEVER default to the
+identity value.
 
 Scenario (deterministic, clock-free, black-box): the root OWNER fails at exactly the root
 combine. ``RootLossCombine`` raises only when its operand sum equals the grand total — with
@@ -28,7 +30,8 @@ is not constructible through the pinned seams (``inject_recv_failures`` is a no-
 dest="driver", ``parsl_run_plan`` carries no ``registry_rewrite``, and a root withheld by a
 still-RUNNING owner is an honest unbounded wait, not a loss). The root-owner-loss arc is the
 sharpest reachable state where NO root exists anywhere; its cause is the user-marker error, not
-``TransportDeliveryError``."""
+``TransportDeliveryError``.
+"""
 
 from __future__ import annotations
 
@@ -66,8 +69,10 @@ MARKER = "m47-fixup-root-loss-marker"
 
 
 class RootLossCombine:
-    """Module-level (HTEX workers unpickle it by reference off this directory's PYTHONPATH
-    export): a combine that fails ONLY on the grand total, i.e. exactly at the root."""
+    """Module-level (HTEX workers unpickle it by reference off this directory's PYTHONPATH export).
+
+    A combine that fails ONLY on the grand total, i.e. exactly at the root.
+    """
 
     def __init__(self, threshold: int, mark_path: str) -> None:
         self.threshold = threshold
@@ -101,7 +106,8 @@ def test_lost_root_raises_attributed_and_never_returns_the_identity() -> None:
         err = excinfo.value
         rendered = f"{getattr(err, 'cause_type', '')}: {err}"
         assert "RuntimeError" in rendered and MARKER in rendered, (
-            f"the StageError must attribute the root-owner loss to the marker cause; got: {rendered}"
+            "the StageError must attribute the root-owner loss to the marker cause; got: "
+            f"{rendered}"
         )
 
         assert os.path.exists(mark_path), (

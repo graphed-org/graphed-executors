@@ -1,10 +1,12 @@
-"""m69b: the H->gg plan with histserv diagnostics over the HTCondor backend's pilots, no pool
-(plan-services.md, the m69b ``test_hgg_local_pilots.py`` row).
+"""m69b: the H->gg plan with histserv diagnostics over the HTCondor backend's pilots, no pool.
 
-``HTCondorBackend`` over ``LocalPilots`` takes the generic profile's service placement, whose first host is
-the driver, so the context's servers start beside the driver; pilot processes fill them concurrently. The
-bindings are the m68a recorder (no pool, no ``htcondor2``). The ``test-hgg`` job runs this file with
-``GRAPHED_HGG_REQUIRED=1``; elsewhere it skips without coffea, higgs_dna or histserv.
+Plan-services.md, the m69b ``test_hgg_local_pilots.py`` row.
+
+``HTCondorBackend`` over ``LocalPilots`` takes the generic profile's service placement, whose first
+host is the driver, so the context's servers start beside the driver; pilot processes fill them
+concurrently. The bindings are the m68a recorder (no pool, no ``htcondor2``). The ``test-hgg`` job
+runs this file with ``GRAPHED_HGG_REQUIRED=1``; elsewhere it skips without coffea, higgs_dna or
+histserv.
 """
 
 from __future__ import annotations
@@ -39,10 +41,14 @@ def test_local_pilots_fill_servers_beside_the_driver(
 ) -> None:
     # the driver's identity is the bindings' FULL_HOSTNAME, and test-hgg installs no bindings
     record_bindings(monkeypatch, RecordingSchedd())
-    ctx = histserv_api().Context(memory_mb=SERVER_MB, workers=PILOTS, name=unique("m69b-hgg-pilots"))
+    ctx = histserv_api().Context(
+        memory_mb=SERVER_MB, workers=PILOTS, name=unique("m69b-hgg-pilots")
+    )
     plan = analysis.plan(fileset(fixtures), year=h.YEAR, out=str(tmp_path), context=ctx)
     pilots = launch_api().LocalPilots(pythonpath=[str(h.EXAMPLE)])
-    backend = run_bounded(lambda: backend_api().HTCondorBackend(pilots, PILOTS, host="127.0.0.1"), RUN_S)
+    backend = run_bounded(
+        lambda: backend_api().HTCondorBackend(pilots, PILOTS, host="127.0.0.1"), RUN_S
+    )
     runner = backend_api().HTCondorRunner(backend, min_pilots=PILOTS)
     try:
         with caplog.at_level(logging.INFO, logger="graphed_executors.services"):

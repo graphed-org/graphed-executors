@@ -1,5 +1,7 @@
-"""m43 peer data movement — blocks cross worker↔worker via future dependencies, never through the
-driver (plan §1.3.4 decision 1; blueprint §3 `test_dask_shuffle_locality`).
+"""m43 peer data movement.
+
+Blocks cross worker↔worker via future dependencies, never through the driver (plan §1.3.4 decision
+1; blueprint §3 `test_dask_shuffle_locality`).
 
 THE test that discriminates the REJECTED design (§1.3.4 option (i), the duck-typed cluster): that
 design runs every `partition`/`concat` kernel in a driver-side loop and only farms out STORAGE, so
@@ -12,11 +14,13 @@ every gather depending on every producer's pick futures, that pair proves block 
 worker↔worker through the scheduler's peer fetch.
 
 All witnesses are pids/addresses/counts (R0.10a) on a tier-B (processes=True) cluster where worker
-pids genuinely differ from the driver's."""
+pids genuinely differ from the driver's.
+"""
 
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from dask_shuffle_backends import (
@@ -31,6 +35,9 @@ from dask_shuffle_backends import (
     shuffle_cluster,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = shuffle_adapters()
@@ -38,7 +45,7 @@ PARTS = 6
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     # tier B is REQUIRED here: processes=False would give every "worker" the driver's pid and
     # vacuously pass the driver-pid exclusion
     with shuffle_cluster(2, processes=True) as c:
@@ -46,17 +53,21 @@ def client():
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
-def test_stage1_and_gather_run_on_workers_and_blocks_cross_between_them(adapter: ShuffleJoinAdapter, client) -> None:  # type: ignore[no-untyped-def]
+def test_stage1_and_gather_run_on_workers_and_blocks_cross_between_them(
+    adapter: ShuffleJoinAdapter, client: Any
+) -> None:
     src = repartition_blocks(adapter)
     install_worker_plugin(client)
     addr_to_pid = live_worker_pids(client)
     assert len(addr_to_pid) == 2 and os.getpid() not in addr_to_pid.values(), "fixture sanity"
 
-    res = dask_repartition(adapter.backend, src, PARTS, runner=make_submit_runner(build_dask_backend(client)))
+    res = dask_repartition(
+        adapter.backend, src, PARTS, runner=make_submit_runner(build_dask_backend(client))
+    )
     w = res.witness
     psites: dict[int, tuple[int, str]] = dict(w.producer_sites)
     gsites: dict[int, tuple[int, str]] = dict(w.gather_sites)

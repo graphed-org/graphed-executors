@@ -1,14 +1,18 @@
-"""m42 worker-side reduction: combines execute ON WORKERS with peer-fetched inputs, never on the
-driver (plan §1.2.1 "worker-side combines for free"; blueprint §3 `test_dask_worker_side_combines`;
-witness style: tests/frozen/m38/test_peer_reduce.py `test_witness_reduction_is_genuinely_off_driver`).
+"""m42 worker-side reduction.
+
+Combines execute ON WORKERS with peer-fetched inputs, never on the driver (plan §1.2.1 "worker-side
+combines for free"; blueprint §3 `test_dask_worker_side_combines`; witness style:
+tests/frozen/m38/test_peer_reduce.py `test_witness_reduction_is_genuinely_off_driver`).
 
 Discriminates: an implementation that gathers all partials to the driver and combines there
 (combine pids == driver pid), and one that funnels every combine to a single worker without any
-cross-worker input movement (no (producer != combiner) move pair)."""
+cross-worker input movement (no (producer != combiner) move pair).
+"""
 
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from submit_backends import (
@@ -19,16 +23,19 @@ from submit_backends import (
     worker_pids,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 
 @pytest.fixture(scope="module")
-def client():
+def client() -> Iterator[Any]:
     with cluster_client(2, processes=True) as c:
         yield c
 
 
-def test_combines_run_on_workers_with_cross_worker_inputs(client) -> None:
+def test_combines_run_on_workers_with_cross_worker_inputs(client: Any) -> None:
     driver_pid = os.getpid()
     wpids = set(worker_pids(client).values())
     assert driver_pid not in wpids  # tier-B precondition: workers are real separate processes

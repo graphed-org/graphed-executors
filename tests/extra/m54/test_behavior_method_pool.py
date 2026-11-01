@@ -1,5 +1,8 @@
-"""m54 §2 item 6 pool witness: a behavior METHOD with arguments, registered on the backend alone,
-evaluates on spawned workers bit-identically to in-process — through the import-ref backend."""
+"""m54 §2 item 6 pool witness.
+
+A behavior METHOD with arguments, registered on the backend alone, evaluates on spawned workers
+bit-identically to in-process — through the import-ref backend.
+"""
 
 from __future__ import annotations
 
@@ -35,7 +38,13 @@ def test_a_backend_only_method_evaluates_on_pool_workers_bit_identically() -> No
 
 
 def test_a_worker_without_the_behavior_cannot_resolve_the_method() -> None:
-    """The discriminating leg: the default worker backend carries no behavior dict."""
-    _expected, plan = _plan(None)
+    """The discriminating leg: a bare worker backend carries no behavior dict."""
+    _expected, plan = _plan("graphed.awkward:AwkwardBackend")
     with pytest.raises(Exception, match="scaled"):
         SequentialRunner().run(plan)
+
+
+def test_the_default_worker_backend_carries_the_session_behavior() -> None:
+    expected, plan = _plan(None)
+    assert SequentialRunner().run(plan).value == [expected]
+    assert ProcessPoolExecutor(max_workers=2, persistent=True).run(plan).value == [expected]

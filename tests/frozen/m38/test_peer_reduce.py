@@ -1,13 +1,17 @@
-"""M38 peer reduction (spike; frozen at P6). The distributed (off-driver) reduction must equal the
-flat ``tree_reduce`` **bit-for-bit** — same grouping — regardless of transport backend, the order a
-worker processes its leaves, or message timing. A non-commutative concat combine makes equality prove
-the left/right *grouping*, not just the leaf multiset."""
+"""M38 peer reduction (spike; frozen at P6).
+
+The distributed (off-driver) reduction must equal the flat ``tree_reduce`` **bit-for-bit** — same
+grouping — regardless of transport backend, the order a worker processes its leaves, or message
+timing. A non-commutative concat combine makes equality prove the left/right *grouping*, not just
+the leaf multiset.
+"""
 
 from __future__ import annotations
 
 import random
 import threading
 import time
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -21,6 +25,9 @@ from graphed_exec_local._peer import (
 from graphed_exec_local._reduce import tree_reduce
 from graphed_exec_local._transport import build_transports
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 def _cat(a: str, b: str) -> str:
     return f"({a}+{b})"
@@ -31,14 +38,17 @@ def _empty() -> str:
 
 
 def _flat(n: int) -> str:
-    return tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0]
+    return cast("str", tree_reduce(n, [(i, str(i)) for i in range(n)], _cat, _empty)[0])
 
 
 def _run(
     n: int, w: int, kind: str, *, shuffle_seed: int | None = None, jitter: bool = False
 ) -> tuple[str, dict[str, PeerReducer[str]]]:
-    """Run the peer reduction and return (root, {worker -> its reducer}) so a test can both check the
-    result AND witness, from the reducers' counters, that the work was genuinely distributed."""
+    """Run the peer reduction and return the root and each worker's reducer.
+
+    Run the peer reduction and return (root, {worker -> its reducer}) so a test can both check the
+    result AND witness, from the reducers' counters, that the work was genuinely distributed.
+    """
     worker_addrs = tuple(f"w{i}" for i in range(w))
     transports = build_transports(kind, ("driver", *worker_addrs))
     reducers: dict[str, PeerReducer[str]] = {}
@@ -52,12 +62,14 @@ def _run(
                 random.Random((shuffle_seed, a).__hash__() & 0xFFFFFFFF).shuffle(items[a])
 
         def worker_main(addr: str) -> None:
-            reducer: PeerReducer[str] = PeerReducer(addr, transports[addr], n, bounds, worker_addrs, _cat)
+            reducer: PeerReducer[str] = PeerReducer(
+                addr, transports[addr], n, bounds, worker_addrs, _cat
+            )
             reducers[addr] = reducer
             src = items[addr]
             if jitter:
 
-                def gen():
+                def gen() -> Iterator[Any]:
                     for it in src:
                         time.sleep(random.random() * 0.001)
                         yield it
@@ -78,7 +90,9 @@ def _run(
             t.close()
 
 
-def _peer_reduce(n: int, w: int, kind: str, *, shuffle_seed: int | None = None, jitter: bool = False) -> str:
+def _peer_reduce(
+    n: int, w: int, kind: str, *, shuffle_seed: int | None = None, jitter: bool = False
+) -> str:
     return _run(n, w, kind, shuffle_seed=shuffle_seed, jitter=jitter)[0]
 
 
@@ -119,9 +133,9 @@ def test_peer_empty_plan_returns_identity() -> None:
 
 @pytest.mark.parametrize("kind", ["ipc", "http"])
 def test_witness_reduction_is_genuinely_off_driver_and_distributed(kind: str) -> None:
-    # WITNESS (not just the result): prove the mechanism engaged — combines were spread across workers
-    # and partials crossed worker->worker, so a degenerate "everything funnels to w0 / via the driver"
-    # path could not have produced this.
+    # WITNESS (not just the result): prove the mechanism engaged — combines were spread across
+    # workers and partials crossed worker->worker, so a degenerate "everything funnels to w0 / via
+    # the driver" path could not have produced this.
     n, w = 100, 8
     root, reducers = _run(n, w, kind)
     assert root == _flat(n)

@@ -1,4 +1,7 @@
-"""m65 B: a thread-http peer run delivers every worker event, even ones still in flight at the root."""
+"""m65 B: a thread-http peer run delivers every worker event.
+
+A thread-http peer run delivers every worker event, even ones still in flight at the root.
+"""
 
 from __future__ import annotations
 

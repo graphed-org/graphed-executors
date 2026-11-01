@@ -1,5 +1,6 @@
-"""m47 review remediation (finding 1, non-gating): the per-peer join spill-key collision that
-silently drops rows.
+"""m47 review remediation (finding 1, non-gating).
+
+The per-peer join spill-key collision that silently drops rows.
 
 Pre-fix, ``_gather_join`` started each peer's overflow (budget-spill) keys at ``next_key = parts``,
 so two peers each spilling a hot dest emitted colliding keys ``parts, parts+1, …`` and the driver's
@@ -90,11 +91,19 @@ def test_two_peer_spilled_join_is_row_exact() -> None:
 
     with p2p_tpe_pool(max_threads=2) as tpe:
         from graphed_executors.parsl_backend import ParslBackend  # noqa: PLC0415
-        from graphed_executors.parsl_backend.transport_shuffle import transport_run_join  # noqa: PLC0415
+        from graphed_executors.parsl_backend.transport_shuffle import (  # noqa: PLC0415
+            transport_run_join,
+        )
 
         r = run_bounded(
             lambda: transport_run_join(
-                be, left, right, PARTS, pbackend=ParslBackend(tpe), broadcast=False, mem_budget_bytes=budget
+                be,
+                left,
+                right,
+                PARTS,
+                pbackend=ParslBackend(tpe),
+                broadcast=False,
+                mem_budget_bytes=budget,
             )
         )
 
@@ -102,7 +111,8 @@ def test_two_peer_spilled_join_is_row_exact() -> None:
     # discriminator; the assembled value is (pre-fix: 4096 rows / 7 keys).
     assert r.witness.join_output_rows == 2 * N * N
     assert total_result_rows(r.value) == 2 * N * N, (
-        f"row loss: assembled {total_result_rows(r.value)} of {2 * N * N} rows — colliding per-peer "
+        f"row loss: assembled {total_result_rows(r.value)} of {2 * N * N} rows — colliding "
+        "per-peer "
         "spill keys were overwritten at the driver assemble"
     )
     assert len(r.value) == len(local.value), (

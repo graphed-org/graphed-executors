@@ -1,8 +1,8 @@
 """Binding an HTTP transport must not resolve the loopback host (tests/extra — NOT frozen).
 
-``http.server.HTTPServer.server_bind`` looks the bound host up with ``socket.getfqdn``: a reverse DNS
-query that a resolver with no answer for loopback leaves hanging for tens of seconds per endpoint —
-long enough for the discovery handshake to time out on a CI runner.
+``http.server.HTTPServer.server_bind`` looks the bound host up with ``socket.getfqdn``: a reverse
+DNS query that a resolver with no answer for loopback leaves hanging for tens of seconds per
+endpoint — long enough for the discovery handshake to time out on a CI runner.
 """
 
 from __future__ import annotations

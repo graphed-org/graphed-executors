@@ -1,15 +1,19 @@
-"""M37 frozen suite (graphed-exec-local slice): exercise the worker telemetry paths IN THE MAIN
-PROCESS. In normal use these run inside spawned worker processes (where coverage.py cannot observe
-them); here we drive the same module functions directly and via a ThreadExecutor, deterministically.
+"""M37 frozen suite (graphed-exec-local slice).
+
+Exercise the worker telemetry paths IN THE MAIN PROCESS. In normal use these run inside spawned
+worker processes (where coverage.py cannot observe them); here we drive the same module functions
+directly and via a ThreadExecutor, deterministically.
 
 These also pin the **off-the-data-path** design: a worker emit is a local buffer append (no IPC), a
-drain thread batches the buffer to the driver, and the profiler serialize is time-throttled."""
+drain thread batches the buffer to the driver, and the profiler serialize is time-throttled.
+"""
 
 from __future__ import annotations
 
 import pickle
 import queue
 import threading
+from typing import Any
 
 from graphed.core import Partition, Plan, Task, TaskPhase
 from graphed.debug import StageError
@@ -44,7 +48,7 @@ def fake_factory() -> FakeProfiler:
 
 class ProfMonitor:
     def __init__(self) -> None:
-        self.events: list[object] = []
+        self.events: list[Any] = []
         self.profiles: list[tuple[str, bytes]] = []
         self._lock = threading.Lock()
 
@@ -80,7 +84,7 @@ def _reset_globals() -> None:
         ex._live_profilers.clear()
 
 
-def _drain_q(q: queue.Queue) -> list:
+def _drain_q(q: queue.Queue[Any]) -> list[Any]:
     items = []
     while True:
         try:
@@ -96,8 +100,9 @@ def test_thread_profiling_runs_profiler_in_process() -> None:
     with ThreadExecutor(max_workers=2, monitor=mon, comms=None) as e:  # hub thread-emit path (M37)
         result = e.run(plan)
     assert result.value == sum((k + 1) * 3 for k in range(4))
-    assert mon.profiles  # the fake profiler flushed (first task is profile-due) -> on_profile fired
-    assert sum(1 for ev in mon.events if ev.phase is TaskPhase.FINISHED) == 4  # type: ignore[attr-defined]
+    # the fake profiler flushed (first task is profile-due) -> on_profile fired
+    assert mon.profiles
+    assert sum(1 for ev in mon.events if ev.phase is TaskPhase.FINISHED) == 4
 
 
 def test_render_error_branches() -> None:
@@ -134,7 +139,7 @@ def test_emit_appends_to_local_buffer_not_ipc() -> None:
 
 def test_drain_batch_ships_one_batched_put() -> None:
     try:
-        q: queue.Queue = queue.Queue(maxsize=50)
+        q: queue.Queue[Any] = queue.Queue(maxsize=50)
         ex._proc_event_q = q
         ex._proc_buffer = ex.deque(maxlen=100)
         ex._proc_emit(("task", 1))
@@ -161,18 +166,24 @@ def test_profile_due_is_time_throttled() -> None:
 
 def test_proc_init_worker_entry_and_drain_thread() -> None:
     try:
-        q: queue.Queue = queue.Queue(maxsize=100)
+        q: queue.Queue[Any] = queue.Queue(maxsize=100)
         ex._proc_init(fake_factory, q)  # starts the per-worker buffer + drain thread + profiler
         assert ex._proc_resources is not None
         assert ex._proc_profiler is not None
         assert ex._proc_drain_thread is not None and ex._proc_drain_thread.is_alive()
         token = "tok"
         ex._prime_shared(token, pickle.dumps(count_entries))
-        out = ex._proc_task_shared(token, Task(0, Partition("f.root", "Events", 0, 9)))  # worker entry
+        # worker entry
+        out = ex._proc_task_shared(token, Task(0, Partition("f.root", "Events", 0, 9)))
         assert out == 9
         ex._proc_drain_final()  # stop the loop, flush final session + remaining buffer
-        kinds = [k for item in _drain_q(q) for (k, _payload) in (item[1] if item[0] == "batch" else [item])]
-        assert "task" in kinds and "profile" in kinds  # STARTED/FINISHED + a (throttled) profile flush
+        kinds = [
+            k
+            for item in _drain_q(q)
+            for (k, _payload) in (item[1] if item[0] == "batch" else [item])
+        ]
+        # STARTED/FINISHED + a (throttled) profile flush
+        assert "task" in kinds and "profile" in kinds
     finally:
         _reset_globals()
 

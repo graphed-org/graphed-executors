@@ -1,6 +1,8 @@
-"""M37 frozen suite (graphed-exec-local slice): both reference executors EMIT dashboard events, and
-do so **passively** — attaching a monitor never changes the reduced result, and a misbehaving
-monitor never breaks the run. Worker-side STARTED/FINISHED/ERRORED + driver-side SUBMITTED.
+"""M37 frozen suite (graphed-exec-local slice).
+
+Both reference executors EMIT dashboard events, and do so **passively** — attaching a monitor never
+changes the reduced result, and a misbehaving monitor never breaks the run. Worker-side
+STARTED/FINISHED/ERRORED + driver-side SUBMITTED.
 
 Pinned to ``comms=None`` (the hub monitor seam) since M38: M37 is the hub-path dashboard milestone,
 so these assertions exercise the hub collector. Peer-path emission parity is covered by m38
@@ -22,7 +24,10 @@ EXECUTORS = [("thread", ThreadExecutor), ("process", ProcessExecutor)]
 
 
 class Recorder:
-    """A thread-safe driver-side monitor (on_task fires from worker threads / the collector thread)."""
+    """A thread-safe driver-side monitor.
+
+    on_task fires from worker threads / the collector thread.
+    """
 
     def __init__(self) -> None:
         self.events: list[TaskEvent] = []
@@ -49,18 +54,21 @@ def _plan(n: int = 8) -> tuple[list[Task], Plan[int]]:
     return tasks, Plan(process=count_entries, combine=add, empty=lambda: 0, tasks=tasks)
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_emit_full_phase_sequence(name: str, Executor: type) -> None:
-    """Worker-side counts are lower bounds: the process drain is best-effort and shutdown must not
-    stall to make it exhaustive."""
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_emit_full_phase_sequence(name: str, executor_cls: type) -> None:
+    """Worker-side counts are lower bounds.
+
+    The process drain is best-effort and shutdown must not stall to make it exhaustive.
+    """
     _, plan = _plan(8)
     rec = Recorder()
-    with Executor(max_workers=3, monitor=rec, comms=None) as ex:
+    with executor_cls(max_workers=3, monitor=rec, comms=None) as ex:
         result = ex.run(plan)
     phases = collections.Counter(e.phase for e in rec.events)
-    # Threads emit in-process (synchronously, inside the future's callable) so their counts are exact;
-    # processes ship over a bounded buffer + a suppressed put + a daemon flush at worker exit, none of
-    # which guarantee delivery -- hence a floor of 1, held up by the worker-label witness below.
+    # Threads emit in-process (synchronously, inside the future's callable) so their counts are
+    # exact; processes ship over a bounded buffer + a suppressed put + a daemon flush at worker
+    # exit, none of which guarantee delivery -- hence a floor of 1, held up by the worker-label
+    # witness below.
     lo = 8 if name == "thread" else 1
     assert phases[TaskPhase.SUBMITTED] == 8  # driver-side, emitted before the submit
     assert lo <= phases[TaskPhase.STARTED] <= 8
@@ -74,12 +82,12 @@ def test_emit_full_phase_sequence(name: str, Executor: type) -> None:
     assert "driver" in workers and len(workers) >= 2
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_attaching_a_monitor_is_passive(name: str, Executor: type) -> None:
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_attaching_a_monitor_is_passive(name: str, executor_cls: type) -> None:
     _, plan = _plan(8)
-    bare = Executor(max_workers=3, comms=None).run(plan)
+    bare = executor_cls(max_workers=3, comms=None).run(plan)
     rec = Recorder()
-    with Executor(max_workers=3, monitor=rec, comms=None) as ex:
+    with executor_cls(max_workers=3, monitor=rec, comms=None) as ex:
         observed = ex.run(plan)
     assert observed.value == bare.value
     assert observed.n_combines == bare.n_combines
@@ -87,20 +95,23 @@ def test_attaching_a_monitor_is_passive(name: str, Executor: type) -> None:
     assert rec.combines == bare.n_combines  # on_combine fired once per tree-reduce combine
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_errored_task_emits_errored_and_propagates(name: str, Executor: type) -> None:
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_errored_task_emits_errored_and_propagates(name: str, executor_cls: type) -> None:
     tasks = [Task(0, Partition("bad.root", "Events", 0, 10))]
     plan = Plan(process=boom, combine=add, empty=lambda: 0, tasks=tasks)
     rec = Recorder()
-    with pytest.raises(ValueError, match="boom"), Executor(max_workers=2, monitor=rec, comms=None) as ex:
+    with (
+        pytest.raises(ValueError, match="boom"),
+        executor_cls(max_workers=2, monitor=rec, comms=None) as ex,
+    ):
         ex.run(plan)
     errored = [e for e in rec.events if e.phase is TaskPhase.ERRORED]
     assert len(errored) >= 1
     assert "boom" in (errored[0].error or "")
 
 
-@pytest.mark.parametrize("name,Executor", EXECUTORS)
-def test_raising_monitor_never_breaks_the_run(name: str, Executor: type) -> None:
+@pytest.mark.parametrize("name,executor_cls", EXECUTORS)
+def test_raising_monitor_never_breaks_the_run(name: str, executor_cls: type) -> None:
     class Bad:
         def on_task(self, event: TaskEvent) -> None:
             raise RuntimeError("monitor exploded")
@@ -115,6 +126,6 @@ def test_raising_monitor_never_breaks_the_run(name: str, Executor: type) -> None
             return None
 
     _, plan = _plan(6)
-    with Executor(max_workers=3, monitor=Bad(), comms=None) as ex:
+    with executor_cls(max_workers=3, monitor=Bad(), comms=None) as ex:
         result = ex.run(plan)
     assert result.value == sum((k + 1) * 5 for k in range(6))

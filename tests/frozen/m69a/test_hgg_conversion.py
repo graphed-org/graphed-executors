@@ -1,5 +1,8 @@
-"""m69a/m72: one graphed plan over a fileset (``examples/hgg/analysis.py``) writes every part the original
-writes and returns the dataset totals coffea's Runner accumulates, on coffea NanoEvents."""
+"""m69a/m72: one graphed plan over a fileset reproduces the original's parts and totals.
+
+m69a/m72: one graphed plan over a fileset (``examples/hgg/analysis.py``) writes every part the
+original writes and returns the dataset totals coffea's Runner accumulates, on coffea NanoEvents.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ UPROOT_USE = re.compile(r"import uproot|uproot\.")
 
 
 def fileset(*datasets: str) -> dict[str, dict[str, Any]]:
-    """coffea's ``{dataset: {file: {"object_path", "steps"}}}`` at RANGES."""
+    """Coffea's ``{dataset: {file: {"object_path", "steps"}}}`` at RANGES."""
     steps = [list(r) for r in RANGES]
     return {ds: {str(FIXTURES[ds]): {"object_path": "Events", "steps": steps}} for ds in datasets}
 
@@ -51,7 +54,9 @@ def analysis() -> ModuleType:
 @pytest.fixture(scope="module")
 def oracle(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[tuple[int, int], h.Part]]:
     out = tmp_path_factory.mktemp("oracle")
-    return {ds: h.oracle_parts(str(uri), ds, h.YEAR, RANGES, out / ds) for ds, uri in FIXTURES.items()}
+    return {
+        ds: h.oracle_parts(str(uri), ds, h.YEAR, RANGES, out / ds) for ds, uri in FIXTURES.items()
+    }
 
 
 @pytest.fixture(params=["sequential", "thread-backend"])
@@ -76,12 +81,18 @@ def test_one_plan_writes_every_part_and_returns_the_totals(
 ) -> None:
     plan = analysis.plan(fileset(*FIXTURES), year=h.YEAR, out=str(tmp_path))
     value = runner.run(plan).value
-    expected = accumulate([counters for parts in oracle.values() for counters, _ in parts.values()])
+    expected = accumulate(
+        [counters for parts in oracle.values() for counters, _ in parts.values()]
+    )
     assert sorted(value) == sorted(FIXTURES)
-    totals = {ds: {k: v for k, v in leaves.items() if k != "diagnostics"} for ds, leaves in value.items()}
+    totals = {
+        ds: {k: v for k, v in leaves.items() if k != "diagnostics"} for ds, leaves in value.items()
+    }
     assert totals == expected
     for ds, leaves in expected.items():
-        assert {k: type(v) for k, v in totals[ds].items()} == {k: type(v) for k, v in leaves.items()}
+        assert {k: type(v) for k, v in totals[ds].items()} == {
+            k: type(v) for k, v in leaves.items()
+        }
         assert set(value[ds]["diagnostics"]) == set(analysis.DIAGNOSTICS)
         assert all(isinstance(hist, bh.Histogram) for hist in value[ds]["diagnostics"].values())
     expected_parts = {part_path(tmp_path, ds, s, e) for ds in FIXTURES for s, e in RANGES}
@@ -117,7 +128,9 @@ def test_each_dataset_run_on_its_own_collects_into_the_same_product(
     assert each == part_bytes(tmp_path / "one")
 
 
-def test_a_file_without_steps_is_refused_at_plan_build(analysis: ModuleType, tmp_path: Path) -> None:
+def test_a_file_without_steps_is_refused_at_plan_build(
+    analysis: ModuleType, tmp_path: Path
+) -> None:
     unstepped = {"DataC_2024": {str(h.DATA_FIXTURE): {"object_path": "Events"}}}
     for bad in (unstepped, {**fileset("MC"), **unstepped}):
         with pytest.raises(ValueError, match="steps"):
@@ -127,7 +140,10 @@ def test_a_file_without_steps_is_refused_at_plan_build(analysis: ModuleType, tmp
 
 @pytest.fixture
 def recorded_events(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
-    """Every events object a ``NanoEventsFactory`` hands out while the test runs (calls pass through)."""
+    """Every events object a ``NanoEventsFactory`` hands out while the test runs.
+
+    Calls pass through.
+    """
     seen: list[Any] = []
     events = NanoEventsFactory.events
 
@@ -150,7 +166,9 @@ def test_the_events_are_coffea_nanoevents(
         assert isinstance(events, GraphedNanoArray)
         assert hasattr(events.Photon, "metric_table") and hasattr(events.Photon, "delta_r")
         assert not hasattr(events.Photon, "no_such_method_xyz")
-        assert {type(s).__name__ for s in events.session.sources().values()} == {"_GraphedTTreeSource"}
+        assert {type(s).__name__ for s in events.session.sources().values()} == {
+            "_GraphedTTreeSource"
+        }
     # the same source node backs a raw uproot array, which has no NanoEvents collections
     raw = uproot.graphed({str(h.MC_FIXTURE): "Events"})
     assert {type(s).__name__ for s in raw.session.sources().values()} == {"_GraphedTTreeSource"}

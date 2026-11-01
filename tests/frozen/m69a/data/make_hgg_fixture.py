@@ -1,15 +1,16 @@
 """Build the m69a NanoAOD v15 diphoton fixtures.
 
-``python make_hgg_fixture.py --slice 0 200 SRC nano_hgg_v15.root`` writes the MC fixture: entries 0-200,
-every branch, of the CMS sample
+``python make_hgg_fixture.py --slice 0 200 SRC nano_hgg_v15.root`` writes the MC fixture: entries
+0-200, every branch, of the CMS sample
 ``/store/mc/RunIII2024Summer24NanoAODv15/GluGluH-Hto2G_Par-M-125_TuneCP5_13p6TeV_amcatnloFXFX-pythia8/NANOAODSIM/150X_mcRun3_2024_realistic_v2-v2/120000/acebfb52-a25b-48bc-b9f6-80fe54a98d56.root``
 (SRC), real H->gg events with nothing injected.
 
-``python make_hgg_fixture.py SRC DST``, with SRC coffea's ``tests/samples/nano_tt_v15.root``, writes every
-branch of SRC with two loose photons and the mainAnalysis diphoton triggers injected into events 0-59.
-``--data`` then drops the generator branches (``GenPart_*``, ``GenVtx_*``, ``LHE*``, ``genWeight``) and sets
-run/lumi from the 2024 golden JSON next to this file: events 30-59 lie in uncertified lumis of a certified
-run, every other event is certified; that is the data fixture ``nano_hgg_v15_data.root``.
+``python make_hgg_fixture.py SRC DST``, with SRC coffea's ``tests/samples/nano_tt_v15.root``,
+writes every branch of SRC with two loose photons and the mainAnalysis diphoton triggers injected
+into events 0-59. ``--data`` then drops the generator branches (``GenPart_*``, ``GenVtx_*``,
+``LHE*``, ``genWeight``) and sets run/lumi from the 2024 golden JSON next to this file: events
+30-59 lie in uncertified lumis of a certified run, every other event is certified; that is the data
+fixture ``nano_hgg_v15_data.root``.
 
 The output embeds its own file name, so a rebuild is byte-identical only under the same basename.
 """
@@ -47,10 +48,18 @@ def read_collections(src, entry_start=None, entry_stop=None):
     arr = tree.arrays(entry_start=entry_start, entry_stop=entry_stop)
     names = tree.keys()
     colls = sorted(
-        {n[1:] for n in names if n.startswith("n") and any(k.startswith(n[1:] + "_") for k in names)}
+        {
+            n[1:]
+            for n in names
+            if n.startswith("n") and any(k.startswith(n[1:] + "_") for k in names)
+        }
     )
-    out = {c: ak.zip({k[len(c) + 1 :]: arr[k] for k in names if k.startswith(c + "_")}) for c in colls}
-    flat = [n for n in names if not n.startswith("n") and not any(n.startswith(c + "_") for c in colls)]
+    out = {
+        c: ak.zip({k[len(c) + 1 :]: arr[k] for k in names if k.startswith(c + "_")}) for c in colls
+    }
+    flat = [
+        n for n in names if not n.startswith("n") and not any(n.startswith(c + "_") for c in colls)
+    ]
     # n* branches that count nothing; the jagged counters are rewritten from the collections
     flat += [n for n in names if n.startswith("n") and n[1:] not in colls and n[1:] not in names]
     for n in flat:
@@ -115,7 +124,9 @@ def make_data(out):
     assert first > len(UNCERTIFIED) and last - first >= n
     lumi = np.where(uncertified, np.arange(n) - UNCERTIFIED.start + 1, first + np.arange(n))
     out["run"] = ak.values_astype(np.full(n, int(run)), ak.type(out["run"]).content.primitive)
-    out["luminosityBlock"] = ak.values_astype(lumi, ak.type(out["luminosityBlock"]).content.primitive)
+    out["luminosityBlock"] = ak.values_astype(
+        lumi, ak.type(out["luminosityBlock"]).content.primitive
+    )
 
 
 def write(dst, out):
@@ -125,7 +136,11 @@ def write(dst, out):
     # uproot.recreate keeps a longer existing file's tail
     pathlib.Path(dst).unlink(missing_ok=True)
     with uproot.recreate(dst, uuid_function=lambda: fixed_uuid, compression=None) as f:
-        f.mktree("Events", {k: ak.type(v).content for k, v in out.items()}, counter_name=lambda c: "n" + c)
+        f.mktree(
+            "Events",
+            {k: ak.type(v).content for k, v in out.items()},
+            counter_name=lambda c: "n" + c,
+        )
         f["Events"].extend(out)
         f.mktree("Runs", {"run": np.int64})
         f["Runs"].extend({"run": np.array([1])})

@@ -1,5 +1,8 @@
-"""m68d C (plan §2 "C — a lost service is a service failure, and the run stops at its first failure"),
-rows C1-C6 of §4: every OS, on ``ThreadBackend`` and on ``HTCondorBackend`` over ``LocalPilots``."""
+"""m68d C: a lost service is a service failure, and the run stops at its first failure.
+
+m68d C (plan §2 "C — a lost service is a service failure, and the run stops at its first failure"),
+rows C1-C6 of §4: every OS, on ``ThreadBackend`` and on ``HTCondorBackend`` over ``LocalPilots``.
+"""
 
 from __future__ import annotations
 
@@ -86,7 +89,7 @@ def kill_after_task_zero(mark: Path, web: Web) -> None:
     (mark / "killed").touch()
 
 
-# ---- C1: the fixed path stops at its first failed task -------------------------------------------------
+# ---- C1: the fixed path stops at its first failed task ------------------------------------------
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
@@ -124,32 +127,37 @@ def test_a_fixed_run_with_a_monitor_raises_well_within_the_drain_timeout(
     assert len(started(mark)) < 8, f"leaves started by close: {started(mark)}"
 
 
-# ---- C2: a task whose service is gone raises ServiceUnreachable ---------------------------------------
+# ---- C2: a task whose service is gone raises ServiceUnreachableError ----------------------------
 
 
 @pytest.mark.parametrize("kind", BACKENDS)
 def test_a_task_whose_service_is_gone_raises_service_unreachable(
     kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runners: list[Any]
 ) -> None:
-    monkeypatch.setenv("_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "worker.ad", WORKER_ID)))
+    monkeypatch.setenv(
+        "_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "worker.ad", WORKER_ID))
+    )
     web = Web()
     runner = make_runner(kind, services={SERVICE: web.endpoint})
     runners.append(runner)
-    if kind == "htcondor":  # the pilot keeps the worker's identity; the driver's own differs from now on
+    # the pilot keeps the worker's identity; the driver's own differs from now on
+    if kind == "htcondor":
         run_bounded(runner.wait_for_pilots, 120.0)
-        monkeypatch.setenv("_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "driver.ad", DRIVER_ID)))
+        monkeypatch.setenv(
+            "_CONDOR_MACHINE_AD", str(write_machine_ad(tmp_path / "driver.ad", DRIVER_ID))
+        )
     mark = tmp_path / "mark"
     run = Background(lambda: runner.run(gated_plan(mark, given_spec())))
     kill_after_task_zero(mark, web)
     err = run.error()
-    assert isinstance(err, services_api().ServiceUnreachable), repr(err)
+    assert isinstance(err, services_api().ServiceUnreachableError), repr(err)
     task_error = (mark / "t1.error").read_text()
     assert (err.name, err.endpoint, err.worker) == (SERVICE, web.endpoint, WORKER_ID), err.args
     assert task_error in err.reason, f"the task's {task_error} is not in {err.reason!r}"
     assert f"127.0.0.1:{web.port}" in err.reason.replace(task_error, ""), err.reason
 
 
-# ---- C3: a plan's own error with a live service stays intact, and was re-checked ---------------------------
+# ---- C3: a plan's own error with a live service stays intact, and was re-checked ----------------
 
 
 @pytest.mark.parametrize("error", ["OSError", "ConnectionRefusedError"])
@@ -175,10 +183,12 @@ def test_a_plan_error_with_a_live_service_is_intact_and_was_rechecked(
         failed_gets, err = gets_during(RaiseIn(error))
     assert twin.value == ((0, "ok"),), twin
     assert type(err).__name__ == error and str(err) == PLAN_ERROR, repr(err)
-    assert failed_gets - twin_gets == 1, f"GETs: {failed_gets} with the failed task, {twin_gets} without"
+    assert failed_gets - twin_gets == 1, (
+        f"GETs: {failed_gets} with the failed task, {twin_gets} without"
+    )
 
 
-# ---- C4: only a plan with services has its task functions wrapped ---------------------------------------
+# ---- C4: only a plan with services has its task functions wrapped -------------------------------
 
 
 class SpyBackend(ThreadBackend):
@@ -197,19 +207,29 @@ def test_a_service_free_plan_submits_its_task_functions_unwrapped(tmp_path: Path
     with Web() as web:
         backend = SpyBackend()
         with SubmitRunner(backend, services={SERVICE: web.endpoint}) as runner:
-            run_bounded(lambda: runner.run(gated_plan(tmp_path / "plain", None, n=2, process=RaiseIn(None))))
+            run_bounded(
+                lambda: runner.run(
+                    gated_plan(tmp_path / "plain", None, n=2, process=RaiseIn(None))
+                )
+            )
             plain = list(backend.calls)
             backend.calls.clear()
-            run_bounded(lambda: runner.run(gated_plan(tmp_path / "served", given_spec(), n=2, process=RaiseIn(None))))
+            run_bounded(
+                lambda: runner.run(
+                    gated_plan(tmp_path / "served", given_spec(), n=2, process=RaiseIn(None))
+                )
+            )
             served = [c for c in backend.calls if c[0] != "_probe_services"]
     assert sorted({name for name, _ in plain}) == ["_combine_task", "_leaf_task"], plain
     assert served and {name for name, _ in served} == {"_service_checked"}, served
-    assert sorted({args[1].__name__ for _, args in served}) == ["_combine_task", "_leaf_task"], served
+    assert sorted({args[1].__name__ for _, args in served}) == ["_combine_task", "_leaf_task"], (
+        served
+    )
     for _, args in served:
         assert [tuple(check) for check in args[0]] == [(SERVICE, web.endpoint, "http:/")], args[0]
 
 
-# ---- C5: a driverless run whose given service dies exits 1 -------------------------------------------------
+# ---- C5: a driverless run whose given service dies exits 1 --------------------------------------
 
 
 def test_a_driverless_run_whose_given_service_dies_exits_1(tmp_path: Path) -> None:
@@ -227,12 +247,12 @@ def test_a_driverless_run_whose_given_service_dies_exits_1(tmp_path: Path) -> No
             driver.wait()
     ok, payload = pickle.loads((job / "result.pkl").read_bytes())
     assert (code, ok) == (1, False), f"exit {code}: {payload!r}"
-    assert isinstance(payload, services_api().ServiceUnreachable), repr(payload)
+    assert isinstance(payload, services_api().ServiceUnreachableError), repr(payload)
     assert (payload.name, payload.endpoint) == (SERVICE, web.endpoint), payload.args
     assert log_lines(job, "rerun:") == [], "a service no SERVICE node hosts was rerun"
 
 
-# ---- C6: the same through a DurablePlanV2 stage ----------------------------------------------------------
+# ---- C6: the same through a DurablePlanV2 stage -------------------------------------------------
 
 
 def test_a_stage_task_whose_service_is_gone_raises_service_unreachable(tmp_path: Path) -> None:
@@ -242,6 +262,6 @@ def test_a_stage_task_whose_service_is_gone_raises_service_unreachable(tmp_path:
         run = Background(lambda: runner.run(stage_plan(mark, given_spec())))
         kill_after_task_zero(mark, web)
         err = run.error()
-    assert isinstance(err, services_api().ServiceUnreachable), repr(err)
+    assert isinstance(err, services_api().ServiceUnreachableError), repr(err)
     assert (err.name, err.endpoint) == (SERVICE, web.endpoint), err.args
     assert (mark / "t1.error").read_text() in err.reason, err.reason

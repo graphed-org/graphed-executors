@@ -1,12 +1,13 @@
 """The managed child of the m68d legs: ``<python> m68d_child.py <mode> <port> <report> [arg]``.
 
-Stdlib only, python >= 3.9. Each start appends ``start <pid> <port>`` to ``<report>.starts``. A file
-``<report>.exit.<pid>`` holding an integer makes that child exit with it. Modes:
+Stdlib only, python >= 3.9. Each start appends ``start <pid> <port>`` to ``<report>.starts``. A
+file ``<report>.exit.<pid>`` holding an integer makes that child exit with it. Modes:
 
 - ``serve``: HTTP 200 on ``("", port)`` at once.
-- ``gated``: waits for the file ``arg``, then binds ``("", port)``, retrying while another socket holds it.
-- ``slow``: the first start in its cwd sleeps ``arg`` seconds, then binds as ``gated`` does; later starts
-  bind at once.
+- ``gated``: waits for the file ``arg``, then binds ``("", port)``, retrying while another socket
+  holds it.
+- ``slow``: the first start in its cwd sleeps ``arg`` seconds, then binds as ``gated`` does; later
+  starts bind at once.
 """
 
 from __future__ import annotations

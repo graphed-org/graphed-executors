@@ -33,7 +33,7 @@ analysis instead:
 ```python
 import numpy as np
 from graphed.core import Partition, Plan, Task
-from graphed_executors.local import ProcessPoolExecutor
+from graphed_executors import ProcessPoolExecutor
 
 def count(partition, resources):          # module-level, so workers can import it
     return np.asarray([partition.entry_stop - partition.entry_start])
@@ -61,14 +61,14 @@ import boost_histogram as bh
 import graphed_histogram as gh
 from graphed import Session
 from graphed.awkward import AwkwardBackend, from_parquet
-from graphed_executors.local import ProcessPoolExecutor
+from graphed_executors import ProcessPoolExecutor
 
 if __name__ == "__main__":
     ak.to_parquet(ak.Array({"pt": [[40.0, 25.0], [55.0], [30.0, 60.0, 20.0],
                                    [80.0], [15.0, 45.0], [70.0, 10.0]]}), "events.parquet")
 
     session = Session(AwkwardBackend())
-    events = from_parquet(session, "events", "events.parquet", steps_per_file=3)
+    events = from_parquet("events", "events.parquet", steps_per_file=3, session=session)
 
     h = gh.boost.Histogram(bh.axis.Regular(4, 0.0, 100.0), storage=bh.storage.Int64())
     h.fill(events.pt)                     # records the fill; nothing is read yet
@@ -92,18 +92,21 @@ be module-level functions the workers can import — a lambda or a notebook-cell
 
 ## Which runner do I want?
 
-| You are running on | Use | Import from |
-|---|---|---|
-| One process, quick check, nothing picklable needed | `ThreadExecutor()` | `graphed_executors.local` |
-| Your laptop, all cores | `ProcessPoolExecutor(max_workers=N)` | `graphed_executors.local` |
-| A many-core machine where the worker count strains the open-file limit | `PinnedPoolExecutor` | `graphed_executors.local` |
-| A dask cluster (local, dask-jobqueue, Kubernetes, …) | `dask_runner(client)` | `graphed_executors.dask_backend` |
-| A parsl HTEX pool | `parsl_runner(executor)` | `graphed_executors.parsl_backend` |
-| An HTCondor pool (LPC, lxplus, your own) | `htcondor_runner(site=..., n_pilots=N)` | `graphed_executors.htcondor_backend` |
-| A vine_graph manager (TaskVine workers or a factory) | `vine_graph_runner(executor)` | `graphed_executors.vine_graph_backend` |
+| You are running on | Use |
+|---|---|
+| One process, quick check, nothing picklable needed | `ThreadExecutor()` |
+| Your laptop, all cores | `ProcessPoolExecutor(max_workers=N)` |
+| A many-core machine where the worker count strains the open-file limit | `PinnedPoolExecutor` |
+| A dask cluster (local, dask-jobqueue, Kubernetes, …) | `dask_runner(client)` |
+| A parsl HTEX pool | `parsl_runner(executor)` |
+| An HTCondor pool (LPC, lxplus, your own) | `htcondor_runner(site=..., n_pilots=N)` |
+| A vine_graph manager (TaskVine workers or a factory) | `vine_graph_runner(executor)` |
+
+All of these, and `graphed.core`'s `SequentialRunner`, import from the top level:
+`from graphed_executors import ProcessPoolExecutor`.
 
 (`import graphed_exec_local` still works as a deprecated alias for `graphed_executors.local`;
-use the namespaced form in new code.)
+use `graphed_executors` in new code.)
 
 Direct Slurm submission isn't supported; use dask-jobqueue, parsl's providers, or a TaskVine factory
 to reach those batch systems.
@@ -130,7 +133,7 @@ it the same `plan` from your first run:
 
 ```python
 from distributed import Client
-from graphed_executors.dask_backend import dask_runner
+from graphed_executors import dask_runner
 
 if __name__ == "__main__":                    # needed when Client() spawns a local cluster
     client = Client(n_workers=2, dashboard_address=":0")  # or Client("tcp://scheduler:8786")
@@ -178,7 +181,7 @@ plan = Plan(process=my_tasks.count, combine=my_tasks.add, empty=my_tasks.zero,
             tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
 if __name__ == "__main__":
-    from graphed_executors.parsl_backend import parsl_runner, start_htex, stop_htex
+    from graphed_executors import parsl_runner, start_htex, stop_htex
 
     htex = start_htex(workers=8, run_dir="runinfo", heartbeat_period=2)
     try:
@@ -223,7 +226,7 @@ Using the `plan` from your first run:
 
 ```python
 from graphed.debug import Dashboard
-from graphed_executors.local import ProcessPoolExecutor
+from graphed_executors import ProcessPoolExecutor
 
 if __name__ == "__main__":                    # a spawn pool re-imports this file
     with Dashboard(profile=True, control=True) as dash:

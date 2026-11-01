@@ -1,13 +1,16 @@
-"""m45 gate + knob-honesty pins — the facade adds NO gate of its own (the engines' refusals
-surface intact) and never silently ignores or mis-forwards a transport-only knob
-(m45-facade-plan §1.2, §2 items 4/5/7). Runs in the MAIN CI matrix — the engine gates and the
-facade's knob validation all fire BEFORE any submit, so refusing stubs suffice (no cluster).
+"""m45 gate + knob-honesty pins.
+
+The facade adds NO gate of its own (the engines' refusals surface intact) and never silently
+ignores or mis-forwards a transport-only knob (m45-facade-plan §1.2, §2 items 4/5/7). Runs in the
+MAIN CI matrix — the engine gates and the facade's knob validation all fire BEFORE any submit, so
+refusing stubs suffice (no cluster).
 
 Discriminates: a facade that swallows or re-words the m44 pin gate / m43 peer gate; one that
 silently drops a transport-only knob on the tasks path (forward-and-ignore) or forwards it into a
 TypeError; one that validates knobs BEFORE resolution (auto->tasks + knob must still raise); and
 the r1-draft bug — treating join's COMMON ``mem_budget_bytes`` as transport-only — via the
-knob-validation asserts here plus the success arm in the join module."""
+knob-validation asserts here plus the success arm in the join module.
+"""
 
 from __future__ import annotations
 
@@ -38,7 +41,9 @@ def test_explicit_transport_on_pinless_surfaces_the_m44_gate() -> None:
 
     with pytest.raises(NotImplementedError, match="pin") as rep_exc:
         facade_repartition(BACKEND, blocks, 4, dbackend=stub, shuffle_method="transport")
-    assert "Phase 2" in str(rep_exc.value), "the m44 refusal must surface intact through the facade"
+    assert "Phase 2" in str(rep_exc.value), (
+        "the m44 refusal must surface intact through the facade"
+    )
     with pytest.raises(NotImplementedError, match="pin") as join_exc:
         facade_join(BACKEND, left, right, 4, dbackend=stub, shuffle_method="transport")
     assert "Phase 2" in str(join_exc.value)
@@ -53,7 +58,8 @@ def test_auto_on_all_false_degrades_then_refuses_via_the_m43_gate() -> None:
     with pytest.raises(NotImplementedError, match="peer data movement") as rep_exc:
         facade_repartition(BACKEND, blocks, 4, dbackend=stub)  # auto -> tasks -> m43 gate
     assert "Phase 2" in str(rep_exc.value), (
-        "auto on an all-False backend must degrade to tasks and then surface the m43 peer-movement "
+        "auto on an all-False backend must degrade to tasks and then surface the m43 "
+        "peer-movement "
         "refusal — not a facade-invented error, not a silent fallback"
     )
     with pytest.raises(NotImplementedError, match="peer data movement"):
@@ -80,7 +86,11 @@ def test_transport_only_knobs_raise_on_explicit_tasks() -> None:
         with pytest.raises(ValueError, match=name):
             facade_repartition(BACKEND, blocks, 4, dbackend=stub, shuffle_method="tasks", **knob)
 
-    for knob in ({"holder_budget_bytes": 1000}, {"pull_timeout_s": 1.0}, {"epoch_restarts_allowed": 0}):
+    for knob in (
+        {"holder_budget_bytes": 1000},
+        {"pull_timeout_s": 1.0},
+        {"epoch_restarts_allowed": 0},
+    ):
         (name,) = knob
         with pytest.raises(ValueError, match=name):
             facade_join(BACKEND, left, right, 4, dbackend=stub, shuffle_method="tasks", **knob)

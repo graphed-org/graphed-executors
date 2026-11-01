@@ -1,4 +1,4 @@
-"""The hub broadcast waits for a pool worker that boots long after its sibling, up to a deadline."""
+"""The hub broadcast waits, up to a deadline, for a worker that boots long after its sibling."""
 
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ from graphed.core import StopReason
 from graphed_executors.local import executors
 
 
-def _second_boots_late(marker: str, late_s: float, init: Callable[..., None] | None, *initargs: Any) -> None:
+def _second_boots_late(
+    marker: str, late_s: float, init: Callable[..., None] | None, *initargs: Any
+) -> None:
     try:
         os.close(os.open(marker, os.O_CREAT | os.O_EXCL))
     except FileExistsError:
@@ -58,6 +60,6 @@ def test_a_worker_still_booting_at_the_deadline_is_refused(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _late_sibling(monkeypatch, tmp_path, 3.0)
-    monkeypatch.setattr(executors, "_WORKER_START_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(executors.ProcessPoolExecutor, "_worker_start_timeout_s", 0.5)
     with pytest.raises(RuntimeError, match=r"broadcast reached only 1/2 workers in \d+\.\ds"):
         executors.ProcessPoolExecutor(max_workers=2, comms=None).run(mp.make_plan(mp.Probe()))

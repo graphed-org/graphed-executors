@@ -1,10 +1,12 @@
-"""m69b: histserv servers placed by ``htcondor_runner(service_hosts=...)`` on a real pool
-(plan-services.md, the m69b ``test_histserv_cluster.py`` row, with "Placement" and "Schedulability").
+"""m69b: histserv servers placed by ``htcondor_runner(service_hosts=...)`` on a real pool.
 
-The live tests need the ``htcondor2`` bindings and a pool (the ``test-htcondor`` job's personal HTCondor),
-gated as ``tests/frozen/m68b/test_cluster_services_live.py`` gates: skipped where the bindings are not
-installed, and, where they are, a missing schedd is a failure naming what is missing. Fills carry dyadic
-weights, so pool pilots filling concurrently still sum exactly. The narrowing refusal needs no pool.
+Plan-services.md, the m69b ``test_histserv_cluster.py`` row, with "Placement" and "Schedulability".
+
+The live tests need the ``htcondor2`` bindings and a pool (the ``test-htcondor`` job's personal
+HTCondor), gated as ``tests/frozen/m68b/test_cluster_services_live.py`` gates: skipped where the
+bindings are not installed, and, where they are, a missing schedd is a failure naming what is
+missing. Fills carry dyadic weights, so pool pilots filling concurrently still sum exactly. The
+narrowing refusal needs no pool.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from m69b_harness import (
 )
 from services_harness import backend_api, htcondor_api, launch_api, status_records, wait_for
 
-from graphed_executors.submit.services import ServiceUnavailable
+from graphed_executors.submit.services import ServiceUnavailableError
 
 POOL_PROBE_S = 30.0
 LIVE_S = 600.0
@@ -48,23 +50,35 @@ PILOT_MB = 1024
 
 
 def require_pool() -> Any:
-    """The bindings and a schedd of a reachable pool, or a skip (no bindings) / failure (no pool)."""
+    """Return the bindings and a schedd of a reachable pool, or a skip (no bindings) / failure.
+
+    No pool.
+    """
     htcondor2: Any = pytest.importorskip(
         "htcondor2",
-        reason="the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)",
+        reason=(
+            "the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)"
+        ),
     )
     try:
         ads = run_bounded(
-            lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]), POOL_PROBE_S
+            lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]),
+            POOL_PROBE_S,
         )
     except Exception as exc:
-        pytest.fail(f"htcondor2 is installed but no pool answers ({exc}): start a personal HTCondor")
-    assert ads, "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+        pytest.fail(
+            f"htcondor2 is installed but no pool answers ({exc}): start a personal HTCondor"
+        )
+    assert ads, (
+        "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+    )
     require_histserv()
     return htcondor2
 
 
-def live_runner(tmp_path: Path, hosts: tuple[str, ...] | None, n_pilots: int = PILOTS, **kwargs: Any) -> Any:
+def live_runner(
+    tmp_path: Path, hosts: tuple[str, ...] | None, n_pilots: int = PILOTS, **kwargs: Any
+) -> Any:
     narrowed = {} if hosts is None else {"service_hosts": hosts}
     return run_bounded(
         lambda: backend_api().htcondor_runner(
@@ -85,7 +99,9 @@ def services_since(t0: int) -> str:
 
 
 def queued(schedd: Any, constraint: str) -> list[Any]:
-    return list(schedd.query(constraint=constraint, projection=["ClusterId", "JobStatus", "JobBatchName"]))
+    return list(
+        schedd.query(constraint=constraint, projection=["ClusterId", "JobStatus", "JobBatchName"])
+    )
 
 
 def history(schedd: Any, constraint: str) -> list[Any]:
@@ -94,20 +110,25 @@ def history(schedd: Any, constraint: str) -> list[Any]:
 
 
 def named(number: int, text: str, *cut: str) -> bool:
-    """``number`` stands alone in ``text`` once ``cut`` (the run's own paths) is removed from it."""
+    """Check that ``number`` stands alone in ``text`` once ``cut`` (the run's paths) is removed."""
     for ident in cut:
         text = text.replace(ident, "")
     return re.search(rf"(?<!\d){number}(?!\d)", text) is not None
 
 
 def two_sizes(workers: int) -> tuple[int, int]:
-    """Sizes ``s < L`` (MiB): the small slot alone fits ``s``, the big one needs ``L``, and the two
-    together exceed ``L``, so a context offering both opens one server of each."""
+    """Sizes ``s < L`` (MiB).
+
+    The small slot alone fits ``s``, the big one needs ``L``, and the two together exceed
+    ``L``, so a context offering both opens one server of each.
+    """
     big = predicted(TWO, ("big",), workers)
     small = predicted(TWO, ("small",), workers)
     both = predicted(TWO, ("big", "small"), workers)
     s, large = -(-small // MIB), -(-big // MIB)
-    assert s * MIB < big and large * MIB < both, f"fixture: slots too close ({small}, {big}, {both} bytes)"
+    assert s * MIB < big and large * MIB < both, (
+        f"fixture: slots too close ({small}, {big}, {both} bytes)"
+    )
     return s, large
 
 
@@ -123,7 +144,9 @@ def test_a_two_size_context_opens_one_cluster_job_of_each_size(
     htc = require_pool()
     schedd = htc.Schedd()
     s, large = two_sizes(PILOTS)
-    ctx = histserv_api().Context(memory_mb=[s, large], workers=PILOTS, name=unique("m69b-two-sizes"))
+    ctx = histserv_api().Context(
+        memory_mb=[s, large], workers=PILOTS, name=unique("m69b-two-sizes")
+    )
     plan = served_plan(TWO, ctx)
     sizes = sorted(int(spec.launch.resources["memory_mb"]) for spec in plan.services)
     assert sizes == [s, large], (sizes, ctx.servers())
@@ -143,7 +166,9 @@ def test_a_two_size_context_opens_one_cluster_job_of_each_size(
     assert sorted(int(ad["RequestMemory"]) for ad in history(schedd, jobs)) == sizes
 
 
-def test_driver_placement_starts_no_cluster_job(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_driver_placement_starts_no_cluster_job(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     htc = require_pool()
     schedd = htc.Schedd()
     s, large = two_sizes(PILOTS)
@@ -200,9 +225,9 @@ def test_a_server_the_driver_cannot_hold_falls_to_the_cluster(
     (status,) = statuses
     assert (status.leg, status.host) == ("managed", "cluster"), status
     run_path = str(tmp_path)
-    assert named(ONE_SIZE_MB, status.detail, run_path) and named(ONE_SIZE_MB - 1, status.detail, run_path), (
-        status.detail
-    )
+    assert named(ONE_SIZE_MB, status.detail, run_path) and named(
+        ONE_SIZE_MB - 1, status.detail, run_path
+    ), status.detail
     assert same_values(result.value, twin)
     jobs = services_since(t0)
     assert wait_for(lambda: len(history(schedd, jobs)) == 1, GONE_S), history(schedd, jobs)
@@ -210,9 +235,13 @@ def test_a_server_the_driver_cannot_hold_falls_to_the_cluster(
 
 
 def largest_slot_mb(htc: Any) -> int:
-    """The largest slot memory the collector advertises: partitionable ``TotalSlotMemory``, static
-    ``Memory``, dynamic slots skipped."""
-    ads = htc.Collector().query(htc.AdType.Startd, projection=["SlotType", "TotalSlotMemory", "Memory"])
+    """Return the largest slot memory the collector advertises.
+
+    Partitionable ``TotalSlotMemory``, static ``Memory``, dynamic slots skipped.
+    """
+    ads = htc.Collector().query(
+        htc.AdType.Startd, projection=["SlotType", "TotalSlotMemory", "Memory"]
+    )
     sizes = [
         int(ad["TotalSlotMemory"] if ad.get("SlotType") == "Partitionable" else ad["Memory"])
         for ad in ads
@@ -223,8 +252,10 @@ def largest_slot_mb(htc: Any) -> int:
 
 
 def unrun(schedd: Any, constraint: str) -> list[tuple[Any, bool]]:
-    """``(NumJobStarts, JobCurrentStartDate present)`` of each history ad matching ``constraint``."""
-    ads = schedd.history(constraint, ["ClusterId", "NumJobStarts", "JobCurrentStartDate"], match=10)
+    """``(NumJobStarts, JobCurrentStartDate present)`` per history ad matching ``constraint``."""
+    ads = schedd.history(
+        constraint, ["ClusterId", "NumJobStarts", "JobCurrentStartDate"], match=10
+    )
     return [(ad.get("NumJobStarts"), "JobCurrentStartDate" in ad) for ad in ads]
 
 
@@ -236,40 +267,54 @@ def test_a_server_no_slot_can_hold_is_removed_unrun_and_refused(tmp_path: Path) 
     htc = require_pool()
     schedd = htc.Schedd()
     largest = largest_slot_mb(htc)
-    ctx = histserv_api().Context(memory_mb=largest + 1024, workers=PILOTS, name=unique("m69b-no-slot"))
+    ctx = histserv_api().Context(
+        memory_mb=largest + 1024, workers=PILOTS, name=unique("m69b-no-slot")
+    )
     plan = served_plan(SMALL, ctx)
     assert [s[1] for s in ctx.servers()] == [largest + 1024], ctx.servers()
     runner = live_runner(tmp_path, ("cluster",))
     t0 = int(time.time())
     jobs = services_since(t0)
     try:
-        with pytest.raises(ServiceUnavailable) as err:
+        with pytest.raises(ServiceUnavailableError) as err:
             run_bounded(lambda: runner.run(plan), LIVE_S)
-        assert wait_for(lambda: not queued(schedd, jobs), GONE_S), "the refused job is still queued"
+        assert wait_for(lambda: not queued(schedd, jobs), GONE_S), (
+            "the refused job is still queued"
+        )
     finally:
         run_bounded(runner.close, LIVE_S)
     text = refusal_text(err.value)
     run_path = str(tmp_path)
-    assert named(largest + 1024, text, run_path) and named(largest, text, run_path), (largest, text)
+    assert named(largest + 1024, text, run_path) and named(largest, text, run_path), (
+        largest,
+        text,
+    )
     assert wait_for(lambda: unrun(schedd, jobs) == [(0, False)], GONE_S), unrun(schedd, jobs)
 
 
 def test_a_requirement_no_slot_meets_is_removed_unrun_and_refused(tmp_path: Path) -> None:
     htc = require_pool()
     schedd = htc.Schedd()
-    ctx = histserv_api().Context(memory_mb=ONE_SIZE_MB, workers=PILOTS, name=unique("m69b-unmatched"))
+    ctx = histserv_api().Context(
+        memory_mb=ONE_SIZE_MB, workers=PILOTS, name=unique("m69b-unmatched")
+    )
     (spec,) = served_plan(SMALL, ctx).services
     runner = live_runner(tmp_path, ("cluster",))
     try:
         run_bounded(runner.wait_for_pilots, LIVE_S)
         launcher = runner.backend.launcher
         # set only now: extra_submit reaches the pilots' submit too
-        launcher.extra_submit = {**launcher.extra_submit, "requirements": "(TARGET.OpSysMajorVer == 99)"}
+        launcher.extra_submit = {
+            **launcher.extra_submit,
+            "requirements": "(TARGET.OpSysMajorVer == 99)",
+        }
         t0 = int(time.time())
         jobs = services_since(t0)
-        with pytest.raises(ServiceUnavailable):
+        with pytest.raises(ServiceUnavailableError):
             run_bounded(lambda: runner.backend.host_service(spec, "unmatched"), LIVE_S)
-        assert wait_for(lambda: not queued(schedd, jobs), GONE_S), "the refused job is still queued"
+        assert wait_for(lambda: not queued(schedd, jobs), GONE_S), (
+            "the refused job is still queued"
+        )
     finally:
         run_bounded(runner.close, LIVE_S)
     assert wait_for(lambda: unrun(schedd, jobs) == [(0, False)], GONE_S), unrun(schedd, jobs)
@@ -307,12 +352,16 @@ def test_a_server_behind_a_busy_pool_waits_and_its_timeout_counts_from_its_start
         t0 = int(time.time())
         with caplog.at_level(logging.INFO, logger="graphed_executors"):
             future = runner.submit(plan)
-            assert not wait_for(future.done, PENDING_S), "the run ended while its server could not start"
+            assert not wait_for(future.done, PENDING_S), (
+                "the run ended while its server could not start"
+            )
             (job,) = queued(schedd, services_since(t0))
             assert job["JobStatus"] == 1, dict(job)
             key = str(job["JobBatchName"]).removeprefix("graphed-service-")
             lines = [r.getMessage() for r in caplog.records]
-            assert any(key in line and re.search(r"JobStatus\W*1\b", line) for line in lines), lines
+            assert any(key in line and re.search(r"JobStatus\W*1\b", line) for line in lines), (
+                lines
+            )
             removed_at = int(time.time())
             schedd.act(htc.JobAction.Remove, mine)
             blocker = None

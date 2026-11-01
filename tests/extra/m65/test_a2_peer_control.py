@@ -1,4 +1,7 @@
-"""m65 A2.2: the peer routes' pause deadline, late-cancel teardown, driver fold and idempotent handlers."""
+"""m65 A2.2: the peer routes' run control.
+
+The peer routes' pause deadline, late-cancel teardown, driver fold and idempotent handlers.
+"""
 
 from __future__ import annotations
 
@@ -11,31 +14,34 @@ import pytest
 from graphed.core import Partition, RunControl, RunState, StopReason
 from graphed.core.execution import LocalResources
 
-from graphed_executors.local import ProcessPoolExecutor, _peer, executors
+from graphed_executors.local import ProcessPoolExecutor, _driver, _peer
 from graphed_executors.local._reduce import lazy_tree_reduce, running_fold
 
 ONES = (1,) * mp.N
+ROOT_TIMEOUT_S = 10.0  # headroom for the unpaused work on a loaded runner
 
 
 @pytest.mark.parametrize("route", ["thread-ipc", "proc-ipc"])
 def test_paused_time_does_not_count_toward_the_root_deadline(
     route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", 3.0)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", ROOT_TIMEOUT_S)
     ctl = RunControl()
     rec = mp.Recorder(on_first_finished=ctl.pause)
     ex = mp.ROUTES[route].make(rec, control=ctl)
     run = mp.Background(lambda: ex.run(mp.make_plan(mp.Probe(sleep_s=0.01))))
     assert rec.first_finished.wait(30)
-    time.sleep(4.0)
+    time.sleep(ROOT_TIMEOUT_S + 1.0)  # longer than the deadline, so counting it would time out
     ctl.resume()
     res = run.result()
     assert (res.value, res.stopped) == (ONES, StopReason.EXHAUSTED)
 
 
 @pytest.mark.parametrize("route", ["thread-ipc", "proc-ipc"])
-def test_the_root_timeout_message_follows_the_constant(route: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(executors, "_PEER_ROOT_TIMEOUT_S", 0.5)
+def test_the_root_timeout_message_follows_the_constant(
+    route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.5)
     ex = mp.ROUTES[route].make()
     run = mp.Background(lambda: ex.run(mp.make_plan(mp.Probe(sleep_s=1.0))))
     with pytest.raises(TimeoutError, match=r"within 0\.5s"):
@@ -74,7 +80,10 @@ def test_a_cancel_after_the_root_leaves_a_persistent_pool_clean(
 
 
 def _node(level: int, pos: int) -> float:
-    """The plan-tree value of node ``(level, pos)`` over the float partials (odd levels carry up)."""
+    """Return the plan-tree value of node ``(level, pos)`` over the float partials.
+
+    Odd levels carry up.
+    """
     if level == 0:
         return float(mp.partial("float", mp.N, pos))
     size = (mp.N + (1 << (level - 1)) - 1) >> (level - 1)
@@ -88,19 +97,29 @@ class _Peers:
 
 
 def test_the_driver_fold_of_hand_ins_is_the_tree_root() -> None:
-    # The sibling pairs (0,26)/(0,27), (0,30)/(0,31) and (2,8)/(2,9) were never settled by a worker;
-    # w0's message and the item (0, 27) arrive twice.
-    w0 = ("cancelled", "w0", 20, [(level, pos, _node(level, pos)) for level, pos in ((4, 0), (3, 2))])
-    items = [(level, pos, _node(level, pos)) for level, pos in ((1, 12), (0, 26), (0, 27), (0, 27))]
+    # The sibling pairs (0,26)/(0,27), (0,30)/(0,31) and (2,8)/(2,9) were never settled by a
+    # worker; w0's message and the item (0, 27) arrive twice.
+    w0 = (
+        "cancelled",
+        "w0",
+        20,
+        [(level, pos, _node(level, pos)) for level, pos in ((4, 0), (3, 2))],
+    )
+    items = [
+        (level, pos, _node(level, pos)) for level, pos in ((1, 12), (0, 26), (0, 27), (0, 27))
+    ]
     w1_nodes = ((1, 14), (0, 30), (0, 31), (2, 8), (2, 9))
     w1 = ("cancelled", "w1", 20, [(level, pos, _node(level, pos)) for level, pos in w1_nodes])
     ctl: _peer.PeerControl[float] = _peer.PeerControl(RunControl(), _Peers(), mp.N, mp.add, float)
     got = [ctl.take(m) for m in (w0, w0, *[("item", *i) for i in items], w1)]
-    root, _ = lazy_tree_reduce(mp.N, ((k, mp.partial("float", mp.N, k)) for k in range(mp.N)), mp.add, float)
+    root, _ = lazy_tree_reduce(
+        mp.N, ((k, mp.partial("float", mp.N, k)) for k in range(mp.N)), mp.add, float
+    )
     assert got[:-1] == [None] * (len(got) - 1)
     assert got[-1] == (root, mp.N)
     pieces = sorted((pos << level, v) for level, pos, v in {*w0[3], *items, *w1[3]})
-    assert running_fold(iter(pieces), mp.add, float)[0] != root  # a first-leaf fold alone misses it
+    # a first-leaf fold alone misses it
+    assert running_fold(iter(pieces), mp.add, float)[0] != root
 
 
 class _Script:

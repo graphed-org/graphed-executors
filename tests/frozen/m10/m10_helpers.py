@@ -1,5 +1,7 @@
-"""Shared, PICKLABLE process/combine functions for the M10 pooled-combines suite (module-level so
-a spawned process pool can import them)."""
+"""Shared, PICKLABLE process/combine functions for the M10 pooled-combines suite.
+
+Module-level so a spawned process pool can import them.
+"""
 
 from __future__ import annotations
 
@@ -27,8 +29,11 @@ def leaf_singleton(part: Partition, res: object) -> tuple[object, ...]:
 
 
 def tree_shape(a: object, b: object) -> tuple[object, ...]:
-    """A combine that RECORDS the grouping: the result is the combine tree itself, so two runs (or
-    two execution modes) produced the same reduction tree iff the results are equal."""
+    """Return a combine that RECORDS the grouping.
+
+    The result is the combine tree itself, so two runs (or two execution modes) produced the
+    same reduction tree iff the results are equal.
+    """
     return (a, b)
 
 
@@ -41,7 +46,7 @@ def leaf_pid(part: Partition, res: object) -> frozenset[int]:
 
 
 def combine_collect_pid(a: frozenset[int], b: frozenset[int]) -> frozenset[int]:
-    """Records WHERE each combine ran: the union of input pids plus this process's pid."""
+    """Record WHERE each combine ran: the union of input pids plus this process's pid."""
     return a | b | {os.getpid()}
 
 

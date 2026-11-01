@@ -1,4 +1,7 @@
-"""A peer worker whose partial fails to pickle raises that error at once, not the root timeout (GW34)."""
+"""A peer worker whose partial fails to pickle raises that error at once, not the root timeout.
+
+GW34.
+"""
 
 from __future__ import annotations
 
@@ -15,13 +18,15 @@ from graphed.aggregate import aggregate_plan
 from graphed.awkward import AwkwardBackend, AwkwardForm, gak
 from graphed.core.execution import LocalResources, Partition
 
-import graphed_executors.local.executors as local_executors
-from graphed_executors.local import ProcessPoolExecutor
+from graphed_executors.local import ProcessPoolExecutor, _driver
 from graphed_executors.local._peer import make_bounds, process_and_reduce
 
 
-def test_an_unpicklable_partial_surfaces_its_pickling_error_promptly(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(local_executors, "_PEER_ROOT_TIMEOUT_S", 30.0)
+@pytest.mark.parametrize("comms", ["ipc", "http"])
+def test_an_unpicklable_partial_surfaces_its_pickling_error_promptly(
+    comms: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 30.0)
     session = Session(AwkwardBackend())
     form = AwkwardForm(ak.Array(EVENTS.layout.to_typetracer(forget_length=True)))
     ev = session.source("events", form=form, data=Events(EVENTS))
@@ -34,12 +39,15 @@ def test_an_unpicklable_partial_surfaces_its_pickling_error_promptly(monkeypatch
     )
     start = time.monotonic()
     with pytest.raises(pickle.PicklingError, match="this partial does not pickle"):
-        ProcessPoolExecutor(max_workers=2, comms="ipc").run(plan)
+        ProcessPoolExecutor(max_workers=2, comms=comms).run(plan)
     assert time.monotonic() - start < 30.0
 
 
 class _SilentBrokenTransport:
-    """Every send raises and no ``done`` ever arrives, as when the partial for the root never lands."""
+    """Every send raises and no ``done`` ever arrives.
+
+    As when the partial for the root never lands.
+    """
 
     address = "w0"
 

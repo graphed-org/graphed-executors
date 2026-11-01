@@ -1,4 +1,7 @@
-"""m65 A3: ``dask_runner`` honours a ``RunControl`` per A-2, and its window is the cluster's task slots."""
+"""m65 A3: ``dask_runner`` honours a ``RunControl`` per A-2.
+
+Its window is the cluster's task slots.
+"""
 
 from __future__ import annotations
 
@@ -92,7 +95,9 @@ def test_scale_from_zero_completes(path: str) -> None:
         timer = threading.Timer(2.0, cluster.scale, args=(2,))
         timer.start()
         try:
-            res = mp.Background(lambda: ex.run(mp.make_plan(mp.Probe(n=8), adaptive=PATHS[path]))).result(60)
+            res = mp.Background(
+                lambda: ex.run(mp.make_plan(mp.Probe(n=8), adaptive=PATHS[path]))
+            ).result(60)
         finally:
             timer.cancel()
         assert res.value == (1,) * 8

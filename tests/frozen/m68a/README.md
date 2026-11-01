@@ -46,7 +46,7 @@ an `(n_events, n_features)` matrix, which a rank-1 input would reject.
 | `…::test_a_given_endpoint_wins_over_a_site_endpoint` | D2 order; row 1 "a given endpoint wins over a site endpoint" |
 | `…::test_a_dead_given_endpoint_refuses_naming_user_with_zero_plan_submits` | D2 leg 1 "never silently replaced"; row 1 |
 | `…::test_a_dead_site_endpoint_falls_through_to_managed` | D2 leg 2 "falls through and the status records it" |
-| `…::test_no_launch_and_no_endpoint_names_all_three_legs` | D2 "Nothing left → `ServiceUnavailable(name)` naming the three legs" |
+| `…::test_no_launch_and_no_endpoint_names_all_three_legs` | D2 "Nothing left → `ServiceUnavailableError(name)` naming the three legs" |
 | `…::test_a_gpu_recipe_without_host_service_is_refused_naming_the_attribute` | D2/D10; §3.1 ServiceSet bullet (cluster-hosted iff `host_service`) |
 | `…::test_an_injected_fault_surfaces_and_leaves_nothing[*]` | row 1 fault matrix (nine faults × `run`/`ServiceSet.start`): the injected exception itself, every managed pid reaped and port free with the runner open, `release_service` exactly for the returned keys; r20: the unanswered probe's `backend.cancel`; the raising release logged and a later release still run |
 | `…::test_a_managed_child_lives_exactly_as_long_as_its_run` | row 1 "per run … gone when `run` returns, two runs start two pids" |
@@ -134,7 +134,7 @@ Beyond the names in plan §3.1, the tests rely on these readings of it:
 - The status log record carries `status` (a `ServiceStatus`) and is emitted at INFO by the
   `graphed_executors.services` logger, once per spec per `start()` (a user-held set's own start
   included). `detail` of a managed status that fell through leg 2 contains the dead site endpoint.
-- `ServiceUnavailable.legs` has a key per leg tried (all three when none applied); a leg-1 failure
+- `ServiceUnavailableError.legs` has a key per leg tried (all three when none applied); a leg-1 failure
   names `user` and the endpoint. A check that never passes names the check (`http:/`) in
   `legs["managed"]`; a GPU recipe without `host_service` names `host_service` there.
 - `ServiceSet.start()` returns an `Endpoints` whose values are the minted or given endpoints;
@@ -150,10 +150,10 @@ Beyond the names in plan §3.1, the tests rely on these readings of it:
   (`test_an_injected_fault_surfaces_and_leaves_nothing[port-range-held-*]`), and as exit 1 with that
   `OSError` in `result.pkl` from the driver (`test_a_held_port_range_exits_1_with_os_error`). This is the
   literal text of the table's rows 1 and 5 (r15: the table governs over D2's "nothing left →
-  `ServiceUnavailable`").
+  `ServiceUnavailableError`").
 - D4's "a `None` range refuses the matching host at construction naming the row" is read as: building a
   `SiteProfile` derives `service_hosts` without that host, and a managed start on it is then refused in
-  `ServiceUnavailable.legs["managed"]`, which names `host_service`. "Naming the row" is not asserted
+  `ServiceUnavailableError.legs["managed"]`, which names `host_service`. "Naming the row" is not asserted
   there, because no planned surface of that refusal carries the row's name; it is asserted for a
   `services` value that is not an endpoint, which fails `SiteProfile` construction naming the row.
 - `test_a_failed_runner_in_the_driver_leaves_no_pilot_and_no_port` injects its fault by patching the

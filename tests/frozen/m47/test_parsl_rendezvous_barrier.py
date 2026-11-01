@@ -1,8 +1,9 @@
-"""m47 self-rendezvous barrier — endpoints are minted IN-TASK on worker processes, no peer holds
-the address book before ALL k hellos arrived, and over-asking k converts into a bounded attributed
-error that FREES the slots (plan §1.4 rendezvous/G5 + barrier cleanup; blueprint §3
-`test_parsl_rendezvous_barrier`; also the "exactly k hellos" third of the reshaped
-anti-super-linear guard).
+"""m47 self-rendezvous barrier.
+
+Endpoints are minted IN-TASK on worker processes, no peer holds the address book before ALL k
+hellos arrived, and over-asking k converts into a bounded attributed error that FREES the slots
+(plan §1.4 rendezvous/G5 + barrier cleanup; blueprint §3 `test_parsl_rendezvous_barrier`; also the
+"exactly k hellos" third of the reshaped anti-super-linear guard).
 
 Witnesses (counters/pids, never clocks): per-peer ``endpoint_pid`` is a WORKER pid (never the
 driver's) and the k pids are distinct; ``endpoint_port`` is a nonzero OS-assigned port, distinct
@@ -15,7 +16,8 @@ resolved and every slot was freed (the §1.4 cleanup: cancel the queued, marker-
 Discriminates: driver-assigned ports (driver pid provenance); an incremental registry broadcast
 (size-at-receipt < k); a barrier-less design that starts sending before the k-th hello (ditto); a
 hanging over-ask (hard timeout); leaked peer slots (the post-error submit never runs on a 2-slot
-pool still held by zombie peers)."""
+pool still held by zombie peers).
+"""
 
 from __future__ import annotations
 
@@ -57,10 +59,14 @@ def htex():  # type: ignore[no-untyped-def]
 
 def test_endpoints_are_minted_in_task_and_no_peer_sees_a_partial_registry(htex) -> None:  # type: ignore[no-untyped-def]
     backend = make_parsl_backend(htex)
-    res = run_bounded(lambda: plan_run(make_p2p_plan(N_LEAVES, "m47barrier"), backend), timeout_s=240.0)
+    res = run_bounded(
+        lambda: plan_run(make_p2p_plan(N_LEAVES, "m47barrier"), backend), timeout_s=240.0
+    )
 
     rows = peer_rows(res)
-    assert sorted(rows) == ["w0", "w1"], f"pinned peer addresses w0..w{{k-1}} expected, got {sorted(rows)}"
+    assert sorted(rows) == ["w0", "w1"], (
+        f"pinned peer addresses w0..w{{k-1}} expected, got {sorted(rows)}"
+    )
 
     driver_pid = os.getpid()
     pids = {addr: int(c.get("endpoint_pid", 0)) for addr, c in rows.items()}
@@ -76,7 +82,8 @@ def test_endpoints_are_minted_in_task_and_no_peer_sees_a_partial_registry(htex) 
 
     for addr, c in rows.items():
         assert int(c.get("registry_size_at_receipt", 0)) == K, (
-            f"peer {addr} received a registry of size {c.get('registry_size_at_receipt', 0)} != k={K} "
+            f"peer {addr} received a registry of size {c.get('registry_size_at_receipt', 0)} != "
+            f"k={K} "
             "— the driver must broadcast the book only after ALL k hellos (the G5 barrier that "
             "subsumes pre-created inboxes); a partial book means sends can race a missing inbox"
         )
@@ -94,13 +101,17 @@ def test_over_asked_k_is_a_bounded_attributed_error_and_the_slots_are_freed(htex
     with pytest.raises(StageError) as excinfo:
         run_bounded(
             lambda: plan_run(
-                make_p2p_plan(N_LEAVES, "m47overask"), backend, workers=K + 1, barrier_timeout_s=8.0
+                make_p2p_plan(N_LEAVES, "m47overask"),
+                backend,
+                workers=K + 1,
+                barrier_timeout_s=8.0,
             ),
             timeout_s=180.0,
         )
     msg = str(excinfo.value)
     assert "2/3" in msg, (
-        f"the barrier error must name hellos_seen/k ('2/3' on a {K}-slot pool asked for {K + 1}): {msg}"
+        f"the barrier error must name hellos_seen/k ('2/3' on a {K}-slot pool asked for {K + 1}): "
+        f"{msg}"
     )
 
     # every peer future resolved and every slot was freed: a plain task runs on the SAME pool

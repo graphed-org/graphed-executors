@@ -1,5 +1,7 @@
-"""m46 relay engine — repartition: the honest head-node workflow shape on HTEX (plan §1.3;
-§3 m46 `test_parsl_relay_repartition`; the m39/m43 golden-gate lineage).
+"""m46 relay engine — repartition.
+
+The honest head-node workflow shape on HTEX (plan §1.3; §3 m46 `test_parsl_relay_repartition`; the
+m39/m43 golden-gate lineage).
 
 HTEX fixture DELIBERATELY (plan tests-minor r2): on TPE every task pid == the driver pid, so site
 provenance is vacuous there — only HTEX discriminates driver-side compute.
@@ -16,7 +18,8 @@ per-run observable, never docs-only).
 
 Discriminates: the m43 T·P shape (nonzero picks), per-row/per-fragment task creation (row-count
 ladder), a driver-side map or gather (site pids), an unlabeled relay (missing witness fields), a
-driver_relay_bytes stub (wrong Σ), and any routing/merge/wire drift (hash equality vs local)."""
+driver_relay_bytes stub (wrong Σ), and any routing/merge/wire drift (hash equality vs local).
+"""
 
 from __future__ import annotations
 
@@ -63,7 +66,9 @@ def htex():  # type: ignore[no-untyped-def]
 
 def _relay(htex, src, parts: int, **kwargs):  # type: ignore[no-untyped-def]
     spy = SpyParslBackend(make_parsl_backend(htex))
-    res = run_bounded(lambda: relay_repartition(BACKEND, src, parts, runner=make_runner(spy), **kwargs))
+    res = run_bounded(
+        lambda: relay_repartition(BACKEND, src, parts, runner=make_runner(spy), **kwargs)
+    )
     return spy, res
 
 
@@ -132,8 +137,11 @@ def test_relay_witnesses_head_node_routing_with_worker_side_kernels(htex) -> Non
 
 
 def test_salt_reroutes_deterministically(htex) -> None:  # type: ignore[no-untyped-def]
-    """`salt` must reach the pinned route: two salted runs agree with each other and differ from
-    the unsalted run (content-neutral re-placement — the m40 skew-salt discipline)."""
+    """`salt` must reach the pinned route.
+
+    Two salted runs agree with each other and differ from the unsalted run (content-neutral
+    re-placement — the m40 skew-salt discipline).
+    """
     src = repartition_blocks()
     _s, plain = _relay(htex, src, PARTS)
     _s1, s1 = _relay(htex, src, PARTS, salt=3)

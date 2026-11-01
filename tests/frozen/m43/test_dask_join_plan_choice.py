@@ -1,5 +1,7 @@
-"""m43 F6 — broadcast-vs-shuffle is a PLAN property, never a live-cluster recompute (plan §1.3.4
-"Broadcast-vs-shuffle frozen as a plan property"; blueprint §3 `test_dask_join_plan_choice`).
+"""m43 F6 — broadcast-vs-shuffle is a PLAN property, never a live-cluster recompute.
+
+Plan §1.3.4 "Broadcast-vs-shuffle frozen as a plan property"; blueprint §3
+`test_dask_join_plan_choice`.
 
 The discrimination gap is built into the scenario: with byte-comparable sides and ``parts=8`` the
 pinned rule (`graphed.shuffle.broadcast_join_choice`, keyed on ``parts``) says SHUFFLE, while the
@@ -13,9 +15,12 @@ and zero `_dask_broadcast_join_part`; broadcast ⇒ zero stage-1/pick/gather fut
 and exactly one `_dask_broadcast_join_part` per probe block (the large side is NEVER shuffled).
 
 Discriminates: the F6 live-recompute bug, an executor that overrides a plan-recorded forced
-choice, and a broadcast that secretly routes the large side through map-write."""
+choice, and a broadcast that secretly routes the large side through map-write.
+"""
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from dask_shuffle_backends import (
@@ -35,6 +40,9 @@ from dask_shuffle_backends import (
 )
 from graphed.shuffle import broadcast_join_choice
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytest.importorskip("distributed")
 
 ADAPTERS = shuffle_adapters()
@@ -42,23 +50,23 @@ PARTS = 8
 
 
 @pytest.fixture(scope="module")
-def client1():
+def client1() -> Iterator[Any]:
     with shuffle_cluster(1, processes=False) as c:
         yield c
 
 
 @pytest.fixture(scope="module")
-def client3():
+def client3() -> Iterator[Any]:
     with shuffle_cluster(3, processes=False) as c:
         yield c
 
 
 @pytest.fixture(params=ADAPTERS, ids=[a.name for a in ADAPTERS])
-def adapter(request) -> ShuffleJoinAdapter:  # type: ignore[no-untyped-def]
+def adapter(request: pytest.FixtureRequest) -> ShuffleJoinAdapter:
     return request.param
 
 
-def _run_auto(adapter: ShuffleJoinAdapter, client) -> tuple[SpySubmitBackend, object]:  # type: ignore[no-untyped-def]
+def _run_auto(adapter: ShuffleJoinAdapter, client: Any) -> tuple[SpySubmitBackend, Any]:
     left, right = join_equal_sides(adapter)
     install_worker_plugin(client)
     spy = SpySubmitBackend(build_dask_backend(client))
@@ -66,12 +74,16 @@ def _run_auto(adapter: ShuffleJoinAdapter, client) -> tuple[SpySubmitBackend, ob
     return spy, res
 
 
-def test_auto_choice_is_parts_keyed_and_worker_count_invariant(adapter: ShuffleJoinAdapter, client1, client3) -> None:  # type: ignore[no-untyped-def]
+def test_auto_choice_is_parts_keyed_and_worker_count_invariant(
+    adapter: ShuffleJoinAdapter, client1: Any, client3: Any
+) -> None:
     left, right = join_equal_sides(adapter)
     bb, pb = side_bytes(adapter, left), side_bytes(adapter, right)
     # scenario sanity: the DISCRIMINATION GAP is real for these measured bytes
     assert broadcast_join_choice(bb, pb, PARTS) is False, "parts-keyed rule must say SHUFFLE here"
-    assert broadcast_join_choice(bb, pb, 1) is True, "worker-keyed rule on 1 worker must say BROADCAST"
+    assert broadcast_join_choice(bb, pb, 1) is True, (
+        "worker-keyed rule on 1 worker must say BROADCAST"
+    )
 
     spy1, r1 = _run_auto(adapter, client1)
     names1 = spy1.submitted_fn_names()
@@ -91,14 +103,19 @@ def test_auto_choice_is_parts_keyed_and_worker_count_invariant(adapter: ShuffleJ
     assert r1.dest_block_hashes, "no joined blocks produced — scenario degenerate"
 
 
-def test_forced_broadcast_is_honoured_and_never_shuffles_the_large_side(adapter: ShuffleJoinAdapter, client3) -> None:  # type: ignore[no-untyped-def]
+def test_forced_broadcast_is_honoured_and_never_shuffles_the_large_side(
+    adapter: ShuffleJoinAdapter, client3: Any
+) -> None:
     left, right = join_equal_sides(adapter)
     bb, pb = side_bytes(adapter, left), side_bytes(adapter, right)
-    assert broadcast_join_choice(bb, pb, PARTS) is False  # the model would shuffle: the force is real
+    # the model would shuffle: the force is real
+    assert broadcast_join_choice(bb, pb, PARTS) is False
 
     install_worker_plugin(client3)
     spy = SpySubmitBackend(build_dask_backend(client3))
-    res = dask_join(adapter.backend, left, right, PARTS, runner=make_submit_runner(spy), broadcast=True)
+    res = dask_join(
+        adapter.backend, left, right, PARTS, runner=make_submit_runner(spy), broadcast=True
+    )
 
     names = spy.submitted_fn_names()
     assert (
@@ -116,18 +133,25 @@ def test_forced_broadcast_is_honoured_and_never_shuffles_the_large_side(adapter:
     )
 
 
-def test_forced_shuffle_is_honoured_against_the_cost_model(adapter: ShuffleJoinAdapter, client3) -> None:  # type: ignore[no-untyped-def]
+def test_forced_shuffle_is_honoured_against_the_cost_model(
+    adapter: ShuffleJoinAdapter, client3: Any
+) -> None:
     parts = 4  # at 4 parts (measured: probe = 6x build bytes) the pinned rule says BROADCAST
     left, right = join_small_build_sides(adapter)
     bb, pb = side_bytes(adapter, left), side_bytes(adapter, right)
-    assert broadcast_join_choice(bb, pb, parts) is True  # the model would broadcast: the force is real
+    # the model would broadcast: the force is real
+    assert broadcast_join_choice(bb, pb, parts) is True
 
     install_worker_plugin(client3)
     spy = SpySubmitBackend(build_dask_backend(client3))
-    res = dask_join(adapter.backend, left, right, parts, runner=make_submit_runner(spy), broadcast=False)
+    res = dask_join(
+        adapter.backend, left, right, parts, runner=make_submit_runner(spy), broadcast=False
+    )
 
     names = spy.submitted_fn_names()
-    assert names["_dask_broadcast_join_part"] == 0, "forced shuffle must not take the broadcast path"
+    assert names["_dask_broadcast_join_part"] == 0, (
+        "forced shuffle must not take the broadcast path"
+    )
     assert names["_dask_map_write"] > 0
     assert res.witness.broadcast_chosen is False
     assert observed_join_all(adapter, res.value) == dup_join_all(adapter, left, right, parts)

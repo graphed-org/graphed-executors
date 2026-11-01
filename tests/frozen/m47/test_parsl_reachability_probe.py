@@ -1,7 +1,9 @@
-"""m47 reachability probe — "the cluster decides, not the broker" made mechanical (plan §1.5 G2;
-blueprint §3 `test_parsl_reachability_probe`). Worker<->worker dialability is a CLUSTER property
-parsl never guarantees; the probe runs at rendezvous time, BEFORE any data-plane traffic, and the
-verdict routes through ``on_unreachable``.
+"""m47 reachability probe.
+
+"the cluster decides, not the broker" made mechanical (plan §1.5 G2; blueprint §3
+`test_parsl_reachability_probe`). Worker<->worker dialability is a CLUSTER property parsl never
+guarantees; the probe runs at rendezvous time, BEFORE any data-plane traffic, and the verdict
+routes through ``on_unreachable``.
 
 The negative arms use the pinned ``registry_rewrite`` poisoner (plan §3 harness row): one peer's
 book entry is repointed at a just-closed loopback port — connection-refused is deterministic and
@@ -19,7 +21,8 @@ inputs — hashes byte-identical to a pure relay run, ``witness.head_node_routed
 Discriminates: a probe-less engine (data-plane traffic before the verdict — the poisoned run
 would surface a delivery/pull error, not the pair-naming probe error); a silent fallback (the
 witness field missing); a fallback that re-enters the p2p engine (the relay Counter absent); a
-release that strands peers (the post-arm liveness submit hangs the 2-slot pool)."""
+release that strands peers (the post-arm liveness submit hangs the 2-slot pool).
+"""
 
 from __future__ import annotations
 
@@ -80,7 +83,9 @@ def test_standalone_probe_healthy_and_poisoned(htex) -> None:  # type: ignore[no
     _assert_pool_alive(backend)
 
     poisoned = run_bounded(
-        lambda: probe_reachability(backend, K, registry_rewrite=poison_one(W1, closed_loopback_port())),
+        lambda: probe_reachability(
+            backend, K, registry_rewrite=poison_one(W1, closed_loopback_port())
+        ),
         timeout_s=180.0,
     )
     assert poisoned.ok is False, "a poisoned book entry must fail the probe verdict"
@@ -140,7 +145,9 @@ def test_facade_fallback_runs_the_relay_observably(htex) -> None:  # type: ignor
     assert res.dest_block_hashes == relay_oracle.dest_block_hashes, (
         "the fallback result must be byte-identical to the relay engine on the same inputs"
     )
-    assert res.witness.head_node_routed is True, "the fallback result must be labeled head-node-routed"
+    assert res.witness.head_node_routed is True, (
+        "the fallback result must be labeled head-node-routed"
+    )
     reason = getattr(res.witness, "fallback_reason", None)
     assert reason, (
         "witness.fallback_reason must be set — the automatic as-tasks fallback is observable, "

@@ -1,6 +1,8 @@
-"""m47 at-least-once safety — a retried send that DUPLICATES an already-landed reduction message
-must not double-combine (plan §1.4 epoch/dedup via the reused ``(level,pos)`` guard; blueprint §3
-`test_parsl_reduce_dedup`; the m44 F10 shape re-armed on the HTTP plane).
+"""m47 at-least-once safety.
+
+A retried send that DUPLICATES an already-landed reduction message must not double-combine (plan
+§1.4 epoch/dedup via the reused ``(level,pos)`` guard; blueprint §3 `test_parsl_reduce_dedup`; the
+m44 F10 shape re-armed on the HTTP plane).
 
 Mechanism: the pinned spec-carried injection seam (``inject_recv_failures``, the m44 plugin-seam
 analog) is armed for ONE message from the non-root peer w1 at the root owner w0: the /msg route
@@ -16,7 +18,8 @@ resend); the reduced value STILL equals ``SequentialRunner`` bit-for-bit; zero e
 Discriminates: an exactly-once assumption (no ``(level,pos)`` dedup) double-combines and fails
 value equality; a wire-level digest-dedup transport (suppressing duplicates before delivery)
 breaks at-least-once and fails the duplicate-delivery counter; an unwired injection seam fails
-both counters."""
+both counters.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +61,9 @@ def test_duplicate_delivery_is_witnessed_and_combined_exactly_once(htex) -> None
     backend = make_parsl_backend(htex)
 
     res = run_bounded(
-        lambda: plan_run(make_p2p_plan(N_LEAVES, "m47dedup"), backend, inject_recv_failures={W0: {W1: 1}}),
+        lambda: plan_run(
+            make_p2p_plan(N_LEAVES, "m47dedup"), backend, inject_recv_failures={W0: {W1: 1}}
+        ),
         timeout_s=240.0,
     )
 

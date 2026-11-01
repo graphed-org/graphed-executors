@@ -1,8 +1,11 @@
-"""A managed service for the m68a frozen suite, run as ``{python} service_child.py <mode> <port> <report>``.
+"""A managed service for the m68a frozen suite.
 
-Stdlib only (gRPC mode imports grpcio lazily), so a ``Launch`` recipe can start it from any interpreter.
-Before anything else it writes ``<report>`` = ``{"pid": <its pid>, "python": <the interpreter argv[0]>}``,
-so a test learns the pid of a child it never spawned itself, and which ``{python}`` the recipe rendered.
+Run as ``{python} service_child.py <mode> <port> <report>``.
+
+Stdlib only (gRPC mode imports grpcio lazily), so a ``Launch`` recipe can start it from any
+interpreter. Before anything else it writes ``<report>`` = ``{"pid": <its pid>, "python": <the
+interpreter argv[0]>}``, so a test learns the pid of a child it never spawned itself, and which
+``{python}`` the recipe rendered.
 
 Modes:
 

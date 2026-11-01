@@ -1,8 +1,11 @@
-"""M38 work-stealing (spike; frozen at P6). On an IMBALANCED workload (one worker's whole range is
-heavy), witness — not just assume — that stealing engaged: the heavy owner gave leaves away, peers
-processed more than their assigned share, every leaf ran exactly once, the result is unchanged, and
-the run is faster. Stealing moves only `process` work; the leaf's owner still reduces it, so the
-result is identical to no-stealing and to the canonical SequentialRunner."""
+"""M38 work-stealing (spike; frozen at P6).
+
+On an IMBALANCED workload (one worker's whole range is heavy), witness — not just assume — that
+stealing engaged: the heavy owner gave leaves away, peers processed more than their assigned share,
+every leaf ran exactly once, the result is unchanged, and the run is faster. Stealing moves only
+`process` work; the leaf's owner still reduces it, so the result is identical to no-stealing and to
+the canonical SequentialRunner.
+"""
 
 from __future__ import annotations
 
@@ -14,13 +17,14 @@ from graphed.core.execution import SequentialRunner
 
 from graphed_exec_local.executors import ProcessExecutor, ThreadExecutor
 
-# 4 workers -> worker 0 owns leaves 0..3, all heavy; workers 1-3 own light leaves and go idle almost
-# at once. HEAVY is deliberately LARGE (a ~0.8 s owner window vs a few-ms steal handshake): steal
-# ENGAGEMENT is intrinsically timing-gated (an idle peer's request must reach the busy owner before it
-# finishes), so the witnesses below assert structural counters (`given`/`steals`) while the scenario
-# leaves a wide enough window that engagement is reliable even on a heavily contended macOS/Windows CI
-# runner. (A tight 0.12 s window flaked there — the handshake didn't always land before the owner was
-# done. This sizes the window, not the assertion: per R0.10a the assert is on the counter, not a clock.)
+# 4 workers -> worker 0 owns leaves 0..3, all heavy; workers 1-3 own light leaves and go idle
+# almost at once. HEAVY is deliberately LARGE (a ~0.8 s owner window vs a few-ms steal handshake):
+# steal ENGAGEMENT is intrinsically timing-gated (an idle peer's request must reach the busy owner
+# before it finishes), so the witnesses below assert structural counters (`given`/`steals`) while
+# the scenario leaves a wide enough window that engagement is reliable even on a heavily contended
+# macOS/Windows CI runner. (A tight 0.12 s window flaked there — the handshake didn't always land
+# before the owner was done. This sizes the window, not the assertion: per R0.10a the assert is on
+# the counter, not a clock.)
 HEAVY, LIGHT, N = 0.2, 0.001, 16
 
 
@@ -59,7 +63,8 @@ def test_witness_stealing_redistributes_and_stays_correct(kind: str) -> None:
     r1 = steal.run(plan)
     wit = steal._last_peer_witness
 
-    # correctness: identical to no-stealing AND to the canonical baseline (stealing only moves work)
+    # correctness: identical to no-stealing AND to the canonical baseline (stealing only moves
+    # work)
     assert r0.value == r1.value == seq == N
 
     # witness no-steal really is the static-range baseline: worker 0 processed all 4 of its own
@@ -72,27 +77,31 @@ def test_witness_stealing_redistributes_and_stays_correct(kind: str) -> None:
     assert wit[0]["processed"] < N // 4  # ...and therefore ran fewer than its 4 assigned
     assert sum(w["steals"] for w in wit) > 0  # peers stole work
 
-    # anti-cascade witness (steal-ONE, not steal-half): the heavy owner sheds leaves ONE AT A TIME —
-    # the number of grants equals the number of leaves it gave up, and every shed leaf is stolen by
-    # exactly one peer. A steal-HALF grant would move several leaves per request (so `given` would be
-    # < the leaves shed — a victim emptied into a single bulk transfer); steal-one structurally cannot.
-    # (How many DISTINCT peers catch those one-at-a-time grants is a scheduling-timing detail — on a
-    # slow transport one quick peer may catch several — so it is deliberately NOT asserted.)
-    assert wit[0]["given"] + wit[0]["processed"] == N // 4  # owner's range = run-here + shed-one-by-one
-    assert sum(w["given"] for w in wit) == sum(w["steals"] for w in wit)  # each shed leaf stolen once
+    # anti-cascade witness (steal-ONE, not steal-half): the heavy owner sheds leaves ONE AT A TIME
+    # — the number of grants equals the number of leaves it gave up, and every shed leaf is stolen
+    # by exactly one peer. A steal-HALF grant would move several leaves per request (so `given`
+    # would be < the leaves shed — a victim emptied into a single bulk transfer); steal-one
+    # structurally cannot. (How many DISTINCT peers catch those one-at-a-time grants is a
+    # scheduling-timing detail — on a slow transport one quick peer may catch several — so it is
+    # deliberately NOT asserted.) owner's range = run-here + shed-one-by-one
+    assert wit[0]["given"] + wit[0]["processed"] == N // 4
+    # each shed leaf stolen once
+    assert sum(w["given"] for w in wit) == sum(w["steals"] for w in wit)
 
     # ...and it pays off: the point of stealing is a shorter critical path, witnessed STRUCTURALLY
     # rather than by wall clock — without stealing worker 0 runs all 4 heavy leaves serially
-    # (w0_nosteal.processed == 4); with stealing it runs strictly fewer (asserted above), so the heavy
-    # work is genuinely off its critical path. A wall-clock `dt_steal < dt_nosteal` assert is NOT used:
-    # on a loaded/slow CI runner the ~0.1 s of heavy work is dwarfed by process+transport noise, making
-    # the comparison flaky without proving anything the redistribution witnesses don't already.
-    assert wit[0]["processed"] < w0_nosteal["processed"]  # stealing shortened the heavy owner's path
+    # (w0_nosteal.processed == 4); with stealing it runs strictly fewer (asserted above), so the
+    # heavy work is genuinely off its critical path. A wall-clock `dt_steal < dt_nosteal` assert is
+    # NOT used: on a loaded/slow CI runner the ~0.1 s of heavy work is dwarfed by process+transport
+    # noise, making the comparison flaky without proving anything the redistribution witnesses
+    # don't already. stealing shortened the heavy owner's path
+    assert wit[0]["processed"] < w0_nosteal["processed"]
 
 
 def test_steal_thread_executor_is_correct_and_redistributes() -> None:
     plan = _imbalanced_plan()
-    ex = ThreadExecutor(max_workers=4, comms="ipc", steal=True)  # sleep releases the GIL -> parallel
+    # sleep releases the GIL -> parallel
+    ex = ThreadExecutor(max_workers=4, comms="ipc", steal=True)
     assert ex.run(plan).value == N
     wit = ex._last_peer_witness
     assert sum(w["processed"] for w in wit) == N

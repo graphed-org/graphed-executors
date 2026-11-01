@@ -1,6 +1,10 @@
-"""m74 §4.2 E1-E3: a driver SIGKILLed after ``MIN_DONE`` stored tasks resumes on the local runners
-(``ThreadExecutor(2)`` and ``ProcessPoolExecutor(2)`` with peer ipc, ``SubmitRunner(ThreadBackend(2))``),
-executing only the tasks the store did not hold, bit-for-bit equal to an uninterrupted run."""
+"""m74 §4.2 E1-E3.
+
+A driver SIGKILLed after ``MIN_DONE`` stored tasks resumes on the local runners
+(``ThreadExecutor(2)`` and ``ProcessPoolExecutor(2)`` with peer ipc,
+``SubmitRunner(ThreadBackend(2))``), executing only the tasks the store did not hold, bit-for-bit
+equal to an uninterrupted run.
+"""
 
 from __future__ import annotations
 

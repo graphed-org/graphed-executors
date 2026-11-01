@@ -1,9 +1,11 @@
-"""The managed child of the m68b ``announce.py`` legs: ``<python> m68b_child.py <mode> <port> <report> [code]``.
+"""The managed child of the m68b ``announce.py`` legs.
 
-Stdlib only and python >= 3.9 (the no-``PATH`` leg runs it under the host's ``python3``). At start it appends
-a line to ``<report>.starts`` and then writes ``<report>``: its pid, ``sys.executable``, its cwd's entries,
-whether ``../graphed-secret`` exists, whether SIGTERM is blocked, and the two environment variables the
-legs set. Modes:
+``<python> m68b_child.py <mode> <port> <report> [code]``.
+
+Stdlib only and python >= 3.9 (the no-``PATH`` leg runs it under the host's ``python3``). At start
+it appends a line to ``<report>.starts`` and then writes ``<report>``: its pid, ``sys.executable``,
+its cwd's entries, whether ``../graphed-secret`` exists, whether SIGTERM is blocked, and the two
+environment variables the legs set. Modes:
 
 - ``serve``: HTTP on ``("", port)`` serving its cwd's files.
 - ``ignore``: ``serve`` with SIGTERM ignored.

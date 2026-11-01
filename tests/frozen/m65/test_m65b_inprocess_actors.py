@@ -1,5 +1,7 @@
-"""m65 B: the peer actors push task events and profiles to the worker monitor, in lean form, and
-ship neither stream to the driver. Actors run in threads by the m38 in-process patterns."""
+"""m65 B: the peer actors push task events and profiles to the worker monitor, in lean form.
+
+They ship neither stream to the driver. Actors run in threads by the m38 in-process patterns.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +9,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import m65b_probe as bp
 import pytest
@@ -73,11 +75,19 @@ class _Tap:
 
 
 def _kw(mon: Any) -> dict[str, Any]:
-    return {"emit": True, "lean": True, "profiler_factory": bp.fake_profiler, "monitor_factory": lambda: mon}
+    return {
+        "emit": True,
+        "lean": True,
+        "profiler_factory": bp.fake_profiler,
+        "monitor_factory": lambda: mon,
+    }
 
 
 def _run(
-    n: int, driver_t: Any, actors: dict[str, Callable[[], Any]], handshake: Callable[[], None] | None = None
+    n: int,
+    driver_t: Any,
+    actors: dict[str, Callable[[], Any]],
+    handshake: Callable[[], None] | None = None,
 ) -> str:
     tap = _Tap(driver_t)
     errors: list[BaseException] = []
@@ -118,17 +128,20 @@ def _ipc(n: int, w: int, mon: Any) -> str:
         n,
         driver_t,
         {
-            a: lambda a=a: ipc_peer_actor(
-                a,
-                inboxes[a],
-                {p: inboxes[p] for p in (DRIVER, *addrs) if p != a},
-                n,
-                bounds,
-                addrs,
-                _leaf_value,
-                _cat,
-                items[a],
-                **_kw(mon),
+            a: cast(
+                "Callable[[], Any]",
+                lambda a=a: ipc_peer_actor(
+                    a,
+                    inboxes[a],
+                    {p: inboxes[p] for p in (DRIVER, *addrs) if p != a},
+                    n,
+                    bounds,
+                    addrs,
+                    _leaf_value,
+                    _cat,
+                    items[a],
+                    **_kw(mon),
+                ),
             )
             for a in addrs
         },
@@ -145,17 +158,20 @@ def _http(n: int, w: int, mon: Any) -> str:
             n,
             driver_t,
             {
-                a: lambda a=a: http_peer_actor(
-                    a,
-                    driver_t.host,
-                    driver_t.port,
-                    n,
-                    bounds,
-                    addrs,
-                    _leaf_value,
-                    _cat,
-                    items[a],
-                    **_kw(mon),
+                a: cast(
+                    "Callable[[], Any]",
+                    lambda a=a: http_peer_actor(
+                        a,
+                        driver_t.host,
+                        driver_t.port,
+                        n,
+                        bounds,
+                        addrs,
+                        _leaf_value,
+                        _cat,
+                        items[a],
+                        **_kw(mon),
+                    ),
                 )
                 for a in addrs
             },
@@ -177,7 +193,12 @@ def _pooled(n: int, w: int, mon: Any) -> str:
             n,
             driver_t,
             {
-                a: lambda a=a: pooled_peer_actor(a, n, bounds, addrs, _leaf_value, _cat, items[a], **_kw(mon))
+                a: cast(
+                    "Callable[[], Any]",
+                    lambda a=a: pooled_peer_actor(
+                        a, n, bounds, addrs, _leaf_value, _cat, items[a], **_kw(mon)
+                    ),
+                )
                 for a in addrs
             },
         )

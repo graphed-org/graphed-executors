@@ -1,5 +1,8 @@
-"""Fixtures for the m68a frozen suite: a fresh shared trace per test, and a teardown backstop that stops
-any managed child a failing implementation left running (the tests themselves assert it is gone)."""
+"""Fixtures for the m68a frozen suite.
+
+A fresh shared trace per test, and a teardown backstop that stops any managed child a failing
+implementation left running (the tests themselves assert it is gone).
+"""
 
 from __future__ import annotations
 
@@ -21,7 +24,10 @@ def fresh_trace() -> Iterator[None]:
 
 
 class Children:
-    """Report files and pids of managed children a test expects; each is killed at teardown if alive."""
+    """Report files and pids of managed children a test expects.
+
+    Each is killed at teardown if alive.
+    """
 
     def __init__(self, root: Path) -> None:
         self.root = root

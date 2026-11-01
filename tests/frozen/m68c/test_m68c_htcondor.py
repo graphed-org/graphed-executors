@@ -1,9 +1,12 @@
-"""m68c §6 on HTCondor: ``HTCondorRunner.run`` and ``submit_driverless`` accept a join plan whose stage
-process holds a lambda (it travels cloudpickled by value), the driverless DAG derives a join plan's SERVICE
-nodes, and live joins run over pool pilots.
+"""m68c §6 on HTCondor.
 
-The driverless legs run anywhere (no bindings: a recorder stands in for ``htcondor2``); the live legs
-need the bindings and a personal HTCondor (the test-htcondor job), skipped without bindings."""
+``HTCondorRunner.run`` and ``submit_driverless`` accept a join plan whose stage process holds a
+lambda (it travels cloudpickled by value), the driverless DAG derives a join plan's SERVICE nodes,
+and live joins run over pool pilots.
+
+The driverless legs run anywhere (no bindings: a recorder stands in for ``htcondor2``); the live
+legs need the bindings and a personal HTCondor (the test-htcondor job), skipped without bindings.
+"""
 
 from __future__ import annotations
 
@@ -37,11 +40,11 @@ POOL_PROBE_S = 30.0
 
 
 def _lambda_combine_plan(tag: str) -> Any:
-    """A join plan whose fold stage holds a lambda ``combine``, which only travels by value."""
+    """Return a join plan whose fold holds a lambda ``combine``, which only travels by value."""
     return join_v2(tag, combine=lambda a, b: sorted(a + b))
 
 
-# ---- the bindings recorder (m68b's, trimmed) ------------------------------------------------------
+# ---- the bindings recorder (m68b's, trimmed) ----------------------------------------------------
 
 
 class _Result:
@@ -53,7 +56,9 @@ class _Schedd:
     def __init__(self, log: list[tuple[Any, ...]]) -> None:
         self.log = log
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> _Result:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> _Result:
         self.log.append(("submit", dict(description), count, spool))
         return _Result()
 
@@ -72,7 +77,9 @@ class _Collector:
     def __init__(self, log: list[tuple[Any, ...]]) -> None:
         self.log = log
 
-    def locate(self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def locate(
+        self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         self.log.append(("locate", name))
         return {"Name": name or "schedd.m68c.example", "MyAddress": "<127.0.0.1:9618>"}
 
@@ -135,7 +142,7 @@ class _FakeHTCondor:
         return _Schedd(self.log)
 
     def RemoteParam(self, location: Any) -> dict[str, str]:
-        """The located schedd's config: the CI pool's RPM layout."""
+        """Return the located schedd's config: the CI pool's RPM layout."""
         return {"BIN": "/usr/bin"}
 
 
@@ -151,7 +158,7 @@ def _record_bindings(monkeypatch: pytest.MonkeyPatch) -> _FakeHTCondor:
     return fake
 
 
-# ---- lambda stage processes ----------------------------------------------------------------------
+# ---- lambda stage processes ---------------------------------------------------------------------
 
 _RUN_PLAN_PKL = (
     "import json, pickle, sys\n"
@@ -168,7 +175,9 @@ def test_submit_driverless_accepts_a_lambda_stage_process_and_its_plan_pkl_runs_
     plan = _lambda_combine_plan("dl-lambda")
     ref = sequential(plan).value
     fake = _record_bindings(monkeypatch)
-    handle = run_bounded(lambda: submit_driverless(plan, request_memory_mb=1024, log_dir=tmp_path / "logs"))
+    handle = run_bounded(
+        lambda: submit_driverless(plan, request_memory_mb=1024, log_dir=tmp_path / "logs")
+    )
     assert [e for e in fake.log if e[0] == "submit"], fake.log
     # PYTHONPATH stands in for the user_modules ship of the module-level harness parts.
     env = {**os.environ, "PYTHONPATH": HARNESS_DIR}
@@ -188,7 +197,9 @@ def test_submit_driverless_derives_a_join_plan_s_service_nodes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     launch = Launch(argv=("{python}", "-m", "http.server", "{port}"), resources={"gpus": 1})
-    spec = ServiceSpec("sf", "http", check="http:/", ports=(40000, 40010), launch=launch, timeout_s=60.0)
+    spec = ServiceSpec(
+        "sf", "http", check="http:/", ports=(40000, 40010), launch=launch, timeout_s=60.0
+    )
     plan = join_v2("dl-dag", spec=spec)
     assert plan.services == (spec,)
     fake = _record_bindings(monkeypatch)
@@ -203,21 +214,28 @@ def test_submit_driverless_derives_a_join_plan_s_service_nodes(
     assert [e for e in fake.log if e[0] == "from_dag"], fake.log
 
 
-# ---- live -----------------------------------------------------------------------------------------
+# ---- live ---------------------------------------------------------------------------------------
 
 
 def _require_pool() -> None:
     htcondor2: Any = pytest.importorskip(
         "htcondor2",
-        reason="the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)",
+        reason=(
+            "the htcondor bindings are not installed (Linux wheels only; the test-htcondor job)"
+        ),
     )
     try:
         ads = run_bounded(
-            lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]), POOL_PROBE_S
+            lambda: htcondor2.Collector().query(htcondor2.AdType.Schedd, projection=["Name"]),
+            POOL_PROBE_S,
         )
     except Exception as exc:
-        pytest.fail(f"htcondor2 is installed but no pool answers ({exc}): start a personal HTCondor")
-    assert ads, "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+        pytest.fail(
+            f"htcondor2 is installed but no pool answers ({exc}): start a personal HTCondor"
+        )
+    assert ads, (
+        "htcondor2 is installed but the collector lists no schedd: start a personal HTCondor"
+    )
 
 
 def test_a_live_join_over_pool_pilots_calls_the_given_server(tmp_path: Path) -> None:

@@ -20,7 +20,10 @@ from graphed.core import DurablePlanV2
 
 
 def refuse_staged(plan: object, runner: str, backend: str) -> None:
-    """Refuse a ``DurablePlanV2`` in ``runner``, naming the ``SubmitRunner`` over ``backend`` that runs it."""
+    """Refuse a ``DurablePlanV2`` in ``runner``.
+
+    Naming the ``SubmitRunner`` over ``backend`` that runs it.
+    """
     if isinstance(plan, DurablePlanV2):
         raise TypeError(
             f"{runner} runs a single-stage Plan; a join or repartition plan (DurablePlanV2) runs "

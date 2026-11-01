@@ -1,11 +1,15 @@
-"""Driverless runs: :func:`submit_driverless` ships a plan in ONE HTCondor job whose driver
-(:mod:`graphed_executors.htcondor_backend.driver`) runs it, so the run needs no login session;
-:class:`RunHandle` tracks that job and collects its ``result.pkl``, from this session or a later one.
+"""Driverless runs.
 
-A plan with a service the driver job can host neither beside itself nor through its site (an image or
-GPUs) is submitted as a DAG instead: ``JOB driver`` plus one ``SERVICE`` node per such service, each a
-watch-mode :class:`~graphed_executors.htcondor_backend.services.ServiceJob` announcing to the driver of
-the moment, all in a new run directory under ``log_dir`` that must lie under the site's ``job_root``.
+:func:`submit_driverless` ships a plan in ONE HTCondor job whose driver
+(:mod:`graphed_executors.htcondor_backend.driver`) runs it, so the run needs no login session;
+:class:`RunHandle` tracks that job and collects its ``result.pkl``, from this session or a later
+one.
+
+A plan with a service the driver job can host neither beside itself nor through its site (an image
+or GPUs) is submitted as a DAG instead: ``JOB driver`` plus one ``SERVICE`` node per such service,
+each a watch-mode :class:`~graphed_executors.htcondor_backend.services.ServiceJob` announcing to
+the driver of the moment, all in a new run directory under ``log_dir`` that must lie under the
+site's ``job_root``.
 """
 
 from __future__ import annotations
@@ -57,9 +61,12 @@ PLACEHOLDER = pickle.dumps(
 
 @dataclass(frozen=True)
 class RunHandle:
-    """A submitted driverless job: ``cluster`` on the schedd named ``schedd`` of ``site``, its outputs
-    returning to ``log_dir``. Every call locates that schedd by name, never the local default. With
-    ``dag``, ``cluster`` is the run's DAGMan job, and the outcome is its ``driver`` node's."""
+    """A submitted driverless job.
+
+    ``cluster`` on the schedd named ``schedd`` of ``site``, its outputs returning to
+    ``log_dir``. Every call locates that schedd by name, never the local default. With ``dag``,
+    ``cluster`` is the run's DAGMan job, and the outcome is its ``driver`` node's.
+    """
 
     site: str
     schedd: str
@@ -75,7 +82,9 @@ class RunHandle:
         errors = []
         for pool in pools:
             try:
-                return htc, htc.Schedd(htc.Collector(pool).locate(htc.DaemonType.Schedd, self.schedd))
+                return htc, htc.Schedd(
+                    htc.Collector(pool).locate(htc.DaemonType.Schedd, self.schedd)
+                )
             except Exception as exc:  # the next collector in the list may know it
                 errors.append(f"{pool}: {exc}")
         raise RuntimeError(f"schedd {self.schedd} not found: {'; '.join(errors)}")
@@ -86,7 +95,8 @@ class RunHandle:
         ads = list(schedd.query(constraint=constraint, projection=STATUS_ATTRS))
         in_queue = bool(ads)
         if not in_queue:
-            # without a match bound the schedd scans its whole history; a driver cluster has one proc
+            # without a match bound the schedd scans its whole history; a driver cluster has one
+            # proc
             ads = list(schedd.history(constraint, STATUS_ATTRS, match=1))
         if not ads:
             raise RuntimeError(
@@ -103,25 +113,36 @@ class RunHandle:
         return {3: "removed", 5: "held"}.get(status, "running"), in_queue
 
     def _dag_status(self, schedd: Any, status: Any) -> str:
-        """DAGMan's own ``JobStatus`` for removed and held; the driver node's state while DAGMan runs,
-        and its latest try's exit once DAGMan ended (a try is a new cluster; ``RETRY driver 2``: three)."""
+        """DAGMan's own ``JobStatus`` for removed and held.
+
+        The driver node's state while DAGMan runs, and its latest try's exit once DAGMan
+        ended (a try is a new cluster; ``RETRY driver 2``: three).
+        """
         if status in (3, 5):
             return "removed" if status == 3 else "held"
         node = f'DAGManJobId == {self.cluster} && DAGNodeName == "driver"'
         if status in (1, 2):
-            ads = list(schedd.query(constraint=node, projection=["ClusterId", "JobStatus", "HoldReasonCode"]))
+            ads = list(
+                schedd.query(
+                    constraint=node, projection=["ClusterId", "JobStatus", "HoldReasonCode"]
+                )
+            )
             if any(ad.get("JobStatus") == 5 and not counts_as_alive(ad) for ad in ads):
                 return "held"
             return "running" if any(ad.get("JobStatus") == 2 for ad in ads) else "queued"
         if status == 4:
-            # newest first: the first driver ad is the latest try, and a bound past the tries scans all history
+            # newest first: the first driver ad is the latest try, and a bound past the tries scans
+            # all history
             tries = list(schedd.history(node, ["ClusterId", "ExitCode"], match=1))
             latest: Mapping[str, Any] = max(tries, key=lambda ad: int(ad["ClusterId"]), default={})
             return "done" if latest.get("ExitCode") == 0 else "failed"
         return "running"
 
     def status(self) -> str:
-        """``queued``, ``running``, ``held``, ``done``, ``removed`` or ``failed`` (a nonzero exit)."""
+        """``queued``, ``running``, ``held``, ``done``, ``removed`` or ``failed``.
+
+        A nonzero exit.
+        """
         return self._poll(self._located()[1])[0]
 
     def wait(self, timeout: float | None = None, poll_s: float = 15.0) -> str:
@@ -131,11 +152,13 @@ class RunHandle:
         while (status := self._poll(schedd)[0]) not in TERMINAL:
             if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError(f"cluster {self.cluster} is still {status} after {timeout}s")
-            time.sleep(poll_s if deadline is None else min(poll_s, max(0.0, deadline - time.monotonic())))
+            time.sleep(
+                poll_s if deadline is None else min(poll_s, max(0.0, deadline - time.monotonic()))
+            )
         return status
 
     def result(self) -> ExecResult[Any]:
-        """The run's ``ExecResult``; a failed run re-raises the driver's exception."""
+        """Return the run's ``ExecResult``; a failed run re-raises the driver's exception."""
         _, schedd = self._located()
         status, in_queue = self._poll(schedd)
         if status not in ("done", "failed"):
@@ -155,7 +178,8 @@ class RunHandle:
             ok, payload = pickle.loads(blob)
         except Exception as exc:
             raise RuntimeError(
-                f"cluster {self.cluster}'s {RESULT_FILE} does not load here ({type(exc).__name__}: {exc}); "
+                f"cluster {self.cluster}'s {RESULT_FILE} does not load here "
+                f"({type(exc).__name__}: {exc}); "
                 f"see {LOG_FILE} in {self.log_dir}"
             ) from exc
         if not ok:
@@ -163,6 +187,7 @@ class RunHandle:
         return cast("ExecResult[Any]", payload)
 
     def remove(self) -> None:
+        """Remove the job from its schedd."""
         htc, schedd = self._located()
         schedd.act(
             htc.JobAction.Remove,
@@ -171,24 +196,32 @@ class RunHandle:
         )
 
     def logs(self) -> dict[str, str]:
-        """The driver's logs that have come back to ``log_dir`` (a spooled job's after :meth:`result`)."""
+        """Return the driver's logs that have come back to ``log_dir``.
+
+        A spooled job's after :meth:`result`.
+        """
         root = Path(self.log_dir)
         return {name: (root / name).read_text() for name in LOG_NAMES if (root / name).is_file()}
 
     def save(self, path: str | Path) -> None:
+        """Write this handle to ``path`` as JSON."""
         Path(path).write_text(json.dumps({**asdict(self), "log_dir": str(self.log_dir)}))
 
     @classmethod
     def load(cls, path: str | Path) -> RunHandle:
+        """Read a handle :meth:`save` wrote."""
         return cls(**json.loads(Path(path).read_text()))
 
 
 def _service_nodes(
     specs: Sequence[ServiceSpec], given: Mapping[str, str], profile: SiteProfile
 ) -> dict[str, str]:
-    """``{name: node id}`` for each spec only a SERVICE node can host: launched, given no endpoint, of a
-    kind the site does not serve, and needing an image or GPUs (a driver job hosts the rest beside
-    itself). Ids, not names, reach DAGMan and the three-field announce: a name is a free string."""
+    """``{name: node id}`` for each spec only a SERVICE node can host.
+
+    Launched, given no endpoint, of a kind the site does not serve, and needing an image or
+    GPUs (a driver job hosts the rest beside itself). Ids, not names, reach DAGMan and the
+    three-field announce: a name is a free string.
+    """
     names = sorted(
         spec.name
         for spec in specs
@@ -201,17 +234,21 @@ def _service_nodes(
 
 
 def _require_under(profile: SiteProfile, what: str, path: str | Path) -> None:
-    """Refuse ``path`` outside the site's ``job_root``; lexical (``abspath``), so a symlink under the root
-    passes whatever it names."""
+    """Refuse ``path`` outside the site's ``job_root``.
+
+    Lexical (``abspath``), so a symlink under the root passes whatever it names.
+    """
     root = profile.job_root
     if root is None:
         raise ValueError(
-            f"site {profile.name!r} has no job_root, a tree its jobs read directly, so {what} {path} "
+            f"site {profile.name!r} has no job_root, a tree its jobs read directly, so {what} "
+            f"{path} "
             "cannot be read from a job there"
         )
     if root != "/" and not Path(os.path.abspath(path)).is_relative_to(root):
         raise ValueError(
-            f"{what} {path} lies outside job_root={root} of site {profile.name!r}, the only tree its "
+            f"{what} {path} lies outside job_root={root} of site {profile.name!r}, the only tree "
+            "its "
             f"jobs read directly: pass a {what} under {root}"
         )
 
@@ -220,53 +257,35 @@ def _write_sub(path: Path, desc: Mapping[str, str]) -> None:
     path.write_text("".join(f"{key} = {value}\n" for key, value in desc.items()) + "queue\n")
 
 
-def submit_driverless(
+def _resolved_store(
     plan: Plan[Any] | DurablePlanV2,
-    *,
-    site: str = "generic",
-    image: str | None = None,
-    n_pilots: int = 2,
-    pilots: str = "local",
-    request_memory_mb: int,
-    log_dir: str | Path | None = None,
-    user_modules: Sequence[str | Path] = (),
-    env: str | Path | None = None,
-    extra_submit: Mapping[str, str] | None = None,
-    min_pilots: int = 1,
-    retries: int = 3,
-    max_in_flight: int = 2,
-    services: Mapping[str, str] | None = None,
-    store: str | os.PathLike[str] | None = None,
-    storage_options: Mapping[str, Any] | None = None,
-    salt: str = "",
-    accept_environment: bool = False,
-    task_timeout_s: float | None = None,
-) -> RunHandle:
-    """Submit ``plan`` as ONE job on ``site`` whose driver runs it over ``n_pilots`` pilots:
-    ``pilots="local"`` starts them in the job's own slot (``request_cpus=n_pilots``), ``pilots="condor"``
-    submits them as jobs from inside the driver job (sites whose jobs can submit, with ``worker_ports``,
-    from a ``log_dir`` under ``job_root``). ``log_dir`` receives the submit files and the returned
-    ``result.pkl`` and ``driver.log``; ``user_modules`` and ``env`` are shipped as for
-    :class:`CondorPilots`. ``services`` (service name -> ``scheme://host:port``) are the run's given
-    endpoints, which the driver job checks instead of starting those services. A service only a SERVICE
-    node can host makes the run a DAG in a new ``<log_dir>/graphed-<nonce>/`` (the handle's
-    ``log_dir``), whose ``log_dir``, ``user_modules`` and service inputs must lie under ``job_root``.
-    With ``store`` (a directory every pilot mounts, made absolute here, or an fsspec URL with
-    ``storage_options``), the driver runs ``graphed.checkpoint.resumable(plan, store,
-    storage_options=..., salt=..., accept_environment=...)`` on every try, so a retried driver
-    recomputes only the tasks the store does not hold. ``task_timeout_s`` is
-    :class:`HTCondorBackend`'s. Everything is refused before the bindings are touched."""
+    store: str | os.PathLike[str] | None,
+    storage_options: Mapping[str, Any] | None,
+) -> tuple[str | None, dict[str, Any]]:
+    """``(store, storage_options)`` as ``run.json`` carries them."""
     options = dict(storage_options or {}) if store is not None else {}  # unused without a store
-    if store is not None:
-        # the driver's cwd is the job sandbox HTCondor deletes, so a local store must be absolute here
-        local = os.fspath(store)
-        if not local:
-            raise ValueError("store='' names no directory")
-        store = local if "://" in local else os.path.abspath(local)
-        check_resumable(plan)  # before any pickling: pickling a refused plan's process can start services
-        json.dumps(options)  # run.json carries them: refuse what JSON cannot hold before the bindings
+    if store is None:
+        return None, options
+    # the driver's cwd is the job sandbox HTCondor deletes, so a local store must be absolute here
+    local = os.fspath(store)
+    if not local:
+        raise ValueError("store='' names no directory")
+    store = local if "://" in local else os.path.abspath(local)
+    # before any pickling: pickling a refused plan's process can start services
+    check_resumable(plan)
+    # run.json carries them: refuse what JSON cannot hold before the bindings
+    json.dumps(options)
+    return store, options
+
+
+def _checked_pilots(
+    site: str, pilots: str, services: Mapping[str, str] | None
+) -> tuple[SiteProfile, dict[str, str]]:
+    """``site``'s row and the given endpoints, once ``pilots`` and each endpoint are valid."""
     if pilots not in ("local", "condor"):
-        raise ValueError(f"pilots={pilots!r}: 'local' (in the driver's slot) or 'condor' (jobs it submits)")
+        raise ValueError(
+            f"pilots={pilots!r}: 'local' (in the driver's slot) or 'condor' (jobs it submits)"
+        )
     endpoints = dict(services or {})
     for name, endpoint in endpoints.items():
         try:
@@ -276,23 +295,27 @@ def submit_driverless(
     profile = SITES[site]
     if pilots == "condor" and not profile.jobs_can_submit:
         raise ValueError(
-            f"site {site!r} does not let a job submit jobs, so its driver cannot: use pilots='local'"
+            f"site {site!r} does not let a job submit jobs, so its driver cannot: use "
+            "pilots='local'"
         )
-    _require_plan_importable(plan, ("process", "combine", "empty", "next_tasks", "stop"))
-    launcher = CondorPilots(
-        profile,
-        image=image,
-        request_cpus=n_pilots if pilots == "local" else 1,
-        request_memory_mb=request_memory_mb,
-        log_dir=log_dir,
-        user_modules=user_modules,
-        env=env,
-        extra_submit=extra_submit,
-    )
+    return profile, endpoints
+
+
+def _announce_only(
+    launcher: CondorPilots,
+    plan: Plan[Any] | DurablePlanV2,
+    endpoints: Mapping[str, str],
+    pilots: str,
+    site: str,
+) -> dict[str, str]:
+    """Refuse a driver job ``launcher`` or its site cannot run; return :func:`_service_nodes`."""
     launcher._refuse()
     for module in launcher.user_modules:
         if "," in module:
-            raise ValueError(f"user_modules: {module} holds ',', which splits the job's input list")
+            raise ValueError(
+                f"user_modules: {module} holds ',', which splits the job's input list"
+            )
+    profile = launcher.profile
     announce_only = _service_nodes(plan.services, endpoints, profile)
     if profile.worker_ports is None and (pilots == "condor" or announce_only):
         who = (
@@ -303,8 +326,25 @@ def submit_driverless(
         raise ValueError(
             f"site {site!r} has no worker_ports: {who} cannot reach the driver job's task server"
         )
+    return announce_only
+
+
+def _run_dir(
+    launcher: CondorPilots,
+    plan: Plan[Any] | DurablePlanV2,
+    announce_only: Mapping[str, str],
+    pilots: str,
+    log_dir: str | Path | None,
+) -> tuple[Path, str, dict[str, ServiceJob]]:
+    """Make the run's directory, ``launcher``'s ``log_dir`` from now on.
+
+    ``(run dir, nonce, {node id: SERVICE node job})``.
+    """
+    profile = launcher.profile
     out = Path(
-        os.path.abspath(log_dir or tempfile.mkdtemp(prefix="graphed-driverless-", dir=launcher._sandbox()))
+        os.path.abspath(
+            log_dir or tempfile.mkdtemp(prefix="graphed-driverless-", dir=launcher._sandbox())
+        )
     )
     with ExitStack() as refused:  # a refusal leaves no temporary log_dir behind
         if not log_dir:
@@ -329,9 +369,26 @@ def submit_driverless(
     if nodes:
         run_dir.mkdir()  # new per run: no DAG reads another run's files
     launcher.log_dir = run_dir
+    return run_dir, nonce, nodes
+
+
+def _driver_description(
+    launcher: CondorPilots,
+    plan: Plan[Any] | DurablePlanV2,
+    run_dir: Path,
+    nonce: str,
+    *,
+    dag: bool,
+) -> dict[str, str]:
+    """Stage the driver job in ``run_dir`` and return its submit description."""
     (run_dir / PLAN_FILE).write_bytes(pickle.dumps(plan))
     script = launcher._stage(run_dir, "driver.sh", DRIVER_MODULE, PLACEHOLDER)
-    inputs = [PLAN_FILE, RUN_FILE, *([ENV_FILE] if profile.ship_env else []), *launcher.user_modules]
+    inputs = [
+        PLAN_FILE,
+        RUN_FILE,
+        *([ENV_FILE] if launcher.profile.ship_env else []),
+        *launcher.user_modules,
+    ]
     base = {
         "executable": str(script),
         "arguments": ".",
@@ -342,67 +399,149 @@ def submit_driverless(
         "transfer_output_files": f"{RESULT_FILE},{LOG_FILE}",
         "JobBatchName": f"graphed-driverless-{nonce}",
     }
-    if not nodes:  # a DAG's RETRY is its driver node's one retry owner
+    if not dag:  # a DAG's RETRY is its driver node's one retry owner
         # exit 3 is a plan error: deterministic, so it must not be retried
         base.update(max_retries="2", retry_until="3")
-    desc = launcher.submit_description("", 1, base)
+    return launcher.submit_description("", 1, base)
+
+
+def _submitted(
+    launcher: CondorPilots,
+    run_dir: Path,
+    desc: Mapping[str, str],
+    nodes: Mapping[str, ServiceJob],
+    run: dict[str, Any],
+) -> RunHandle:
+    """Write ``run.json`` (``run`` and the run's layout) and submit the driver job or its DAG."""
+    profile = launcher.profile
     htc = launch._htcondor()
     name, schedd = launcher._choose(htc)
-    run = {
-        "pilots": pilots,
-        "n_pilots": n_pilots,
-        "site": site,
-        "image": image,
-        "log_dir": str(run_dir / PILOTS_SUBDIR),
-        "request_memory_mb": request_memory_mb,
-        "min_pilots": min_pilots,
-        "retries": retries,
-        "max_in_flight": max_in_flight,
+    run.update(
+        log_dir=str(run_dir / PILOTS_SUBDIR),
         # a DAG's driver also reads its SERVICE nodes' queue ads there
-        "schedd_locate": [str(htc.param["COLLECTOR_HOST"]), name]
-        if pilots == "condor" or (nodes and profile.jobs_can_submit)
+        schedd_locate=[str(htc.param["COLLECTOR_HOST"]), name]
+        if run["pilots"] == "condor" or (nodes and profile.jobs_can_submit)
         else None,
-        "user_modules": [Path(m).name for m in launcher.user_modules],
-        "endpoints": endpoints,
-        "announce_only": announce_only,
-        "dag_dir": str(run_dir) if nodes else None,
-        "extra_submit": launcher.extra_submit,
-        "store": store,
-        "storage_options": options,
-        "salt": salt,
-        "accept_environment": accept_environment,
-        "task_timeout_s": task_timeout_s,
-    }
+        user_modules=[Path(m).name for m in launcher.user_modules],
+        dag_dir=str(run_dir) if nodes else None,
+        extra_submit=launcher.extra_submit,
+    )
     (run_dir / RUN_FILE).write_text(json.dumps(run, indent=1))
     if not nodes:
         with ExitStack() as on_error:  # a failed spool must not leave the job queued
             result = launcher._submit(htc, schedd, desc, 1, on_error)
             on_error.pop_all()  # submitted: the job outlives this session
     else:
-        _write_sub(run_dir / "driver.sub", desc)
-        lines = ["JOB driver driver.sub"]
-        for node, job in nodes.items():
-            (run_dir / f"service-{node}").mkdir()
-            keys = job.files(run_dir / f"service-{node}")
-            # a held node frees its slot (a GPU, say) at once; the user's extra_submit still wins
-            _write_sub(
-                run_dir / f"{node}.sub",
-                {**keys, "periodic_remove": "JobStatus == 5", **launcher.extra_submit},
-            )
-            lines.append(f"SERVICE {node} {node}.sub")
-        lines.append("RETRY driver 2 UNLESS-EXIT 3")
-        (run_dir / DAG_FILE).write_text("\n".join(lines) + "\n")
+        _write_dag(run_dir, desc, nodes, launcher.extra_submit)
         # never spooled: the run dir lies under job_root, which the schedd reads
-        # from_dag names the condor_dagman on this host's PATH; the scheduler universe runs the schedd's
+        # from_dag names the condor_dagman on this host's PATH; the scheduler universe runs the
+        # schedd's
         bindir = htc.RemoteParam(htc.Collector().locate(htc.DaemonType.Schedd, name))["BIN"]
         options = {**DAG_OPTIONS, "dagman": f"{bindir}/condor_dagman"}
         launch.ensure_credential(htc, desc)  # the DAG's own description sends none; its nodes do
         result = schedd.submit(htc.Submit.from_dag(str(run_dir / DAG_FILE), options))
     return RunHandle(
-        site=site,
+        site=run["site"],
         schedd=name,
         cluster=int(result.cluster()),
         log_dir=run_dir,
         submitted_at=time.time(),
         dag=bool(nodes),
     )
+
+
+def _write_dag(
+    run_dir: Path,
+    desc: Mapping[str, str],
+    nodes: Mapping[str, ServiceJob],
+    extra_submit: Mapping[str, str],
+) -> None:
+    """Write the run's DAG: ``JOB driver`` and its SERVICE nodes, each with its submit file."""
+    _write_sub(run_dir / "driver.sub", desc)
+    lines = ["JOB driver driver.sub"]
+    for node, job in nodes.items():
+        (run_dir / f"service-{node}").mkdir()
+        keys = job.files(run_dir / f"service-{node}")
+        # a held node frees its slot (a GPU, say) at once; the user's extra_submit still wins
+        _write_sub(
+            run_dir / f"{node}.sub",
+            {**keys, "periodic_remove": "JobStatus == 5", **extra_submit},
+        )
+        lines.append(f"SERVICE {node} {node}.sub")
+    lines.append("RETRY driver 2 UNLESS-EXIT 3")
+    (run_dir / DAG_FILE).write_text("\n".join(lines) + "\n")
+
+
+def submit_driverless(
+    plan: Plan[Any] | DurablePlanV2,
+    *,
+    site: str = "generic",
+    image: str | None = None,
+    n_pilots: int = 2,
+    pilots: str = "local",
+    request_memory_mb: int,
+    log_dir: str | Path | None = None,
+    user_modules: Sequence[str | Path] = (),
+    env: str | Path | None = None,
+    extra_submit: Mapping[str, str] | None = None,
+    min_pilots: int = 1,
+    retries: int = 3,
+    max_in_flight: int = 2,
+    services: Mapping[str, str] | None = None,
+    store: str | os.PathLike[str] | None = None,
+    storage_options: Mapping[str, Any] | None = None,
+    salt: str = "",
+    accept_environment: bool = False,
+    task_timeout_s: float | None = None,
+) -> RunHandle:
+    """Submit ``plan`` as ONE job on ``site`` whose driver runs it over ``n_pilots`` pilots.
+
+    ``pilots="local"`` starts them in the job's own slot (``request_cpus=n_pilots``),
+    ``pilots="condor"`` submits them as jobs from inside the driver job (sites whose jobs can
+    submit, with ``worker_ports``, from a ``log_dir`` under ``job_root``). ``log_dir`` receives
+    the submit files and the returned ``result.pkl`` and ``driver.log``; ``user_modules`` and
+    ``env`` are shipped as for :class:`CondorPilots`. ``services`` (service name ->
+    ``scheme://host:port``) are the run's given endpoints, which the driver job checks instead
+    of starting those services. A service only a SERVICE node can host makes the run a DAG in a
+    new ``<log_dir>/graphed-<nonce>/`` (the handle's ``log_dir``), whose ``log_dir``,
+    ``user_modules`` and service inputs must lie under ``job_root``. With ``store`` (a
+    directory every pilot mounts, made absolute here, or an fsspec URL with
+    ``storage_options``), the driver runs ``graphed.checkpoint.resumable(plan, store,
+    storage_options=..., salt=..., accept_environment=...)`` on every try, so a retried driver
+    recomputes only the tasks the store does not hold. ``task_timeout_s`` is
+    :class:`HTCondorBackend`'s. Everything is refused before the bindings are touched.
+    """
+    store, options = _resolved_store(plan, store, storage_options)
+    profile, endpoints = _checked_pilots(site, pilots, services)
+    _require_plan_importable(plan, ("process", "combine", "empty", "next_tasks", "stop"))
+    launcher = CondorPilots(
+        profile,
+        image=image,
+        request_cpus=n_pilots if pilots == "local" else 1,
+        request_memory_mb=request_memory_mb,
+        log_dir=log_dir,
+        user_modules=user_modules,
+        env=env,
+        extra_submit=extra_submit,
+    )
+    announce_only = _announce_only(launcher, plan, endpoints, pilots, site)
+    run_dir, nonce, nodes = _run_dir(launcher, plan, announce_only, pilots, log_dir)
+    desc = _driver_description(launcher, plan, run_dir, nonce, dag=bool(nodes))
+    run = {
+        "pilots": pilots,
+        "n_pilots": n_pilots,
+        "site": site,
+        "image": image,
+        "request_memory_mb": request_memory_mb,
+        "min_pilots": min_pilots,
+        "retries": retries,
+        "max_in_flight": max_in_flight,
+        "endpoints": endpoints,
+        "announce_only": announce_only,
+        "store": store,
+        "storage_options": options,
+        "salt": salt,
+        "accept_environment": accept_environment,
+        "task_timeout_s": task_timeout_s,
+    }
+    return _submitted(launcher, run_dir, desc, nodes, run)

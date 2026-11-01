@@ -1,4 +1,6 @@
-"""Drive graphed-exec-local M0 (spine) + M7 (executors) through the real orchestrator from local-gate evidence.
+"""Drive graphed-exec-local M0 (spine) + M7 (executors) through the real orchestrator.
+
+From local-gate evidence.
 
 The engine refuses DONE unless `ci` is confirmed green for the pushed commit, so without
 --ci-confirmed the milestones stop at REVIEW (verify CI with scripts/confirm_ci.py in the
@@ -66,6 +68,7 @@ def _drive(milestone: str, *, total: int, cov: float, ci_confirmed: bool) -> Orc
 
 
 def main() -> None:
+    """Advance the orchestrator through M0 and M7 from the given local-gate evidence."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--total", type=int, required=True)
     ap.add_argument("--cov", type=float, required=True)

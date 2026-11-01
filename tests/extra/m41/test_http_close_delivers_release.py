@@ -1,16 +1,17 @@
-"""Closing the driver's HTTP transport must not drop the release it just queued (tests/extra — NOT
-frozen).
+"""Closing the driver's HTTP transport must not drop the release it just queued.
 
-``_peer_http`` releases the workers and closes the driver transport in the very next breath. Sends are
-buffered for a background POST, so a ``close`` that stops the sender before it drains throws the
-``done`` away — and ``pool.shutdown()`` then waits forever on workers that were never released.
+Tests/extra — NOT frozen.
+
+``_peer_http`` releases the workers and closes the driver transport in the very next breath. Sends
+are buffered for a background POST, so a ``close`` that stops the sender before it drains throws
+the ``done`` away — and ``pool.shutdown()`` then waits forever on workers that were never released.
 
 POSITIVE CONTROL: the same release with a pause before ``close`` (nothing left queued) must deliver
 both messages, so a zero in the no-pause leg is a real drop and not a dead instrument.
 
-The second test is the shape CI's slow runners hit: the crashed worker's server is mid-shutdown, so it
-accepts the connection and never answers. One shared sender would spend the whole drain bound retrying
-that POST and the live worker's ``done`` behind it would never be sent.
+The second test is the shape CI's slow runners hit: the crashed worker's server is mid-shutdown, so
+it accepts the connection and never answers. One shared sender would spend the whole drain bound
+retrying that POST and the live worker's ``done`` behind it would never be sent.
 """
 
 from __future__ import annotations
@@ -49,7 +50,11 @@ def test_a_destination_that_never_answers_does_not_starve_the_live_one() -> None
     driver, live = HttpTransport("driver"), HttpTransport("w1")
     try:
         driver.set_registry(
-            {"driver": (driver.host, driver.port), "w0": hole.getsockname(), "w1": (live.host, live.port)}
+            {
+                "driver": (driver.host, driver.port),
+                "w0": hole.getsockname(),
+                "w1": (live.host, live.port),
+            }
         )
         release_workers(driver)  # w0 (the hole) is queued first
         t0 = time.monotonic()

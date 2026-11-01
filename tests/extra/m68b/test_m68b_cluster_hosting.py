@@ -1,7 +1,10 @@
-"""m68b B1 paths the frozen suite does not reach: ``announce.py``'s identity fallback, an exhausted port
-range, a ``service/`` mount point, a port another process took after the scan, the watched pair while it
-is missing or torn, a child that exits after it was ready; ``ServiceJob``'s refusals of a job it cannot
-build, and a ``stop()`` before any submit. No bindings and no pool; ``announce.py`` runs in process."""
+"""m68b B1 paths the frozen suite does not reach.
+
+``announce.py``'s identity fallback, an exhausted port range, a ``service/`` mount point, a port
+another process took after the scan, the watched pair while it is missing or torn, a child that
+exits after it was ready; ``ServiceJob``'s refusals of a job it cannot build, and a ``stop()``
+before any submit. No bindings and no pool; ``announce.py`` runs in process.
+"""
 
 from __future__ import annotations
 
@@ -26,14 +29,16 @@ from graphed_executors.htcondor_backend import announce as ann
 from graphed_executors.htcondor_backend.services import ServiceJob
 
 posix = pytest.mark.skipif(
-    sys.platform == "win32", reason="announce.py is POSIX-only: Windows delivers SIGTERM as TerminateProcess"
+    sys.platform == "win32",
+    reason="announce.py is POSIX-only: Windows delivers SIGTERM as TerminateProcess",
 )
 
-# a child that listens on its port (argv[1]) and exits with argv[2] after argv[3] seconds, or at once on
-# port argv[4]
+# a child that listens on its port (argv[1]) and exits with argv[2] after argv[3] seconds, or at
+# once on port argv[4]
 LISTENER = (
     "import socket, sys, time\n"
-    "port, code, after, quit_on = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])\n"
+    "port, code, after, quit_on = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), "
+    "int(sys.argv[4])\n"
     "if port == quit_on:\n"
     "    sys.exit(code)\n"
     "s = socket.socket()\n"
@@ -46,7 +51,10 @@ LISTENER = (
 
 
 def free_ports(n: int) -> list[int]:
-    """``n`` consecutive ports ``free()`` accepts, scanned from a per-process base so concurrent runs differ."""
+    """``n`` consecutive ports ``free()`` accepts.
+
+    Scanned from a per-process base so concurrent runs differ.
+    """
     for low in range(31000 + os.getpid() % 1000 * 20, 60000, 97):
         ports = list(range(low, low + n))
         if all(ann.free(p) for p in ports):
@@ -68,8 +76,10 @@ def listeners(ports: list[int]) -> Iterator[None]:
 
 @pytest.fixture
 def job_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """A job dir as the cwd on a machine named ``localhost``, and ``CHILD`` restored (and any child it
-    names reaped) afterwards."""
+    """Yield a job dir as the cwd on a machine named ``localhost``.
+
+    ``CHILD`` is restored (and any child it names reaped) afterwards.
+    """
     monkeypatch.chdir(tmp_path)
     (tmp_path / "service").mkdir()
     (tmp_path / "machine.ad").write_text('Machine = "localhost"\n')
@@ -100,10 +110,12 @@ def config(ports: list[int], **fields: Any) -> dict[str, Any]:
     }
 
 
-# ---- announce.py ----------------------------------------------------------------------------------------
+# ---- announce.py --------------------------------------------------------------------------------
 
 
-def test_identity_is_the_machine_ad_s_else_the_fqdn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_identity_is_the_machine_ad_s_else_the_fqdn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(socket, "getfqdn", lambda: "fqdn.example")
     monkeypatch.delenv("_CONDOR_MACHINE_AD", raising=False)
     assert ann.host_identity() == "fqdn.example"
@@ -160,8 +172,8 @@ def test_a_port_taken_after_the_scan_moves_on_to_the_next(
     assert asked[low] == 2
 
 
-# starts the child with announce's start() in a process whose at-fork child handler exits 86, as gRPC's
-# restarts its pollers in a forked child
+# starts the child with announce's start() in a process whose at-fork child handler exits 86, as
+# gRPC's restarts its pollers in a forked child
 AT_FORK_PROBE = (
     "import json, os, sys\n"
     "from graphed_executors.htcondor_backend import announce as ann\n"
@@ -231,7 +243,9 @@ def test_watch_mode_retries_a_refused_pair_and_stops_once_it_answers_200(
 
     monkeypatch.setattr(ann, "post", post)
     monkeypatch.setattr(ann, "RESTARTS", 0)  # the child's exit ends the job
-    cfg = config(ports, argv=["{python}", "-c", LISTENER, "{port}", "7", "5", "0"], key="svc0", watch="dag")
+    cfg = config(
+        ports, argv=["{python}", "-c", LISTENER, "{port}", "7", "5", "0"], key="svc0", watch="dag"
+    )
     (job_dir / "service.json").write_text(json.dumps(cfg))
     monkeypatch.setattr(sys, "argv", ["announce.py", "service.json"])
     assert ann.serve() == 7
@@ -265,7 +279,7 @@ def test_a_child_that_exits_after_ready_ends_the_job_with_its_code(
     assert "ready pid=" in out and "the child exited 5" in out and "orphaned" not in out
 
 
-# ---- ServiceJob -------------------------------------------------------------------------------------------
+# ---- ServiceJob ---------------------------------------------------------------------------------
 
 
 def web(**launch: Any) -> ServiceSpec:
@@ -276,7 +290,11 @@ def test_a_service_job_it_cannot_build_is_refused(tmp_path: Path) -> None:
     pilots = CondorPilots("generic", log_dir=tmp_path)
     with pytest.raises(ValueError, match="no launch recipe"):
         ServiceJob(ServiceSpec("ext", "http"), pilots, key="k", url="http://h:1", secret=b"s")
-    for kwargs in ({}, {"url": "http://h:1"}, {"url": "http://h:1", "secret": b"s", "watch": str(tmp_path)}):
+    for kwargs in (
+        {},
+        {"url": "http://h:1"},
+        {"url": "http://h:1", "secret": b"s", "watch": str(tmp_path)},
+    ):
         with pytest.raises(ValueError, match="either to url with secret"):
             ServiceJob(web(), pilots, key="k", **kwargs)
     no_workers = CondorPilots(replace(SITES["generic"], worker_ports=None), log_dir=tmp_path)
@@ -286,13 +304,17 @@ def test_a_service_job_it_cannot_build_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_submit_through_an_unstarted_launcher_is_refused_before_any_file(tmp_path: Path) -> None:
-    job = ServiceJob(web(), CondorPilots("generic", log_dir=tmp_path), key="k", url="http://h:1", secret=b"s")
+    job = ServiceJob(
+        web(), CondorPilots("generic", log_dir=tmp_path), key="k", url="http://h:1", secret=b"s"
+    )
     with pytest.raises(AssertionError, match="start the launcher"):
         job.submit()
     assert job.dir is None and list(tmp_path.iterdir()) == []
 
 
 def test_stop_before_any_submit_touches_nothing(tmp_path: Path) -> None:
-    job = ServiceJob(web(), CondorPilots("generic", log_dir=tmp_path), key="k", url="http://h:1", secret=b"s")
+    job = ServiceJob(
+        web(), CondorPilots("generic", log_dir=tmp_path), key="k", url="http://h:1", secret=b"s"
+    )
     job.stop()
     assert job.dir is None and job.cluster is None and list(tmp_path.iterdir()) == []

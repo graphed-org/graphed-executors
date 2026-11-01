@@ -1,5 +1,8 @@
-"""m68c §6 on dask: ``dask_runner`` runs a service join plan stage by stage over a process ``LocalCluster``;
-the peer transport runner refuses a join plan."""
+"""m68c §6 on dask.
+
+``dask_runner`` runs a service join plan stage by stage over a process ``LocalCluster``; the peer
+transport runner refuses a join plan.
+"""
 
 from __future__ import annotations
 
@@ -43,4 +46,6 @@ def test_the_dask_peer_transport_refuses_a_join_plan_naming_submit_runner() -> N
     plan = join_v2("refuse-dask", spec=given_spec())
     with pytest.raises(TypeError) as excinfo:
         run_bounded(lambda: transport_run_plan(plan, None))
-    assert "SubmitRunner(" in str(excinfo.value) and "DurablePlanV2" in str(excinfo.value), excinfo.value
+    assert "SubmitRunner(" in str(excinfo.value) and "DurablePlanV2" in str(excinfo.value), (
+        excinfo.value
+    )

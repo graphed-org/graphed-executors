@@ -1,8 +1,11 @@
-"""m69b: a need of a worker moves the runner's pilots only while no plan of its backend starts its services
-(plan-services.md §5.2 "Ordering"), over the frozen ``OrderSchedd`` recorder: a need while a later plan's
-services start, beside one or between two, releases its held pilots only after the set's last announce,
-a driver job's pilots are submitted only after its SERVICE node announced, and a driver job whose pilots
-never start exits 1 with or without services."""
+"""m69b: a need of a worker waits while a plan starts its services.
+
+A need of a worker moves the runner's pilots only while no plan of its backend starts its services
+(plan-services.md §5.2 "Ordering"), over the frozen ``OrderSchedd`` recorder: a need while a later
+plan's services start, beside one or between two, releases its held pilots only after the set's
+last announce, a driver job's pilots are submitted only after its SERVICE node announced, and a
+driver job whose pilots never start exits 1 with or without services.
+"""
 
 from __future__ import annotations
 
@@ -33,8 +36,13 @@ ANNOUNCE_AFTER_S = 1.0
 
 
 def later_plan_backend(tmp_path: Path, schedd: Any) -> HTCondorBackend:
-    """A backend whose first plan ran: its pilots submitted (they start, and answer a set's probe)."""
-    backend = HTCondorBackend(launch.CondorPilots("generic", log_dir=tmp_path), 2, host="127.0.0.1")
+    """Return a backend whose first plan ran.
+
+    Its pilots submitted (they start, and answer a set's probe).
+    """
+    backend = HTCondorBackend(
+        launch.CondorPilots("generic", log_dir=tmp_path), 2, host="127.0.0.1"
+    )
     backend.min_pilots = 0
     backend.wait_for_pilots(0)
     return backend
@@ -111,19 +119,29 @@ def test_a_need_between_a_set_s_services_leaves_the_pilots_held_to_its_last_anno
     inside = order.between(schedd.events, "the set starts", "the set started")
     holds, releases = order.acts(inside, "Hold"), order.acts(inside, "Release")
     assert len(holds) == 1 and len(releases) == 1, inside
-    assert order.acts(order.between(schedd.events, "web2 announced"), "Release")[:1] == releases, inside
+    assert order.acts(order.between(schedd.events, "web2 announced"), "Release")[:1] == releases, (
+        inside
+    )
 
 
 @pytest.fixture
 def in_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A driver job in a slot whose machine ad names it ``127.0.0.1``, on a host whose fqdn resolves to
-    nothing (as a macOS reverse lookup's ``…ip6.arpa`` can): the job is dialled at its ad's ``Machine``."""
+    """Place a driver job in a slot whose machine ad names it ``127.0.0.1``.
+
+    On a host whose fqdn resolves to nothing (as a macOS reverse lookup's ``…ip6.arpa`` can): the
+    job is dialled at its ad's ``Machine``.
+    """
     monkeypatch.setattr(socket, "getfqdn", lambda name="": "unresolvable.invalid")
-    monkeypatch.setenv("_CONDOR_MACHINE_AD", str(harness.write_machine_ad(tmp_path / "machine.ad")))
+    monkeypatch.setenv(
+        "_CONDOR_MACHINE_AD", str(harness.write_machine_ad(tmp_path / "machine.ad"))
+    )
 
 
 def driver_job(tmp_path: Path, services: tuple[str, ...]) -> tuple[Path, Path]:
-    """A DAG driver job's dir over pilots="condor", each of ``services`` a SERVICE node; and its DAG dir."""
+    """Return a DAG driver job's dir over pilots="condor", each of ``services`` a SERVICE node.
+
+    Also returns its DAG dir.
+    """
     job, dag = tmp_path / "job", tmp_path / "dag"
     job.mkdir()
     dag.mkdir()
@@ -150,7 +168,10 @@ def driver_job(tmp_path: Path, services: tuple[str, ...]) -> tuple[Path, Path]:
 
 
 def service_node(schedd: Any, dag: Path, node: Path) -> threading.Thread:
-    """SERVICE node ``node``: idle ``ANNOUNCE_AFTER_S`` after the driver publishes its url, then announce."""
+    """SERVICE node ``node``.
+
+    Idle ``ANNOUNCE_AFTER_S`` after the driver publishes its url, then announce.
+    """
 
     def announce() -> None:
         deadline = time.monotonic() + 60.0
@@ -194,7 +215,9 @@ def test_a_driver_job_whose_pilots_never_start_exits_1(
 ) -> None:
     job, dag = driver_job(tmp_path, services)
     wait = HTCondorBackend.wait_for_pilots
-    monkeypatch.setattr(HTCondorBackend, "wait_for_pilots", lambda self, n, timeout=0.0: wait(self, n, 0.5))
+    monkeypatch.setattr(
+        HTCondorBackend, "wait_for_pilots", lambda self, n, timeout=0.0: wait(self, n, 0.5)
+    )
     schedd = order.OrderSchedd(SERVICE_PORT)  # its pilots never start
     order.order_bindings(monkeypatch, schedd)
     nodes = [service_node(schedd, dag, tmp_path / "svc0")] if services else []

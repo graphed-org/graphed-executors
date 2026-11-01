@@ -1,7 +1,10 @@
-"""m68d port race (plan §2 "Port race — a port counts only when the child holds its listener"), rows
-P1-P4 of §4. P1-P3 replay P1d on Linux: the child starts on a scanned port, another process binds that
-port, and only then does the child try to bind it (``m68d_child.py gated``). P4 reads a fixture proc tree
-on every OS."""
+"""m68d port race: a port counts only when the child holds its listener.
+
+m68d port race (plan §2 "Port race — a port counts only when the child holds its listener"), rows
+P1-P4 of §4. P1-P3 replay P1d on Linux: the child starts on a scanned port, another process binds
+that port, and only then does the child try to bind it (``m68d_child.py gated``). P4 reads a
+fixture proc tree on every OS.
+"""
 
 from __future__ import annotations
 
@@ -33,13 +36,18 @@ from m68d_harness import (
 
 from graphed_executors.submit.threadpool import ThreadBackend
 
-linux = pytest.mark.skipif(sys.platform != "linux", reason="the race is replayed against /proc (Linux)")
+linux = pytest.mark.skipif(
+    sys.platform != "linux", reason="the race is replayed against /proc (Linux)"
+)
 
 
 @contextmanager
 def foreign_after_start(report: Path, gate: Path, status: int) -> Iterator[list[Web]]:
-    """Once the child's first start is recorded, a server answering ``status`` binds that port on every
-    interface; then ``gate`` opens. Yields the list the server lands in."""
+    """Bind the child's port from a ``status`` server once it starts, then open ``gate``.
+
+    Once the child's first start is recorded, a server answering ``status`` binds that port on
+    every interface; then ``gate`` opens. Yields the list the server lands in.
+    """
     bound: list[Web] = []
 
     def bind() -> None:
@@ -58,11 +66,18 @@ def foreign_after_start(report: Path, gate: Path, status: int) -> Iterator[list[
 
 
 def announce_cfg(argv: list[str], check: str, ports: tuple[int, int]) -> dict[str, Any]:
-    return {"argv": argv, "env": {}, "check": check, "ports": list(ports), "python": sys.executable, "timeout_s": 8.0}
+    return {
+        "argv": argv,
+        "env": {},
+        "check": check,
+        "ports": list(ports),
+        "python": sys.executable,
+        "timeout_s": 8.0,
+    }
 
 
 def listener_pids(port: int) -> set[int]:
-    """The pids whose open fds include a LISTEN socket on ``port`` (read from /proc)."""
+    """Return the pids whose open fds include a LISTEN socket on ``port`` (read from /proc)."""
     inodes = set()
     for name in ("/proc/net/tcp", "/proc/net/tcp6"):
         with open(name) as f:
@@ -74,7 +89,9 @@ def listener_pids(port: int) -> set[int]:
     for entry in os.listdir("/proc"):
         if entry.isdigit():
             try:
-                links = {os.readlink(f"/proc/{entry}/fd/{fd}") for fd in os.listdir(f"/proc/{entry}/fd")}
+                links = {
+                    os.readlink(f"/proc/{entry}/fd/{fd}") for fd in os.listdir(f"/proc/{entry}/fd")
+                }
             except OSError:
                 continue
             if links & inodes:
@@ -82,7 +99,7 @@ def listener_pids(port: int) -> set[int]:
     return pids
 
 
-# ---- P1: announce.py moves past a port another process took after the scan -------------------------------
+# ---- P1: announce.py moves past a port another process took after the scan ----------------------
 
 
 @linux
@@ -94,7 +111,9 @@ def test_a_port_another_process_takes_after_the_scan_is_skipped(
     (tmp_path / "service").mkdir()
     report, gate = tmp_path / "child", tmp_path / "gate"
     low, high = free_range(3)
-    cfg = announce_cfg(["{python}", CHILD_FILE, "gated", "{port}", str(report), str(gate)], check, (low, high))
+    cfg = announce_cfg(
+        ["{python}", CHILD_FILE, "gated", "{port}", str(report), str(gate)], check, (low, high)
+    )
     announce = announce_api()
     with foreign_after_start(report, gate, 501) as foreign:
         got = run_bounded(lambda: announce.start(cfg, "127.0.0.1"), 60.0)
@@ -107,7 +126,7 @@ def test_a_port_another_process_takes_after_the_scan_is_skipped(
     assert f"port {low} is held by another process" in log, log
 
 
-# ---- P2: a listener a grandchild holds is the child's own ------------------------------------------------------
+# ---- P2: a listener a grandchild holds is the child's own ---------------------------------------
 
 
 @linux
@@ -118,7 +137,9 @@ def test_a_child_that_listens_through_a_shell_is_its_own_listener(
     (tmp_path / "service").mkdir()
     report = tmp_path / "child"
     low, high = free_range(3)
-    script = f"{{python}} {shlex.quote(CHILD_FILE)} serve {{port}} {shlex.quote(str(report))}; exit $?"
+    script = (
+        f"{{python}} {shlex.quote(CHILD_FILE)} serve {{port}} {shlex.quote(str(report))}; exit $?"
+    )
     cfg = announce_cfg(["sh", "-c", script], "http:/", (low, high))
     announce = announce_api()
     calls: list[tuple[int, Any, bool]] = []
@@ -136,7 +157,9 @@ def test_a_child_that_listens_through_a_shell_is_its_own_listener(
         child, port = got
         holders = listener_pids(port)
         assert port == low, f"ready on {port}, not the first port {low}"
-        assert holders and child.pid not in holders, f"listener held by {holders}, the child is {child.pid}"
+        assert holders and child.pid not in holders, (
+            f"listener held by {holders}, the child is {child.pid}"
+        )
         assert any(pid == child.pid and held for pid, _inodes, held in calls), calls
     finally:
         if not isinstance(got, str):
@@ -145,7 +168,7 @@ def test_a_child_that_listens_through_a_shell_is_its_own_listener(
             end_child(report, pid, 0)  # the shell's python outlives a reap of the shell
 
 
-# ---- P3: a driver-hosted service refuses a port another process holds ----------------------------------------
+# ---- P3: a driver-hosted service refuses a port another process holds ---------------------------
 
 
 @linux
@@ -153,7 +176,14 @@ def test_a_driver_hosted_service_refuses_a_port_held_by_another_process(tmp_path
     report, gate = tmp_path / "child", tmp_path / "gate"
     low, high = free_range(3)
     argv = ("{python}", CHILD_FILE, "gated", "{port}", str(report), str(gate))
-    spec = ServiceSpec(SERVICE, "http", check="http:/", ports=(low, high), launch=Launch(argv=argv), timeout_s=10.0)
+    spec = ServiceSpec(
+        SERVICE,
+        "http",
+        check="http:/",
+        ports=(low, high),
+        launch=Launch(argv=argv),
+        timeout_s=10.0,
+    )
     backend = ThreadBackend(1)
     service_set = services_api().ServiceSet((spec,), backend)
     try:
@@ -163,20 +193,26 @@ def test_a_driver_hosted_service_refuses_a_port_held_by_another_process(tmp_path
         run_bounded(service_set.close, 60.0)
         backend.close()
     assert foreign and foreign[0].port == low, "the foreign listener never bound the scanned port"
-    assert isinstance(err, services_api().ServiceUnavailable), repr(err)
+    assert isinstance(err, services_api().ServiceUnavailableError), repr(err)
     managed = err.legs.get("managed", "")
     assert f"port {low} " in managed and "held by another process" in managed, err.legs
 
 
-# ---- P4: the ownership helpers over a fixture proc tree -------------------------------------------------------
+# ---- P4: the ownership helpers over a fixture proc tree -----------------------------------------
 
 PORT = 0x5BA1
-HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode"
+HEADER = (
+    "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  "
+    "timeout inode"
+)
 TAIL = "1 0000000000000000 100 0 0 10 0"
 
 
 def tcp_row(n: int, local: str, remote: str, state: str, inode: int) -> str:
-    return f"   {n}: {local} {remote} {state} 00000000:00000000 00:00000000 00000000  1000        0 {inode} {TAIL}"
+    return (
+        f"   {n}: {local} {remote} {state} 00000000:00000000 00:00000000 00000000  1000        "
+        f"0 {inode} {TAIL}"
+    )
 
 
 def can_symlink() -> bool:
@@ -189,9 +225,12 @@ def can_symlink() -> bool:
 
 
 def proc_tree(root: Path, links: bool) -> Path:
-    """Listeners on ``PORT``: inode 7101 (tcp) and 7104 (tcp6); 7102 is an established connection on it
-    and 7103 a listener on the next port. Pids: 1 ← 100 (the child) ← 200 ← 300 (holds 7101); 1 ← 900
-    (holds 7104); 400's stat and 500's fd (a child of 100) cannot be read."""
+    """Write a /proc tree with listeners on ``PORT``: inode 7101 (tcp) and 7104 (tcp6).
+
+    7102 is an established connection on it and 7103 a listener on the next port. Pids: 1 ← 100
+    (the child) ← 200 ← 300 (holds 7101); 1 ← 900 (holds 7104); 400's stat and 500's fd (a
+    child of 100) cannot be read.
+    """
     any4, any6 = "00000000", "0" * 32
     (root / "net").mkdir(parents=True)
     (root / "net" / "tcp").write_text(
@@ -208,11 +247,20 @@ def proc_tree(root: Path, links: bool) -> Path:
     (root / "net" / "tcp6").write_text(
         "\n".join([HEADER, tcp_row(0, f"{any6}:{PORT:04X}", f"{any6}:0000", "0A", 7104)]) + "\n"
     )
-    tree = {1: (0, None), 100: (1, None), 200: (100, None), 300: (200, 7101), 900: (1, 7104), 500: (100, None)}
+    tree = {
+        1: (0, None),
+        100: (1, None),
+        200: (100, None),
+        300: (200, 7101),
+        900: (1, 7104),
+        500: (100, None),
+    }
     for pid, (ppid, inode) in tree.items():
         (root / str(pid)).mkdir()
         comm = "python3 child" if pid == 200 else f"p{pid}"
-        (root / str(pid) / "stat").write_text(f"{pid} ({comm}) S {ppid} {pid} {pid} 0 -1 4194560 0 0 0\n")
+        (root / str(pid) / "stat").write_text(
+            f"{pid} ({comm}) S {ppid} {pid} {pid} 0 -1 4194560 0 0 0\n"
+        )
         if pid == 500:
             (root / str(pid) / "fd").write_text("not a directory")
             continue

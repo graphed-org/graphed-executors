@@ -1,5 +1,6 @@
-"""m46 per-instance capability honesty — the research critique's one correction, frozen
-(plan §1.1 table; §3 m46 `test_parsl_capabilities`).
+"""m46 per-instance capability honesty.
+
+The research critique's one correction, frozen (plan §1.1 table; §3 m46 `test_parsl_capabilities`).
 
 The frozen 7-field ``SubmitCapabilities`` (m42 pin — NO new fields, ever) carries per-INSTANCE
 vectors: ``ParslBackend(HTEX)`` is all-seven-False (literally the protocol docstring's "parsl
@@ -13,7 +14,8 @@ Discriminates: a per-library (non-instance) capability stub (fails the TPE row),
 ``peer_data_movement=True`` HTEX lie (the §1.1.4 `_require_peer` silent-pathology blast radius —
 also frozen at the engine gate in `test_parsl_m43_engine_on_tpe`), a capability subclass smuggling
 an eighth field (dataclass equality is class-exact), and a name-string type check (the stdlib
-``ThreadPoolExecutor`` trap: same class name, wrong library, must still be refused)."""
+``ThreadPoolExecutor`` trap: same class name, wrong library, must still be refused).
+"""
 
 from __future__ import annotations
 
@@ -72,7 +74,8 @@ def test_htex_instance_reports_the_all_false_parsl_floor(htex) -> None:  # type:
         "ParslBackend(HTEX) must report all seven flags False — future args resolve on the submit "
         "host (peer_data_movement), broadcast reships per task, no pinning/per-task retries/"
         "resources/running-cancel/file-cache exist (plan §1.1 table). In particular "
-        "peer_data_movement=True would falsely open the m43 _require_peer gate to head-node routing."
+        "peer_data_movement=True would falsely open the m43 _require_peer gate to head-node "
+        "routing."
     )
 
 
@@ -87,9 +90,12 @@ def test_tpe_instance_reports_the_threadbackend_shape(tpe) -> None:  # type: ign
 
 
 def test_capability_fields_are_exactly_the_frozen_seven(htex, tpe) -> None:  # type: ignore[no-untyped-def]
-    """No new capability field, ever (m42 pin restated by m45): both instances carry the exact
-    7-name frozen dataclass — not a subclass with extras (a subclass is a shadow capability
-    channel; m47's transport dispatch goes through a backend attribute, never capability fields)."""
+    """No new capability field, ever (m42 pin restated by m45).
+
+    Both instances carry the exact 7-name frozen dataclass — not a subclass with extras (a
+    subclass is a shadow capability channel; m47's transport dispatch goes through a backend
+    attribute, never capability fields).
+    """
     for backend in (make_parsl_backend(htex), make_parsl_backend(tpe)):
         caps = backend.capabilities
         assert tuple(f.name for f in dataclasses.fields(type(caps))) == FLAG_NAMES
@@ -97,8 +103,11 @@ def test_capability_fields_are_exactly_the_frozen_seven(htex, tpe) -> None:  # t
 
 
 def test_unknown_executor_types_are_refused_loudly() -> None:
-    """A vector is never guessed: non-parsl objects — including the stdlib ThreadPoolExecutor,
-    whose class NAME matches parsl's — get a TypeError naming both supported executor classes."""
+    """A vector is never guessed: non-parsl objects.
+
+    Including the stdlib ThreadPoolExecutor, whose class NAME matches parsl's — get a TypeError
+    naming both supported executor classes.
+    """
     with pytest.raises(TypeError) as excinfo:
         make_parsl_backend(object())
     message = str(excinfo.value)
@@ -109,6 +118,7 @@ def test_unknown_executor_types_are_refused_loudly() -> None:
     stdlib_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
         with pytest.raises(TypeError):
-            make_parsl_backend(stdlib_pool)  # same __name__ as parsl's TPE — a name check passes it
+            # same __name__ as parsl's TPE — a name check passes it
+            make_parsl_backend(stdlib_pool)
     finally:
         stdlib_pool.shutdown()

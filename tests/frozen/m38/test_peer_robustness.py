@@ -1,9 +1,13 @@
-"""M38 peer robustness (spike; frozen at P6): peer mode is STRICT (never silently falls back to hub
-for a feature it can't do) and propagates a worker failure PROMPTLY + intact (the M7 obligation)."""
+"""M38 peer robustness (spike; frozen at P6).
+
+Peer mode is STRICT (never silently falls back to hub for a feature it can't do) and propagates a
+worker failure PROMPTLY + intact (the M7 obligation).
+"""
 
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import pytest
 from graphed.core import Partition, Plan, Task
@@ -34,16 +38,18 @@ class _Monitor:  # minimal Monitor-shaped object (only its presence matters for 
 
 
 @pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
-def test_peer_refuses_pooled_combines_loudly(executor_cls) -> None:
-    # pooled_combines is a hub-only mechanism (peer's whole model is off-driver combines). Rather than
-    # silently running hub, peer mode REFUSES — hub-mode must never sneak into a run asked to be peer.
+def test_peer_refuses_pooled_combines_loudly(executor_cls: Any) -> None:
+    # pooled_combines is a hub-only mechanism (peer's whole model is off-driver combines). Rather
+    # than silently running hub, peer mode REFUSES — hub-mode must never sneak into a run asked to
+    # be peer.
     with pytest.raises(ValueError, match="pooled_combines"):
         executor_cls(max_workers=2, comms="ipc", pooled_combines=True)
 
 
 @pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
-def test_peer_accepts_monitor_and_on_combine(executor_cls) -> None:
-    # peer now has emission parity, so these are accepted (no raise) — they are NOT silently dropped.
+def test_peer_accepts_monitor_and_on_combine(executor_cls: Any) -> None:
+    # peer now has emission parity, so these are accepted (no raise) — they are NOT silently
+    # dropped.
     executor_cls(max_workers=2, comms="ipc", monitor=_Monitor())
     executor_cls(max_workers=2, comms="ipc", on_combine=lambda n: None)
 
@@ -54,10 +60,10 @@ def _count(partition: Partition, resources: object) -> int:
 
 class _Recorder:
     def __init__(self) -> None:
-        self.events: list = []
+        self.events: list[Any] = []
         self.combines = 0
 
-    def on_task(self, event) -> None:
+    def on_task(self, event: Any) -> None:
         self.events.append(event)
 
     def on_profile(self, worker: str, payload: bytes) -> None: ...
@@ -70,7 +76,7 @@ class _Recorder:
 
 @pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
 @pytest.mark.parametrize("kind", ["ipc", "http"])
-def test_peer_emits_full_monitor_event_parity(executor_cls, kind) -> None:
+def test_peer_emits_full_monitor_event_parity(executor_cls: Any, kind: str) -> None:
     # WITNESS the emission parity that lets peer be the default: under peer mode a monitor sees the
     # same per-task lifecycle + combine count as the hub path (so the dashboard works under peer).
     n = 8
@@ -90,11 +96,12 @@ def test_peer_emits_full_monitor_event_parity(executor_cls, kind) -> None:
 
 
 def _spin(partition: Partition, resources: object) -> int:
-    # busy on a WALL-CLOCK budget, RELEASING THE GIL each step (``time.sleep``) so the 10ms off-thread
-    # sampler — which needs the GIL for ``sys._current_frames()`` — reliably lands samples. A pure-Python
-    # spin holds the GIL for the whole budget and can starve the sampler to ZERO samples on a slow/loaded
-    # machine (seen on py3.14 macOS/Windows CI); the real analysis releases the GIL in array kernels, so
-    # this mimics that. Per root-prompt R0.10a a witness must be a deterministic invariant, not timing.
+    # busy on a WALL-CLOCK budget, RELEASING THE GIL each step (``time.sleep``) so the 10ms
+    # off-thread sampler — which needs the GIL for ``sys._current_frames()`` — reliably lands
+    # samples. A pure-Python spin holds the GIL for the whole budget and can starve the sampler to
+    # ZERO samples on a slow/loaded machine (seen on py3.14 macOS/Windows CI); the real analysis
+    # releases the GIL in array kernels, so this mimics that. Per root-prompt R0.10a a witness must
+    # be a deterministic invariant, not timing.
     end = time.monotonic() + 0.15
     s, i = 0.0, 0
     while time.monotonic() < end:
@@ -112,21 +119,22 @@ class _ProfRecorder(_Recorder):
     def on_profile(self, worker: str, payload: bytes) -> None:
         self.profiles.append(payload)
 
-    def worker_profiler_factory(self):
+    def worker_profiler_factory(self) -> Any:
         return make_worker_profiler
 
 
-# Realistic profiling combos. (ThreadExecutor, "http") is excluded: under the GIL the HTTP transport's
-# per-endpoint server + sender threads plus a per-worker sampler thread all contend in one process, so
-# the off-thread sampler starves and may land no sample in a short run — a test-timing artifact, not a
-# product gap. HTTP is the process/distributed seam; the in-process thread pool's default is IPC.
-# (Follow-up: under FREE-THREADED CPython (3.14t) there is no GIL, so those threads run truly in
-# parallel and HTTP+threads becomes reasonable to witness — revisit when 3.14t is the norm.)
+# Realistic profiling combos. (ThreadExecutor, "http") is excluded: under the GIL the HTTP
+# transport's per-endpoint server + sender threads plus a per-worker sampler thread all contend in
+# one process, so the off-thread sampler starves and may land no sample in a short run — a
+# test-timing artifact, not a product gap. HTTP is the process/distributed seam; the in-process
+# thread pool's default is IPC. (Follow-up: under FREE-THREADED CPython (3.14t) there is no GIL, so
+# those threads run truly in parallel and HTTP+threads becomes reasonable to witness — revisit when
+# 3.14t is the norm.)
 @pytest.mark.parametrize(
     ("executor_cls", "kind"),
     [(ThreadExecutor, "ipc"), (ProcessExecutor, "ipc"), (ProcessExecutor, "http")],
 )
-def test_peer_runs_the_profiler_under_a_monitor(executor_cls, kind) -> None:
+def test_peer_runs_the_profiler_under_a_monitor(executor_cls: Any, kind: str) -> None:
     # WITNESS profiling parity (so Dashboard(profile=True) is not silently empty under peer): peer
     # workers run the off-thread sampler and ship a non-empty flamegraph tree to the monitor.
     rec = _ProfRecorder()
@@ -140,9 +148,10 @@ def test_peer_runs_the_profiler_under_a_monitor(executor_cls, kind) -> None:
 
 @pytest.mark.parametrize("executor_cls", [ThreadExecutor, ProcessExecutor])
 @pytest.mark.parametrize("kind", ["ipc", "http"])
-def test_peer_propagates_worker_error_promptly(executor_cls, kind) -> None:
-    # a process() exception means the root never forms; the driver must detect the failed worker and
-    # re-raise its error intact, NOT hang until the safety timeout (pytest-timeout would catch a hang).
+def test_peer_propagates_worker_error_promptly(executor_cls: Any, kind: str) -> None:
+    # a process() exception means the root never forms; the driver must detect the failed worker
+    # and re-raise its error intact, NOT hang until the safety timeout (pytest-timeout would catch
+    # a hang).
     tasks = tuple(Task(k, Partition(f"f{k}.root", "Events", k, k + 1)) for k in range(8))
     plan = Plan(process=_boom, combine=_add, empty=_zero, tasks=tasks)
     with pytest.raises(ValueError, match="kaboom"):

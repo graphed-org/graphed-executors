@@ -1,10 +1,10 @@
 """M39 (a-BI) — the SAME exchange suite runs against BOTH real backends (plan §8, B-r5.3).
 
 The M2 backend-independence discipline (``tests/frozen/m2/backends.py`` +
-``test_backend_independence.py`` ship two backends in the seam-introducing milestone) extended to the
-shuffle seam: ONE test body, parametrized over ``AwkwardBackend`` AND ``NumpyBackend``. A suite green
-on both witnesses the ``ShuffleBackend`` seam is real (not an awkward-shaped hole) BY EXECUTION — a
-primitive that leaked one backend's semantics fails on the other.
+``test_backend_independence.py`` ship two backends in the seam-introducing milestone) extended to
+the shuffle seam: ONE test body, parametrized over ``AwkwardBackend`` AND ``NumpyBackend``. A suite
+green on both witnesses the ``ShuffleBackend`` seam is real (not an awkward-shaped hole) BY
+EXECUTION — a primitive that leaked one backend's semantics fails on the other.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ _IDS = [a.name for a in ADAPTERS]
 
 
 @pytest.fixture(params=ADAPTERS, ids=_IDS)
-def adapter(request) -> BackendAdapter:
+def adapter(request: pytest.FixtureRequest) -> BackendAdapter:
     return request.param
 
 

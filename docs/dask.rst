@@ -43,7 +43,7 @@ and hands you back a runner:
     from distributed import Client, LocalCluster
 
     from graphed.core import Partition, Plan, Task
-    from graphed_executors.dask_backend import dask_runner
+    from graphed_executors import dask_runner
 
     def count(partition, resources):
         return np.asarray([partition.entry_stop - partition.entry_start])
@@ -406,7 +406,7 @@ before the raise may not arrive:
     from distributed import Client, LocalCluster
 
     from graphed.core import Partition, Plan, Task
-    from graphed_executors.dask_backend import dask_runner
+    from graphed_executors import dask_runner
 
     def count(partition, resources):
         return np.asarray([partition.entry_stop - partition.entry_start])
@@ -488,7 +488,7 @@ wires them to the runner; here a monitor stands in for the cancel button:
 
     from graphed.core import Partition, Plan, RunControl, Task
     from graphed.core.execution import TaskPhase
-    from graphed_executors.dask_backend import dask_runner
+    from graphed_executors import dask_runner
 
     def count(partition, resources):
         time.sleep(0.2)
@@ -562,7 +562,7 @@ SLURM via `dask-jobqueue <https://jobqueue.dask.org>`_:
 
     from dask_jobqueue import SLURMCluster
     from distributed import Client
-    from graphed_executors.dask_backend import dask_runner
+    from graphed_executors import dask_runner
 
     cluster = SLURMCluster(
         cores=8, memory="16GB", walltime="01:00:00", interface="ib0",
@@ -579,7 +579,7 @@ Fermilab LPC HTCondor via `lpcjobqueue <https://github.com/CoffeaTeam/lpcjobqueu
 
     from distributed import Client
     from lpcjobqueue import LPCCondorCluster
-    from graphed_executors.dask_backend import dask_runner
+    from graphed_executors import dask_runner
 
     cluster = LPCCondorCluster(ship_env=True)      # ships your venv into the singularity image
     cluster.scale(50)

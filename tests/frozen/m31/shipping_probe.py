@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any, cast
 
 _UNPICKLES: list[int] = []  # per worker process: one append per unpickle of a CountingProcess
 
@@ -24,17 +25,17 @@ class CountingProcess:
         return {"_payload": self._payload}
 
     def __setstate__(self, state: dict[str, object]) -> None:
-        self._payload = state["_payload"]
+        self._payload = cast("bytes", state["_payload"])
         _UNPICKLES.append(os.getpid())  # one entry per unpickle IN THIS WORKER
 
-    def __call__(self, partition: object, resources: object) -> frozenset:
+    def __call__(self, partition: object, resources: object) -> frozenset[Any]:
         time.sleep(0.01)  # hold briefly so trivial tasks genuinely spread across workers
         return frozenset({(os.getpid(), len(_UNPICKLES))})
 
 
-def union(a: frozenset, b: frozenset) -> frozenset:
+def union(a: frozenset[Any], b: frozenset[Any]) -> frozenset[Any]:
     return a | b
 
 
-def empty() -> frozenset:
+def empty() -> frozenset[Any]:
     return frozenset()

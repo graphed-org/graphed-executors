@@ -1,5 +1,8 @@
-"""m68c §6 on parsl: ``SubmitRunner(ParslBackend)`` over a started HighThroughputExecutor runs a service
-join plan with the driver-side (map, dest) edge; the peer transport runner refuses a join plan."""
+"""m68c §6 on parsl.
+
+``SubmitRunner(ParslBackend)`` over a started HighThroughputExecutor runs a service join plan with
+the driver-side (map, dest) edge; the peer transport runner refuses a join plan.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +10,7 @@ import dataclasses
 import os
 import sys
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -35,7 +38,9 @@ PARTS = 8
 def htex(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
     # HTEX workers need the venv on PATH and this directory on PYTHONPATH to import the harness.
     with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
+        mp.setenv(
+            "PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+        )
         mp.setenv("PYTHONPATH", HARNESS_DIR + os.pathsep + os.environ.get("PYTHONPATH", ""))
         executor = start_htex(workers=2, run_dir=str(tmp_path_factory.mktemp("htex")))
         try:
@@ -47,7 +52,8 @@ def htex(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
 def _measured_run(htex: Any, tag: str, peer: bool | None) -> tuple[int, int]:
     plan = join_v2(tag, spec=given_spec(), steps_per_file=PARTS)
     backend = RecordingBackend(ParslBackend(htex), wrap=False)
-    assert backend.capabilities.peer_data_movement is False  # HTEX resolves future args on the driver
+    # HTEX resolves future args on the driver
+    assert backend.capabilities.peer_data_movement is False
     if peer is not None:
         backend.capabilities = dataclasses.replace(backend.capabilities, peer_data_movement=peer)
     with StandIn() as server:
@@ -57,7 +63,7 @@ def _measured_run(htex: Any, tag: str, peer: bool | None) -> tuple[int, int]:
         ref = sequential(plan, {"sf": server.endpoint()})
     assert calls > 0, "no stage task called the server"
     assert got.value == ref.value and got.value, (got.value, ref.value)
-    return backend.measure()
+    return cast("tuple[int, int]", backend.measure())
 
 
 def test_parsl_htex_runs_a_service_join_moving_each_map_result_once(htex: Any) -> None:
@@ -74,4 +80,6 @@ def test_the_parsl_peer_transport_refuses_a_join_plan_naming_submit_runner() -> 
     plan = join_v2("refuse-parsl", spec=given_spec())
     with pytest.raises(TypeError) as excinfo:
         run_bounded(lambda: parsl_run_plan(plan, None))
-    assert "SubmitRunner(" in str(excinfo.value) and "DurablePlanV2" in str(excinfo.value), excinfo.value
+    assert "SubmitRunner(" in str(excinfo.value) and "DurablePlanV2" in str(excinfo.value), (
+        excinfo.value
+    )

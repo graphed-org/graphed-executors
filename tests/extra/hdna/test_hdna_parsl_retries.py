@@ -55,7 +55,9 @@ def executor(request: pytest.FixtureRequest) -> Iterator[Any]:
 
 def _plan(marks: Path, failures: int = 1) -> Plan[int]:
     tasks = tuple(Task(i, Partition.blind(f"mem://p{i}", "", 0, 1)) for i in range(N_TASKS))
-    return Plan(process=FailFirst(str(marks), failures), combine=operator.add, empty=int, tasks=tasks)
+    return Plan(
+        process=FailFirst(str(marks), failures), combine=operator.add, empty=int, tasks=tasks
+    )
 
 
 def test_a_task_that_fails_once_completes_with_one_retry(executor: Any, tmp_path: Path) -> None:

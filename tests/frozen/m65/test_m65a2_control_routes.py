@@ -16,7 +16,8 @@ THREAD = [name for name, r in mp.ROUTES.items() if r.thread]
 ADAPTIVE = [name for name, r in mp.ROUTES.items() if r.adaptive]
 ONES = (1,) * mp.N
 ZEROS = (0,) * mp.N
-# A task handed out before the pause still starts after it; its worker may wait this long for a CPU.
+# A task handed out before the pause still starts after it; its worker may wait this long for a
+# CPU.
 PAUSE_SETTLE_S = 2.0
 
 
@@ -71,7 +72,8 @@ def test_pause_stops_dispatch_then_resume_completes(route: str) -> None:
     resumed = time.perf_counter()
     ctl.resume()
     res = run.result()
-    # Counted by the workers' own start stamps, so event delivery lag cannot move a start between the two.
+    # Counted by the workers' own start stamps, so event delivery lag cannot move a start between
+    # the two.
     starts = [e.t for e in rec.events if e.phase is TaskPhase.STARTED]
     s1 = sum(t < paused_at[0] + PAUSE_SETTLE_S for t in starts)
     s2 = sum(t < resumed for t in starts)
@@ -149,7 +151,11 @@ def test_cancel_no_check_saw_is_reset(route: str) -> None:
     assert ctl.state is RunState.RUNNING
     full = ex.run(_plan(route, mp.Probe(variant=variant)))
     bare = mp.ROUTES[route].make().run(_plan(route, mp.Probe(variant=variant)))
-    assert (full.value, full.n_partitions, full.stopped) == (bare.value, mp.N, StopReason.EXHAUSTED)
+    assert (full.value, full.n_partitions, full.stopped) == (
+        bare.value,
+        mp.N,
+        StopReason.EXHAUSTED,
+    )
     if hub:
         assert (res.value, res.stopped) == (bare.value, StopReason.EXHAUSTED)
 
@@ -180,8 +186,11 @@ def test_stop_condition_does_not_end_a_cancel_drain(route: str, tmp_path: Path) 
     rec = mp.Recorder()
     ex = _controlled(route, ctl, rec)
     probe = mp.Probe(sleep_s=0.05, hold_key=0, entered_path=entered, release_path=release)
-    # Key 0 alone reaches the target, so the stop condition can only fire once it completes: in the drain.
-    plan = _plan(route, probe, batch=mp.tasks(entries={0: 1000}), stop=StopCondition(target_events=1000))
+    # Key 0 alone reaches the target, so the stop condition can only fire once it completes: in the
+    # drain.
+    plan = _plan(
+        route, probe, batch=mp.tasks(entries={0: 1000}), stop=StopCondition(target_events=1000)
+    )
     run = mp.Background(lambda: ex.run(plan))
     assert mp._await_file(entered)
     ctl.cancel()

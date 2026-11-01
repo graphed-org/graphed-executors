@@ -1,5 +1,7 @@
-"""m47 parsl facade — ONE shared resolver, honest per-instance dispatch, loud refusals (plan
-§1.5; blueprint §3 `test_parsl_shuffle_method_facade`).
+"""m47 parsl facade.
+
+ONE shared resolver, honest per-instance dispatch, loud refusals (plan §1.5; blueprint §3
+`test_parsl_shuffle_method_facade`).
 
 Witnesses: **resolver identity** — ``parsl_backend.api.resolve_shuffle_method IS
 dask_backend.api.resolve_shuffle_method`` (the same function object, re-exported from
@@ -18,7 +20,8 @@ removes honesty).
 Discriminates: hardcoded-engine facades (both dispatch shapes present); a copied resolver
 (identity); silent knob drops; a TPE "transport" that actually runs; a capability-field-based
 transport gate (peer_transport is a backend attribute — the frozen 7-field vector is pinned
-unchanged by m46)."""
+unchanged by m46).
+"""
 
 from __future__ import annotations
 
@@ -87,7 +90,9 @@ def test_auto_and_tasks_dispatch_to_the_relay_shape_on_htex(htex, method: str) -
     spy = SpyP2PBackend(make_parsl_backend(htex))
 
     res = run_bounded(
-        lambda: facade_repartition(adapter.backend, src, PARTS, pbackend=spy, shuffle_method=method)
+        lambda: facade_repartition(
+            adapter.backend, src, PARTS, pbackend=spy, shuffle_method=method
+        )
     )
     names: Counter[str] = spy.fn_names()
     assert names["_dask_map_write"] > 0 and names["_dask_gather"] == PARTS, (
@@ -97,7 +102,9 @@ def test_auto_and_tasks_dispatch_to_the_relay_shape_on_htex(htex, method: str) -
         f"{method}: neither the m43 pick tier nor the p2p engine may engage: {dict(names)}"
     )
     assert res.dest_block_hashes == local.dest_block_hashes
-    assert res.witness.head_node_routed is True, "the relay result must carry the head-node witness"
+    assert res.witness.head_node_routed is True, (
+        "the relay result must carry the head-node witness"
+    )
     assert not hasattr(res, "transport"), "a tasks-resolution result must not carry .transport"
 
 
@@ -108,15 +115,21 @@ def test_explicit_transport_dispatches_to_the_p2p_shape_on_htex(htex) -> None:  
     spy = SpyP2PBackend(make_parsl_backend(htex))
 
     res = run_bounded(
-        lambda: facade_repartition(adapter.backend, src, PARTS, pbackend=spy, shuffle_method="transport")
+        lambda: facade_repartition(
+            adapter.backend, src, PARTS, pbackend=spy, shuffle_method="transport"
+        )
     )
     names: Counter[str] = spy.fn_names()
-    assert names["_parsl_peer_main"] == K, f"explicit transport must seat k={K} peers: {dict(names)}"
+    assert names["_parsl_peer_main"] == K, (
+        f"explicit transport must seat k={K} peers: {dict(names)}"
+    )
     assert names["_dask_map_write"] == 0 and names["_dask_gather"] == 0, (
         f"the p2p engine must not smuggle relay submits: {dict(names)}"
     )
     assert res.dest_block_hashes == local.dest_block_hashes
-    assert hasattr(res, "transport"), "the transport result must carry .transport (m45 observability)"
+    assert hasattr(res, "transport"), (
+        "the transport result must carry .transport (m45 observability)"
+    )
 
 
 def test_invalid_method_raises_before_any_work() -> None:

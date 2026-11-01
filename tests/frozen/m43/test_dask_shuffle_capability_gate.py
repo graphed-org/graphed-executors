@@ -1,6 +1,8 @@
-"""m43 honest scoping — shuffle on a backend WITHOUT peer data movement refuses loudly, and the
-shuffle module itself imports dask-free (plan §1.3.4 capability gate; blueprint §3
-`test_dask_shuffle_capability_gate`). Runs in the MAIN CI matrix — no distributed needed.
+"""m43 honest scoping.
+
+Shuffle on a backend WITHOUT peer data movement refuses loudly, and the shuffle module itself
+imports dask-free (plan §1.3.4 capability gate; blueprint §3 `test_dask_shuffle_capability_gate`).
+Runs in the MAIN CI matrix — no distributed needed.
 
 A head-node-routed backend (parsl-HTEX class) would funnel every block through the driver — the
 exact pathology §1.3.4 rejects — so both entry points must check
@@ -8,7 +10,8 @@ exact pathology §1.3.4 rejects — so both entry points must check
 missing capability and the Phase-2 store-handle data plane, BEFORE any work is submitted (the stub
 counts and refuses submits/broadcasts). Discriminates: a silent wrong answer on such backends, a
 gate that fires only after stage 1 was already submitted, and a module-import-time `import
-distributed` in the shuffle module (subprocess probe, the m42 packaging idiom)."""
+distributed` in the shuffle module (subprocess probe, the m42 packaging idiom).
+"""
 
 from __future__ import annotations
 
@@ -38,8 +41,11 @@ print("CLEAN")
 
 
 def test_shuffle_module_imports_without_touching_distributed() -> None:
-    """A fresh interpreter imports the shuffle module and both pinned entry points while
-    distributed/dask stay unimported (works whether or not the extra is installed)."""
+    """A fresh interpreter imports the shuffle module without importing distributed or dask.
+
+    A fresh interpreter imports the shuffle module and both pinned entry points while
+    distributed/dask stay unimported (works whether or not the extra is installed).
+    """
     proc = subprocess.run(
         [sys.executable, "-c", PROBE], capture_output=True, text=True, timeout=120, check=False
     )
@@ -59,7 +65,9 @@ def test_no_peer_data_movement_refuses_before_any_work(adapter) -> None:  # type
 
     with pytest.raises(NotImplementedError, match="peer data movement") as rep_exc:
         dask_repartition(adapter.backend, blocks, 3, runner=runner)
-    assert "Phase 2" in str(rep_exc.value), "the refusal must point at the Phase-2 store data plane"
+    assert "Phase 2" in str(rep_exc.value), (
+        "the refusal must point at the Phase-2 store data plane"
+    )
 
     with pytest.raises(NotImplementedError, match="peer data movement") as join_exc:
         dask_join(adapter.backend, blocks, blocks, 3, runner=runner)

@@ -1,12 +1,14 @@
-"""Shared harness for the m74 frozen suite: a run whose driver is SIGKILLed resumes from the
-content-addressed store on every runner (lanes/ckpt-resume/plan.md §4.2).
+"""Shared harness for the m74 frozen suite.
+
+A run whose driver is SIGKILLed resumes from the content-addressed store on every runner
+(lanes/ckpt-resume/plan.md §4.2).
 
 Everything a worker, pilot or driver subprocess unpickles is module-level here: the T-leaf plan
-(``Leaf``) and the counting codec (``CountingCodec``). ``drive`` is the driver entry of every runner leg,
-run as ``python -c "import m74_harness; m74_harness.drive()" <runner> <store> <work> <out>`` in its own
-session; ``crash_and_resume`` kills that session after ``MIN_DONE`` tasks are in the store and reruns
-it. The m67 driverless pieces E6/E8 use are copied here (frozen suites never import across
-directories).
+(``Leaf``) and the counting codec (``CountingCodec``). ``drive`` is the driver entry of every
+runner leg, run as ``python -c "import m74_harness; m74_harness.drive()" <runner> <store> <work>
+<out>`` in its own session; ``crash_and_resume`` kills that session after ``MIN_DONE`` tasks are in
+the store and reruns it. The m67 driverless pieces E6/E8 use are copied here (frozen suites never
+import across directories).
 """
 
 from __future__ import annotations
@@ -58,13 +60,16 @@ FAKE_SCHEDD = "schedd.m74.example"
 FAKE_CLUSTER = 7474
 DRIVER_MODULE = "graphed_executors.htcondor_backend.driver"
 
-# ---- the plan --------------------------------------------------------------------------------------
+# ---- the plan -----------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Leaf:
-    """Leaf ``i``: a marker file per execution in ``markers``, then ``[1e16 if i == 0 else 1.0, i]``,
-    so the fold's grouping shows in the bits of element 0."""
+    """Leaf ``i``: a marker file per execution in ``markers``.
+
+    It returns ``[1e16 if i == 0 else 1.0, i]``, so the fold's grouping shows in the bits of
+    element 0.
+    """
 
     markers: str
 
@@ -110,7 +115,7 @@ def work_dirs(work: Path) -> tuple[Path, Path]:
     return markers, decodes
 
 
-# ---- the driver entry --------------------------------------------------------------------------------
+# ---- the driver entry ---------------------------------------------------------------------------
 
 
 def _run(runner: str, plan: Plan[Any], work: Path) -> Any:
@@ -164,9 +169,12 @@ def _run(runner: str, plan: Plan[Any], work: Path) -> Any:
 
 
 def drive(argv: list[str] | None = None) -> None:
-    """``<runner> <store> <work> <out>``: the leaf plan over ``work``, made resumable on ``store`` with
-    the counting codec, run on ``runner``; ``pickle.dumps(value)`` to ``out``. ``graphed.checkpoint``
-    logs at INFO to stderr."""
+    """``<runner> <store> <work> <out>``.
+
+    The leaf plan over ``work``, made resumable on ``store`` with the counting codec, run on
+    ``runner``; ``pickle.dumps(value)`` to ``out``. ``graphed.checkpoint`` logs at INFO to
+    stderr.
+    """
     runner, store, work, out = argv if argv is not None else sys.argv[1:5]
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(name)s %(levelname)s %(message)s"))
@@ -179,17 +187,20 @@ def drive(argv: list[str] | None = None) -> None:
     Path(out).write_bytes(pickle.dumps(value))
 
 
-# ---- driver sessions -----------------------------------------------------------------------------------
+# ---- driver sessions ----------------------------------------------------------------------------
 
 
 def driver_env(extra_path: tuple[str, ...] = ()) -> dict[str, str]:
-    """This environment with the venv's bin on ``PATH`` (HTEX's worker pool script) and this
-    directory (after ``extra_path``) on ``PYTHONPATH``."""
+    """Return this environment set up for HTEX workers from this venv.
+
+    Return this environment with the venv's bin on ``PATH`` (HTEX's worker pool script) and this
+    directory (after ``extra_path``) on ``PYTHONPATH``.
+    """
     env = dict(os.environ)
     env["PATH"] = os.path.dirname(sys.executable) + os.pathsep + env.get("PATH", "")
-    env["PYTHONPATH"] = os.pathsep.join([*extra_path, HARNESS_DIR, env.get("PYTHONPATH", "")]).rstrip(
-        os.pathsep
-    )
+    env["PYTHONPATH"] = os.pathsep.join(
+        [*extra_path, HARNESS_DIR, env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
     return env
 
 
@@ -208,7 +219,9 @@ def start_driver(argv: list[str], cwd: Path, log: Path, env: dict[str, str] | No
 
 def session_members(sid: int) -> list[int]:
     """Live pids whose session is ``sid``: ``ps -A -o pid=`` filtered by ``os.getsid``."""
-    listing = subprocess.run(["ps", "-A", "-o", "pid="], capture_output=True, text=True, check=True)
+    listing = subprocess.run(
+        ["ps", "-A", "-o", "pid="], capture_output=True, text=True, check=True
+    )
     members = []
     for token in listing.stdout.split():
         pid = int(token)
@@ -225,8 +238,10 @@ def _kill(pids: list[int]) -> None:
 
 
 def kill_session(proc: Any) -> None:
-    """SIGKILL every process in ``proc``'s session, ``wait()`` the driver, then kill again until no
-    member is left, within ``KILL_TIMEOUT_S``."""
+    """SIGKILL every process in ``proc``'s session, ``wait()`` the driver.
+
+    Then kill again until no member is left, within ``KILL_TIMEOUT_S``.
+    """
     sid = proc.pid
     _kill(session_members(sid))
     proc.wait(KILL_TIMEOUT_S)
@@ -238,7 +253,7 @@ def kill_session(proc: Any) -> None:
 
 
 def finish(proc: Any, timeout_s: float = RUN_TIMEOUT_S) -> int:
-    """The driver's exit code, killing its session if it outlives ``timeout_s``."""
+    """Return the driver's exit code, killing its session if it outlives ``timeout_s``."""
     try:
         return int(proc.wait(timeout_s))
     except subprocess.TimeoutExpired:
@@ -264,7 +279,11 @@ def files(directory: Path) -> set[str]:
 
 
 def reused_line(text: str) -> int:
-    """``reused`` of the one ``"%d of %d tasks reused from %s"`` line in ``text``, whose total is ``T``."""
+    """Return ``reused`` from the one ``"%d of %d tasks reused from %s"`` line in ``text``.
+
+    ``reused`` of the one ``"%d of %d tasks reused from %s"`` line in ``text``, whose total is
+    ``T``.
+    """
     found = REUSED.findall(text)
     assert len(found) == 1, f"expected one reused line, found {found} in:\n{text[-4000:]}"
     reused, total = (int(x) for x in found[0])
@@ -280,13 +299,16 @@ def last_driver_section(log: Path) -> str:
     return text[start:]
 
 
-# ---- a killed run and its resume ---------------------------------------------------------------------
+# ---- a killed run and its resume ----------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Resumed:
-    """What one crash-and-resume showed: tasks in the store after the kill, executions of the rerun,
-    the rerun's log, both value bytes, and the pids of decodes and drivers."""
+    """What one crash-and-resume showed.
+
+    Tasks in the store after the kill, executions of the rerun, the rerun's log, both value
+    bytes, and the pids of decodes and drivers.
+    """
 
     done: int
     executions: int
@@ -314,7 +336,10 @@ def run_to_end(runner: str, store: Path, work: Path, name: str) -> tuple[int, by
 
 
 def kill_after_min_done(runner: str, store: Path, work: Path) -> int:
-    """Start a driver, kill its session once ``MIN_DONE`` tasks are in ``store``; the tasks left done."""
+    """Start a driver, kill its session once ``MIN_DONE`` tasks are in ``store``.
+
+    The tasks left done.
+    """
     work_dirs(work)
     log = work / "killed.log"
     proc = start_driver(_drive_argv(runner, store, work, work / "killed.pkl"), work, log)
@@ -328,8 +353,11 @@ def kill_after_min_done(runner: str, store: Path, work: Path) -> int:
 
 
 def crash_and_resume(tmp_path: Path, runner: str, resume_on: str | None = None) -> Resumed:
-    """Kill a ``runner`` driver after ``MIN_DONE`` stored tasks, rerun on ``resume_on`` (default the
-    same runner) to the end, and run ``resume_on`` uninterrupted on a fresh store for reference."""
+    """Kill a ``runner`` driver mid-run, resume it, and run an uninterrupted reference.
+
+    Kill a ``runner`` driver after ``MIN_DONE`` stored tasks, rerun on ``resume_on`` (default the
+    same runner) to the end, and run ``resume_on`` uninterrupted on a fresh store for reference.
+    """
     resume_on = resume_on or runner
     store, work = tmp_path / "store", tmp_path / "work"
     left = kill_after_min_done(runner, store, work)
@@ -337,7 +365,9 @@ def crash_and_resume(tmp_path: Path, runner: str, resume_on: str | None = None) 
     before = files(markers)
     seen = files(decodes)
     pid, value, text = run_to_end(resume_on, store, work, "resumed")
-    _, reference, _ = run_to_end(resume_on, tmp_path / "ref-store", tmp_path / "ref-work", "reference")
+    _, reference, _ = run_to_end(
+        resume_on, tmp_path / "ref-store", tmp_path / "ref-work", "reference"
+    )
     return Resumed(
         done=left,
         executions=len(files(markers) - before),
@@ -354,18 +384,24 @@ def assert_resumed(result: Resumed, process_workers: bool) -> None:
     assert result.executions == T - result.done, (
         f"the rerun executed {result.executions} tasks; {T} - {result.done} were not done"
     )
-    assert result.value == result.reference, (pickle.loads(result.value), pickle.loads(result.reference))
+    assert result.value == result.reference, (
+        pickle.loads(result.value),
+        pickle.loads(result.reference),
+    )
     assert reused_line(result.log) == result.done, result.done
     if process_workers:
         assert result.decode_pids, "no decode ran in the rerun"
-        assert not result.decode_pids & result.driver_pids, (result.decode_pids, result.driver_pids)
+        assert not result.decode_pids & result.driver_pids, (
+            result.decode_pids,
+            result.driver_pids,
+        )
 
 
-# ---- a fake distribution ---------------------------------------------------------------------------------
+# ---- a fake distribution ------------------------------------------------------------------------
 
 
 def fake_dist(root: Path, version: str, name: str = "zzfake") -> Path:
-    """A ``PYTHONPATH`` entry holding ``<name>-<version>.dist-info/METADATA``."""
+    """Return a ``PYTHONPATH`` entry holding ``<name>-<version>.dist-info/METADATA``."""
     info = root / f"{name}-{version}.dist-info"
     info.mkdir(parents=True)
     (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
@@ -373,8 +409,11 @@ def fake_dist(root: Path, version: str, name: str = "zzfake") -> Path:
 
 
 def record_environment_with(path_entry: Path, store: Path, salt: str, cwd: Path) -> None:
-    """``resumable(leaf_plan, store, salt=salt)`` in a ``python`` subprocess with ``path_entry`` ahead
-    on ``PYTHONPATH``: the store's environment record for ``salt`` is then that environment's."""
+    """Run ``resumable`` in a ``python`` subprocess with ``path_entry`` on ``PYTHONPATH``.
+
+    ``resumable(leaf_plan, store, salt=salt)`` in a ``python`` subprocess with ``path_entry`` ahead
+    on ``PYTHONPATH``: the store's environment record for ``salt`` is then that environment's.
+    """
     code = (
         "import sys; from m74_harness import leaf_plan, resumable; "
         "resumable(leaf_plan(sys.argv[3]), sys.argv[1], salt=sys.argv[2])"
@@ -392,7 +431,7 @@ def record_environment_with(path_entry: Path, store: Path, salt: str, cwd: Path)
     assert proc.returncode == 0, proc.stderr
 
 
-# ---- the HTCondor driverless job (copied from m67's driverless_harness and test_driver_entry) -------
+# ---- the HTCondor driverless job (copied from m67's driverless_harness and test_driver_entry)
 
 
 def htcondor_api() -> Any:
@@ -421,15 +460,21 @@ class RecordingSchedd:
     def __init__(self) -> None:
         self.log: list[tuple[Any, ...]] = []
 
-    def query(self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def query(
+        self, constraint: str = "true", projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("query", str(constraint), tuple(projection or ())))
         return []
 
-    def history(self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any) -> list[Any]:
+    def history(
+        self, constraint: Any = None, projection: Any = None, *args: Any, **kwargs: Any
+    ) -> list[Any]:
         self.log.append(("history", str(constraint), tuple(projection or ())))
         return []
 
-    def submit(self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any) -> SubmitResult:
+    def submit(
+        self, description: Any, count: int = 0, spool: bool = False, **kwargs: Any
+    ) -> SubmitResult:
         self.log.append(("submit", dict(description), count, spool))
         return SubmitResult(FAKE_CLUSTER)
 
@@ -445,7 +490,9 @@ class _Collector:
         self.fake = fake
         self.pool = pool
 
-    def locate(self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def locate(
+        self, daemon_type: Any, name: str | None = None, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
         self.fake.log.append(("locate", self.pool, str(daemon_type), name))
         return {"Name": name, "MyAddress": "<127.0.0.1:9618>", "located": True}
 
@@ -479,7 +526,11 @@ class FakeHTCondor:
     def __init__(self, schedd: RecordingSchedd) -> None:
         self.schedd = schedd
         self.log = schedd.log
-        self.param = {"COLLECTOR_HOST": FAKE_POOL, "SCHEDD_HOST": FAKE_SCHEDD, "FERMIHTC_REMOTE_POOL": FAKE_POOL}
+        self.param = {
+            "COLLECTOR_HOST": FAKE_POOL,
+            "SCHEDD_HOST": FAKE_SCHEDD,
+            "FERMIHTC_REMOTE_POOL": FAKE_POOL,
+        }
         self.schedd_ads: list[dict[str, Any]] = [
             {
                 "Name": FAKE_SCHEDD,
@@ -506,7 +557,7 @@ class FakeHTCondor:
 
 
 def record_bindings(monkeypatch: pytest.MonkeyPatch, schedd: RecordingSchedd) -> FakeHTCondor:
-    """Patch ``launch._htcondor`` to log ``("_htcondor",)`` and return a ``FakeHTCondor`` over ``schedd``."""
+    """Patch ``launch._htcondor`` to log its call and return a ``FakeHTCondor`` over ``schedd``."""
     fake = FakeHTCondor(schedd)
 
     def _htcondor() -> FakeHTCondor:
@@ -522,7 +573,7 @@ def submits(log: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
 
 
 def job_dir(desc: dict[str, Any], log_dir: Path, dest: Path) -> Path:
-    """A job scratch dir holding each ``transfer_input_files`` entry under its base name."""
+    """Return a job scratch dir holding each ``transfer_input_files`` entry under its base name."""
     iwd = Path(desc.get("initialdir") or log_dir)
     dest.mkdir(parents=True)
     for entry in (e.strip() for e in str(desc["transfer_input_files"]).split(",") if e.strip()):
@@ -534,8 +585,13 @@ def job_dir(desc: dict[str, Any], log_dir: Path, dest: Path) -> Path:
     return dest
 
 
-def prepared_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: Any, name: str, **kwargs: Any) -> Path:
-    """A job scratch dir ``tmp_path/<name>`` from a recorded ``submit_driverless``, with ``.machine.ad``."""
+def prepared_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: Any, name: str, **kwargs: Any
+) -> Path:
+    """Return a job scratch dir ``tmp_path/<name>`` from a recorded ``submit_driverless``.
+
+    It includes ``.machine.ad``.
+    """
     log_dir = tmp_path / f"{name}-submit"
     log_dir.mkdir()
     fake = record_bindings(monkeypatch, RecordingSchedd())
@@ -549,9 +605,11 @@ def prepared_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: Any, nam
 
 
 def start_job_driver(job: Path) -> Any:
-    """``python -m ...driver <job>`` in ``job``, in a new session, as the job's ``driver.sh`` runs it."""
+    """Start ``python -m ...driver <job>`` in ``job`` in a new session, as ``driver.sh`` does."""
     env = dict(driver_env(), _CONDOR_MACHINE_AD=str(job / ".machine.ad"))
-    return start_driver([sys.executable, "-m", DRIVER_MODULE, str(job)], job, job / "driver.out", env)
+    return start_driver(
+        [sys.executable, "-m", DRIVER_MODULE, str(job)], job, job / "driver.out", env
+    )
 
 
 def read_result(job: Path) -> tuple[bool, Any]:
@@ -559,7 +617,7 @@ def read_result(job: Path) -> tuple[bool, Any]:
     return ok, payload
 
 
-# ---- a gh plan over in-memory events (copied from m69b) ------------------------------------------------
+# ---- a gh plan over in-memory events (copied from m69b) -----------------------------------------
 
 
 @dataclass(frozen=True)
@@ -573,7 +631,9 @@ class Steps:
         raise AssertionError("the whole-dataset loader must never run during a plan")
 
     def partitions(self, steps_per_file: int = 1) -> tuple[Partition, ...]:
-        return tuple(Partition.blind(self.uri, "", s, steps_per_file) for s in range(steps_per_file))
+        return tuple(
+            Partition.blind(self.uri, "", s, steps_per_file) for s in range(steps_per_file)
+        )
 
     def read_partition(self, partition: Partition, columns: Any, resources: Any) -> ak.Array:
         part = partition.resolve(len(self.data))
@@ -586,7 +646,7 @@ def events_data(n: int = 200) -> ak.Array:
 
 
 def histogram_plan(context: Any = None) -> Any:
-    """``gh.plan`` of one Weight fill of ``x``, backed on ``context`` (a histserv ``Context``) when given."""
+    """Return ``gh.plan`` of one Weight fill of ``x``, on a histserv ``context`` if given."""
     import boost_histogram as bh  # noqa: PLC0415
     from graphed import Session  # noqa: PLC0415
     from graphed.awkward import AwkwardBackend, AwkwardForm  # noqa: PLC0415

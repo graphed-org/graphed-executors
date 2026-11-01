@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m63"))
 import m63_harness as h
 
 from graphed_executors.local import ProcessPoolExecutor, ThreadExecutor
-from graphed_executors.local.executors import _BaseExecutor
+from graphed_executors.local._driver import _BaseExecutor
 
 
 class CombineCounter(h.RecordingMonitor):  # type: ignore[misc]
