@@ -28,7 +28,7 @@ fresh announce, so the loop is bounded by the node's restarts.
   D6). Inside ``runner.run``: a run whose workers were lost (a ``graphed.WorkerLostError``,
   e.g. every pilot preempted; *owner ruling 2026-09-25*), a ``StoreUnavailable``, and the run's own
   service phase or a failed task's re-check of its services (``ServiceUnavailableError``,
-  ``ServiceUnreachableError`` and a probe's raw ``WorkerLostError``; *this plan's decision*).
+  ``ServiceUnreachableError`` and a probe's ``WorkerLostError``; *this plan's decision*).
 - 3: an ``EnvironmentChanged`` from making the plan resumable on ``run.json["store"]``, and every
   other exception from ``runner.run(plan)``: the plan's own error, deterministic, so the job's
   ``retry_until`` (a DAG's ``RETRY driver 2 UNLESS-EXIT 3``) stops retrying it. A ``StageError``

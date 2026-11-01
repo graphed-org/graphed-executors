@@ -97,6 +97,8 @@ class _InFlight(Generic[R]):
     The file outlives a killed worker, so the driver can say which chunk it died on.
     """
 
+    # ponytail: a file per chunk; a shared-memory slot per worker if 1 ms chunks ever matter
+
     process: Callable[[Partition, Any], R]
     directory: str
 
@@ -313,7 +315,7 @@ class _BaseExecutor:
         with self._settled(kept), self._lost_workers(kept):
             yield kept  # kept alive for the next run()
 
-    def _lost_workers(self, pool: _PoolExecutor) -> AbstractContextManager[None]:
+    def _lost_workers(self, pool: _PoolExecutor | None) -> AbstractContextManager[None]:
         """Turn a dead worker into a ``WorkerLostError``: threads cannot die alone."""
         return contextlib.nullcontext()
 
@@ -419,6 +421,9 @@ class _BaseExecutor:
         return self._run_once(plan, control)
 
     def _run_once(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
+        # a chunk a shutdown cut off left its marker, which would read as running from now on
+        shutil.rmtree(self._in_flight, ignore_errors=True)
+        os.makedirs(self._in_flight, exist_ok=True)
         if control is not None and control.state is RunState.CANCELLED:
             return ExecResult(plan.empty(), 0, 0, StopReason.CANCELLED)
         if plan.next_tasks is not None:
@@ -522,15 +527,13 @@ class _BaseExecutor:
                 out = ctl.take(got[1])
             if failed():
                 break
-            if ctl is not None and ctl.relay():
+            # every poll: a chunk seen only when the deadline lapses would miss the gaps between
+            if (ctl is not None and ctl.relay()) or os.listdir(self._in_flight):
                 deadline = time.monotonic() + self._peer_root_timeout_s
             if time.monotonic() >= deadline:
-                if not os.listdir(self._in_flight):  # a long chunk is progress, however long
-                    raise TimeoutError(
-                        "peer reduction did not produce a root within "
-                        f"{self._peer_root_timeout_s}s"
-                    )
-                deadline = time.monotonic() + self._peer_root_timeout_s
+                raise TimeoutError(
+                    f"peer reduction did not produce a root within {self._peer_root_timeout_s}s"
+                )
         return out
 
     def _peer_execute(

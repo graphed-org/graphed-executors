@@ -14,7 +14,7 @@ import signal
 import time
 from collections.abc import Iterator, Sequence
 from concurrent.futures import Executor as _PoolExecutor
-from concurrent.futures import Future
+from concurrent.futures import Future, wait
 from concurrent.futures import ProcessPoolExecutor as _StdProcessPool
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing.process import BaseProcess
@@ -105,20 +105,25 @@ class _ProcessPeerBase(_BaseExecutor):
             return None
         # a broken stdlib pool SIGTERMs the survivors; the worker that broke it exited otherwise
         dead = next((p for p in exited if p.exitcode != -signal.SIGTERM), exited[0])
-        chunk = "no chunk (it died between chunks)"
-        for marker in Path(self._in_flight).iterdir():  # a retry starts from an empty directory
+        chunk = "no chunk (a combine, or idle)"
+        for marker in Path(self._in_flight).glob(f"{dead.pid}.*"):
             with contextlib.suppress(OSError):
-                text = marker.read_text()
-                marker.unlink()
-                if marker.name.startswith(f"{dead.pid}."):
-                    chunk = text or chunk
+                chunk = marker.read_text() or chunk
         return WorkerLostError(partition=chunk, worker=f"pid {dead.pid}")
 
+    def _raise_lost(self, pool: Any) -> None:
+        lost = self._lost_in(_worker_processes(pool))
+        if lost is not None:
+            raise lost
+
     @contextlib.contextmanager
-    def _lost_workers(self, pool: _PoolExecutor) -> Iterator[None]:
+    def _lost_workers(self, pool: _PoolExecutor | None) -> Iterator[None]:
         try:
             yield
         except BrokenProcessPool as exc:
+            if not getattr(pool, "_broken", False):  # a chunk's own nested pool, not this one
+                raise
+            assert pool is not None
             workers = _worker_processes(pool)
             pool.shutdown()  # joins them, so every exit code is in; a broken pool cannot be reused
             if self._kept_pool is pool:
@@ -154,9 +159,10 @@ class _ProcessPeerBase(_BaseExecutor):
     ) -> tuple[R, int]:
         ctx = multiprocessing.get_context("spawn")
         try:
-            if (self._comms or "ipc") == "http":
-                return self._peer_http(plan, n, w, bounds, worker_addrs, items, ctx, control)
-            return self._peer_ipc(plan, n, w, bounds, worker_addrs, items, ctx, control)
+            with self._lost_workers(self._peer_pool):  # a kept pool can lose a worker between runs
+                if (self._comms or "ipc") == "http":
+                    return self._peer_http(plan, n, w, bounds, worker_addrs, items, ctx, control)
+                return self._peer_ipc(plan, n, w, bounds, worker_addrs, items, ctx, control)
         except BaseException:
             # A failed run leaves messages in flight that a bounded exit deliberately abandoned: a
             # peer's >64 KB partial parked in the crashed worker's pipe, the driver's own `done`.
@@ -389,9 +395,7 @@ class _ProcessPeerBase(_BaseExecutor):
                         f.result()
             # Nothing above sees a pinned worker's crash, or the crash of the last worker a stdlib
             # pool spawned: submit wakes the pool's watcher before adding that process.
-            lost = self._lost_in(_worker_processes(pool))
-            if lost is not None:
-                raise lost
+            self._raise_lost(pool)
             return False
 
         try:
@@ -415,7 +419,7 @@ class _ProcessPeerBase(_BaseExecutor):
             forward.close(OUTBOX_EXIT_WAIT_S)
         release_workers(driver_t)
         with self._lost_workers(pool):
-            self._last_peer_witness = self._finish_peer(driver_t, futs)
+            self._last_peer_witness = self._finish_peer(driver_t, futs, pool)
         assert out is not None  # failed() raises instead of reporting
         return out
 
@@ -432,7 +436,9 @@ class _ProcessPeerBase(_BaseExecutor):
                     break
                 self._forward_peer_events(got[1])
 
-    def _finish_peer(self, driver_t: Any, futs: list[Future[Any]]) -> list[dict[str, int]]:
+    def _finish_peer(
+        self, driver_t: Any, futs: list[Future[Any]], pool: Any = None
+    ) -> list[dict[str, int]]:
         """Wait for the released workers and return their witness stats, re-raising a failure."""
         if self._run_monitor is None:
             # Fast path (no monitor): workers see ``done`` immediately (the transport wakes on the
@@ -441,7 +447,10 @@ class _ProcessPeerBase(_BaseExecutor):
             # EVERY run — under 1 % of a long job but ~15 % of a sub-second interactive pass (the
             # measured peer-vs-hub regression on the ADL benchmark was almost entirely this join).
             # ``f.result()`` is woken the instant a worker finishes and re-raises a worker error
-            # intact (M6).
+            # intact (M6). ``wait`` wakes on completion too; its timeout only paces the liveness
+            # check, since a dead pinned worker's future never resolves.
+            while wait(futs, timeout=0.05).not_done:
+                self._raise_lost(pool)
             return [f.result() for f in futs]
         # Monitored: drain trailing events until every worker has finished (a late
         # FINISHED/ERRORED, shipped after the root formed, must not be lost) — we cannot just block
@@ -457,6 +466,7 @@ class _ProcessPeerBase(_BaseExecutor):
             got = driver_t.recv(timeout=drain_poll)
             if got is not None:
                 self._forward_peer_events(got[1])
+            self._raise_lost(pool)
         for _sender, payload in driver_t.poll():
             self._forward_peer_events(payload)
         return [f.result() for f in futs]  # propagate any error even on success

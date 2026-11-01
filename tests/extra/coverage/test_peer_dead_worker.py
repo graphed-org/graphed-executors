@@ -23,6 +23,9 @@ class _SilentDriver:
     def recv(self, timeout: float | None = None) -> tuple[str, object] | None:
         return None
 
+    def poll(self) -> list[tuple[str, object]]:
+        return []
+
     def peers(self) -> tuple[str, ...]:
         return ("w0",)
 
@@ -62,6 +65,33 @@ def test_a_dead_worker_raises_and_releases_the_rest(monkeypatch: pytest.MonkeyPa
     with pytest.raises(WorkerLostError, match="worker pid 1 died"):
         _collect(drv, False, monkeypatch)
     assert drv.released()
+
+
+class _RootDriver(_SilentDriver):
+    def recv(self, timeout: float | None = None) -> tuple[str, object] | None:
+        return ("w0", ("root", 1.0))
+
+
+@pytest.mark.parametrize("monitored", [False, True])
+def test_a_worker_dead_after_the_root_raises_instead_of_hanging(monitored: bool) -> None:
+    plan: Plan[float] = Plan(process=lambda p, r: 1.0, combine=lambda a, b: a + b, empty=float)
+    outcome: list[BaseException] = []
+    ex = ProcessPoolExecutor(1)
+    ex._run_monitor = object() if monitored else None  # type: ignore[assignment]
+
+    def run() -> None:
+        try:
+            ex._collect_peer(_RootDriver(), plan, 2, [Future()], _Pool(False))
+        except BaseException as exc:
+            outcome.append(exc)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(10)
+    ex._run_monitor = None
+    ex.close()
+    assert not thread.is_alive(), "an unresolved future hangs the finish"
+    assert isinstance(outcome[0], WorkerLostError)
 
 
 def test_live_workers_wait_for_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:

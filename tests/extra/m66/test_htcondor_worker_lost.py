@@ -6,6 +6,7 @@ import pickle
 import socket
 import sys
 from pathlib import Path
+from typing import Any
 
 import graphed
 import pytest
@@ -45,6 +46,7 @@ def test_a_twice_lost_leaf_names_its_chunk_and_pilot(monkeypatch: pytest.MonkeyP
 def test_the_server_error_is_the_shared_one() -> None:
     lost = htcondor_api().WorkerLostError("graphed-abc-leaf-3", "host.example:4242")
     assert isinstance(lost, graphed.WorkerLostError)
-    again = pickle.loads(pickle.dumps(lost))
-    assert (again.key, again.pilot) == (lost.key, lost.pilot)
-    assert (again.partition, again.worker) == ("graphed-abc-leaf-3", "host.example:4242")
+    again: Any = pickle.loads(pickle.dumps(lost))
+    named = ("graphed-abc-leaf-3", "host.example:4242")
+    assert (again.key, again.pilot) == named
+    assert (again.partition, again.worker) == named

@@ -438,7 +438,6 @@ class SubmitRunner:
         exec_ctx = ExecContext()
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
-        # F2b: dask key -> Task, so a worker death names the partition
         results: list[tuple[int, R]] = []
         stopped: StopReason | None = None
         seq = 0
@@ -501,7 +500,6 @@ class SubmitRunner:
         exec_ctx = ExecContext()
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
-        # F2b: dask key -> Task, so a worker death names the partition
         results: list[tuple[int, R]] = []
         stopped: StopReason | None = None
         seq = 0

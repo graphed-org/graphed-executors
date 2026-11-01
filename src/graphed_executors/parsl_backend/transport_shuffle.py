@@ -19,6 +19,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from graphed import WorkerLostError
 from graphed.debug import SourceFrame, StageError
 
 from graphed_executors.common.http_plane import PullTimeoutError
@@ -395,22 +396,22 @@ def _run_shuffle(
 def _shuffle_stage_error(exc: BaseException, pbackend: Any) -> Any:
     """Wrap a run-fatal shuffle failure as an attributed ``StageError``.
 
-    That NAMES the actual death signal
-    (``WorkerLost``/``ManagerLost``/``PullTimeoutError``/``TransportDeliveryError``) — unlike the
-    shared ``build_stage_error`` (which renders a described death as ``cause_type='KilledWorker'``,
-    losing the parsl signal whose ``str`` never carries its class name), the m47 driver layers the
-    victim-worker context on top of the named signal (backend.describe_failure's own note).
+    A worker death is a ``WorkerLostError`` that keeps parsl's own signal, whose ``str`` never
+    carries its class name; anything else names its type (``PullTimeoutError``,
+    ``TransportDeliveryError``).
     """
     describe = getattr(pbackend, "describe_failure", None)
     info = describe(exc) if describe is not None else None
-    worker = f" (worker: {info[1]})" if info is not None else ""
+    if info is not None:
+        worker = f"{info[1]} ({type(exc).__name__})"
+        return WorkerLostError(partition="transport-shuffle", worker=worker)
     return StageError(
         op="run",
         frames=(SourceFrame(filename="transport-shuffle", lineno=0),),
         input_forms=(),
         partition="transport-shuffle",
         cause_type=type(exc).__name__,
-        cause_message=f"{type(exc).__name__}: {exc}{worker}",
+        cause_message=f"{type(exc).__name__}: {exc}",
         opt_level=0,
     )
 

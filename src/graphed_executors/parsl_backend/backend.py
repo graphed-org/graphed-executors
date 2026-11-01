@@ -275,7 +275,8 @@ class ParslBackend:
         if death is None:
             return None
         label = str(death) or type(death).__name__
-        return getattr(exc, "graphed_key", "") or label, label.rpartition("loss of worker ")[2]
+        who = label.rpartition("loss of ")[2].removeprefix("worker ")
+        return getattr(exc, "graphed_key", "") or label, who
 
 
 def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) -> Future[Any]:

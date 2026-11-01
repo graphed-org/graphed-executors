@@ -6,6 +6,7 @@ import os
 import pickle
 import threading
 import time
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +17,6 @@ import pytest
 from graphed.core import (
     ExecContext,
     ExecResult,
-    LocalResources,
     Partition,
     Plan,
     Task,
@@ -139,7 +139,7 @@ def test_a_persistent_pool_survives_a_lost_worker(tmp_path: Path) -> None:
 def test_retries_leave_a_user_error_alone(tmp_path: Path) -> None:
     calls = tmp_path / "calls"
 
-    def fail(part: Partition, res: LocalResources) -> int:
+    def fail(part: Partition, res: Any) -> int:
         with calls.open("a") as log:
             log.write("x")
         raise ValueError("bad chunk")
@@ -175,7 +175,6 @@ def test_the_chunk_named_is_the_dead_workers_not_a_survivors() -> None:
         lost = ProcessPoolExecutor._lost_in(ex, workers)  # type: ignore[arg-type]
         assert lost is not None
         assert (lost.partition, lost.worker) == ("the lost chunk", "pid 7")
-        assert os.listdir(ex._in_flight) == [], "a retry starts with no markers"
 
 
 class _Silent:
@@ -193,6 +192,77 @@ def test_the_root_deadline_waits_for_a_running_chunk(monkeypatch: pytest.MonkeyP
         with pytest.raises(TimeoutError, match=r"within 0\.1s"):
             ex._await_peer_root(_Silent(), N, None, lambda: False)
     assert time.monotonic() - start >= 0.5
+
+
+class _RootAt:
+    """Deliver the root once ``when`` has passed."""
+
+    def __init__(self, when: float) -> None:
+        self.when = when
+
+    def recv(self, timeout: float) -> tuple[str, tuple[str, int]] | None:
+        time.sleep(timeout)
+        return ("w0", ("root", 7)) if time.monotonic() >= self.when else None
+
+
+def test_a_gap_between_chunks_at_the_deadline_is_not_a_stall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.3)
+    with ThreadExecutor(1) as ex:
+        marker = Path(ex._in_flight, "1.1")
+        marker.write_text("chunk")
+        threading.Timer(0.2, marker.unlink).start()  # nothing runs as the first deadline lapses
+        threading.Timer(0.4, marker.write_text, ("next chunk",)).start()
+        threading.Timer(0.9, marker.unlink).start()
+        root = _RootAt(time.monotonic() + 1.0)
+        assert ex._await_peer_root(root, N, None, lambda: False) == (7, N)
+
+
+def _nested_pool_fails(part: Partition, res: object) -> int:
+    raise BrokenProcessPool("the chunk's own pool")
+
+
+@pytest.mark.parametrize("route", ["ipc", "hub"])
+def test_a_chunks_own_broken_pool_is_its_error_not_a_lost_worker(route: str) -> None:
+    failed: list[BaseException] = []
+
+    def run() -> None:
+        with make(route) as ex:
+            try:
+                ex.run(Plan(process=_nested_pool_fails, combine=add, empty=zero, tasks=TASKS))
+            except BaseException as exc:
+                failed.append(exc)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(60)
+    assert not thread.is_alive(), "shutting the pool down before releasing its actors hangs"
+    assert type(failed[0]) is BrokenProcessPool
+
+
+@pytest.mark.parametrize("route", ["ipc", "http"])
+def test_a_worker_lost_between_runs_is_a_worker_lost_error(route: str, tmp_path: Path) -> None:
+    calm = plan(Die(str(tmp_path / "log"), deaths=0))
+    with make(route, persistent=True) as ex:
+        assert ex.run(calm).value == N
+        pool = ex._peer_pool
+        victim = next(iter(pool._processes.values()))
+        victim.kill()
+        victim.join()
+        while not pool._broken:
+            time.sleep(0.01)
+        with pytest.raises(graphed.WorkerLostError) as info:
+            ex.run(calm)
+        assert info.value.worker == f"pid {victim.pid}"
+        assert ex.run(calm).value == N, "the next run respawns"
+
+
+def test_a_marker_a_shutdown_cut_off_does_not_outlive_its_run(tmp_path: Path) -> None:
+    with ThreadExecutor(2) as ex:
+        Path(ex._in_flight, "1.1").write_text("a chunk cut off")
+        assert ex.run(plan(Die(str(tmp_path / "log"), deaths=0))).value == N
+        assert os.listdir(ex._in_flight) == []
 
 
 def test_a_healthy_run_leaves_no_marker(tmp_path: Path) -> None:

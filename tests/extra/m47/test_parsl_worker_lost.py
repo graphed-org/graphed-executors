@@ -9,9 +9,11 @@ from pathlib import Path
 import graphed
 import pytest
 from graphed.core import Partition, Plan, Task, chunk_label
+from graphed.debug import StageError
 
 from graphed_executors.parsl_backend import parsl_runner, start_htex, stop_htex
 from graphed_executors.parsl_backend.backend import ParslBackend, _ParslFuture
+from graphed_executors.parsl_backend.transport_shuffle import _shuffle_stage_error
 
 pytest.importorskip("parsl")
 
@@ -55,6 +57,16 @@ class WorkerLost(Exception):  # noqa: N818  (parsl's name is what is matched)
         return "Task failure due to loss of worker 1 on host h"
 
 
+class ManagerLost(Exception):  # noqa: N818  (parsl's name is what is matched)
+    def __str__(self) -> str:
+        return "Task failure due to loss of manager abc on host h"
+
+
+def test_a_lost_manager_names_the_manager_not_parsls_sentence() -> None:
+    backend = object.__new__(ParslBackend)
+    assert backend.describe_failure(ManagerLost()) == (str(ManagerLost()), "manager abc on host h")
+
+
 def test_a_future_tags_its_exception_with_the_task_key() -> None:
     raw: Future[object] = Future()
     raw.set_exception(WorkerLost())
@@ -62,3 +74,11 @@ def test_a_future_tags_its_exception_with_the_task_key() -> None:
         _ParslFuture(raw, {}, "graphed-abc-leaf-3").result()
     backend = object.__new__(ParslBackend)
     assert backend.describe_failure(info.value) == ("graphed-abc-leaf-3", "1 on host h")
+
+
+def test_a_shuffle_death_is_a_worker_lost_error_that_keeps_the_signal() -> None:
+    backend = object.__new__(ParslBackend)
+    err = _shuffle_stage_error(WorkerLost(), backend)
+    assert isinstance(err, graphed.WorkerLostError)
+    assert "WorkerLost" in err.worker and "1 on host h" in err.worker
+    assert type(_shuffle_stage_error(ValueError("x"), backend)) is StageError
