@@ -57,7 +57,7 @@ launched from.
        )
        plan = Plan(process=count, combine=add, empty=zero, tasks=tasks)
 
-       result = ProcessPoolExecutor(max_workers=4).run(plan)
+       result = ProcessPoolExecutor(workers=4).run(plan)
        print(result.value, result.n_partitions, result.n_combines)
 
    # [700] 7 6
@@ -131,7 +131,7 @@ Which runner do I want?
      - ``parsl_runner(executor)`` — see :doc:`parsl`
      - Your task functions must live in an installed module, not in ``__main__``.
    * - An HTCondor pool: the LPC, lxplus, or your own
-     - ``htcondor_runner(site=..., n_pilots=N)`` — see :doc:`htcondor`
+     - ``htcondor_runner(site=..., workers=N)`` — see :doc:`htcondor`
      - Submits its own pilot jobs; no scheduler to start. Task functions go in a module you pass
        in ``user_modules``.
 

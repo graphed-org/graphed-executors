@@ -39,10 +39,12 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Protocol, TypeVar, overload
 
+from graphed.core import RunControl
 from graphed.core.execution import ExecResult, Plan
 from graphed.core.plan import DurablePlanV2
 from graphed.services import ServiceSpec
 
+from graphed_executors.common import renamed
 from graphed_executors.parsl_backend.backend import _ParslFuture
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
@@ -65,6 +67,7 @@ R = TypeVar("R")
 
 # Pilots queue like any other job, so a busy pool can take minutes to start the first one.
 N_WORKERS_WAIT_S = 600.0
+DEFAULT_PILOTS = 2
 IDLE_LOG_S = 30.0  # between log lines of a service job still waiting for a slot
 _IDLE, _RUNNING = 1, 2  # JobStatus
 # a SERVICE node's periodic_remove takes a held node out of the queue, so only its history says why
@@ -770,6 +773,7 @@ class HTCondorRunner(SubmitRunner):
         retries: int = 3,
         max_in_flight: int = 2,
         services: Mapping[str, str] | None = None,
+        control: RunControl | None = None,
     ) -> None:
         """Run plans on ``backend``, waiting for ``min_pilots`` at its first need of a worker."""
         super().__init__(
@@ -778,6 +782,7 @@ class HTCondorRunner(SubmitRunner):
             retries=retries,
             max_in_flight=max_in_flight,
             services=services,
+            control=control,
         )
         self._min_pilots = backend.min_pilots = min_pilots
 
@@ -814,7 +819,8 @@ class HTCondorRunner(SubmitRunner):
 
 def htcondor_runner(
     *,
-    n_pilots: int,
+    workers: int | None = None,
+    n_pilots: int | None = None,
     site: str | SiteProfile = "generic",
     image: str | None = None,
     request_cpus: int = 1,
@@ -832,8 +838,9 @@ def htcondor_runner(
     services: Mapping[str, str] | None = None,
     service_hosts: Sequence[str] | None = None,
     task_timeout_s: float | None = None,
+    control: RunControl | None = None,
 ) -> HTCondorRunner:
-    """``n_pilots`` pilot jobs on the ``site`` pool behind an :class:`HTCondorRunner`.
+    """``workers`` pilot jobs (default 2) on the ``site`` pool behind an :class:`HTCondorRunner`.
 
     ``runner.close()`` removes them. ``port_range`` is the driver-side port range; default from
     the site profile. ``services`` are the runner's given service endpoints. ``service_hosts``
@@ -853,7 +860,7 @@ def htcondor_runner(
     )
     backend = HTCondorBackend(
         pilots,
-        n_pilots,
+        renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS),
         host=host,
         port_range=port_range,
         service_hosts=service_hosts,
@@ -866,4 +873,5 @@ def htcondor_runner(
         retries=retries,
         max_in_flight=max_in_flight,
         services=services,
+        control=control,
     )

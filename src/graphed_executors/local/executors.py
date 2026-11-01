@@ -49,6 +49,7 @@ from graphed.core.execution import (
 from graphed.debug import StageError
 
 from .._window import wait_until
+from ..common import renamed
 from ._driver import _BaseExecutor
 from ._peer import OUTBOX_EXIT_WAIT_S, PeerControl, process_and_reduce
 from ._pinned_pool import exit_with_driver
@@ -597,8 +598,9 @@ class _ProcessExecutorBase(_ProcessPeerBase):
 
     def __init__(
         self,
-        max_workers: int | None = None,
+        workers: int | None = None,
         *,
+        max_workers: int | None = None,
         on_combine: Callable[[int], None] | None = None,
         pooled_combines: bool = False,
         persistent: bool = False,
@@ -610,7 +612,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         retries: int = 0,
     ):
         super().__init__(
-            max_workers,
+            renamed(workers, max_workers, "max_workers", None),
             on_combine=on_combine,
             pooled_combines=pooled_combines,
             persistent=persistent,

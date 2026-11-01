@@ -27,6 +27,12 @@ Unreleased
 * ``run()`` at the top level of a script with no ``if __name__ == "__main__":`` guard raises a
   ``RuntimeError`` naming the fix; it was a ``BrokenProcessPool`` after hundreds of lines of worker
   tracebacks.
+* One vocabulary across runners: ``workers=`` on ``ThreadExecutor``, ``ProcessPoolExecutor``,
+  ``PinnedPoolExecutor``, ``htcondor_runner`` and ``submit_driverless``, where ``max_workers=`` and
+  ``n_pilots=`` are deprecated and passing both spellings raises ``TypeError``; and ``control=`` on
+  ``dask_runner``, ``parsl_runner`` and ``htcondor_runner``.
+* ``htcondor_runner`` and ``submit_driverless`` agree on their defaults: 2 workers and
+  ``request_memory_mb=2048``.
 
 0.0.7
 -----

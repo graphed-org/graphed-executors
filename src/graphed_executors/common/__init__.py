@@ -11,12 +11,27 @@ three installed; frozen no-cross-import test). It hosts:
   worker<->worker reachability (e.g. parsl HTEX).
 
 It also holds :func:`refuse_staged`, the one refusal of a join or repartition plan by the runners
-that take a single-stage ``Plan``.
+that take a single-stage ``Plan``, and :func:`renamed`, the one deprecation of a setting's name.
 """
 
 from __future__ import annotations
 
+import warnings
+from typing import TypeVar
+
 from graphed.core import DurablePlanV2
+
+T = TypeVar("T")
+
+
+def renamed(workers: int | None, old: int | None, old_name: str, default: T) -> int | T:
+    """Return ``workers``, its deprecated ``old_name`` spelling, or ``default``; never both."""
+    if old is None:
+        return default if workers is None else workers
+    if workers is not None:
+        raise TypeError(f"pass workers= or {old_name}=, not both")
+    warnings.warn(f"{old_name}= is deprecated; use workers=", DeprecationWarning, stacklevel=3)
+    return old
 
 
 def refuse_staged(plan: object, runner: str, backend: str) -> None:

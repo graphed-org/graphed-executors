@@ -49,11 +49,11 @@ eight tiny ones, so that the order the partials are added in is visible in the t
            print(f"{name:<24} {total.tobytes().hex()}  {float(total[0]):.17g}")
 
        runs = {
-           "ThreadExecutor(1)": ThreadExecutor(max_workers=1),
-           "ThreadExecutor(8)": ThreadExecutor(max_workers=8),
-           "ProcessPoolExecutor(1)": ProcessPoolExecutor(max_workers=1),
-           "ProcessPoolExecutor(8)": ProcessPoolExecutor(max_workers=8),
-           "PinnedPoolExecutor(8)": PinnedPoolExecutor(max_workers=8),
+           "ThreadExecutor(1)": ThreadExecutor(workers=1),
+           "ThreadExecutor(8)": ThreadExecutor(workers=8),
+           "ProcessPoolExecutor(1)": ProcessPoolExecutor(workers=1),
+           "ProcessPoolExecutor(8)": ProcessPoolExecutor(workers=8),
+           "PinnedPoolExecutor(8)": PinnedPoolExecutor(workers=8),
        }
        for label, executor in runs.items():
            value = executor.run(plan).value
@@ -243,7 +243,7 @@ or by leaving the ``with`` block:
        return np.zeros(1, dtype=int)
 
    def sweep(plans):
-       with ProcessPoolExecutor(max_workers=4, persistent=True) as ex:
+       with ProcessPoolExecutor(workers=4, persistent=True) as ex:
            return [ex.run(plan).value for plan in plans]   # one spawn, amortized
 
    if __name__ == "__main__":
@@ -296,7 +296,7 @@ it. Every executor and runner here has it — the local pools and ``SubmitRunner
                                for i in range(4)))
 
    if __name__ == "__main__":
-       with ProcessPoolExecutor(max_workers=4, persistent=True) as ex:
+       with ProcessPoolExecutor(workers=4, persistent=True) as ex:
            futures = [ex.submit(build(n)) for n in (100, 200, 300)]
            print([f.result().value for f in futures])
 
@@ -550,7 +550,7 @@ queued behind it by ``submit`` run as usual.
 
     tasks = [Task(k, Partition(f"f{k}.root", "Events", k, k + 1)) for k in range(100)]
     plan = Plan(process=process, combine=lambda a, b: a + b, empty=lambda: 0, tasks=tasks)
-    res = ThreadExecutor(max_workers=2, control=ctl).run(plan)
+    res = ThreadExecutor(workers=2, control=ctl).run(plan)
     print(res.stopped, res.value == res.n_partitions < 100, ctl.state)
 
 which prints::

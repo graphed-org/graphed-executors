@@ -47,7 +47,7 @@ from graphed.services import require_bound
 
 from .._plan_queue import PlanQueue
 from .._window import Window
-from ..common import refuse_staged
+from ..common import refuse_staged, renamed
 from ._peer import PeerControl, make_bounds, slice_items
 from ._reduce import LazyReducer, TreeProgress, running_fold, tree_reduce
 
@@ -116,8 +116,9 @@ class _BaseExecutor:
 
     def __init__(
         self,
-        max_workers: int | None = None,
+        workers: int | None = None,
         *,
+        max_workers: int | None = None,
         on_combine: Callable[[int], None] | None = None,
         pooled_combines: bool = False,
         persistent: bool = False,
@@ -131,7 +132,8 @@ class _BaseExecutor:
         self._retries = retries
         self._running: set[int] = set()
         self._plans = PlanQueue(self.run, max_in_flight)
-        self.max_workers = max_workers if max_workers is not None else (os.cpu_count() or 1)
+        workers = renamed(workers, max_workers, "max_workers", None)
+        self.max_workers = workers if workers is not None else (os.cpu_count() or 1)
         # test hook: called per tree-reduce combine with #leaves so far
         self._on_combine = on_combine
         self._pooled_combines = pooled_combines

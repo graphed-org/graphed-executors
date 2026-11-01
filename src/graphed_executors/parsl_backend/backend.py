@@ -27,6 +27,8 @@ from concurrent.futures import Future, InvalidStateError
 from contextlib import suppress
 from typing import Any, cast
 
+from graphed.core import RunControl
+
 from graphed_executors.common.transport_run import in_chain
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
@@ -311,6 +313,7 @@ def parsl_runner(
     retries: int = 3,
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
+    control: RunControl | None = None,
 ) -> SubmitRunner:
     """Build the user-facing runner in one line.
 
@@ -324,4 +327,5 @@ def parsl_runner(
         retries=retries,
         max_in_flight=max_in_flight,
         services=services,
+        control=control,
     )

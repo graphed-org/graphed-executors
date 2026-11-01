@@ -46,7 +46,7 @@ plan  = Plan(process=count, combine=add, empty=zero,
              tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
 if __name__ == "__main__":
-    result = ProcessPoolExecutor(max_workers=4).run(plan)
+    result = ProcessPoolExecutor(workers=4).run(plan)
     print(result.value)                   # [700]
 ```
 
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     h.fill(events.pt)                     # records the fill; nothing is read yet
 
     plan = gh.plan({"jet_pt": h})         # your analysis, packaged for a runner
-    result = ProcessPoolExecutor(max_workers=4).run(plan)
+    result = ProcessPoolExecutor(workers=4).run(plan)
     print(gh.unpack(result.value)["jet_pt"].values())   # [3 4 3 1]
 ```
 
@@ -95,11 +95,11 @@ be module-level functions the workers can import — a lambda or a notebook-cell
 | You are running on | Use |
 |---|---|
 | One process, quick check, nothing picklable needed | `ThreadExecutor()` |
-| Your laptop, all cores | `ProcessPoolExecutor(max_workers=N)` |
+| Your laptop, all cores | `ProcessPoolExecutor(workers=N)` |
 | A many-core machine where the worker count strains the open-file limit | `PinnedPoolExecutor` |
 | A dask cluster (local, dask-jobqueue, Kubernetes, …) | `dask_runner(client)` |
 | A parsl HTEX pool | `parsl_runner(executor)` |
-| An HTCondor pool (LPC, lxplus, your own) | `htcondor_runner(site=..., n_pilots=N)` |
+| An HTCondor pool (LPC, lxplus, your own) | `htcondor_runner(site=..., workers=N)` |
 
 All of these, and `graphed.core`'s `SequentialRunner`, import from the top level:
 `from graphed_executors import ProcessPoolExecutor`.
@@ -189,7 +189,7 @@ Two things bite people on HTEX:
 
 - `persistent=True` keeps the process pool alive across `run()` calls — worth it in notebooks
   and parameter sweeps, where the spawn cost would otherwise repeat per plan. Use it as a
-  context manager: `with ProcessPoolExecutor(max_workers=4, persistent=True) as ex:` and call
+  context manager: `with ProcessPoolExecutor(workers=4, persistent=True) as ex:` and call
   `ex.run(plan)` once per plan inside.
 - Call `resources.open_once(uri, opener)` inside your `process` and the worker keeps that handle
   for its lifetime, so ten partitions of one file on one worker open it once instead of ten
@@ -215,7 +215,7 @@ from graphed_executors import ProcessPoolExecutor
 if __name__ == "__main__":                    # a spawn pool re-imports this file
     with Dashboard(profile=True, control=True) as dash:
         print("open", dash.url)               # the page updates while the plan runs
-        result = dash.attach(ProcessPoolExecutor(max_workers=4)).run(plan)
+        result = dash.attach(ProcessPoolExecutor(workers=4)).run(plan)
     print(result.value, result.stopped)       # [700] exhausted ("cancelled" after a cancel)
 ```
 
