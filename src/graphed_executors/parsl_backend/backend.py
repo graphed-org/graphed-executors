@@ -29,9 +29,10 @@ from typing import Any, cast
 
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
+from graphed_executors.submit.worker import Emitted, dispatch_events, subscribe, unwrap
 
 from ._lazy import _parsl_executor_types
-from ._shim import EventBatch, _parsl_task_shim, dispatch_events
+from ._shim import _parsl_task_shim
 
 # The two frozen 7-field vectors (m42 pin — NO new fields, NO subclass; the m47 transport dispatch
 # rides a backend-private attribute, never a capability field).
@@ -63,7 +64,7 @@ _WORKER_DEATH_NAMES = ("WorkerLost", "ManagerLost")
 class _ParslFuture:
     """A thin :class:`SubmitFuture` over a parsl future.
 
-    ``result()`` unwraps the ``(result, events)`` shim envelope and dispatches the buffered
+    ``result()`` unwraps the ``Emitted`` shim envelope and dispatches the buffered
     monitor events to the backend's driver-side handler registry exactly once
     (completion-granularity piggyback); ``done``/``exception``/``cancel``/``cancelled``
     delegate.
@@ -79,11 +80,11 @@ class _ParslFuture:
         self._dispatched = False
 
     def result(self, timeout: float | None = None) -> object:
-        result, events = cast("tuple[object, list[EventBatch]]", self._raw.result(timeout))
-        if not self._dispatched:
+        result = self._raw.result(timeout)
+        if not self._dispatched and type(result) is Emitted:
             self._dispatched = True
-            dispatch_events(events, self._handlers)
-        return result
+            dispatch_events(result.events, self._handlers)
+        return unwrap(result)
 
     def done(self) -> bool:
         return bool(self._raw.done())
@@ -214,12 +215,7 @@ class ParslBackend:
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
         """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
-        self._handlers[topic] = handler
-
-        def unsub() -> None:
-            self._handlers.pop(topic, None)
-
-        return unsub
+        return subscribe(self._handlers, topic, handler)
 
     def cancel(self, futures: Sequence[Any]) -> None:
         """Best-effort, pre-run only (``cancel_running=False``); a no-op on HTEX.
