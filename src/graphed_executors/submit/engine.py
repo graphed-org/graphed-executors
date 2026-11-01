@@ -757,7 +757,9 @@ class SubmitRunner:
     def _context(self, run_nonce: str, monitor: Monitor | None) -> RunContext:
         if monitor is None:
             return RunContext(run_nonce, None, None)
-        push = worker_monitor_factory(monitor)
+        # off the pinned Protocol, as task_slots is
+        forks = getattr(self.backend, "forks_each_task", False)
+        push = None if forks else worker_monitor_factory(monitor)
         return RunContext(
             run_nonce,
             f"graphed-monitor-{run_nonce}",

@@ -35,12 +35,15 @@ def executor(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
     worker += ["--disk", "4000", "--timeout", "120", "localhost", str(PORT)]
     logs = subprocess.DEVNULL
     workers = [subprocess.Popen(worker, env=env, stdout=logs, stderr=logs) for _ in range(2)]
-    with vg.Executor(PORT, params={"progress-bar": 0, "max-retries": 2}) as ex:
-        yield ex
-    for proc in workers:
-        proc.terminate()
-        proc.wait()
-    os.chdir(cwd)
+    try:
+        with vg.Executor(PORT, params={"progress-bar": 0, "max-retries": 2}) as ex:
+            yield ex
+    finally:
+        for proc in workers:
+            proc.terminate()
+            proc.wait()
+        os.chdir(cwd)
+        del os.environ["VINE_TEST_DRIVER_PID"]
 
 
 class Recorder:
@@ -62,9 +65,7 @@ class Recorder:
         return None
 
 
-def test_a_monitored_plan_leaves_partial_results_on_the_workers(
-    executor: Any, tmp_path: Path
-) -> None:
+def test_a_monitored_plan_loads_only_the_root_on_the_driver(executor: Any, tmp_path: Path) -> None:
     monitor = Recorder()
     plan = Plan(process, combine, empty, tasks(8, f"data|{tmp_path}"))
     with vine_graph_runner(executor, monitor=monitor) as runner:
@@ -73,7 +74,6 @@ def test_a_monitored_plan_leaves_partial_results_on_the_workers(
     phases = collections.Counter(event.phase for event in monitor.events)
     assert phases[TaskPhase.FINISHED] == 8
     assert phases[TaskPhase.STARTED] == 8
-    # Only the root reaches the driver.
     assert len(list(tmp_path.iterdir())) == 1
     workers = {e.worker for e in monitor.events if e.phase is TaskPhase.FINISHED}
     assert len(workers) == 2, workers

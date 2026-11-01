@@ -4,7 +4,8 @@ Running on TaskVine
 If your workers are `TaskVine <https://cctools.readthedocs.io/en/latest/taskvine/>`_ workers,
 graphed runs your plan on them through vine_graph (``ndcctools.taskvine.vine_graph``). You create
 the ``Executor``, you own it, and you hand it over. Workers read each other's partial results, and
-merges run on workers.
+merges run on workers. The Manager also receives each partial result as its task completes, so its
+machine needs the disk for them (the ``vault-disk-limit`` setting).
 
 This page is the how-to. For *why* the answer doesn't move when the worker count does, read
 :doc:`design`.
@@ -55,13 +56,14 @@ message is vine_graph's own: vine_graph does not say which worker it was.
 Monitors
 --------
 
-A monitor with a ``worker_monitor_factory`` (the dashboard's ``per_worker=True``) connects each
-worker to it directly, and nothing changes for the run.
+vine_graph has no channel for monitor events beside a task's value. So each leaf of a monitored run
+gets one small extra task, which loads the leaf's result on a worker and returns its events alone.
+Your session loads no partial result for them; the cost is one more task per leaf, and events
+arrive when that task finishes.
 
-Any other monitor needs its events on the driver, and vine_graph has no channel for them beside a
-task's value. So each leaf of a monitored run gets one small extra task, which loads the leaf's
-result on a worker and returns its events alone. Partial results stay on the workers either way;
-the cost is one more task per leaf, and events arrive when that task finishes.
+A monitor with a ``worker_monitor_factory`` (the dashboard's ``per_worker=True``) gets its events the
+same way, on the driver: each call is a fork that ends without running exit handlers, so a monitor
+on a worker would lose what it had buffered.
 
 What a task keeps
 -----------------

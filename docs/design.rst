@@ -1100,14 +1100,16 @@ On TaskVine
 
 ``graphed_executors.vine_graph_backend`` runs on a vine_graph ``Executor`` you create; :doc:`vine_graph`
 is the how-to. It is the one backend besides dask whose futures are data dependencies between
-workers, so merges read their inputs worker to worker and only the root's result reaches your
-session.
+workers, so merges read their inputs worker to worker and your session loads only the root's
+result. The Manager still receives each partial: a vine_graph ``Future`` has its result fetched when
+the task completes, so the Manager's machine needs the disk for them (``vault-disk-limit``).
 
 That is also why monitor events cannot ride a task's result as they do on parsl and HTCondor, where
-results come through the driver anyway: reading them would pull every partial result back. A leaf
-of a monitored run gets a small task of its own that returns just its events. vine_graph forks each
-call from a library process, so a worker's ``open_once`` handles last one task, and the worker's
-name in an event is that library process, not the call.
+results come through the driver anyway: reading them would load every partial result in your
+session. A leaf of a monitored run gets a small task of its own that returns just its events.
+vine_graph forks each call from a library process, so a worker's ``open_once`` handles last one
+task, the worker's name in an event is that library process, not the call, and a per-worker monitor
+would die with the fork before it sent what it buffered, so its events take that same task.
 
 Not supported yet
 -----------------

@@ -59,6 +59,8 @@ class Future:
         self.cancelled = False
 
     def done(self) -> bool:
+        if self._executor.closed:
+            raise RuntimeError("the Executor is closed")
         return True
 
     def exception(self, timeout: float | None = None) -> TaskError | None:

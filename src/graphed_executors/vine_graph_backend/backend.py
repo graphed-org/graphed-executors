@@ -13,9 +13,8 @@ exception and the reason. That is the submit seam the engine needs, so this adap
 - returns broadcast payloads as the bytes themselves: vine_graph serializes an argument object once
   however many tasks pass it, and stages a large one as a file that workers cache, so the bytes
   travel once per worker;
-- reads a leaf's monitor events in a task of their own (``_shim._take_events``) when a monitor
-  needs them on the driver, so results stay on the workers. A monitor with a
-  ``worker_monitor_factory`` takes no such task: its workers push.
+- reads a leaf's monitor events in a task of their own (``_shim._take_events``), so the driver
+  loads no partial result. Workers never push to a monitor (``forks_each_task``).
 
 The caller owns the vine_graph Executor. Workers need this package, graphed, and the analysis's own
 dependencies in their environment. Modules that a plan refers to by import and that workers lack go
@@ -24,6 +23,8 @@ to every worker through the Executor's ``library_files``.
 
 from __future__ import annotations
 
+import functools
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
@@ -49,10 +50,23 @@ def _original(error: Any) -> BaseException:
     return cast(BaseException, error if error.exception is None else error.exception)
 
 
+def _dispatch(handlers: EventHandlers, future: Any) -> None:
+    """Deliver the events a finished ``_take_events`` future returned or inherited."""
+    try:
+        error = future.exception()
+        if error is None:
+            events = future.result()
+        else:
+            events = getattr(error.exception, "graphed_events", None)
+    except Exception:  # the Executor closed before the task finished
+        return
+    dispatch_events(events or [], handlers)
+
+
 class _VineFuture:
     """A :class:`SubmitFuture` over a vine_graph future."""
 
-    __slots__ = ("_future", "key")
+    __slots__ = ("__weakref__", "_future", "key")
 
     def __init__(self, future: Any, key: str) -> None:
         self._future = future
@@ -82,7 +96,7 @@ class _VineFuture:
         self._future.add_done_callback(lambda _: fn(self))
 
     def __repr__(self) -> str:
-        return f"<_VineFuture {self.key} done={self.done()}>"
+        return f"<_VineFuture {self.key} {self._future!r}>"
 
 
 class VineGraphBackend:
@@ -95,6 +109,9 @@ class VineGraphBackend:
     settings, so those hints are ignored. The Executor's ``max-retries`` covers failures of the
     infrastructure; an exception that a task's function raises fails the task at once.
     """
+
+    # A forked call ends in os._exit, so a monitor built on a worker loses what it buffered.
+    forks_each_task = True
 
     capabilities = SubmitCapabilities(
         peer_data_movement=True,
@@ -110,7 +127,10 @@ class VineGraphBackend:
         """Run tasks on ``executor``, which stays the caller's to close."""
         self._executor = executor
         self._handlers: EventHandlers = {}
-        self._keys: dict[int, str] = {}  # vine_graph's key of each task -> the engine's
+        # vine_graph's key of each task -> its future, which names it for describe_failure
+        self._futures: weakref.WeakValueDictionary[int, _VineFuture] = (
+            weakref.WeakValueDictionary()
+        )
 
     def n_workers(self) -> int:
         """Return the workers connected now."""
@@ -134,11 +154,14 @@ class VineGraphBackend:
         """Submit ``fn`` through the worker shim; ``_VineFuture`` args become dependencies."""
         args = tuple(arg._future if type(arg) is _VineFuture else arg for arg in args)
         future = self._executor.submit(_vine_task_shim, fn, *args)
-        self._keys[future.target.key] = key
+        wrapped = _VineFuture(future, key)
+        self._futures[future.target.key] = wrapped
         # Only leaves emit, and a checked task holds its fn as its second argument.
         if self._handlers and _leaf_task in (fn, *args[1:2]):
-            self._executor.submit(_take_events, future).add_done_callback(self._dispatch)
-        return _VineFuture(future, key)
+            # This run's handlers: events may land after the run unsubscribed.
+            done = functools.partial(_dispatch, dict(self._handlers))
+            self._executor.submit(_take_events, future).add_done_callback(done)
+        return wrapped
 
     def broadcast(self, payload: bytes, *, token: str) -> object:
         """Return ``payload``: vine_graph serializes one object once."""
@@ -171,20 +194,11 @@ class VineGraphBackend:
 
         if not isinstance(exc, TaskError) or exc.reason not in _LOST:
             return None
-        node = exc.task if exc.source is None else exc.source
-        key = None if node is None else self._keys.get(node.key)
-        return None if key is None else (key, str(exc))
-
-    def _dispatch(self, future: Any) -> None:
-        try:
-            error = future.exception()
-            if error is None:
-                events = future.result()
-            else:
-                events = getattr(error.exception, "graphed_events", None)
-        except Exception:  # the Executor closed before the task finished
-            return
-        dispatch_events(events or [], self._handlers)
+        for node in (exc.source, exc.task):
+            future = None if node is None else self._futures.get(node.key)
+            if future is not None:
+                return future.key, str(exc)
+        return None
 
 
 def vine_graph_runner(
