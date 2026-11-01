@@ -184,11 +184,11 @@ def dask_runner(
     only — this adapter does not enforce them yet (see :meth:`DaskBackend.submit`).
     ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``).
     """
-    # lazy: distributed is the optional extra
-    from .plugin import GraphedWorkerPlugin
+    # Ahead of plugin's bare import: DaskBackend raises the ImportError that names the extra.
+    backend = DaskBackend(client, replicate_broadcast=replicate_broadcast)
+    from .plugin import GraphedWorkerPlugin  # lazy: distributed is the optional extra
 
     client.register_plugin(GraphedWorkerPlugin())
-    backend = DaskBackend(client, replicate_broadcast=replicate_broadcast)
     return SubmitRunner(
         backend, monitor=monitor, retries=retries, max_in_flight=max_in_flight, services=services
     )

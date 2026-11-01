@@ -231,7 +231,7 @@ or by leaving the ``with`` block:
 
    import numpy as np
    from graphed.core import Partition, Plan, Task
-   from graphed_executors.local import ProcessPoolExecutor
+   from graphed_executors import ProcessPoolExecutor
 
    def count(partition, resources):
        return np.asarray([partition.entry_stop - partition.entry_start])
@@ -279,7 +279,7 @@ it. Every executor and runner here has it — the local pools and ``SubmitRunner
 
    import numpy as np
    from graphed.core import Partition, Plan, Task
-   from graphed_executors.local import ProcessPoolExecutor
+   from graphed_executors import ProcessPoolExecutor
 
    def count(partition, resources):
        return np.asarray([partition.entry_stop - partition.entry_start])
@@ -402,7 +402,7 @@ the thread and process pools, ``SubmitRunner`` over any backend, ``dask_runner``
 
     from graphed.checkpoint import resumable
     from graphed.core import Partition, Plan, Task
-    from graphed_executors.local import ThreadExecutor
+    from graphed_executors import ThreadExecutor
 
 
     def chunk(partition, resources):
@@ -526,7 +526,7 @@ queued behind it by ``submit`` run as usual.
     import time
 
     from graphed.core import Partition, Plan, RunControl, Task
-    from graphed_executors.local import ThreadExecutor
+    from graphed_executors import ThreadExecutor
 
     ctl = RunControl()
 

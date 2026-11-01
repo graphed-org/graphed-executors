@@ -24,6 +24,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ._lazy import _parsl_executor_types
+
 
 def start_htex(
     *,
@@ -47,7 +49,7 @@ def start_htex(
     harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here
     would break worker-side imports of caller-defined task fns.
     """
-    from parsl.executors import HighThroughputExecutor
+    htex_cls, _ = _parsl_executor_types()
     from parsl.providers import LocalProvider
 
     kwargs: dict[str, Any] = {
@@ -60,7 +62,7 @@ def start_htex(
         kwargs["address"] = address
     if heartbeat_period is not None:
         kwargs["heartbeat_period"] = heartbeat_period
-    executor = HighThroughputExecutor(**kwargs)
+    executor = htex_cls(**kwargs)
 
     executor.run_dir = run_dir  # move 1
     os.makedirs(run_dir, exist_ok=True)

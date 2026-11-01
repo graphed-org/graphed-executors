@@ -100,7 +100,7 @@ DataFlowKernel would otherwise do for you. Hand the started executor to
     import tempfile
 
     from graphed.core import Partition, Plan, Task
-    from graphed_executors.parsl_backend import parsl_runner, start_htex, stop_htex
+    from graphed_executors import parsl_runner, start_htex, stop_htex
     from my_tasks import add, count, zero
 
     if __name__ == "__main__":

@@ -153,7 +153,7 @@ install and names it.
 
     # A recipe: this needs the LPC pool.
     from graphed.core import Partition, Plan, Task
-    from graphed_executors.htcondor_backend import htcondor_runner
+    from graphed_executors import htcondor_runner
     import my_tasks
 
     IMAGE = "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/coffea-almalinux9-noml:2026.9.0-py3.12"
@@ -211,7 +211,7 @@ packages (a shared filesystem, or the same image):
 .. code-block:: python
 
     # A recipe: this needs an HTCondor pool.
-    from graphed_executors.htcondor_backend import htcondor_runner
+    from graphed_executors import htcondor_runner
 
     with htcondor_runner(n_pilots=10, user_modules=["my_tasks.py"]) as runner:
         result = runner.run(plan)              # the plan from the laptop run above
