@@ -45,6 +45,7 @@ from graphed.core.execution import (
     complete_events,
     emit_task,
     partition_label,
+    worker_profiler_factory,
 )
 from graphed.debug import StageError
 
@@ -635,9 +636,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
 
         These are the profiler factory, event queue, push factory and lean flag.
         """
-        factory = (
-            self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
-        )
+        factory = worker_profiler_factory(self._run_monitor)
         push = self._run_push
         return factory, None if push is not None else self._event_q, push, self._run_lean
 

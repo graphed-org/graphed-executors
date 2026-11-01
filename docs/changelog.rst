@@ -10,6 +10,12 @@ Unreleased
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
+* A monitor without ``worker_profiler_factory``, or one whose factory raises, no longer ends a run
+  on ``ProcessPoolExecutor``, ``PinnedPoolExecutor``, ``dask_runner``, ``parsl_runner`` or
+  ``htcondor_runner``.
+* Every runner reports a run's start and end to a monitor's optional ``on_run_start(n_tasks)`` and
+  ``on_run_end()``, so ``graphed.debug.ProgressBar`` shows the plan's whole task count from the
+  first tick and closes on a cancelled or failed run.
 
 0.0.7
 -----
