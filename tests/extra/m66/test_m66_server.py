@@ -175,7 +175,7 @@ def test_pilots_sharing_a_hostname_and_pid_stay_distinct(
         marker = tmp_path / "died"
         fut: Future[Any] = Future()
         ts.add("k", die_once, (str(marker),), fut)
-        assert fut.result(timeout=60)[0] == "survived"  # the (result, events) envelope
+        assert fut.result(timeout=60).value == "survived"
         assert marker.exists(), "the task never killed a pilot: the scenario did not run"
     finally:
         ts.close()

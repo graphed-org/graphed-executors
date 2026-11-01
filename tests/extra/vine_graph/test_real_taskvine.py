@@ -16,7 +16,7 @@ import pytest
 from graphed.core import Plan
 from graphed.core.execution import TaskPhase
 from graphed.debug import StageError
-from vine_plan_fns import combine, empty, process, tasks
+from vine_plan_fns import Recorder, combine, empty, process, tasks
 
 from graphed_executors.vine_graph_backend import vine_graph_runner
 
@@ -44,25 +44,6 @@ def executor(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
             proc.wait()
         os.chdir(cwd)
         del os.environ["VINE_TEST_DRIVER_PID"]
-
-
-class Recorder:
-    """A monitor with no ``worker_monitor_factory``: its events must reach the driver."""
-
-    def __init__(self) -> None:
-        self.events: list[Any] = []
-
-    def on_task(self, event: Any) -> None:
-        self.events.append(event)
-
-    def on_combine(self, *_: Any) -> None:
-        pass
-
-    def on_profile(self, *_: Any) -> None:
-        pass
-
-    def worker_profiler_factory(self) -> None:
-        return None
 
 
 def test_a_monitored_plan_loads_only_the_root_on_the_driver(executor: Any, tmp_path: Path) -> None:

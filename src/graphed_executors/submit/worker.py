@@ -152,25 +152,16 @@ class Emitted:
     events: list[EventBatch]
 
 
-def unwrap(value: object) -> object:
-    """Return a task's plain value."""
-    return value.value if type(value) is Emitted else value
-
-
-def run_buffered(env: BufferedEnv, fn: Callable[..., object], args: tuple[object, ...]) -> object:
-    """Run ``fn`` under ``env``; return its value, as an :class:`Emitted` when it emitted events.
-
-    Worker-resolved future args reach ``fn`` unwrapped.
-    """
+def run_buffered(env: BufferedEnv, fn: Callable[..., object], args: tuple[object, ...]) -> Emitted:
+    """Run ``fn(*args)`` under ``env``; return its value with the events it emitted."""
     token = set_worker_env(env)
     try:
-        value = fn(*map(unwrap, args))
+        return Emitted(fn(*args), env.events)
     finally:
         _reset_worker_env(token)
-    return Emitted(value, env.events) if env.events else value
 
 
-def buffered_task(fn: Callable[..., object], /, *args: object) -> object:
+def buffered_task(fn: Callable[..., object], /, *args: object) -> Emitted:
     """Run ``fn(*args)`` on a worker process identified as ``hostname:pid``."""
     return run_buffered(BufferedEnv(f"{socket.gethostname()}:{os.getpid()}"), fn, args)
 

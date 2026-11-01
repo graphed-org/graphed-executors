@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from graphed_executors.parsl_backend.backend import ParslBackend, _ParslFuture
+from graphed_executors.submit.worker import Emitted
 
 
 def _backend(*, htex: bool) -> ParslBackend:
@@ -32,7 +33,7 @@ def test_cancel_leaves_htex_futures_and_cancels_tpe_ones(htex: bool, cancelled: 
     _backend(htex=htex).cancel([_ParslFuture(raw, {})])
     assert raw.cancelled() is cancelled
     if not cancelled:
-        raw.set_result(("done", []))  # what parsl's result thread does; it must not raise
+        raw.set_result(Emitted("done", []))  # what parsl's result thread does; it must not raise
         assert _ParslFuture(raw, {}).result() == "done"
 
 

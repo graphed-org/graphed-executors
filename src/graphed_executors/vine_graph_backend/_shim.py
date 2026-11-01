@@ -18,11 +18,11 @@ from collections.abc import Callable
 from graphed_executors.submit.worker import BufferedEnv, Emitted, EventBatch, run_buffered
 
 
-def _vine_task_shim(fn: Callable[..., object], /, *args: object) -> object:
+def _vine_task_shim(fn: Callable[..., object], /, *args: object) -> Emitted:
     # The parent of a forked call is its worker's library process, which outlives the call.
     env = BufferedEnv(f"{socket.gethostname()}:{os.getppid()}")
     try:
-        return run_buffered(env, fn, args)
+        return run_buffered(env, fn, tuple(a.value if type(a) is Emitted else a for a in args))
     except BaseException as exc:
         if env.events:
             with contextlib.suppress(Exception):  # telemetry never replaces the task's exception
@@ -30,6 +30,6 @@ def _vine_task_shim(fn: Callable[..., object], /, *args: object) -> object:
         raise
 
 
-def _take_events(value: object) -> list[EventBatch]:
+def _take_events(value: Emitted) -> list[EventBatch]:
     """Return the events of a task's value: a task of its own, so the driver loads only them."""
-    return value.events if type(value) is Emitted else []
+    return value.events

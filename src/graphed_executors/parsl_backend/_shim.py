@@ -19,7 +19,7 @@ import os
 import socket
 from collections.abc import Callable
 
-from graphed_executors.submit.worker import BufferedEnv, run_buffered
+from graphed_executors.submit.worker import BufferedEnv, Emitted, run_buffered
 
 
 def _worker_identity() -> str:
@@ -35,7 +35,7 @@ def _worker_identity() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
 
 
-def _parsl_task_shim(fn: Callable[..., object], /, *args: object) -> object:
+def _parsl_task_shim(fn: Callable[..., object], /, *args: object) -> Emitted:
     """Run ``fn(*args)`` under a :class:`BufferedEnv` on the worker.
 
     Future args were already resolved DRIVER-side by ``ParslBackend.submit`` (parsl workers cannot

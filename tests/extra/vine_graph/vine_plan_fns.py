@@ -4,10 +4,34 @@ from __future__ import annotations
 
 import os
 import signal
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from graphed.core import Partition, Task
+from graphed.core.execution import TaskPhase
+
+
+class Recorder:
+    """A monitor with no ``worker_monitor_factory``."""
+
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    def on_task(self, event: Any) -> None:
+        self.events.append(event)
+
+    def on_combine(self, *_: Any) -> None:
+        pass
+
+    def on_profile(self, *_: Any) -> None:
+        pass
+
+    def worker_profiler_factory(self) -> None:
+        return None
+
+    def phases(self) -> Counter[TaskPhase]:
+        return Counter(event.phase for event in self.events)
 
 
 class Counted:

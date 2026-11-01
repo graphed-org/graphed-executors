@@ -29,7 +29,7 @@ from typing import Any, cast
 
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
-from graphed_executors.submit.worker import Emitted, dispatch_events, subscribe, unwrap
+from graphed_executors.submit.worker import Emitted, dispatch_events, subscribe
 
 from ._lazy import _parsl_executor_types
 from ._shim import _parsl_task_shim
@@ -80,11 +80,11 @@ class _ParslFuture:
         self._dispatched = False
 
     def result(self, timeout: float | None = None) -> object:
-        result = self._raw.result(timeout)
-        if not self._dispatched and type(result) is Emitted:
+        result = cast("Emitted", self._raw.result(timeout))
+        if not self._dispatched:
             self._dispatched = True
             dispatch_events(result.events, self._handlers)
-        return unwrap(result)
+        return result.value
 
     def done(self) -> bool:
         return bool(self._raw.done())

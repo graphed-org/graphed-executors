@@ -23,20 +23,20 @@ from graphed.core import (
 )
 from graphed.core.execution import TaskPhase
 from graphed.debug import StageError
+from vine_plan_fns import Recorder
 
 from graphed_executors import vine_graph_runner
 from graphed_executors.submit import RunContext, SubmitFuture, SubmitRunner, current_env
+from graphed_executors.submit.engine import _RunTasks
 from graphed_executors.submit.worker import (
     BufferedEnv,
     Emitted,
     _combine_task,
     _leaf_task,
-    _service_checked,
     buffered_task,
     dispatch_events,
     run_buffered,
     subscribe,
-    unwrap,
 )
 from graphed_executors.vine_graph_backend import VineGraphBackend
 from graphed_executors.vine_graph_backend._shim import _take_events, _vine_task_shim
@@ -48,26 +48,6 @@ def vine_graph_module(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("ndcctools", "ndcctools.taskvine"):
         monkeypatch.setitem(sys.modules, name, ModuleType(name))
     monkeypatch.setitem(sys.modules, "ndcctools.taskvine.vine_graph", fake)
-
-
-class Recorder:
-    def __init__(self) -> None:
-        self.events: list[Any] = []
-
-    def on_task(self, event: Any) -> None:
-        self.events.append(event)
-
-    def on_combine(self, *_: Any) -> None:
-        pass
-
-    def on_profile(self, *_: Any) -> None:
-        pass
-
-    def worker_profiler_factory(self) -> None:
-        return None
-
-    def phases(self) -> Counter[TaskPhase]:
-        return Counter(event.phase for event in self.events)
 
 
 def _send_nothing() -> Any:
@@ -197,14 +177,14 @@ def test_a_per_worker_monitor_gets_its_events_on_the_driver() -> None:
 def test_events_that_land_after_the_run_unsubscribed_reach_its_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    executor = fake.Executor()
-    backend = VineGraphBackend(executor)
+    backend = VineGraphBackend(fake.Executor())
     seen: list[Any] = []
     unsubscribe = backend.subscribe_events("t", seen.extend)
     late: list[Any] = []
     monkeypatch.setattr(fake.Future, "add_done_callback", lambda self, fn: late.append((fn, self)))
     ctx = RunContext("run", "t", None)
-    backend.submit(_leaf_task, ctx, pickle.dumps(raising), "late", tasks(1)[0], key="leaf")
+    leaf = backend.submit(_leaf_task, ctx, pickle.dumps(raising), "late", tasks(1)[0], key="leaf")
+    backend.take_events(leaf)
     unsubscribe()
     for fn, future in late:
         fn(future)
@@ -216,12 +196,20 @@ def test_a_service_checked_leaf_reports_its_events_and_a_plain_task_takes_no_eve
     backend = VineGraphBackend(executor)
     seen: list[Any] = []
     backend.subscribe_events("t", seen.extend)
-    backend.submit(entries, tasks(1)[0].partition, None, key="plain")
-    assert executor.loaded == []
+    submits = _RunTasks(backend, (("svc", "tcp://localhost:1", "tcp"),))
+    submits.submit(entries, tasks(1)[0].partition, None, key="plain", retries=0)
+    assert _take_events not in executor.submitted
     ctx = RunContext("run", "t", None)
     payload = pickle.dumps(entries)
-    backend.submit(_service_checked, (), _leaf_task, ctx, payload, "tok", tasks(1)[0], key="leaf")
+    submits.submit(_leaf_task, ctx, payload, "tok", tasks(1)[0], key="leaf", retries=0)
     assert [event["phase"] for event in seen] == ["started", "finished"]
+
+
+def test_a_run_without_a_monitor_takes_no_events_task() -> None:
+    executor = fake.Executor()
+    backend = VineGraphBackend(executor)
+    backend.take_events(backend.submit(int, key="k"))
+    assert _take_events not in executor.submitted
 
 
 def test_a_function_exception_reaches_the_caller_with_one_errored_event() -> None:
@@ -351,12 +339,12 @@ def test_a_worker_is_named_for_its_library_process(monkeypatch: pytest.MonkeyPat
     # Forks of one library differ in pid and share a parent.
     monkeypatch.setattr("os.getppid", lambda: 4242)
     monkeypatch.setattr("os.getpid", lambda: 1)
-    first = _vine_task_shim(worker)
+    first = _vine_task_shim(worker).value
     monkeypatch.setattr("os.getpid", lambda: 2)
-    assert _vine_task_shim(worker) == first
+    assert _vine_task_shim(worker).value == first
     assert str(first).endswith(":4242")
     monkeypatch.setattr("os.getppid", lambda: 4343)
-    assert _vine_task_shim(worker) != first
+    assert _vine_task_shim(worker).value != first
 
 
 def test_capacity_reads_the_executors() -> None:
@@ -372,12 +360,11 @@ def test_the_backend_adapts_the_submit_seam() -> None:
     future = backend.submit(int, key="k")
     assert isinstance(future, SubmitFuture)
     assert future.done()
-    assert future.key in repr(future)
     called: list[object] = []
     future.add_done_callback(called.append)
     assert called == [future]
     assert backend.submit(add, future, future, key="dep").result() == 0
-    backend.cancel([future, object()])
+    backend.cancel([future])
     assert future._future.cancelled
     backend.close()
     assert not executor.closed
@@ -394,16 +381,8 @@ def test_a_closed_executor_ends_dispatch_quietly() -> None:
     assert seen == []
 
 
-def test_a_future_of_a_closed_executor_still_has_a_repr() -> None:
-    executor = fake.Executor()
-    future = VineGraphBackend(executor).submit(int, key="k")
-    executor.closed = True
-    assert "k" in repr(future)
-
-
 def test_take_events_reads_an_envelope() -> None:
     assert _take_events(Emitted(1, [("t", [])])) == [("t", [])]
-    assert _take_events(1) == []
 
 
 def test_emitted_pickles_on_every_protocol() -> None:
@@ -412,20 +391,16 @@ def test_emitted_pickles_on_every_protocol() -> None:
         assert pickle.loads(pickle.dumps(envelope, protocol)) == envelope
 
 
-def test_run_buffered_wraps_a_value_only_when_it_emitted() -> None:
-    def quiet(a: int) -> int:
-        return a + 1
-
+def test_run_buffered_returns_the_value_with_its_events() -> None:
     def noisy(a: int) -> int:
         current_env().emit("t", [{"n": a}])
         return a + 1
 
-    assert run_buffered(BufferedEnv("w"), quiet, (1,)) == 2
-    assert run_buffered(BufferedEnv("w"), quiet, (Emitted(1, []),)) == 2
-    emitted = run_buffered(BufferedEnv("w"), noisy, (1,))
-    assert emitted == Emitted(2, [("t", [{"n": 1}])])
-    assert unwrap(emitted) == 2
-    assert unwrap(2) == 2
+    assert run_buffered(BufferedEnv("w"), noisy, (1,)) == Emitted(2, [("t", [{"n": 1}])])
+
+
+def test_the_vine_shim_unwraps_a_dependency() -> None:
+    assert _vine_task_shim(int, Emitted("3", [])) == Emitted(3, [])
 
 
 def test_buffered_env_keeps_one_resources_per_process() -> None:
@@ -436,7 +411,7 @@ def test_buffered_task_names_host_and_process() -> None:
     def worker() -> str:
         return current_env().worker
 
-    host, _, pid = str(buffered_task(worker)).rpartition(":")
+    host, _, pid = str(buffered_task(worker).value).rpartition(":")
     assert host
     assert pid.isdigit()
 
