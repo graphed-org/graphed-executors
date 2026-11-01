@@ -27,6 +27,7 @@ from concurrent.futures import Future, InvalidStateError
 from contextlib import suppress
 from typing import Any, cast
 
+from graphed_executors.common.transport_run import in_chain
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
 
@@ -60,18 +61,6 @@ _N_WORKERS_WAIT_S = 30.0
 _WORKER_DEATH_NAMES = ("WorkerLost", "ManagerLost")
 
 
-def _worker_death(exc: BaseException) -> BaseException | None:
-    """Return the parsl worker loss in ``exc``'s chain, matched by class name, or ``None``."""
-    seen: set[int] = set()
-    node: BaseException | None = exc
-    while node is not None and id(node) not in seen:
-        seen.add(id(node))
-        if type(node).__name__ in _WORKER_DEATH_NAMES:
-            return node
-        node = node.__cause__ if node.__cause__ is not None else node.__context__
-    return None
-
-
 class _ParslFuture:
     """A thin :class:`SubmitFuture` over a parsl future.
 
@@ -98,7 +87,7 @@ class _ParslFuture:
         try:
             result, events = cast("tuple[object, list[EventBatch]]", self._raw.result(timeout))
         except BaseException as exc:
-            if _worker_death(exc) is not None:  # parsl's own carries no task key
+            if in_chain(exc, *_WORKER_DEATH_NAMES):  # parsl's own carries no task key
                 exc.graphed_key = self._key  # type: ignore[attr-defined]
             raise
         if not self._dispatched:
@@ -271,7 +260,7 @@ class ParslBackend:
         that reached here another way has none, and its message stands in. Anything unrelated
         returns ``None``.
         """
-        death = _worker_death(exc)
+        death = in_chain(exc, *_WORKER_DEATH_NAMES)
         if death is None:
             return None
         label = str(death) or type(death).__name__

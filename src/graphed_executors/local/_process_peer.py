@@ -10,19 +10,24 @@ from __future__ import annotations
 
 import contextlib
 import multiprocessing
+import os
+import shutil
 import signal
+import tempfile
+import threading
 import time
-from collections.abc import Iterator, Sequence
-from concurrent.futures import Executor as _PoolExecutor
+import weakref
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future, wait
 from concurrent.futures import ProcessPoolExecutor as _StdProcessPool
 from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass
 from multiprocessing.process import BaseProcess
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 
 from graphed import WorkerLostError
-from graphed.core import Partition, Plan, RunControl
+from graphed.core import ExecResult, Partition, Plan, RunControl, chunk_label
 from graphed.core.execution import complete_events
 
 from ._driver import _BaseExecutor
@@ -74,6 +79,30 @@ def _worker_processes(pool: Any) -> list[BaseProcess]:
     return pool.workers if isinstance(pool, PinnedProcessPool) else list(pool._processes.values())
 
 
+@dataclass(frozen=True)
+class _InFlight(Generic[R]):
+    """``fn`` that names its work in a file while it runs.
+
+    The file outlives a killed worker, so the driver can say what it died on. ``label`` names
+    work that has no partition; a chunk is named by the one it is called with.
+    """
+
+    # ponytail: a file per call; a shared-memory slot per worker if 1 ms chunks ever matter
+    fn: Callable[..., R]
+    directory: str
+    label: str | None = None
+
+    def __call__(self, *args: Any) -> R:
+        marker = Path(self.directory, f"{os.getpid()}.{threading.get_ident()}")
+        with contextlib.suppress(OSError):  # diagnostics never fail a chunk
+            marker.write_text(self.label or chunk_label(args[0]))
+        try:
+            return self.fn(*args)
+        finally:
+            with contextlib.suppress(OSError):
+                marker.unlink()
+
+
 class _ProcessPeerBase(_BaseExecutor):
     """Peer reduction on spawned worker processes, reused across runs when ``persistent=True``.
 
@@ -98,6 +127,24 @@ class _ProcessPeerBase(_BaseExecutor):
     _peer_driver: QueueTransport | None = None
     _last_peer_relays = 0  # nodes the driver forwarded in the last pinned run
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # per executor, not per run: a persistent pool's broadcast token hashes the path
+        self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
+        weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
+
+    def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
+        return _InFlight(fn, self._in_flight, label)
+
+    def _busy(self) -> bool:
+        return bool(os.listdir(self._in_flight))
+
+    def _run_once(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
+        # work a shutdown cut off left its marker, which would read as running from now on
+        shutil.rmtree(self._in_flight, ignore_errors=True)
+        os.makedirs(self._in_flight, exist_ok=True)
+        return super()._run_once(plan, control)
+
     def _lost_in(self, workers: Sequence[BaseProcess]) -> WorkerLostError | None:
         """Return the error for the first dead one of ``workers``, ``None`` if all are alive."""
         exited = [p for p in workers if p.exitcode is not None]
@@ -117,17 +164,18 @@ class _ProcessPeerBase(_BaseExecutor):
             raise lost
 
     @contextlib.contextmanager
-    def _lost_workers(self, pool: _PoolExecutor | None) -> Iterator[None]:
+    def _lost_workers(self, pool: Any) -> Iterator[None]:
         try:
             yield
         except BrokenProcessPool as exc:
             if not getattr(pool, "_broken", False):  # a chunk's own nested pool, not this one
                 raise
-            assert pool is not None
             workers = _worker_processes(pool)
-            pool.shutdown()  # joins them, so every exit code is in; a broken pool cannot be reused
+            # either joins them, so every exit code is in
             if self._kept_pool is pool:
-                self._kept_pool = None
+                self._release_kept_pool()
+            else:
+                pool.shutdown()
             lost = self._lost_in(workers)
             if lost is None:
                 raise
@@ -159,10 +207,9 @@ class _ProcessPeerBase(_BaseExecutor):
     ) -> tuple[R, int]:
         ctx = multiprocessing.get_context("spawn")
         try:
-            with self._lost_workers(self._peer_pool):  # a kept pool can lose a worker between runs
-                if (self._comms or "ipc") == "http":
-                    return self._peer_http(plan, n, w, bounds, worker_addrs, items, ctx, control)
-                return self._peer_ipc(plan, n, w, bounds, worker_addrs, items, ctx, control)
+            if (self._comms or "ipc") == "http":
+                return self._peer_http(plan, n, w, bounds, worker_addrs, items, ctx, control)
+            return self._peer_ipc(plan, n, w, bounds, worker_addrs, items, ctx, control)
         except BaseException:
             # A failed run leaves messages in flight that a bounded exit deliberately abandoned: a
             # peer's >64 KB partial parked in the crashed worker's pipe, the driver's own `done`.
@@ -239,51 +286,52 @@ class _ProcessPeerBase(_BaseExecutor):
         # the run's release: EOF once the driver closes it
         release_r, release_w = ctx.Pipe(duplex=False)
         try:
-            if isinstance(pool, PinnedProcessPool):
-                futs = [
-                    pool.submit(
-                        pinned_peer_actor,
-                        n,
-                        bounds,
-                        worker_addrs,
-                        plan.process,
-                        plan.combine,
-                        items[a],
-                        self._steal,
-                        self._run_monitor is not None,
-                        factory,
-                        self._run_push,  # the pinned pool takes no task keywords
-                        self._run_lean,
-                        self._run_keys,
-                        complete_events(self._run_monitor),
-                        release_r,
-                        worker=i,
-                    )
-                    for i, a in enumerate(worker_addrs)
-                ]
-            else:
-                futs = [
-                    pool.submit(
-                        pooled_peer_actor,
-                        a,
-                        n,
-                        bounds,
-                        worker_addrs,
-                        plan.process,
-                        plan.combine,
-                        items[a],
-                        self._steal,
-                        self._run_monitor is not None,
-                        factory,
-                        monitor_factory=self._run_push,
-                        lean=self._run_lean,
-                        keys=self._run_keys,
-                        complete=complete_events(self._run_monitor),
-                        release=release_r,
-                    )
-                    for a in worker_addrs
-                ]
-            return self._collect_peer(driver_t, plan, n, futs, pool, control)
+            with self._lost_workers(pool):
+                if isinstance(pool, PinnedProcessPool):
+                    futs = [
+                        pool.submit(
+                            pinned_peer_actor,
+                            n,
+                            bounds,
+                            worker_addrs,
+                            plan.process,
+                            plan.combine,
+                            items[a],
+                            self._steal,
+                            self._run_monitor is not None,
+                            factory,
+                            self._run_push,  # the pinned pool takes no task keywords
+                            self._run_lean,
+                            self._run_keys,
+                            complete_events(self._run_monitor),
+                            release_r,
+                            worker=i,
+                        )
+                        for i, a in enumerate(worker_addrs)
+                    ]
+                else:
+                    futs = [
+                        pool.submit(
+                            pooled_peer_actor,
+                            a,
+                            n,
+                            bounds,
+                            worker_addrs,
+                            plan.process,
+                            plan.combine,
+                            items[a],
+                            self._steal,
+                            self._run_monitor is not None,
+                            factory,
+                            monitor_factory=self._run_push,
+                            lean=self._run_lean,
+                            keys=self._run_keys,
+                            complete=complete_events(self._run_monitor),
+                            release=release_r,
+                        )
+                        for a in worker_addrs
+                    ]
+                return self._collect_peer(driver_t, plan, n, futs, pool, control)
         finally:
             release_w.close()  # first: the shutdown below joins actors that only this ends
             release_r.close()
@@ -327,31 +375,34 @@ class _ProcessPeerBase(_BaseExecutor):
         # the run's release: EOF once the driver closes it
         release_r, release_w = ctx.Pipe(duplex=False)
         try:
-            futs = [
-                pool.submit(
-                    http_peer_actor,
-                    a,
-                    driver_t.host,
-                    driver_t.port,
-                    n,
-                    bounds,
-                    worker_addrs,
-                    plan.process,
-                    plan.combine,
-                    items[a],
-                    self._steal,
-                    self._run_monitor is not None,
-                    factory,
-                    monitor_factory=self._run_push,
-                    lean=self._run_lean,
-                    keys=self._run_keys,
-                    complete=complete_events(self._run_monitor),
-                    release=release_r,
+            with self._lost_workers(pool):
+                futs = [
+                    pool.submit(
+                        http_peer_actor,
+                        a,
+                        driver_t.host,
+                        driver_t.port,
+                        n,
+                        bounds,
+                        worker_addrs,
+                        plan.process,
+                        plan.combine,
+                        items[a],
+                        self._steal,
+                        self._run_monitor is not None,
+                        factory,
+                        monitor_factory=self._run_push,
+                        lean=self._run_lean,
+                        keys=self._run_keys,
+                        complete=complete_events(self._run_monitor),
+                        release=release_r,
+                    )
+                    for a in worker_addrs
+                ]
+                http_driver_handshake(
+                    driver_t, worker_addrs, timeout_s=self._worker_start_timeout_s
                 )
-                for a in worker_addrs
-            ]
-            http_driver_handshake(driver_t, worker_addrs, timeout_s=self._worker_start_timeout_s)
-            return self._collect_peer(driver_t, plan, n, futs, pool, control)
+                return self._collect_peer(driver_t, plan, n, futs, pool, control)
         finally:
             release_w.close()  # first: the shutdown below joins actors that only this ends
             release_r.close()
@@ -389,10 +440,9 @@ class _ProcessPeerBase(_BaseExecutor):
             self._last_peer_relays += 1
 
         def failed() -> bool:
-            with self._lost_workers(pool):
-                for f in futs:
-                    if f.done() and f.exception() is not None:
-                        f.result()
+            for f in futs:
+                if f.done() and f.exception() is not None:
+                    f.result()
             # Nothing above sees a pinned worker's crash, or the crash of the last worker a stdlib
             # pool spawned: submit wakes the pool's watcher before adding that process.
             self._raise_lost(pool)
@@ -418,8 +468,7 @@ class _ProcessPeerBase(_BaseExecutor):
         if forward is not None:
             forward.close(OUTBOX_EXIT_WAIT_S)
         release_workers(driver_t)
-        with self._lost_workers(pool):
-            self._last_peer_witness = self._finish_peer(driver_t, futs, pool)
+        self._last_peer_witness = self._finish_peer(driver_t, futs, pool)
         assert out is not None  # failed() raises instead of reporting
         return out
 

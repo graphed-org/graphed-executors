@@ -26,7 +26,7 @@ from graphed.debug import StageError
 
 from graphed_executors import PinnedPoolExecutor, ProcessPoolExecutor, ThreadExecutor
 from graphed_executors.local import _driver
-from graphed_executors.local._driver import _InFlight
+from graphed_executors.local._process_peer import _InFlight
 
 N = 8
 KEY = 5
@@ -168,11 +168,11 @@ def test_a_marker_lives_exactly_as_long_as_its_chunk(tmp_path: Path) -> None:
 
 
 def test_the_chunk_named_is_the_dead_workers_not_a_survivors() -> None:
-    with ThreadExecutor(1) as ex:
+    with make("ipc") as ex:
         for name, chunk in (("11.1", "a survivor's chunk"), ("7.1", "the lost chunk")):
             Path(ex._in_flight, name).write_text(chunk)
         workers = [SimpleNamespace(pid=11, exitcode=-15), SimpleNamespace(pid=7, exitcode=17)]
-        lost = ProcessPoolExecutor._lost_in(ex, workers)  # type: ignore[arg-type]
+        lost = ex._lost_in(workers)
         assert lost is not None
         assert (lost.partition, lost.worker) == ("the lost chunk", "pid 7")
 
@@ -184,7 +184,7 @@ class _Silent:
 
 def test_the_root_deadline_waits_for_a_running_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.1)
-    with ThreadExecutor(1) as ex:
+    with make("ipc") as ex:
         marker = Path(ex._in_flight, "1.1")
         marker.write_text("chunk")
         threading.Timer(0.5, marker.unlink).start()
@@ -209,7 +209,7 @@ def test_a_gap_between_chunks_at_the_deadline_is_not_a_stall(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.3)
-    with ThreadExecutor(1) as ex:
+    with make("ipc") as ex:
         marker = Path(ex._in_flight, "1.1")
         marker.write_text("chunk")
         threading.Timer(0.2, marker.unlink).start()  # nothing runs as the first deadline lapses
@@ -259,14 +259,47 @@ def test_a_worker_lost_between_runs_is_a_worker_lost_error(route: str, tmp_path:
 
 
 def test_a_marker_a_shutdown_cut_off_does_not_outlive_its_run(tmp_path: Path) -> None:
-    with ThreadExecutor(2) as ex:
+    with make("ipc") as ex:
         Path(ex._in_flight, "1.1").write_text("a chunk cut off")
         assert ex.run(plan(Die(str(tmp_path / "log"), deaths=0))).value == N
         assert os.listdir(ex._in_flight) == []
 
 
 def test_a_healthy_run_leaves_no_marker(tmp_path: Path) -> None:
-    with ThreadExecutor(2) as ex:
+    with make("ipc") as ex:
         result: ExecResult[int] = ex.run(plan(Die(str(tmp_path / "log"), deaths=0)))
         assert os.listdir(ex._in_flight) == []
     assert result.value == N
+
+
+def slow(part: Partition, res: object) -> int:
+    time.sleep(0.5)
+    return 1
+
+
+def slow_add(a: int, b: int) -> int:
+    time.sleep(0.5)
+    return a + b
+
+
+def test_a_thread_run_outlasts_the_deadline_while_a_chunk_or_combine_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.2)
+    for process, combine in ((slow, add), (lambda p, r: 1, slow_add)):
+        tasks = TASKS[:2]
+        with ThreadExecutor(1) as ex:
+            assert (
+                ex.run(Plan(process=process, combine=combine, empty=zero, tasks=tasks)).value == 2
+            )
+
+
+def test_a_combine_names_itself_on_a_process_worker(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def look(a: int, b: int) -> int:
+        seen.extend(p.read_text() for p in tmp_path.iterdir())
+        return a + b
+
+    assert _InFlight(look, str(tmp_path), "a combine")(1, 2) == 3
+    assert seen == ["a combine"]

@@ -9,18 +9,14 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
-import tempfile
 import threading
 import time
-import weakref
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Executor as _PoolExecutor
 from concurrent.futures import Future, as_completed, wait
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
 
 from graphed import WorkerLostError
@@ -33,7 +29,6 @@ from graphed.core import (
     RunState,
     StopReason,
     Task,
-    chunk_label,
 )
 from graphed.core.execution import (
     LocalResources,
@@ -91,26 +86,19 @@ class _RunLeaves:
 
 
 @dataclass(frozen=True)
-class _InFlight(Generic[R]):
-    """``process`` that names its chunk in a file while it runs.
+class _Tracked(Generic[R]):
+    """``fn`` that holds its thread in ``running`` while it runs."""
 
-    The file outlives a killed worker, so the driver can say which chunk it died on.
-    """
+    fn: Callable[..., R]
+    running: set[int]
 
-    # ponytail: a file per chunk; a shared-memory slot per worker if 1 ms chunks ever matter
-
-    process: Callable[[Partition, Any], R]
-    directory: str
-
-    def __call__(self, partition: Partition, resources: Any) -> R:
-        marker = Path(self.directory, f"{os.getpid()}.{threading.get_ident()}")
-        with contextlib.suppress(OSError):  # diagnostics never fail a chunk
-            marker.write_text(chunk_label(partition))
+    def __call__(self, *args: Any) -> R:
+        thread = threading.get_ident()
+        self.running.add(thread)
         try:
-            return self.process(partition, resources)
+            return self.fn(*args)
         finally:
-            with contextlib.suppress(OSError):
-                marker.unlink()
+            self.running.discard(thread)
 
 
 class _BaseExecutor:
@@ -123,7 +111,7 @@ class _BaseExecutor:
     pool, `plan.combine` must be picklable (module-level), exactly like `plan.process`.
     """
 
-    #: How long a peer driver waits for the root with no chunk running, not counting paused time.
+    #: How long a peer driver waits for the root with no worker busy, not counting paused time.
     _peer_root_timeout_s = 300.0
 
     def __init__(
@@ -141,8 +129,7 @@ class _BaseExecutor:
         retries: int = 0,
     ):
         self._retries = retries
-        self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
-        weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
+        self._running: set[int] = set()
         self._plans = PlanQueue(self.run, max_in_flight)
         self.max_workers = max_workers if max_workers is not None else (os.cpu_count() or 1)
         # test hook: called per tree-reduce combine with #leaves so far
@@ -315,7 +302,7 @@ class _BaseExecutor:
         with self._settled(kept), self._lost_workers(kept):
             yield kept  # kept alive for the next run()
 
-    def _lost_workers(self, pool: _PoolExecutor | None) -> AbstractContextManager[None]:
+    def _lost_workers(self, pool: Any) -> AbstractContextManager[None]:
         """Turn a dead worker into a ``WorkerLostError``: threads cannot die alone."""
         return contextlib.nullcontext()
 
@@ -402,28 +389,30 @@ class _BaseExecutor:
             self._run_lean = lean_events(self.monitor)
             control = self.control
             try:
-                watched = replace(plan, process=_InFlight(plan.process, self._in_flight))
+                watched = replace(plan, process=self._watched(plan.process))
                 result = self._retried(watched, control)
             finally:
                 if control is not None and control.state is RunState.CANCELLED:
                     control.reset()  # a cancel ends this run only, whether or not a check saw it
             return finalize_result(plan, result)
 
+    def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
+        """Return ``fn`` reporting to :meth:`_busy` while it runs."""
+        return _Tracked(fn, self._running)
+
+    def _busy(self) -> bool:
+        return bool(self._running)
+
     def _retried(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
         # ponytail: whole-plan rerun, so a late loss repeats finished chunks; per-chunk retry needs
         # the peer tree to re-own a lost worker's leaves and partials
-        for _ in range(self._retries):
-            try:
+        # a pull stream has moved on and cannot replay
+        for _ in range(0 if plan.next_tasks is not None else self._retries):
+            with contextlib.suppress(WorkerLostError):
                 return self._run_once(plan, control)
-            except WorkerLostError:
-                if plan.next_tasks is not None:  # a pull stream has moved on and cannot replay
-                    raise
         return self._run_once(plan, control)
 
     def _run_once(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
-        # a chunk a shutdown cut off left its marker, which would read as running from now on
-        shutil.rmtree(self._in_flight, ignore_errors=True)
-        os.makedirs(self._in_flight, exist_ok=True)
         if control is not None and control.state is RunState.CANCELLED:
             return ExecResult(plan.empty(), 0, 0, StopReason.CANCELLED)
         if plan.next_tasks is not None:
@@ -457,6 +446,7 @@ class _BaseExecutor:
         worker_addrs = tuple(f"w{i}" for i in range(w))
         items = slice_items([t.partition for t in tasks], bounds, worker_addrs)
         self._emit_submitted(tasks)  # worker-side STARTED/FINISHED/ERRORED stream in
+        plan = replace(plan, combine=self._watched(plan.combine, "a combine"))
         self._run_keys = None
         if self._run_monitor is not None and any(t.key != i for i, t in enumerate(tasks)):
             self._run_keys = [t.key for t in tasks]  # workers emit keys[leaf]
@@ -510,7 +500,7 @@ class _BaseExecutor:
         Forwards monitor events, hands ``via`` messages to ``on_via`` and relays run control;
         paused time does not count against ``_peer_root_timeout_s``. Returns what is in hand once
         ``failed()`` reports a worker failure, and raises ``TimeoutError`` once the deadline
-        passes with no chunk running: no worker is coming to deliver the root.
+        passes with no worker busy: none is coming to deliver the root.
         """
         deadline = time.monotonic() + self._peer_root_timeout_s
         out: tuple[R, int] | None = None
@@ -527,8 +517,8 @@ class _BaseExecutor:
                 out = ctl.take(got[1])
             if failed():
                 break
-            # every poll: a chunk seen only when the deadline lapses would miss the gaps between
-            if (ctl is not None and ctl.relay()) or os.listdir(self._in_flight):
+            # every poll: work seen only when the deadline lapses would miss the gaps between
+            if (ctl is not None and ctl.relay()) or got is not None or self._busy():
                 deadline = time.monotonic() + self._peer_root_timeout_s
             if time.monotonic() >= deadline:
                 raise TimeoutError(

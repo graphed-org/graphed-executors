@@ -368,8 +368,8 @@ finished run again, and a monitor sees their events again. A plan that pulls its
 ``next_tasks`` is not re-run, because the stream it was pulling from has moved on.
 
 A peer run also waits for a root with nothing left running, in case the reduction itself is lost.
-That wait is 300 s and never counts a running chunk, so a long chunk is not a stall, and a chunk
-that hangs in your own code hangs the run.
+That wait is 300 s and never counts a running chunk or combine, so long work is not a stall, and
+work that hangs in your own code hangs the run.
 
 .. _design-epoch-restart:
 

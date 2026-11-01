@@ -121,8 +121,16 @@ class _RunTasks:
         self._pending: set[SubmitFuture] = set()
 
     def submit(
-        self, fn: Callable[..., object], /, *args: object, key: str, retries: int
+        self,
+        fn: Callable[..., object],
+        /,
+        *args: object,
+        key: str,
+        retries: int,
+        task: Task | None = None,
     ) -> SubmitFuture:
+        if task is not None:
+            self.tasks[key] = task
         if self.checks:
             args, fn = (self.checks, fn, *args), _service_checked
         fut = self._backend.submit(fn, *args, key=key, retries=retries)
@@ -317,9 +325,15 @@ class SubmitRunner:
                     # driver-side SUBMITTED (leaves only)
                     emit_task(monitor, self._submitted_event(task))
                 key = _key(plan_fp, ctx.run_nonce, "leaf", i)
-                submits.tasks[key] = task
                 futs[i] = submits.submit(
-                    _leaf_task, ctx, phandle, ptoken, task, key=key, retries=self._retries
+                    _leaf_task,
+                    ctx,
+                    phandle,
+                    ptoken,
+                    task,
+                    key=key,
+                    retries=self._retries,
+                    task=task,
                 )
             combines, root = plan_tree(n)
             assert root is not None  # n >= 1
@@ -384,9 +398,8 @@ class SubmitRunner:
             nonlocal sent
             i, task = item
             key = _key(plan_fp, ctx.run_nonce, "leaf", i)
-            submits.tasks[key] = task
             fut = submits.submit(
-                _leaf_task, ctx, phandle, ptoken, task, key=key, retries=self._retries
+                _leaf_task, ctx, phandle, ptoken, task, key=key, retries=self._retries, task=task
             )
             sent += 1
             node_of[fut] = i
@@ -451,10 +464,15 @@ class SubmitRunner:
                 if monitor is not None:
                     emit_task(monitor, self._submitted_event(task))
                 dask_key = _key(plan_fp, ctx.run_nonce, "leaf", seq)
-                # F2b: attribute a KilledWorker to this chunk (not the key)
-                submits.tasks[dask_key] = task
                 fut = submits.submit(
-                    _leaf_task, ctx, phandle, ptoken, task, key=dask_key, retries=self._retries
+                    _leaf_task,
+                    ctx,
+                    phandle,
+                    ptoken,
+                    task,
+                    key=dask_key,
+                    retries=self._retries,
+                    task=task,
                 )
                 seq += 1
                 outstanding[fut] = (task.key, task.partition.n_entries)
@@ -467,7 +485,6 @@ class SubmitRunner:
                 if fut not in outstanding:  # a cancelled/duplicate callback
                     continue
                 key, n_entries = outstanding.pop(fut)
-                # F2b: real map, not {}
                 results.append((key, cast(R, fut.result())))
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
@@ -517,10 +534,15 @@ class SubmitRunner:
         def start(task: Task) -> None:
             nonlocal seq
             dask_key = _key(plan_fp, ctx.run_nonce, "leaf", seq)
-            # F2b: attribute a KilledWorker to this chunk (not the key)
-            submits.tasks[dask_key] = task
             fut = submits.submit(
-                _leaf_task, ctx, phandle, ptoken, task, key=dask_key, retries=self._retries
+                _leaf_task,
+                ctx,
+                phandle,
+                ptoken,
+                task,
+                key=dask_key,
+                retries=self._retries,
+                task=task,
             )
             seq += 1
             outstanding[fut] = (task.key, task.partition.n_entries)
@@ -531,7 +553,6 @@ class SubmitRunner:
             in_flight = outstanding.__len__
             for fut in self._completions(window, done_q, outstanding, in_flight, start):
                 key, n_entries = outstanding.pop(fut)
-                # F2b: real map, not {}
                 results.append((key, cast(R, fut.result())))
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
@@ -618,9 +639,8 @@ class SubmitRunner:
                     else:
                         args.extend(stage_futs[i])
                 key = _key(plan_fp, ctx.run_nonce, f"{stage.kind}.{s}", t)
-                submits.tasks[key] = task
                 fut = submits.submit(
-                    fn, handle, token, task, *args, key=key, retries=self._retries
+                    fn, handle, token, task, *args, key=key, retries=self._retries, task=task
                 )
                 outstanding[fut] = bool(stage.inputs)
                 fut.add_done_callback(done_q.put)
