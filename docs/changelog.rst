@@ -24,6 +24,9 @@ Unreleased
   was; that timeout now only counts time with no worker running a chunk or a combine.
 * A persistent process pool that lost a worker respawns for the next run; it raised
   ``BrokenProcessPool`` on every later run.
+* ``run()`` at the top level of a script with no ``if __name__ == "__main__":`` guard raises a
+  ``RuntimeError`` naming the fix; it was a ``BrokenProcessPool`` after hundreds of lines of worker
+  tracebacks.
 
 0.0.7
 -----
