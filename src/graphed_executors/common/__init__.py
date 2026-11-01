@@ -17,7 +17,7 @@ that take a single-stage ``Plan``, and :func:`renamed`, the one deprecation of a
 from __future__ import annotations
 
 import warnings
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from graphed.core import DurablePlanV2
 
@@ -32,6 +32,17 @@ def renamed(workers: int | None, old: int | None, old_name: str, default: T) -> 
         raise TypeError(f"pass workers= or {old_name}=, not both")
     warnings.warn(f"{old_name}= is deprecated; use workers=", DeprecationWarning, stacklevel=3)
     return old
+
+
+def warn_few_tasks(plan: Any, workers: int) -> None:
+    """Warn that ``plan`` cannot use all of ``workers``; a pull stream's count is not known yet."""
+    n = len(getattr(plan, "tasks", ()))
+    if 0 < n < workers and getattr(plan, "next_tasks", None) is None:
+        warnings.warn(
+            f"{n} task(s) for {workers} workers; "
+            "pass events_per_task= or steps_per_file= to the plan",
+            stacklevel=3,
+        )
 
 
 def refuse_staged(plan: object, runner: str, backend: str) -> None:

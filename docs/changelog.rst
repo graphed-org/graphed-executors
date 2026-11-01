@@ -36,6 +36,8 @@ Unreleased
 * ``run(plan, skip_failed=N)`` on every runner goes on past ``N`` failed chunks; see graphed's
   changelog for ``ExecResult.failed``. A lost worker's chunk counts, after ``retries``, by rerunning
   the plan with that chunk left out. ``StopCondition(max_errors=N)`` is the same budget.
+* A plan with fewer tasks than the runner has workers warns once per run, naming
+  ``events_per_task=`` and ``steps_per_file=``.
 * ``ParslRunner.local(workers=4)`` starts HTEX on this machine and stops it when the ``with`` block
   ends. ``ParslRunner(executor)`` is ``parsl_runner(executor)``, which now returns one, and leaves
   a caller's executor running.

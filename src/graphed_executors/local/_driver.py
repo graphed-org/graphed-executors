@@ -50,7 +50,7 @@ from graphed.services import require_bound
 
 from .._plan_queue import PlanQueue
 from .._window import Window
-from ..common import refuse_staged, renamed
+from ..common import refuse_staged, renamed, warn_few_tasks
 from ._peer import PeerControl, make_bounds, slice_items
 from ._reduce import LazyReducer, TreeProgress, running_fold, tree_reduce
 
@@ -388,6 +388,7 @@ class _BaseExecutor:
         """
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
+        warn_few_tasks(plan, self.max_workers)
         plan = cast("Plan[R]", skipping(plan, skip_failed))
         with self._run_lock:
             self._switch_in(self.monitor)

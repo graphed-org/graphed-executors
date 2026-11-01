@@ -64,6 +64,7 @@ from graphed.shuffle import pick
 
 from graphed_executors._plan_queue import PlanQueue
 from graphed_executors._window import PAUSED_WAKE_S, Window, wait_until
+from graphed_executors.common import warn_few_tasks
 from graphed_executors.local._reduce import TreeProgress, plan_tree, running_fold
 
 from .protocol import SubmitBackend, SubmitFuture
@@ -229,6 +230,7 @@ class SubmitRunner:
         monitor = self.monitor
         control = self.control
         given = self.services
+        warn_few_tasks(plan, self._task_slots())
         retried = self.backend.capabilities.per_task_retries
         plan = skipping(plan, skip_failed, attempts=1 + (self._retries if retried else 0))
         while True:
