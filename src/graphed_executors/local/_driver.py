@@ -378,7 +378,7 @@ class _BaseExecutor:
             finally:
                 if control is not None and control.state is RunState.CANCELLED:
                     control.reset()  # a cancel ends this run only, whether or not a check saw it
-            return finalize_result(plan, result)
+        return finalize_result(plan, result)
 
     def _run_peer(self, plan: Plan[R], control: RunControl | None = None) -> ExecResult[R]:
         """M38 peer reduction.

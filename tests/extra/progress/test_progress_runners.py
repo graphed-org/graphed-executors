@@ -20,7 +20,7 @@ from graphed.core import (
     TaskEvent,
     TaskPhase,
 )
-from graphed.debug import ProgressBar, progress
+from graphed.debug import ProgressBar
 
 from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor, ThreadExecutor
 from graphed_executors.submit import SubmitRunner, ThreadBackend
@@ -63,6 +63,8 @@ def _plan(process: Callable[..., tuple[int, ...]] = ordered, n: int = N) -> Plan
 
 
 class OnlyOnTask:
+    complete_events = True
+
     def __init__(self) -> None:
         self.finished = 0
 
@@ -70,12 +72,8 @@ class OnlyOnTask:
         self.finished += event.phase is TaskPhase.FINISHED
 
 
-class OverridesOnTask(MonitorBase):
-    def __init__(self) -> None:
-        self.finished = 0
-
-    def on_task(self, event: TaskEvent) -> None:
-        self.finished += event.phase is TaskPhase.FINISHED
+class OverridesOnTask(OnlyOnTask, MonitorBase):
+    pass
 
 
 class RaisingFactory(OverridesOnTask):
@@ -96,7 +94,7 @@ class CancelAfterFirst(ProgressBar):  # type: ignore[misc]
 
 @pytest.fixture(autouse=True)
 def text_bar(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(progress, "tqdm", None)
+    monkeypatch.setitem(sys.modules, "tqdm.auto", None)
 
 
 @pytest.fixture(scope="module")
@@ -140,6 +138,7 @@ def test_a_monitor_with_only_on_task_runs(make: Callable[..., Any], monitor: Any
     watcher = monitor()
     with make(monitor=watcher) as runner:
         assert len(runner.run(_plan()).value) == N
+    assert watcher.finished == N
 
 
 def test_bar_reaches_total_and_leaves_the_result_alone(

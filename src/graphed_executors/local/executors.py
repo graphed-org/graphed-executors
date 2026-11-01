@@ -344,7 +344,7 @@ def _thread_profiler(monitor: Monitor | None) -> WorkerProfiler | None:
         return cast("WorkerProfiler | None", cached)
     prof: WorkerProfiler | None = None
     with contextlib.suppress(Exception):
-        factory = monitor.worker_profiler_factory()
+        factory = worker_profiler_factory(monitor)
         if factory is not None:
             prof = factory()
             prof.start()
