@@ -200,6 +200,7 @@ def vine_graph_runner(
     monitor: Any = None,
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
+    control: Any = None,
 ) -> SubmitRunner:
     """Return a :class:`SubmitRunner` over a :class:`VineGraphBackend` of ``executor``.
 
@@ -212,4 +213,5 @@ def vine_graph_runner(
         retries=0,
         max_in_flight=max_in_flight,
         services=services,
+        control=control,
     )

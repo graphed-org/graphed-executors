@@ -17,6 +17,7 @@ from graphed.core import (
     OpSpec,
     Partition,
     Plan,
+    RunControl,
     SequentialRunner,
     StageSpec,
     Task,
@@ -322,6 +323,12 @@ def test_a_dependent_read_first_is_attributed_to_its_source() -> None:
 def test_an_exception_of_another_kind_is_left_alone() -> None:
     backend = VineGraphBackend(fake.Executor())
     assert backend.describe_failure(ValueError("x")) is None
+
+
+def test_vine_graph_runner_takes_a_control() -> None:
+    control = RunControl()
+    with vine_graph_runner(fake.Executor(), control=control) as runner:
+        assert runner.control is control
 
 
 def test_vine_graph_runner_has_no_retries_to_ignore() -> None:
