@@ -22,9 +22,22 @@ the package stays parsl-free at load (``test_parsl_no_cross_import``).
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 from typing import Any
 
 from ._lazy import _parsl_executor_types
+
+
+def _scripts_on_path() -> None:
+    """Find ``interchange.py``, which HTEX launches by name, in an unactivated venv too."""
+    if shutil.which("interchange.py"):
+        return
+    os.environ["PATH"] = os.pathsep.join([os.path.dirname(sys.executable), os.environ["PATH"]])
+    if not shutil.which("interchange.py"):
+        raise RuntimeError(
+            "parsl's interchange.py is not on PATH; activate the venv (source .venv/bin/activate)"
+        )
 
 
 def start_htex(
@@ -49,6 +62,7 @@ def start_htex(
     harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here
     would break worker-side imports of caller-defined task fns.
     """
+    _scripts_on_path()
     htex_cls, _ = _parsl_executor_types()
     from parsl.providers import LocalProvider
 
@@ -76,8 +90,13 @@ def start_htex(
 
 
 def stop_htex(executor: Any) -> None:
-    """Shut the executor down, reaping the interchange, manager, and worker processes.
+    """Stop the executor's blocks, then the executor, within seconds.
 
-    A shutdown that signals without joining leaks processes/ports across the fixture bill.
+    ``executor.shutdown()`` alone leaves workers to their heartbeat timeout, because scaling blocks
+    in is the DFK's job and direct use has none. The provider is asked rather than
+    ``scale_in``, which needs an interchange that a failed run may have lost.
     """
-    executor.shutdown()
+    try:
+        executor.provider.cancel(list(executor.blocks_to_job_id.values()))
+    finally:
+        executor.shutdown()

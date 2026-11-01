@@ -15,11 +15,12 @@ collects the parsl suite parsl-free.
 
 from __future__ import annotations
 
-from .backend import ParslBackend, parsl_runner
+from .backend import ParslBackend, ParslRunner, parsl_runner
 from .launch import start_htex, stop_htex
 
 __all__ = [
     "ParslBackend",
+    "ParslRunner",
     "parsl_runner",
     "start_htex",
     "stop_htex",

@@ -22,6 +22,7 @@ HOMES = {
     "htcondor_runner": "graphed_executors.htcondor_backend",
     "parsl_runner": "graphed_executors.parsl_backend",
     "start_htex": "graphed_executors.parsl_backend",
+    "ParslRunner": "graphed_executors.parsl_backend",
     "stop_htex": "graphed_executors.parsl_backend",
 }
 

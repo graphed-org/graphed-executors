@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 __version__ = "0.0.7"
 
 __all__ = [
+    "ParslRunner",
     "PinnedPoolExecutor",
     "ProcessPoolExecutor",
     "SequentialRunner",
@@ -41,6 +42,7 @@ __all__ = [
 
 # Resolved on first use, so importing this package loads neither graphed nor a backend.
 _HOMES = {
+    "ParslRunner": "graphed_executors.parsl_backend",
     "PinnedPoolExecutor": "graphed_executors.local",
     "ProcessPoolExecutor": "graphed_executors.local",
     "SequentialRunner": "graphed.core",
