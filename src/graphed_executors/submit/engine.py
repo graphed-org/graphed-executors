@@ -230,7 +230,6 @@ class SubmitRunner:
         monitor = self.monitor
         control = self.control
         given = self.services
-        warn_few_tasks(plan, self._task_slots())
         retried = self.backend.capabilities.per_task_retries
         plan = skipping(plan, skip_failed, attempts=1 + (self._retries if retried else 0))
         while True:
@@ -239,6 +238,8 @@ class SubmitRunner:
                 # the submission's scope: released in reverse on exit
                 with contextlib.ExitStack() as scope:
                     result = self._run_scoped(plan, monitor, control, given, ctx, scope)
+                if result.n_partitions:  # asked earlier, a pilot backend would start its pilots
+                    warn_few_tasks(plan, self._task_slots())
                 return finalize_result(plan, result)
             except WorkerLostError as err:
                 # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs the

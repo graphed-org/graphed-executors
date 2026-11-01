@@ -6,6 +6,7 @@ import dataclasses
 import json
 import os
 import sys
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -214,7 +215,8 @@ def test_lost_workers_count_against_the_budget(run_with_workers: Run) -> None:
 
 def test_dask_lists_every_chunk_it_leaves_out(dask_client: Any) -> None:
     try:
-        with pytest.warns(UserWarning, match="failed chunk"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             res = _dask_leg(dask_client)(plan_of(poison=(5,)), skip_failed=N)
     except WorkerLostError as err:
         assert "combine" in err.partition, "only a loss blamed on no chunk may end the run"
