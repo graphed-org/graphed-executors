@@ -33,6 +33,11 @@ Unreleased
   ``dask_runner``, ``parsl_runner`` and ``htcondor_runner``.
 * ``htcondor_runner`` and ``submit_driverless`` agree on their defaults: 2 workers and
   ``request_memory_mb=2048``.
+* **Default change:** an exception from ``process`` now runs once on dask and parsl, where it ran
+  up to four times. ``retries=`` covers lost workers only; ``retry_user_errors=N`` on
+  ``dask_runner``, ``parsl_runner``, ``htcondor_runner`` and ``SubmitRunner`` opts in to ``N`` more
+  tries in the worker. On dask a lost worker's budget is ``allowed-failures``, so ``retries=`` has
+  no effect there.
 * ``run(plan, skip_failed=N)`` on every runner goes on past ``N`` failed chunks; see graphed's
   changelog for ``ExecResult.failed``. A lost worker's chunk counts, after ``retries``, by rerunning
   the plan with that chunk left out. ``StopCondition(max_errors=N)`` is the same budget.

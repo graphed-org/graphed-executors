@@ -105,7 +105,7 @@ def test_retries_behave_as_under_run(client: Any, tmp_path: Path) -> None:
     with dask_runner(client) as clean:
         ref = fbytes(clean.run(fixed_plan(5)).value)
     got = {}
-    with dask_runner(client, retries=1) as runner:
+    with dask_runner(client, retry_user_errors=1) as runner:
         for leg in ("run", "submit"):
             marker = tmp_path / f"retry-{leg}"
             assert not marker.exists()

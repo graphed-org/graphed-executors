@@ -16,10 +16,14 @@ that take a single-stage ``Plan``, and :func:`renamed`, the one deprecation of a
 
 from __future__ import annotations
 
+import contextlib
 import warnings
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 
 from graphed.core import DurablePlanV2
+from graphed.core.services import Bindable
 
 T = TypeVar("T")
 
@@ -32,6 +36,27 @@ def renamed(workers: int | None, old: int | None, old_name: str, default: T) -> 
         raise TypeError(f"pass workers= or {old_name}=, not both")
     warnings.warn(f"{old_name}= is deprecated; use workers=", DeprecationWarning, stacklevel=3)
     return old
+
+
+@dataclass(frozen=True)
+class RetriedProcess:
+    """``process`` retried in its worker: a user error spends no lost-worker budget."""
+
+    process: Callable[..., Any]
+    attempts: int
+
+    def __call__(self, partition: Any, resources: Any) -> Any:
+        """Run ``process``; only the last attempt's exception gets out."""
+        for _ in range(self.attempts - 1):
+            with contextlib.suppress(Exception):
+                return self.process(partition, resources)
+        return self.process(partition, resources)
+
+    def bind_services(self, endpoints: Mapping[str, str]) -> RetriedProcess:
+        """Bind ``endpoints`` into the wrapped process."""
+        if not isinstance(self.process, Bindable):
+            return self
+        return replace(self, process=self.process.bind_services(endpoints))
 
 
 def warn_few_tasks(plan: Any, workers: int) -> None:

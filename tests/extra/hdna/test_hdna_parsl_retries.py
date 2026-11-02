@@ -7,10 +7,9 @@ import os
 import shutil
 import tempfile
 import threading
-import time
 import uuid
 from collections.abc import Iterator
-from concurrent.futures import CancelledError
+from concurrent.futures import CancelledError, Future
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +22,7 @@ from graphed.core import Partition
 from graphed.core.execution import Plan, Task
 
 from graphed_executors.parsl_backend import ParslBackend
+from graphed_executors.parsl_backend.backend import _resubmitting
 from graphed_executors.parsl_backend.launch import start_htex, stop_htex
 from graphed_executors.submit import SubmitRunner
 
@@ -61,7 +61,7 @@ def _plan(marks: Path, failures: int = 1) -> Plan[int]:
 
 
 def test_a_task_that_fails_once_completes_with_one_retry(executor: Any, tmp_path: Path) -> None:
-    value = SubmitRunner(ParslBackend(executor), retries=1).run(_plan(tmp_path)).value
+    value = SubmitRunner(ParslBackend(executor), retry_user_errors=1).run(_plan(tmp_path)).value
     assert value == N_TASKS
     assert sorted(os.listdir(tmp_path)) == [f"p{i}.{k}" for i in range(N_TASKS) for k in range(2)]
 
@@ -71,7 +71,8 @@ def test_a_task_failing_more_often_than_its_retries_fails_the_run(
     executor: Any, tmp_path: Path, retries: int, failures: int
 ) -> None:
     with pytest.raises(RuntimeError, match=f"attempt {retries} at mem://p"):
-        SubmitRunner(ParslBackend(executor), retries=retries).run(_plan(tmp_path, failures))
+        runner = SubmitRunner(ParslBackend(executor), retry_user_errors=retries)
+        runner.run(_plan(tmp_path, failures))
 
 
 def test_a_cancel_reaches_the_queued_attempt_on_tpe(tpe: Any, tmp_path: Path) -> None:
@@ -93,14 +94,19 @@ def test_a_cancel_reaches_the_queued_attempt_on_tpe(tpe: Any, tmp_path: Path) ->
     assert os.listdir(tmp_path) == []  # the attempt never ran
 
 
+class WorkerLost(Exception):  # noqa: N818  (parsl's name is what is matched)
+    pass
+
+
 def test_a_resubmit_the_executor_refuses_settles_with_its_error() -> None:
-    run_dir = tempfile.mkdtemp(prefix="gw21-bad-")
-    htex = start_htex(workers=1, run_dir=run_dir)
-    try:
-        fut = ParslBackend(htex).submit(time.sleep, 3, key="k", retries=2)
-        boom = RuntimeError("all blocks failed")
-        htex.set_bad_state_and_fail_all(boom)
-        assert fut.exception(timeout=15) is boom
-    finally:
-        stop_htex(htex)
-        shutil.rmtree(run_dir, ignore_errors=True)
+    first: Future[int] = Future()
+    boom = RuntimeError("all blocks failed")
+
+    def attempt() -> Future[int]:
+        if first.done():
+            raise boom
+        return first
+
+    fut = _resubmitting(attempt, 2, cancels=False)
+    first.set_exception(WorkerLost())
+    assert fut.exception(timeout=5) is boom

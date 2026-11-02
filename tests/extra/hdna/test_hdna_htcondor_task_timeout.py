@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from _hdna_payloads import HangAt
+from _hdna_payloads import FailFirst, HangAt
 from graphed.checkpoint import Store, resumable
 from graphed.core import Partition
 from graphed.core.execution import Plan, Task
@@ -170,3 +170,27 @@ def test_a_driverless_run_carries_the_timeout_to_its_backend(
     with pytest.raises(RuntimeError, match="stop before"):
         driver._runner(run, job, io.StringIO())
     assert seen["task_timeout_s"] == 7.5
+
+
+def _flaky_plan(marks: Path, failures: int) -> Plan[int]:
+    tasks = (Task(0, Partition.blind("mem://once", "", 0, 1)),)
+    return Plan(
+        process=FailFirst(str(marks), failures), combine=operator.add, empty=int, tasks=tasks
+    )
+
+
+def _condor_runner(**kw: Any) -> HTCondorRunner:
+    backend = HTCondorBackend(LocalPilots(pythonpath=[HERE]), 1, host="127.0.0.1")
+    return HTCondorRunner(backend, **kw)
+
+
+def test_a_user_error_runs_once_on_a_pilot(tmp_path: Path) -> None:
+    with _condor_runner() as runner, pytest.raises(RuntimeError, match="attempt 0"):
+        runner.run(_flaky_plan(tmp_path, 99))
+    assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_retry_user_errors_reaches_the_pilot(tmp_path: Path) -> None:
+    with _condor_runner(retry_user_errors=1) as runner:
+        assert runner.run(_flaky_plan(tmp_path, 1)).value == 1
+    assert len(list(tmp_path.iterdir())) == 2

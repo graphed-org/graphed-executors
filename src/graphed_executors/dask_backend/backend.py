@@ -178,6 +178,7 @@ def dask_runner(
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
     control: RunControl | None = None,
+    retry_user_errors: int = 0,
 ) -> SubmitRunner:
     """Build the user-facing runner in one line.
 
@@ -199,4 +200,5 @@ def dask_runner(
         max_in_flight=max_in_flight,
         services=services,
         control=control,
+        retry_user_errors=retry_user_errors,
     )

@@ -64,7 +64,7 @@ from graphed.shuffle import pick
 
 from graphed_executors._plan_queue import PlanQueue
 from graphed_executors._window import PAUSED_WAKE_S, Window, wait_until
-from graphed_executors.common import warn_few_tasks
+from graphed_executors.common import RetriedProcess, warn_few_tasks
 from graphed_executors.local._reduce import TreeProgress, plan_tree, running_fold
 
 from .protocol import SubmitBackend, SubmitFuture
@@ -137,6 +137,8 @@ class _RunTasks:
             self.tasks[key] = task
         if self.checks:
             args, fn = (self.checks, fn, *args), _service_checked
+        # a library's own per-task retry repeats exceptions, which are the user's to opt in to
+        retries = 0 if self._backend.capabilities.per_task_retries else retries
         fut = self._backend.submit(fn, *args, key=key, retries=retries)
         with self._lock:
             self._pending.add(fut)
@@ -176,14 +178,19 @@ class SubmitRunner:
         max_in_flight: int = 2,
         control: RunControl | None = None,
         services: Mapping[str, str] | None = None,
+        retry_user_errors: int = 0,
     ) -> None:
-        """Run plans on ``backend``, passing ``retries`` to each task's submit."""
+        """Run plans on ``backend``, retrying a lost worker ``retries`` times.
+
+        An exception from ``process`` runs once, plus ``retry_user_errors`` tries in its worker.
+        """
         self._plans = PlanQueue(self.run, max_in_flight)
         self.backend = backend
         self.monitor = monitor  # read once at each run's start (Dashboard.attach assigns it)
         self.control = control  # likewise
         self.services = services  # likewise
         self._retries = retries
+        self._retry_user_errors = retry_user_errors
 
     def __enter__(self) -> SubmitRunner:
         """Return the runner."""
@@ -230,8 +237,10 @@ class SubmitRunner:
         monitor = self.monitor
         control = self.control
         given = self.services
-        retried = self.backend.capabilities.per_task_retries
-        plan = skipping(plan, skip_failed, attempts=1 + (self._retries if retried else 0))
+        if self._retry_user_errors and isinstance(plan, Plan):
+            retried = RetriedProcess(plan.process, 1 + self._retry_user_errors)
+            plan = replace(plan, process=retried)
+        plan = skipping(plan, skip_failed)
         while True:
             ctx = self._context(uuid.uuid4().hex[:8], monitor)
             try:
