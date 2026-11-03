@@ -22,7 +22,7 @@ from graphed.core.worker_warnings import Warned, keeping_warnings, process_id
 import graphed_executors.local._peer as _peer
 import graphed_executors.local.executors as _executors
 from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor
-from graphed_executors.local._pinned_pool import exit_with_driver
+from graphed_executors.local._pinned_pool import _pinned_loop, exit_with_driver
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit.worker import RunContext, _leaf_task
 
@@ -103,12 +103,18 @@ def test_a_leaf_submitted_to_another_process_carries_its_warning() -> None:
     assert isinstance(partial, Warned)
 
 
+def _stopped() -> queue.Queue[None]:
+    calls: queue.Queue[None] = queue.Queue()
+    calls.put(None)
+    return calls
+
+
 INITIALIZERS: dict[str, Callable[[str], None]] = {
     "exit-with-driver": exit_with_driver,
     "process-pool": lambda driver: _executors._proc_init(driver=driver),
     "process-peer": lambda driver: _peer.peer_pool_init({}, driver),
-    "pinned-peer": lambda driver: _peer.pinned_peer_init(
-        "w0", queue.Queue(), {_peer.DRIVER: queue.Queue()}, (), driver
+    "pinned-pool": lambda driver: _pinned_loop(
+        lambda: None, (), _stopped(), queue.Queue(), driver
     ),
 }
 
@@ -118,7 +124,6 @@ def test_a_pool_initializer_run_in_its_driver_leaves_it_a_driver(
     init: Callable[[str], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(_peer, "_peer_registry", None)
-    monkeypatch.setattr(_peer, "_pinned", None)
     monkeypatch.setattr(_executors, "_proc_resources", None)
     init(process_id())
     with warnings.catch_warnings(record=True) as seen, keeping_warnings() as caught:

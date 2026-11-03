@@ -160,11 +160,10 @@ class _ProcessPeerBase(_BaseExecutor):
                     registry[a],  # this worker's inbox
                     {t: registry[t] for t in outbox[a]},  # only its O(log N) outboxes (+ driver)
                     tuple(worker_addrs[j] for j in lifeline_neighbors(wi[a], w)),  # lifelines
-                    process_id(),
                 )
                 for a in worker_addrs
             ]
-            pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args)
+            pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args, driver=process_id())
         else:
             pool = _StdProcessPool(
                 max_workers=w,

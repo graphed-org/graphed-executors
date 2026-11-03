@@ -22,7 +22,6 @@ from graphed.core.execution import (
     emit_task,
     partition_label,
 )
-from graphed.core.worker_warnings import enter_worker
 from graphed.debug import StageError
 
 from ._peer_tree import (
@@ -482,11 +481,7 @@ _pinned: tuple[str, Any, tuple[str, ...]] | None = None
 
 
 def pinned_peer_init(
-    address: str,
-    inbox: Any,
-    outboxes: dict[str, Any],
-    steal_peers: tuple[str, ...],
-    driver: str | None = None,
+    address: str, inbox: Any, outboxes: dict[str, Any], steal_peers: tuple[str, ...]
 ) -> None:
     """``PinnedProcessPool`` per-worker initializer.
 
@@ -494,8 +489,6 @@ def pinned_peer_init(
     its steal lifelines as a process global.
     """
     global _pinned
-    if driver is not None:
-        enter_worker(driver)
     _pinned = (
         address,
         QueueTransport(address, inbox, outboxes, via=outboxes[DRIVER]),
