@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import multiprocessing
+import pickle
 import queue
 import warnings
 from collections.abc import Callable
@@ -14,13 +17,14 @@ from graphed import Session
 from graphed.aggregate import aggregate_plan
 from graphed.awkward import AwkwardBackend, AwkwardForm
 from graphed.core import Partition, Plan
-from graphed.core.worker_warnings import keeping_warnings, process_id
+from graphed.core.worker_warnings import Warned, keeping_warnings, process_id
 
 import graphed_executors.local._peer as _peer
+import graphed_executors.local.executors as _executors
 from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor
 from graphed_executors.local._pinned_pool import exit_with_driver
-from graphed_executors.local.executors import _proc_init
 from graphed_executors.submit import SubmitRunner, ThreadBackend
+from graphed_executors.submit.worker import RunContext, _leaf_task
 
 DATA = ak.Array({"x": [1.0, 2.0, 3.0, 4.0], "y": [0.0, 1.0, 1.0, 1.0]})
 
@@ -90,9 +94,18 @@ def test_a_tasks_warning_reaches_the_driver_whose_hooks_stay(
     assert seen == [warned]
 
 
+def test_a_leaf_submitted_to_another_process_carries_its_warning() -> None:
+    plan = _plan()
+    args = (RunContext("run", None, None, lean=True), pickle.dumps(plan.process), "leaf")
+    spawn = multiprocessing.get_context("spawn")
+    with concurrent.futures.ProcessPoolExecutor(1, mp_context=spawn) as workers:
+        partial = workers.submit(_leaf_task, *args, plan.tasks[0]).result()
+    assert isinstance(partial, Warned)
+
+
 INITIALIZERS: dict[str, Callable[[str], None]] = {
     "exit-with-driver": exit_with_driver,
-    "process-pool": lambda driver: _proc_init(driver=driver),
+    "process-pool": lambda driver: _executors._proc_init(driver=driver),
     "process-peer": lambda driver: _peer.peer_pool_init({}, driver),
     "pinned-peer": lambda driver: _peer.pinned_peer_init(
         "w0", queue.Queue(), {_peer.DRIVER: queue.Queue()}, (), driver
@@ -106,6 +119,7 @@ def test_a_pool_initializer_run_in_its_driver_leaves_it_a_driver(
 ) -> None:
     monkeypatch.setattr(_peer, "_peer_registry", None)
     monkeypatch.setattr(_peer, "_pinned", None)
+    monkeypatch.setattr(_executors, "_proc_resources", None)
     init(process_id())
     with warnings.catch_warnings(record=True) as seen, keeping_warnings() as caught:
         warnings.simplefilter("always")
