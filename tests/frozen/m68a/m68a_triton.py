@@ -183,7 +183,9 @@ def _cat(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
 
 def values_plan(*outputs: Any) -> Plan[Any]:
     """One output row per output Array, over two partitions."""
-    return aggregate_plan(*outputs, reduce=_rows, combine=_cat, empty=list, steps_per_file=2)
+    plan = aggregate_plan(*outputs, reduce=_rows, combine=_cat, empty=list, steps_per_file=2)
+    assert isinstance(plan, Plan)
+    return plan
 
 
 def triton_service_plan(
@@ -253,9 +255,11 @@ def live_identity_plan(spec: ServiceSpec) -> Plan[Any]:
         "output_name": "OUTPUT0",
     }
     out = record_external(ev.session, TRITON_PLUGIN, LIVE_PAYLOAD, [ev.x], params=params)
-    return aggregate_plan(
+    plan = aggregate_plan(
         out, reduce=identity_rows_and_wire, combine=identity_cat, empty=no_rows, steps_per_file=2
     )
+    assert isinstance(plan, Plan)
+    return plan
 
 
 # ---- an aggregate_plan whose reduce is a spy ----------------------------------------------------
@@ -265,6 +269,8 @@ def spy_aggregate_plan(reduce: Any, spec: ServiceSpec, combine: Any, empty: Any)
     """``aggregate_plan(ev.x, reduce=<spy>, services=(spec.name,))`` over two partitions."""
     ev = new_events(f"mem://m68a-aggregate-{spec.name}")
     ev.session.declare_service(spec)
-    return aggregate_plan(
+    plan = aggregate_plan(
         ev.x, reduce=reduce, combine=combine, empty=empty, steps_per_file=2, services=(spec.name,)
     )
+    assert isinstance(plan, Plan)
+    return plan
