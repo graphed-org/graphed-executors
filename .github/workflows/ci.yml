@@ -15,7 +15,7 @@ env:
   # the former core/debug/frontend/numpy/awkward siblings are now one consolidated package
   # Pinned, not @main: graphed is an unpinned upstream whose merges can redden this frozen suite with
   # no local change. graphed at the graphed#197 head until 0.0.11 is on PyPI.
-  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@5bdd0638544746408083fb8f4950b2c69a68a9e3"
+  GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@1cdc06466bbecb64e6765259bc24a4867cbd61f9"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
   # The frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
