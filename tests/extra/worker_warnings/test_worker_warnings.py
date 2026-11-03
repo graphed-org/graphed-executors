@@ -16,7 +16,7 @@ import pytest
 from graphed import Session
 from graphed.aggregate import aggregate_plan
 from graphed.awkward import AwkwardBackend, AwkwardForm
-from graphed.core import Partition, Plan
+from graphed.core import Partition, Plan, chunk_label
 from graphed.core.worker_warnings import Warned, keeping_warnings, process_id
 
 import graphed_executors.local._peer as _peer
@@ -69,7 +69,7 @@ def _plan() -> Plan[list[float]]:
 
 
 DIVIDE = "divide by zero encountered in divide"
-CARRIED = f"{DIVIDE} [first in chunk 1/2 of mem://events (2 entries)]"
+CARRIED = f"{DIVIDE} [first in {chunk_label(Events(DATA).partitions(2)[0], rows=2)}]"
 RUNNERS: dict[str, tuple[Callable[[], Any], str]] = {
     "process-pool": (lambda: ProcessPoolExecutor(max_workers=2, comms=None), CARRIED),
     "process-peer": (lambda: ProcessPoolExecutor(max_workers=2), CARRIED),
