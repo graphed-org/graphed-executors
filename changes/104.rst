@@ -1,0 +1,6 @@
+.. under: Unreleased
+
+* A warning raised in a task on a worker process reaches the driver on every runner: each marks
+  its workers with ``graphed.core.worker_warnings.enter_worker``, so a driver that loaded its plan
+  instead of building it keeps its own ``warnings.showwarning`` and filters (graphed#197). This
+  needs the next ``graphed`` release.

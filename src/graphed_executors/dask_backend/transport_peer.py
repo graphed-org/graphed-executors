@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from graphed.core.execution import LocalResources, Plan
+from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.services import require_bound
 
 from graphed_executors.common import refuse_staged
@@ -86,6 +87,7 @@ def _dask_peer_main(
     bounds: list[int],
     worker_addresses: tuple[str, ...],
     steal_peers: tuple[str, ...],
+    driver: str,
 ) -> dict[str, Any]:
     """One worker's peer actor (module-level: spawn-safe).
 
@@ -99,6 +101,7 @@ def _dask_peer_main(
 
     from .transport import open_endpoint
 
+    enter_worker(driver)
     endpoint = open_endpoint(spec)
     # research §5: free the ThreadPool slot; the worker keeps serving handlers
     distributed.secede()
@@ -222,6 +225,7 @@ def _reduce_epoch(
             peers.bounds,
             peers.worker_addrs,
             peers.overlay.get(addr, ()),
+            process_id(),
             key=f"graphed-transport-{nonce}-peer-{i}",
             workers=[addr],
             retries=0,
