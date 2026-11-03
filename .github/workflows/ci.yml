@@ -14,7 +14,7 @@ concurrency:
 env:
   # the former core/debug/frontend/numpy/awkward siblings are now one consolidated package
   # Pinned, not @main: graphed is an unpinned upstream whose merges can redden this frozen suite with
-  # no local change. graphed 0.0.10 from PyPI.
+  # no local change. graphed at the graphed#169 merge commit until 0.0.11 is on PyPI.
   GRAPHED: "graphed[awkward,numpy] @ git+https://github.com/graphed-org/graphed@544c2be2ffaed84977249436c891584aa83b6c35"
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
