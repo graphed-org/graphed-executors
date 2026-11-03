@@ -69,7 +69,7 @@ def _plan() -> Plan[list[float]]:
 
 
 DIVIDE = "divide by zero encountered in divide"
-CARRIED = f"{DIVIDE} [first in mem://events::0/2]"
+CARRIED = f"{DIVIDE} [first in chunk 1/2 of mem://events (2 entries)]"
 RUNNERS: dict[str, tuple[Callable[[], Any], str]] = {
     "process-pool": (lambda: ProcessPoolExecutor(max_workers=2, comms=None), CARRIED),
     "process-peer": (lambda: ProcessPoolExecutor(max_workers=2), CARRIED),
