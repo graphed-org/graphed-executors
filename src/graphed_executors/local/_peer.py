@@ -22,6 +22,7 @@ from graphed.core.execution import (
     emit_task,
     partition_label,
 )
+from graphed.core.worker_warnings import enter_worker
 from graphed.debug import StageError
 
 from ._peer_tree import (
@@ -481,7 +482,11 @@ _pinned: tuple[str, Any, tuple[str, ...]] | None = None
 
 
 def pinned_peer_init(
-    address: str, inbox: Any, outboxes: dict[str, Any], steal_peers: tuple[str, ...]
+    address: str,
+    inbox: Any,
+    outboxes: dict[str, Any],
+    steal_peers: tuple[str, ...],
+    driver: str | None = None,
 ) -> None:
     """``PinnedProcessPool`` per-worker initializer.
 
@@ -489,6 +494,8 @@ def pinned_peer_init(
     its steal lifelines as a process global.
     """
     global _pinned
+    if driver is not None:
+        enter_worker(driver)
     _pinned = (
         address,
         QueueTransport(address, inbox, outboxes, via=outboxes[DRIVER]),
@@ -555,7 +562,7 @@ def pinned_peer_actor(
 _peer_registry: dict[str, Any] | None = None
 
 
-def peer_pool_init(registry: dict[str, Any]) -> None:
+def peer_pool_init(registry: dict[str, Any], driver: str | None = None) -> None:
     """``ProcessPoolExecutor`` initializer.
 
     Stash the inherited full registry so each actor resolves its own inbox + the peers'
@@ -563,7 +570,7 @@ def peer_pool_init(registry: dict[str, Any]) -> None:
     """
     global _peer_registry
     _peer_registry = registry
-    exit_with_driver()
+    exit_with_driver(driver)
 
 
 def pooled_peer_actor(

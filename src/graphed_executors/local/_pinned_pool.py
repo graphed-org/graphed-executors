@@ -29,13 +29,17 @@ from collections.abc import Callable
 from concurrent.futures import Executor, Future
 from typing import Any
 
+from graphed.core.worker_warnings import enter_worker
 
-def exit_with_driver() -> None:
-    """Pool-worker initializer step: exit this process once the driver that spawned it dies.
+
+def exit_with_driver(driver: str | None = None) -> None:
+    """Pool-worker initializer step: serve ``driver``, and exit once its spawning driver dies.
 
     A pool worker otherwise waits on its call queue forever, since every worker holds a write
-    end of it.
+    end of it. Serving ``driver``, its tasks keep their warnings for the driver to issue.
     """
+    if driver is not None:
+        enter_worker(driver)
     parent = multiprocessing.parent_process()
     if parent is not None:
         threading.Thread(

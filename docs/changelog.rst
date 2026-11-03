@@ -10,6 +10,10 @@ Unreleased
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
+* Requires ``graphed`` 0.0.11 or later. A warning raised in a task on a worker process reaches the
+  driver on every runner: each marks its workers with ``graphed.core.worker_warnings.enter_worker``,
+  so a driver that loaded its plan instead of building it keeps its own ``warnings.showwarning``
+  and filters (graphed#197).
 
 0.0.7
 -----
