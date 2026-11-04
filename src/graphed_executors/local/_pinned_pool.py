@@ -29,13 +29,17 @@ from collections.abc import Callable
 from concurrent.futures import Executor, Future
 from typing import Any
 
+from graphed.core.worker_warnings import enter_worker
 
-def exit_with_driver() -> None:
-    """Pool-worker initializer step: exit this process once the driver that spawned it dies.
+
+def exit_with_driver(driver: str | None = None) -> None:
+    """Pool-worker initializer step: serve ``driver``, and exit once its spawning driver dies.
 
     A pool worker otherwise waits on its call queue forever, since every worker holds a write
-    end of it.
+    end of it. Serving ``driver``, its tasks keep their warnings for the driver to issue.
     """
+    if driver is not None:
+        enter_worker(driver)
     parent = multiprocessing.parent_process()
     if parent is not None:
         threading.Thread(
@@ -53,6 +57,7 @@ def _pinned_loop(
     init_args: tuple[Any, ...],
     call_q: Any,
     result_q: Any,
+    driver: str | None = None,
 ) -> None:
     """Run the generic pinned-worker body.
 
@@ -60,7 +65,7 @@ def _pinned_loop(
     ``(cid, fn, args)`` calls from this worker's control queue until the shutdown sentinel,
     returning each result (or a picklable error) on the shared result queue.
     """
-    exit_with_driver()
+    exit_with_driver(driver)
     init_fn(*init_args)
     while True:
         item = call_q.get()
@@ -89,6 +94,7 @@ class PinnedProcessPool(Executor):
         init_args: list[tuple[Any, ...]],
         *,
         daemon: bool = True,
+        driver: str | None = None,
     ) -> None:
         self._n = n_workers
         # per-worker control (no feeder thread)
@@ -97,7 +103,7 @@ class PinnedProcessPool(Executor):
         self._procs = [
             ctx.Process(
                 target=_pinned_loop,
-                args=(init_fn, init_args[i], self._call[i], self._result),
+                args=(init_fn, init_args[i], self._call[i], self._result, driver),
                 daemon=daemon,
             )
             for i in range(n_workers)
