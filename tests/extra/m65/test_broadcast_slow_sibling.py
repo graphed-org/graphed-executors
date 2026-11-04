@@ -51,7 +51,7 @@ def test_a_worker_booting_after_its_sibling_has_answered_is_still_primed(
     late_s = 8.0
     _late_sibling(monkeypatch, tmp_path, late_s)
     t0 = time.monotonic()
-    res = executors.ProcessPoolExecutor(max_workers=2, comms=None).run(mp.make_plan(mp.Probe()))
+    res = executors.ProcessPoolExecutor(workers=2, comms=None).run(mp.make_plan(mp.Probe()))
     assert (res.value, res.n_partitions, res.stopped) == ((1,) * mp.N, mp.N, StopReason.EXHAUSTED)
     assert time.monotonic() - t0 >= late_s  # the late worker was waited for, not skipped
 
@@ -62,4 +62,4 @@ def test_a_worker_still_booting_at_the_deadline_is_refused(
     _late_sibling(monkeypatch, tmp_path, 3.0)
     monkeypatch.setattr(executors.ProcessPoolExecutor, "_worker_start_timeout_s", 0.5)
     with pytest.raises(RuntimeError, match=r"broadcast reached only 1/2 workers in \d+\.\ds"):
-        executors.ProcessPoolExecutor(max_workers=2, comms=None).run(mp.make_plan(mp.Probe()))
+        executors.ProcessPoolExecutor(workers=2, comms=None).run(mp.make_plan(mp.Probe()))

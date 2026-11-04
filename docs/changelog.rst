@@ -10,22 +10,6 @@ Unreleased
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
-* ``run()`` at the top level of a script with no ``if __name__ == "__main__":`` guard raises a
-  ``RuntimeError`` naming the fix; it was a ``BrokenProcessPool`` after hundreds of lines of worker
-  tracebacks.
-* One vocabulary across runners: ``workers=`` on ``ThreadExecutor``, ``ProcessPoolExecutor``,
-  ``PinnedPoolExecutor``, ``htcondor_runner`` and ``submit_driverless``, where ``max_workers=`` and
-  ``n_pilots=`` are deprecated and passing both spellings raises ``TypeError``; and ``control=`` on
-  ``dask_runner``, ``parsl_runner`` and ``htcondor_runner``.
-* ``htcondor_runner`` and ``submit_driverless`` agree on their defaults: 2 workers and
-  ``request_memory_mb=2048``.
-* ``ParslRunner.local(workers=4)`` starts HTEX on this machine and stops it when the ``with`` block
-  ends. ``ParslRunner(executor)`` is ``parsl_runner(executor)``, which now returns one, and leaves
-  a caller's executor running.
-* ``stop_htex`` stops the block's worker processes within seconds, where they used to outlive it
-  by the heartbeat threshold (120 s by default).
-* ``start_htex`` works from an unactivated venv, and otherwise refuses naming the cause instead of
-  ``FileNotFoundError: 'interchange.py'``.
 
 0.0.7
 -----

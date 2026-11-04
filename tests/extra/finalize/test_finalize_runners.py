@@ -87,13 +87,13 @@ def _on_driver(run: Callable[[], Any], expected: Any) -> Any:
 
 
 LOCAL: dict[str, Callable[[], Any]] = {
-    "thread-peer": lambda: ThreadExecutor(max_workers=2),
-    "thread-hub": lambda: ThreadExecutor(max_workers=2, comms=None),
-    "thread-pooled": lambda: ThreadExecutor(max_workers=2, comms=None, pooled_combines=True),
-    "thread-windowed": lambda: ThreadExecutor(max_workers=2, comms=None, control=RunControl()),
-    "process-peer": lambda: ProcessPoolExecutor(max_workers=2),
-    "process-hub": lambda: ProcessPoolExecutor(max_workers=2, comms=None),
-    "pinned-peer": lambda: PinnedPoolExecutor(max_workers=2),
+    "thread-peer": lambda: ThreadExecutor(workers=2),
+    "thread-hub": lambda: ThreadExecutor(workers=2, comms=None),
+    "thread-pooled": lambda: ThreadExecutor(workers=2, comms=None, pooled_combines=True),
+    "thread-windowed": lambda: ThreadExecutor(workers=2, comms=None, control=RunControl()),
+    "process-peer": lambda: ProcessPoolExecutor(workers=2),
+    "process-hub": lambda: ProcessPoolExecutor(workers=2, comms=None),
+    "pinned-peer": lambda: PinnedPoolExecutor(workers=2),
     "submit-thread": lambda: SubmitRunner(ThreadBackend(2)),
     "submit-thread-windowed": lambda: SubmitRunner(ThreadBackend(2), control=RunControl()),
 }
@@ -110,7 +110,7 @@ def test_local_runners_finalize_once_on_the_driver(make: Callable[[], Any]) -> N
 @pytest.mark.parametrize(
     "make",
     [
-        lambda: ThreadExecutor(max_workers=2),
+        lambda: ThreadExecutor(workers=2),
         lambda: SubmitRunner(ThreadBackend(2)),
         lambda: SubmitRunner(ThreadBackend(2), control=RunControl()),
     ],
@@ -134,7 +134,7 @@ def test_a_cancelled_run_finalizes_its_empty_value(make: Callable[..., Any]) -> 
 
 
 def test_a_plan_without_finalize_returns_the_combined_value() -> None:
-    with ThreadExecutor(max_workers=2) as runner:
+    with ThreadExecutor(workers=2) as runner:
         assert runner.run(_plan(finalize=None)).value == TOTAL
     assert CALLS == []
 
