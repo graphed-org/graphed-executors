@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import operator
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Iterator
 from multiprocessing.managers import SyncManager
 from pathlib import Path
@@ -102,17 +104,55 @@ def test_python_dash_c_is_unaffected() -> None:
     assert (out.returncode, out.stdout.strip()) == (0, "False"), out.stderr
 
 
+PLAN = Plan(
+    process=lambda p, r: 1,
+    combine=operator.add,
+    empty=int,
+    tasks=(Task(0, Partition("f", "t", 0, 1)),),
+)
+
+
 def test_a_manager_that_fails_otherwise_keeps_its_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def start(self: Any) -> None:
         self._process = SimpleNamespace(exitcode=1, pid=0, join=lambda: None)
         raise EOFError("manager died")
 
     monkeypatch.setattr(SyncManager, "start", start)
-    plan = Plan(
-        process=lambda p, r: 1,
-        combine=operator.add,
-        empty=int,
-        tasks=(Task(0, Partition("f", "t", 0, 1)),),
-    )
     with pytest.raises(EOFError, match="manager died"):
-        ProcessPoolExecutor(2, comms=None, monitor=MonitorBase()).run(plan)
+        ProcessPoolExecutor(2, comms=None, monitor=MonitorBase()).run(PLAN)
+
+
+@pytest.mark.parametrize(
+    ("exitcode", "error", "match"),
+    [(83, RuntimeError, "re-imported your script"), (1, EOFError, "exited with code 1")],
+)
+def test_a_manager_that_dies_without_answering_is_not_awaited(
+    monkeypatch: pytest.MonkeyPatch, exitcode: int, error: type[Exception], match: str
+) -> None:
+    release = threading.Event()  # Windows: start() never returns once the server is gone
+
+    def start(self: Any) -> None:
+        self._process = SimpleNamespace(exitcode=exitcode, pid=0, join=lambda: None)
+        release.wait()
+
+    monkeypatch.setattr(SyncManager, "start", start)
+    try:
+        with pytest.raises(error, match=match):
+            ProcessPoolExecutor(2, comms=None, monitor=MonitorBase()).run(PLAN)
+    finally:
+        release.set()
+
+
+def test_a_worker_reimporting_main_exits_without_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    def exit_(code: int) -> None:
+        raise SystemExit(code)
+
+    ex = ProcessPoolExecutor(2)
+    monkeypatch.setattr(
+        multiprocessing, "current_process", lambda: SimpleNamespace(_inheriting=True)
+    )
+    monkeypatch.setattr(os, "_exit", exit_)
+    with pytest.raises(SystemExit) as exited:
+        ex.run(PLAN)
+    assert exited.value.code == 83
+    assert not os.path.exists(ex._in_flight)
