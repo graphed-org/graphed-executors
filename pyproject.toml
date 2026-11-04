@@ -102,8 +102,8 @@ convention = "pep257"
 "tests/**" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
 # the translation keeps the HiggsDNA processor's names so it reads line for line against the original
 "examples/hgg/analysis.py" = ["N802", "N803", "N806", "N815"]
-# distributed, parsl and the htcondor2 bindings are optional extras: these modules import without
-# them and load them on first use
+# distributed, parsl, the htcondor2 bindings and vine_graph are optional: these modules import
+# without them and load them on first use
 "src/graphed_executors/dask_backend/_lazy.py" = ["PLC0415"]
 "src/graphed_executors/dask_backend/backend.py" = ["PLC0415"]
 "src/graphed_executors/dask_backend/transport_peer.py" = ["PLC0415"]
@@ -112,6 +112,7 @@ convention = "pep257"
 "src/graphed_executors/parsl_backend/launch.py" = ["PLC0415"]
 "src/graphed_executors/htcondor_backend/launch.py" = ["PLC0415"]
 "src/graphed_executors/htcondor_backend/services.py" = ["PLC0415"]
+"src/graphed_executors/vine_graph_backend/backend.py" = ["PLC0415"]
 # ctypes is absent from CPython builds without libffi; only the Windows branch needs it
 "src/graphed_executors/submit/services.py" = ["PLC0415"]
 # the fakes stand in for htcondor2's class-named factories (Schedd, Collector, Credd, ...)
@@ -159,7 +160,7 @@ exclude = ['^tests/frozen/m69a/data/inclusive_processor\.py$']
 # The tests/extra dirs with sibling helper modules are bases as well, so `import _big_partial`
 # resolves the way pytest's prepend import mode resolves it; the frozen dirs must NOT be, since a
 # base there would put their files back on colliding bare basenames.
-mypy_path = ["src", ".", "tests/extra/hdna", "tests/extra/m41", "tests/extra/m54", "tests/extra/m68d", "examples/hgg"]
+mypy_path = ["src", ".", "tests/extra/hdna", "tests/extra/m41", "tests/extra/m54", "tests/extra/m68d", "tests/extra/vine_graph", "examples/hgg"]
 explicit_package_bases = true
 
 # Read-only helpers under tests/frozen/** that tests import by bare basename: pytest puts them on
@@ -284,5 +285,12 @@ follow_imports = "skip"
 # htcondor backend.
 [[tool.mypy.overrides]]
 module = ["htcondor2", "htcondor2.*", "classad2"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# ndcctools.taskvine.vine_graph comes only with a CCTools build (not on PyPI) and is imported lazily by the
+# vine_graph backend.
+[[tool.mypy.overrides]]
+module = ["ndcctools", "ndcctools.*"]
 ignore_missing_imports = true
 follow_imports = "skip"

@@ -134,6 +134,9 @@ Which runner do I want?
      - ``htcondor_runner(site=..., n_pilots=N)`` — see :doc:`htcondor`
      - Submits its own pilot jobs; no scheduler to start. Task functions go in a module you pass
        in ``user_modules``.
+   * - TaskVine workers
+     - ``vine_graph_runner(executor)`` — see :doc:`vine_graph`
+     - Needs a CCTools build of the unreleased ``vine-graph`` branch.
 
 The pools and the ``*_runner`` functions import from the top level:
 ``from graphed_executors import ProcessPoolExecutor``.
@@ -207,6 +210,7 @@ Where to go next
    dask
    parsl
    htcondor
+   vine_graph
    hgg
    api
    improvements
@@ -214,7 +218,7 @@ Where to go next
 
 * :doc:`design` — why your result is reproducible, where your merges run, and what happens
   when a worker dies.
-* :doc:`dask`, :doc:`parsl` and :doc:`htcondor` — install, a worked run, the knobs, and the
+* :doc:`dask`, :doc:`parsl`, :doc:`htcondor` and :doc:`vine_graph` — install, a worked run, the knobs, and the
   failures you will actually hit.
 * :doc:`hgg` — a real coffea analysis translated to graphed, and how its answers are checked
   against the original's.

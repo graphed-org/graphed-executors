@@ -40,8 +40,8 @@ from typing import Any
 
 from graphed_executors.local._portable import PICKLE_ERRORS, Portable
 from graphed_executors.local._transport import LookupFreeHTTPServer
-from graphed_executors.parsl_backend._shim import _parsl_task_shim
 from graphed_executors.parsl_backend.backend import _ParslFuture
+from graphed_executors.submit.worker import buffered_task
 
 # A pilot beats every LEASE_S / 6, so it is lost after six missed beats: that rides out a task
 # holding the GIL and a transient network drop. Read at call time, never copied, so a test can
@@ -187,9 +187,9 @@ class TaskServer:
             resolved = tuple(a.result() if isinstance(a, _ParslFuture) else a for a in args)
             try:
                 try:
-                    payload = pickle.dumps((_parsl_task_shim, fn, resolved))
+                    payload = pickle.dumps((buffered_task, fn, resolved))
                 except PICKLE_ERRORS:  # an upstream result only cloudpickle carries
-                    payload = pickle.dumps((_parsl_task_shim, fn, Portable(resolved)))
+                    payload = pickle.dumps((buffered_task, fn, Portable(resolved)))
             # raised in a done-callback it would be logged and the task would hang
             except Exception as exc:
                 settle(fut, exc=exc)

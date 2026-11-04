@@ -100,6 +100,7 @@ be module-level functions the workers can import — a lambda or a notebook-cell
 | A dask cluster (local, dask-jobqueue, Kubernetes, …) | `dask_runner(client)` |
 | A parsl HTEX pool | `parsl_runner(executor)` |
 | An HTCondor pool (LPC, lxplus, your own) | `htcondor_runner(site=..., n_pilots=N)` |
+| A vine_graph manager (TaskVine workers or a factory) | `vine_graph_runner(executor)` |
 
 All of these, and `graphed.core`'s `SequentialRunner`, import from the top level:
 `from graphed_executors import ProcessPoolExecutor`.
@@ -107,8 +108,24 @@ All of these, and `graphed.core`'s `SequentialRunner`, import from the top level
 (`import graphed_exec_local` still works as a deprecated alias for `graphed_executors.local`;
 use `graphed_executors` in new code.)
 
-TaskVine and direct Slurm submission aren't supported; use dask-jobqueue or parsl's providers to
-reach those batch systems.
+Direct Slurm submission isn't supported; use dask-jobqueue, parsl's providers, or a TaskVine factory
+to reach those batch systems.
+
+The vine_graph backend runs plans on TaskVine through `ndcctools.taskvine.vine_graph`, which needs a CCTools
+build of the [`vine-graph`](https://github.com/JinZhou5042/cctools/tree/vine-graph)
+branch. `vine_graph_runner(executor)` runs plans on a vine_graph `Executor` that the caller creates and
+closes; vine_graph moves partial results between workers, keeps a copy of each in the manager, and
+recomputes those lost with a worker. It retries what the infrastructure broke (the Executor's
+`max-retries`), not a function that raises. Workers need this package, graphed, and the analysis's
+dependencies in their environment:
+
+```python
+from ndcctools.taskvine import vine_graph as vg
+from graphed_executors import vine_graph_runner
+
+with vg.Executor(9123, "my-analysis") as executor, vine_graph_runner(executor) as runner:
+    result = runner.run(plan)  # workers: vine_worker -M my-analysis
+```
 
 ### On a dask cluster
 

@@ -23,6 +23,7 @@ HOMES = {
     "parsl_runner": "graphed_executors.parsl_backend",
     "start_htex": "graphed_executors.parsl_backend",
     "stop_htex": "graphed_executors.parsl_backend",
+    "vine_graph_runner": "graphed_executors.vine_graph_backend",
 }
 
 

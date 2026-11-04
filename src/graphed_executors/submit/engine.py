@@ -122,12 +122,16 @@ class _RunTasks:
     def submit(
         self, fn: Callable[..., object], /, *args: object, key: str, retries: int
     ) -> SubmitFuture:
+        leaf = fn is _leaf_task
         if self._checks:
             args, fn = (self._checks, fn, *args), _service_checked
         fut = self._backend.submit(fn, *args, key=key, retries=retries)
         with self._lock:
             self._pending.add(fut)
         fut.add_done_callback(self._done)  # outside the lock: a done future calls back at once
+        take_events = getattr(self._backend, "take_events", None)  # off the pinned Protocol
+        if leaf and take_events is not None:
+            take_events(fut)
         return fut
 
     def _done(self, fut: SubmitFuture) -> None:
@@ -757,7 +761,8 @@ class SubmitRunner:
     def _context(self, run_nonce: str, monitor: Monitor | None) -> RunContext:
         if monitor is None:
             return RunContext(run_nonce, None, None)
-        push = worker_monitor_factory(monitor)
+        # a backend that takes a leaf's events itself has workers that cannot push
+        push = None if hasattr(self.backend, "take_events") else worker_monitor_factory(monitor)
         return RunContext(
             run_nonce,
             f"graphed-monitor-{run_nonce}",

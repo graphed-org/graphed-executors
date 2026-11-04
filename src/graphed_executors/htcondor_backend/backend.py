@@ -53,6 +53,7 @@ from graphed_executors.submit.services import (
     minted_endpoint,
     release_quietly,
 )
+from graphed_executors.submit.worker import subscribe
 
 from . import launch as _launch
 from . import server as _server
@@ -459,12 +460,7 @@ class HTCondorBackend:
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
         """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
-        self._handlers[topic] = handler
-
-        def unsub() -> None:
-            self._handlers.pop(topic, None)
-
-        return unsub
+        return subscribe(self._handlers, topic, handler)
 
     def cancel(self, futures: Sequence[Any]) -> None:
         """Cancel ``futures`` not yet leased; a leased task runs to completion."""

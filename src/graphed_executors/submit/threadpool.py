@@ -20,6 +20,7 @@ from graphed.core.execution import LocalResources, WorkerResources
 
 from .engine import _reset_worker_env, set_worker_env
 from .protocol import SubmitCapabilities, SubmitFuture
+from .worker import subscribe
 
 
 class _ThreadEnv:
@@ -112,12 +113,7 @@ class ThreadBackend:
         self, topic: str, handler: Callable[[list[dict[str, object]]], None]
     ) -> Callable[[], None]:
         """Call ``handler`` with each event batch on ``topic``; return the unsubscribe."""
-        self._handlers[topic] = handler
-
-        def unsub() -> None:
-            self._handlers.pop(topic, None)
-
-        return unsub
+        return subscribe(self._handlers, topic, handler)
 
     def cancel(self, futures: Sequence[Any]) -> None:
         # best-effort: only not-yet-started work is prevented (cancel_running=False)

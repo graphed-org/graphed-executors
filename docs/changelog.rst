@@ -5,9 +5,12 @@ Unreleased
 ----------
 
 * ``SequentialRunner``, ``ThreadExecutor``, ``ProcessPoolExecutor``, ``PinnedPoolExecutor``,
-  ``dask_runner``, ``parsl_runner``, ``htcondor_runner``, ``start_htex`` and ``stop_htex`` import from
+  ``dask_runner``, ``parsl_runner``, ``htcondor_runner``, ``vine_graph_runner``, ``start_htex`` and
+  ``stop_htex`` import from
   ``graphed_executors`` directly. They load on first use, so ``import graphed_executors`` still imports no backend, and
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
+* ``vine_graph_runner(executor)`` runs plans on TaskVine through a vine_graph ``Executor``
+  (:doc:`vine_graph`). It needs a CCTools build of the ``vine-graph`` branch.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
 

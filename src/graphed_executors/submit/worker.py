@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import os
 import pickle
+import socket
 import threading
 import time
 from collections import OrderedDict
@@ -100,6 +102,10 @@ _ENV: contextvars.ContextVar[WorkerEnv | None] = contextvars.ContextVar(
 )
 _DEFAULT_ENV = _DefaultEnv()
 
+EventHandlers = dict[str, Callable[[list[dict[str, object]]], None]]
+# A monitor event batch as buffered on a worker: (topic, events).
+EventBatch = tuple[str, list[dict[str, object]]]
+
 
 def set_worker_env(env: WorkerEnv) -> contextvars.Token[WorkerEnv | None]:
     """Install ``env`` as the current worker env; returns a token for :func:`_reset_worker_env`."""
@@ -117,6 +123,69 @@ def current_env() -> WorkerEnv:
     """
     env = _ENV.get()
     return env if env is not None else _DEFAULT_ENV
+
+
+# ---- buffered events: for backends with no worker->driver transport of their own ----------------
+
+
+class BufferedEnv:
+    """A per-task :class:`WorkerEnv` whose ``emit`` buffers for the driver.
+
+    ``open_once`` resources are one per worker process, so file locality holds across the tasks a
+    reused process runs.
+    """
+
+    def __init__(self, worker: str) -> None:
+        """Buffer the events of one task on ``worker``."""
+        self.resources: WorkerResources = _DEFAULT_ENV.resources
+        self.worker = worker
+        self.events: list[EventBatch] = []
+
+    def emit(self, topic: str, events: list[dict[str, object]]) -> None:
+        """Buffer ``events`` under ``topic`` for the driver."""
+        self.events.append((topic, list(events)))
+
+
+@dataclass(frozen=True, slots=True)
+class Emitted:
+    """A task's value with the events it emitted, as a :class:`BufferedEnv` task returns it."""
+
+    value: object
+    events: list[EventBatch]
+
+
+def run_buffered(env: BufferedEnv, fn: Callable[..., object], args: tuple[object, ...]) -> Emitted:
+    """Run ``fn(*args)`` under ``env``; return its value with the events it emitted."""
+    token = set_worker_env(env)
+    try:
+        return Emitted(fn(*args), env.events)
+    finally:
+        _reset_worker_env(token)
+
+
+def buffered_task(fn: Callable[..., object], /, *args: object) -> Emitted:
+    """Run ``fn(*args)`` on a worker process identified as ``hostname:pid``."""
+    return run_buffered(BufferedEnv(f"{socket.gethostname()}:{os.getpid()}"), fn, args)
+
+
+def dispatch_events(events: list[EventBatch], handlers: EventHandlers) -> None:
+    """Deliver a task's buffered event batches to the driver-side topic handlers."""
+    for topic, batch in events:
+        handler = handlers.get(topic)
+        if handler is not None:
+            handler(batch)
+
+
+def subscribe(
+    handlers: EventHandlers, topic: str, handler: Callable[[list[dict[str, object]]], None]
+) -> Callable[[], None]:
+    """Register ``handler`` on ``topic`` in ``handlers``; return the unsubscribe."""
+    handlers[topic] = handler
+
+    def unsub() -> None:
+        handlers.pop(topic, None)
+
+    return unsub
 
 
 # ---- broadcast-once worker-side token cache (mirror of local ``_shared_objects``) ---------------
