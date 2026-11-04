@@ -54,9 +54,11 @@ def _plan() -> Plan[list[float]]:
     session = Session(AwkwardBackend())
     form = AwkwardForm(ak.Array(EVENTS.layout.to_typetracer(forget_length=True)))
     ev = session.source("events", form=form, data=Events())
-    return aggregate_plan(
+    plan = aggregate_plan(
         ev.x / ev.y, reduce=as_list, combine=concat, empty=nothing, steps_per_file=3
     )
+    assert isinstance(plan, Plan)
+    return plan
 
 
 class _Sequential(SequentialRunner):
@@ -111,14 +113,16 @@ def make(request: pytest.FixtureRequest) -> Callable[[], Any]:
         return IN_DRIVER[request.param]
     if request.param in IN_WORKERS:
         return IN_WORKERS[request.param]
-    return request.getfixturevalue(f"{request.param}_runner_for")
+    factory: Callable[[], Any] = request.getfixturevalue(f"{request.param}_runner_for")
+    return factory
 
 
 @pytest.fixture(params=[*IN_WORKERS, "dask"])
 def make_in_workers(request: pytest.FixtureRequest) -> Callable[[], Any]:
     if request.param in IN_WORKERS:
         return IN_WORKERS[request.param]
-    return request.getfixturevalue(f"{request.param}_runner_for")
+    factory: Callable[[], Any] = request.getfixturevalue(f"{request.param}_runner_for")
+    return factory
 
 
 def _ran(make: Callable[[], Any], plan: Plan[Any]) -> tuple[Any, list[warnings.WarningMessage]]:
