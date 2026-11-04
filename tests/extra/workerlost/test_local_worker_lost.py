@@ -208,14 +208,14 @@ class _RootAt:
 def test_a_gap_between_chunks_at_the_deadline_is_not_a_stall(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.3)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 1.0)
     with make("ipc") as ex:
         marker = Path(ex._in_flight, "1.1")
         marker.write_text("chunk")
-        threading.Timer(0.2, marker.unlink).start()  # nothing runs as the first deadline lapses
-        threading.Timer(0.4, marker.write_text, ("next chunk",)).start()
-        threading.Timer(0.9, marker.unlink).start()
-        root = _RootAt(time.monotonic() + 1.0)
+        threading.Timer(0.6, marker.unlink).start()  # nothing runs as the first deadline lapses
+        threading.Timer(1.2, marker.write_text, ("next chunk",)).start()
+        threading.Timer(1.6, marker.unlink).start()
+        root = _RootAt(time.monotonic() + 1.8)
         assert ex._await_peer_root(root, N, None, lambda: False) == (7, N)
 
 
