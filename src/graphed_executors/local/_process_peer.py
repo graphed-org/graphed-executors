@@ -136,6 +136,10 @@ class _ProcessPeerBase(_BaseExecutor):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        if getattr(multiprocessing.current_process(), "_inheriting", False):
+            # a worker re-importing main: its run() exits, and a kill before then would leak a dir
+            self._in_flight = ""
+            return
         # per executor, not per run: a persistent pool's broadcast token hashes the path
         self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
@@ -143,7 +147,6 @@ class _ProcessPeerBase(_BaseExecutor):
     def run(self, plan: Plan[R]) -> ExecResult[R]:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
-            shutil.rmtree(self._in_flight, ignore_errors=True)  # os._exit skips the finalizer
             os._exit(_UNGUARDED_EXIT)
         return super().run(plan)
 

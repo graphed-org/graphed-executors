@@ -2,3 +2,4 @@
 
 * On Windows, an unguarded script that runs a process executor with a ``monitor`` raises the
   ``if __name__ == "__main__":`` ``RuntimeError``; it hung while starting the monitor's manager.
+  An unguarded script also no longer leaves a ``graphed-in-flight-*`` temp directory behind.

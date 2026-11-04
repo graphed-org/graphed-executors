@@ -158,16 +158,19 @@ def test_a_manager_that_dies_without_answering_is_not_awaited(
         release.set()
 
 
-def test_a_worker_reimporting_main_exits_without_running(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_worker_reimporting_main_exits_without_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     def exit_(code: int) -> None:
         raise SystemExit(code)
 
-    ex = ProcessPoolExecutor(2)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     monkeypatch.setattr(
         multiprocessing, "current_process", lambda: SimpleNamespace(_inheriting=True)
     )
     monkeypatch.setattr(os, "_exit", exit_)
+    ex = ProcessPoolExecutor(2)
+    assert list(tmp_path.iterdir()) == []  # a kill before run() leaves nothing behind
     with pytest.raises(SystemExit) as exited:
         ex.run(PLAN)
     assert exited.value.code == 83
-    assert not os.path.exists(ex._in_flight)
