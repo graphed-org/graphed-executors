@@ -745,12 +745,17 @@ def http_peer_actor(
 
 
 def http_driver_handshake(
-    driver_transport: HttpTransport, worker_addresses: tuple[str, ...], *, timeout_s: float = 30.0
+    driver_transport: HttpTransport,
+    worker_addresses: tuple[str, ...],
+    *,
+    timeout_s: float = 30.0,
+    check: Callable[[], None] = lambda: None,
 ) -> None:
     """Driver side of the HTTP discovery.
 
     Gather each worker's announced ``(host, port)``, assemble the full registry, and send it to
-    every worker so they can address each other.
+    every worker so they can address each other. ``check`` runs each poll, to raise for a worker
+    that will never announce.
     """
     registry: dict[str, tuple[str, int]] = {DRIVER: (driver_transport.host, driver_transport.port)}
     deadline = time.monotonic() + timeout_s
@@ -762,6 +767,7 @@ def http_driver_handshake(
                 _, addr, host, port = payload
                 registry[addr] = (host, port)
                 continue
+        check()
         if time.monotonic() >= deadline:
             raise TimeoutError("HTTP peer workers did not all announce in time")
     driver_transport.set_registry(registry)

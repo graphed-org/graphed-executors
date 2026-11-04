@@ -80,6 +80,12 @@ def _worker_processes(pool: Any) -> list[BaseProcess]:
     return pool.workers if isinstance(pool, PinnedProcessPool) else list(pool._processes.values())
 
 
+# a spawned worker's exit when the script it re-imported calls run(): the driver names the fix
+_UNGUARDED_EXIT = 83
+_UNGUARDED = """run() was called while a pool worker re-imported your script.
+  Put the run under:  if __name__ == "__main__":"""
+
+
 @dataclass(frozen=True)
 class _InFlight(Generic[R]):
     """``fn`` that names its work in a file while it runs.
@@ -134,6 +140,13 @@ class _ProcessPeerBase(_BaseExecutor):
         self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
 
+    def run(self, plan: Plan[R]) -> ExecResult[R]:
+        # what stdlib spawn itself checks, but it reports it in every worker's traceback
+        if getattr(multiprocessing.current_process(), "_inheriting", False):
+            shutil.rmtree(self._in_flight, ignore_errors=True)  # os._exit skips the finalizer
+            os._exit(_UNGUARDED_EXIT)
+        return super().run(plan)
+
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         return _InFlight(fn, self._in_flight, label)
 
@@ -147,10 +160,15 @@ class _ProcessPeerBase(_BaseExecutor):
         return super()._run_once(plan, control)
 
     def _lost_in(self, workers: Sequence[BaseProcess]) -> WorkerLostError | None:
-        """Return the error for the first dead one of ``workers``, ``None`` if all are alive."""
+        """Return the error for the first dead one of ``workers``, ``None`` if all are alive.
+
+        Raise :class:`RuntimeError` instead when one exited for an unguarded script.
+        """
         exited = [p for p in workers if p.exitcode is not None]
         if not exited:
             return None
+        if any(p.exitcode == _UNGUARDED_EXIT for p in exited):
+            raise RuntimeError(_UNGUARDED) from None
         # a broken stdlib pool SIGTERMs the survivors; the worker that broke it exited otherwise
         dead = next((p for p in exited if p.exitcode != -signal.SIGTERM), exited[0])
         chunk = "no chunk (a combine, or idle)"
@@ -409,7 +427,10 @@ class _ProcessPeerBase(_BaseExecutor):
                     for a in worker_addrs
                 ]
                 http_driver_handshake(
-                    driver_t, worker_addrs, timeout_s=self._worker_start_timeout_s
+                    driver_t,
+                    worker_addrs,
+                    timeout_s=self._worker_start_timeout_s,
+                    check=lambda: self._raise_lost(pool),
                 )
                 return self._collect_peer(driver_t, plan, n, futs, pool, control)
         finally:
