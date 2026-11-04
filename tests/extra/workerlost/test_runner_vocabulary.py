@@ -18,6 +18,7 @@ from graphed_executors.common import renamed
 from graphed_executors.dask_backend.backend import dask_runner
 from graphed_executors.htcondor_backend import backend as condor
 from graphed_executors.htcondor_backend.driverless import submit_driverless
+from graphed_executors.local.executors import ProcessExecutor
 from graphed_executors.parsl_backend.backend import parsl_runner
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 
@@ -46,6 +47,13 @@ def test_the_old_spelling_warns_where_it_is_written(runner: Any) -> None:
     assert ex.max_workers == 3
     assert caught[0].filename == __file__
     ex.close()
+
+
+def test_the_deprecated_alias_warns_max_workers_where_it_is_written() -> None:
+    with pytest.warns(DeprecationWarning) as caught:
+        ex = ProcessExecutor(max_workers=3)
+    assert ex.max_workers == 3
+    assert [w.filename for w in caught if "max_workers=" in str(w.message)] == [__file__]
 
 
 @pytest.mark.parametrize("runner", LOCAL)
@@ -133,3 +141,12 @@ def test_htcondor_runner_wires_workers_and_control(monkeypatch: pytest.MonkeyPat
 def test_submit_driverless_refuses_both_spellings() -> None:
     with pytest.raises(TypeError, match="not both"):
         submit_driverless(PLAN, workers=2, n_pilots=3)
+
+
+def test_submit_driverless_warns_n_pilots_where_it_is_written() -> None:
+    with (
+        pytest.warns(DeprecationWarning, match="n_pilots= is deprecated") as caught,
+        pytest.raises(ValueError, match="pilots='nope'"),
+    ):
+        submit_driverless(PLAN, n_pilots=3, pilots="nope")
+    assert caught[0].filename == __file__

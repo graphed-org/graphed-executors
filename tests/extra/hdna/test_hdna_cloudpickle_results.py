@@ -85,7 +85,7 @@ def _run(route: str, plan: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
             return runner.run(plan).value
     monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 60.0)
     cls, kwargs = ROUTES[route]
-    return cls(max_workers=2, **kwargs).run(plan).value
+    return cls(workers=2, **kwargs).run(plan).value
 
 
 @pytest.mark.parametrize("route", ROUTE_IDS)
