@@ -16,7 +16,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast
 
 from graphed.core import Task
@@ -29,6 +29,7 @@ from graphed.core.execution import (
     emit_task,
     partition_label,
 )
+from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.debug import StageError
 from graphed.shuffle import split
 
@@ -55,6 +56,7 @@ class RunContext:
     # pickled worker_monitor_factory: workers push, not the topic
     monitor_factory: bytes | None = None
     lean: bool = False  # lean events: no STARTED, and an unlabelled terminal event
+    driver: str = field(default_factory=process_id)
 
     @property
     def events_per_leaf(self) -> int:
@@ -219,6 +221,7 @@ def _leaf_task(ctx: RunContext, payload: bytes, token: str, task: Task) -> objec
     Worker-side timing. ``payload`` is the resolved broadcast bytes; the token cache
     deserializes it once per worker.
     """
+    enter_worker(ctx.driver)
     process = cast(
         "Callable[[Partition, WorkerResources], object]", _shared_payload(token, payload)
     )

@@ -555,7 +555,7 @@ def pinned_peer_actor(
 _peer_registry: dict[str, Any] | None = None
 
 
-def peer_pool_init(registry: dict[str, Any]) -> None:
+def peer_pool_init(registry: dict[str, Any], driver: str | None = None) -> None:
     """``ProcessPoolExecutor`` initializer.
 
     Stash the inherited full registry so each actor resolves its own inbox + the peers'
@@ -563,7 +563,7 @@ def peer_pool_init(registry: dict[str, Any]) -> None:
     """
     global _peer_registry
     _peer_registry = registry
-    exit_with_driver()
+    exit_with_driver(driver)
 
 
 def pooled_peer_actor(

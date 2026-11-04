@@ -47,6 +47,7 @@ from graphed.core.execution import (
     partition_label,
     worker_profiler_factory,
 )
+from graphed.core.worker_warnings import process_id
 from graphed.debug import StageError
 
 from .._window import wait_until
@@ -165,6 +166,7 @@ def _proc_init(
     *,
     monitor_factory: Callable[[], Monitor] | None = None,
     lean: bool = False,
+    driver: str | None = None,
 ) -> None:
     global _proc_resources, _proc_event_q, _proc_profiler, _proc_buffer
     global _proc_drain_stop, _proc_drain_thread, _proc_monitor, _proc_lean
@@ -172,7 +174,7 @@ def _proc_init(
         _proc_drain_stop.set()
     if _proc_drain_thread is not None:
         _proc_drain_thread.join(timeout=_PROC_EXIT_JOIN_S)
-    exit_with_driver()
+    exit_with_driver(driver)
     _proc_resources = LocalResources()
     _proc_event_q = event_q
     _proc_profiler = _proc_buffer = _proc_drain_stop = _proc_drain_thread = _proc_monitor = None
@@ -645,7 +647,9 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         return _StdProcessPool(
             max_workers=self.max_workers,
             mp_context=multiprocessing.get_context("spawn"),
-            initializer=functools.partial(_proc_init, monitor_factory=push, lean=lean),
+            initializer=functools.partial(
+                _proc_init, monitor_factory=push, lean=lean, driver=process_id()
+            ),
             initargs=(factory, event_q),
         )
 

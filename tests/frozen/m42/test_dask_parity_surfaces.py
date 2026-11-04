@@ -30,7 +30,7 @@ from graphed import GraphedError, Session, aggregate_plan, compile_ir
 from graphed.awkward import AwkwardBackend
 from graphed.awkward import gak as gak_fns
 from graphed.awkward.io import from_parquet, to_parquet
-from graphed.core.execution import SequentialRunner
+from graphed.core.execution import Plan, SequentialRunner
 from submit_backends import (
     ToyListBackend,
     ToyListSource,
@@ -100,6 +100,7 @@ def test_parquet_aggregate_multi_output_matches_sequential_and_spreads(
     plan = aggregate_plan(
         out1, out2, reduce=agg_reduce, combine=agg_combine, empty=agg_empty, steps_per_file=4
     )
+    assert isinstance(plan, Plan)
     assert len(plan.tasks) == N_FILES * 4
 
     seq = SequentialRunner().run(plan)
@@ -135,6 +136,7 @@ def _toy_external_plan(*, bind_external: bool) -> Any:
     plan = aggregate_plan(
         out, reduce=agg_reduce, combine=agg_combine, empty=agg_empty, externals=externals
     )
+    assert isinstance(plan, Plan)
     if not bind_external:
         # aggregate_plan auto-wires evaluators from the recording session, so externals=None is not
         # an unbound plan; strip them to exercise a genuinely unbound External.
