@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from graphed.core.execution import LocalResources, Plan
+from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.debug import SourceFrame, StageError
 from graphed.services import require_bound
 
@@ -87,6 +88,7 @@ def rendezvous_spec(
         "driver_host": driver_ep.host,
         "driver_port": driver_ep.port,
         "worker_addrs": worker_addrs,
+        "driver": process_id(),
     }
 
 
@@ -98,6 +100,7 @@ def _parsl_peer_main(spec: dict[str, Any]) -> dict[str, Any]:
     the SubmitBackend spy seam — leaves/fragments ride the spec + the pull plane, never per-leaf
     futures.
     """
+    enter_worker(spec["driver"])
     addr = spec["addr"]
     recv_failures = spec.get("recv_failures") or None
     ep = EscalatingHttpTransport(
