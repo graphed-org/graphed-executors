@@ -28,6 +28,7 @@ from graphed.core.execution import (
     WorkerResources,
     emit_task,
     partition_label,
+    skipped_error,
 )
 from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.debug import StageError
@@ -233,7 +234,8 @@ def _leaf_task(ctx: RunContext, payload: bytes, token: str, task: Task) -> objec
     except BaseException as exc:
         _emit_phase(ctx, env, TaskPhase.ERRORED, task, error=_render_error(exc))
         raise
-    _emit_phase(ctx, env, TaskPhase.FINISHED, task)
+    why = skipped_error(result)
+    _emit_phase(ctx, env, TaskPhase.ERRORED if why else TaskPhase.FINISHED, task, error=why)
     return result
 
 

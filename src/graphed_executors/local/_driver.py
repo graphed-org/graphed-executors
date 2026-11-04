@@ -385,6 +385,7 @@ class _BaseExecutor:
         :class:`~graphed.WorkerLostError` re-runs the whole plan up to ``retries`` times, then
         counts as a failed chunk.
         """
+        self._before_run()
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
         plan = cast("Plan[R]", skipping(plan, skip_failed))
@@ -406,6 +407,9 @@ class _BaseExecutor:
                 if control is not None and control.state is RunState.CANCELLED:
                     control.reset()  # a cancel ends this run only, whether or not a check saw it
             return finalize_result(plan, result)
+
+    def _before_run(self) -> None:
+        """Refuse a run before anything starts; a hook, so ``run`` keeps one frame for warnings."""
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         """Return ``fn`` reporting to :meth:`_busy` while it runs."""

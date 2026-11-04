@@ -21,6 +21,7 @@ from graphed.core.execution import (
     TaskPhase,
     emit_task,
     partition_label,
+    skipped_error,
 )
 from graphed.debug import StageError
 
@@ -441,7 +442,10 @@ class _PeerActor(Generic[R]):
             raise
         self.stats["processed"] += 1
         if self._emit:
-            self.emit_event(TaskPhase.FINISHED, leaf, part)
+            why = skipped_error(partial)
+            self.emit_event(
+                TaskPhase.ERRORED if why else TaskPhase.FINISHED, leaf, part, error=why
+            )
         if self.owner(leaf) == self.address:
             self.settle_leaf(leaf, partial)  # my leaf -> reduce here
         else:
