@@ -154,7 +154,10 @@ class _ProcessPeerBase(_BaseExecutor):
         return _InFlight(fn, self._in_flight, label)
 
     def _busy(self) -> bool:
-        return bool(os.listdir(self._in_flight))
+        try:
+            return bool(os.listdir(self._in_flight))
+        except FileNotFoundError:  # no run has made it yet
+            return False
 
     def _run_once(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
         # work a shutdown cut off left its marker, which would read as running from now on
