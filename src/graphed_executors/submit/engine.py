@@ -229,8 +229,7 @@ class SubmitRunner:
         monitor = self.monitor
         control = self.control
         given = self.services
-        retried = self.backend.capabilities.per_task_retries
-        plan = skipping(plan, skip_failed, attempts=1 + (self._retries if retried else 0))
+        plan = skipping(plan, skip_failed)
         while True:
             ctx = self._context(uuid.uuid4().hex[:8], monitor)
             try:
