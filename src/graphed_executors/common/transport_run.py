@@ -22,6 +22,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from graphed import WorkerLostError
 from graphed.core import Plan
 from graphed.debug import SourceFrame, StageError
 
@@ -97,14 +98,15 @@ def merge_counters(
 
 
 # ---- failure classification / attribution (matched by exception NAME, so dask/parsl-agnostic)
-def _in_chain(exc: BaseException | None, name: str) -> bool:
+def in_chain(exc: BaseException | None, *names: str) -> BaseException | None:
+    """Return the first exception in ``exc``'s chain with one of the class ``names``."""
     seen: set[int] = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
-        if type(exc).__name__ == name:
-            return True
+        if type(exc).__name__ in names:
+            return exc
         exc = exc.__cause__ or exc.__context__
-    return False
+    return None
 
 
 def is_restart_worthy(exc: BaseException | None, backend: Any) -> bool:
@@ -117,12 +119,12 @@ def is_restart_worthy(exc: BaseException | None, backend: Any) -> bool:
     """
     if exc is None:
         return False
-    if _in_chain(exc, "TransportDeliveryError") or _in_chain(exc, "PullTimeoutError"):
+    if in_chain(exc, "TransportDeliveryError", "PullTimeoutError"):
         return True
     describe = getattr(backend, "describe_failure", None)
     if describe is not None and describe(exc) is not None:
         return True
-    return _in_chain(exc, "CommClosedError") or _in_chain(exc, "KilledWorker")
+    return in_chain(exc, "CommClosedError", "KilledWorker") is not None
 
 
 def pick_attributable(errs: Mapping[Any, BaseException], backend: Any) -> BaseException:
@@ -168,19 +170,7 @@ def build_stage_error(exc: BaseException, backend: Any) -> Any:
     info = describe(exc) if describe is not None else None
     if info is not None:
         key, last_worker = info
-        return StageError(
-            op="run",
-            frames=(SourceFrame(filename=str(key), lineno=0),),
-            input_forms=(),
-            partition=str(key),
-            cause_type="KilledWorker",
-            cause_message=(
-                f"worker {last_worker} died (segfault/OOM/preemption suspected; note: blame can "
-                "be "
-                "unfair under co-located tasks)"
-            ),
-            opt_level=0,
-        )
+        return WorkerLostError(partition=str(key), worker=last_worker)
     return StageError(
         op="run",
         frames=(SourceFrame(filename="transport-run", lineno=0),),

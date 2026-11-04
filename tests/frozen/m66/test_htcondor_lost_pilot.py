@@ -73,7 +73,7 @@ def test_a_twice_lost_leaf_is_an_attributed_stage_error(
     with make_runner(local_backend(3)) as runner, pytest.raises(StageError) as excinfo:
         run_bounded(lambda: runner.run(plan))
     err = excinfo.value
-    assert type(err) is StageError
+    assert isinstance(err, StageError)
     assert poison in err.partition, err.partition
     assert err.cause_type == "KilledWorker"
     assert f"{socket.gethostname()}:" in err.cause_message, err.cause_message

@@ -362,7 +362,8 @@ raised it — not an opaque scheduler string.
 
 **A worker that dies hard** — segfault, OOM, preemption — reaches dask as
 ``distributed.KilledWorker`` once it has died ``distributed.scheduler.allowed-failures`` times.
-graphed turns that into a ``StageError`` naming the partition and the last worker that held it.
+graphed turns that into a ``graphed.WorkerLostError``, a ``StageError`` naming the chunk and the
+last worker that held it.
 Under co-located tasks the blame can land on an innocent partition, so treat the attribution as a
 strong hint rather than a verdict.
 
