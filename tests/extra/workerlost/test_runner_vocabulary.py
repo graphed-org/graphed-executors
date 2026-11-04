@@ -40,20 +40,15 @@ def test_one_set_of_keywords_runs_every_local_runner(runner: Any) -> None:
         assert ex.max_workers == 2
 
 
-@pytest.mark.parametrize("runner", LOCAL)
+@pytest.mark.parametrize("runner", [*LOCAL, ProcessExecutor])
 def test_the_old_spelling_warns_where_it_is_written(runner: Any) -> None:
-    with pytest.warns(DeprecationWarning, match="max_workers= is deprecated") as caught:
+    with pytest.warns(DeprecationWarning) as caught:
         ex = runner(max_workers=3)
     assert ex.max_workers == 3
-    assert caught[0].filename == __file__
+    assert [w.filename for w in caught if "max_workers= is deprecated" in str(w.message)] == [
+        __file__
+    ]
     ex.close()
-
-
-def test_the_deprecated_alias_warns_max_workers_where_it_is_written() -> None:
-    with pytest.warns(DeprecationWarning) as caught:
-        ex = ProcessExecutor(max_workers=3)
-    assert ex.max_workers == 3
-    assert [w.filename for w in caught if "max_workers=" in str(w.message)] == [__file__]
 
 
 @pytest.mark.parametrize("runner", LOCAL)
