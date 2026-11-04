@@ -720,7 +720,15 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         if self._run_monitor is None or self._run_push is not None:  # pushing workers bypass it
             return
         if self._mgr is None:  # one manager + queue for this executor's lifetime
-            self._mgr = multiprocessing.get_context("spawn").Manager()
+            mgr = SyncManager(ctx=multiprocessing.get_context("spawn"))
+            try:
+                mgr.start()
+            except EOFError:
+                proc = cast("Any", mgr)._process  # the server re-imports main like a worker
+                proc.join()
+                self._lost_in([proc])  # raises for an unguarded script
+                raise
+            self._mgr = mgr
             self._event_q = self._mgr.Queue(maxsize=10000)
         if self._collector is None or not self._collector.is_alive():  # idempotent across runs
             self._collector_stop = threading.Event()
@@ -861,7 +869,9 @@ class ProcessExecutor(ProcessPoolExecutor):
     visible at the call site rather than chosen silently.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, workers: int | None = None, *, max_workers: int | None = None, **kwargs: Any
+    ) -> None:
         """Warn that this alias is deprecated, then build a :class:`ProcessPoolExecutor`."""
         warnings.warn(
             "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same "
@@ -870,4 +880,5 @@ class ProcessExecutor(ProcessPoolExecutor):
             DeprecationWarning,
             stacklevel=2,
         )
-        super().__init__(*args, **kwargs)
+        # resolved here so the max_workers= warning names the caller's line, not this one
+        super().__init__(renamed(workers, max_workers, "max_workers", None), **kwargs)

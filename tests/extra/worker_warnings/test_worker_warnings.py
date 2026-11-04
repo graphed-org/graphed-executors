@@ -71,10 +71,10 @@ def _plan() -> Plan[list[float]]:
 DIVIDE = "divide by zero encountered in divide"
 CARRIED = f"{DIVIDE} [first in {chunk_label(Events(DATA).partitions(2)[0], rows=2)}]"
 RUNNERS: dict[str, tuple[Callable[[], Any], str]] = {
-    "process-pool": (lambda: ProcessPoolExecutor(max_workers=2, comms=None), CARRIED),
-    "process-peer": (lambda: ProcessPoolExecutor(max_workers=2), CARRIED),
-    "pinned-peer": (lambda: PinnedPoolExecutor(max_workers=2), CARRIED),
-    "http-peer": (lambda: ProcessPoolExecutor(max_workers=2, comms="http"), CARRIED),
+    "process-pool": (lambda: ProcessPoolExecutor(workers=2, comms=None), CARRIED),
+    "process-peer": (lambda: ProcessPoolExecutor(workers=2), CARRIED),
+    "pinned-peer": (lambda: PinnedPoolExecutor(workers=2), CARRIED),
+    "http-peer": (lambda: ProcessPoolExecutor(workers=2, comms="http"), CARRIED),
     "in-driver-threads": (lambda: SubmitRunner(ThreadBackend(2)), DIVIDE),
 }
 

@@ -143,6 +143,7 @@ class _ProcessPeerBase(_BaseExecutor):
     def run(self, plan: Plan[R]) -> ExecResult[R]:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
+            shutil.rmtree(self._in_flight, ignore_errors=True)  # os._exit skips the finalizer
             os._exit(_UNGUARDED_EXIT)
         return super().run(plan)
 
@@ -159,7 +160,10 @@ class _ProcessPeerBase(_BaseExecutor):
         return super()._run_once(plan, control)
 
     def _lost_in(self, workers: Sequence[BaseProcess]) -> WorkerLostError | None:
-        """Return the error for the first dead one of ``workers``, ``None`` if all are alive."""
+        """Return the error for the first dead one of ``workers``, ``None`` if all are alive.
+
+        Raise :class:`RuntimeError` instead when one exited for an unguarded script.
+        """
         exited = [p for p in workers if p.exitcode is not None]
         if not exited:
             return None

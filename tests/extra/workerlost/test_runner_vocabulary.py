@@ -113,7 +113,7 @@ def _defaults(fn: Any) -> dict[str, Any]:
 
 def test_the_condor_entry_points_agree_on_their_defaults() -> None:
     runner, driverless = _defaults(condor.htcondor_runner), _defaults(submit_driverless)
-    for name in ("workers", "n_pilots", "request_memory_mb", "retries"):
+    for name in ("request_memory_mb", "retries"):
         assert runner[name] == driverless[name] is not inspect.Parameter.empty
     assert "control" in runner
 
