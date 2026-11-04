@@ -140,7 +140,7 @@ class _ProcessPeerBase(_BaseExecutor):
         self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
 
-    def _before_run(self) -> None:
+    def _before_run(self, plan: Plan[Any]) -> None:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             shutil.rmtree(self._in_flight, ignore_errors=True)  # os._exit skips the finalizer

@@ -385,7 +385,7 @@ class _BaseExecutor:
         :class:`~graphed.WorkerLostError` re-runs the whole plan up to ``retries`` times, then
         counts as a failed chunk.
         """
-        self._before_run()
+        self._before_run(plan)
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
         plan = cast("Plan[R]", skipping(plan, skip_failed))
@@ -408,7 +408,7 @@ class _BaseExecutor:
                     control.reset()  # a cancel ends this run only, whether or not a check saw it
             return finalize_result(plan, result)
 
-    def _before_run(self) -> None:
+    def _before_run(self, plan: Plan[Any]) -> None:
         """Refuse a run before anything starts; a hook, so ``run`` keeps one frame for warnings."""
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
@@ -673,8 +673,9 @@ class _BaseExecutor:
                     continue
                 for fut in done:
                     key, n_entries, t0 = submitted.pop(fut)
-                    results.append((key, cast(R, fut.result())))  # re-raises a worker error intact
-                    ctx.errors += n_failed(results[-1][1])
+                    partial = cast(R, fut.result())  # re-raises a worker error intact
+                    results.append((key, partial))
+                    ctx.errors += n_failed(partial)
                     ctx.n_done += 1
                     ctx.events_done += n_entries
                     ctx.last_durations[key] = time.perf_counter() - t0

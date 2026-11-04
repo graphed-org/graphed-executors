@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import os
 import sys
@@ -200,22 +201,26 @@ def test_a_left_out_chunk_is_an_errored_task_on_every_runner(run: Run) -> None:
     }
 
 
-@pytest.mark.parametrize("cls", [ThreadExecutor, ProcessPoolExecutor, PinnedPoolExecutor])
-def test_the_missing_chunk_warning_names_the_callers_line(cls: Any) -> None:
-    with cls(workers=2, retries=0) as runner, pytest.warns(UserWarning, match="failed chunk") as w:
-        runner.run(plan_of(3), skip_failed=1)
-    assert [x.filename for x in w if "failed chunk" in str(x.message)] == [__file__]
-
-
-def test_the_htcondor_warning_names_the_callers_line() -> None:
+def _condor() -> Any:
     from graphed_executors.htcondor_backend import (  # noqa: PLC0415
         HTCondorBackend,
         HTCondorRunner,
         LocalPilots,
     )
 
-    backend = HTCondorBackend(LocalPilots(pythonpath=[str(Path(__file__).parent)]), 2)
-    with HTCondorRunner(backend) as runner, pytest.warns(UserWarning, match="failed chunk") as w:
+    return HTCondorRunner(HTCondorBackend(LocalPilots(pythonpath=[str(Path(__file__).parent)]), 2))
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(functools.partial(cls, workers=2, retries=0), id=cls.__name__)
+        for cls in (ThreadExecutor, ProcessPoolExecutor, PinnedPoolExecutor)
+    ]
+    + [pytest.param(_condor, id="HTCondorRunner")],
+)
+def test_the_missing_chunk_warning_names_the_callers_line(make: Callable[[], Any]) -> None:
+    with make() as runner, pytest.warns(UserWarning, match="failed chunk") as w:
         runner.run(plan_of(3), skip_failed=1)
     assert [x.filename for x in w if "failed chunk" in str(x.message)] == [__file__]
 
@@ -262,7 +267,7 @@ def test_dask_lists_every_chunk_it_leaves_out(dask_client: Any) -> None:
             res = _dask_leg(dask_client)(plan_of(poison=(5,)), skip_failed=N)
     except WorkerLostError as err:
         assert "combine" in err.partition, "only a loss blamed on no chunk may end the run"
-        return
+        pytest.skip("dask blamed a combine, which names no chunk to leave out")
     assert any("failed chunk" in str(w.message) for w in caught)
     left_out = [f.record["entry_start"] for f in res.failed]
     assert 5 in left_out

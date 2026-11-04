@@ -504,8 +504,9 @@ class SubmitRunner:
                 if fut not in outstanding:  # a cancelled/duplicate callback
                     continue
                 key, n_entries = outstanding.pop(fut)
-                results.append((key, cast(R, fut.result())))
-                exec_ctx.errors += n_failed(results[-1][1])
+                partial = cast(R, fut.result())
+                results.append((key, partial))
+                exec_ctx.errors += n_failed(partial)
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 reason = plan.stop.reason(exec_ctx) if plan.stop else None
@@ -573,8 +574,9 @@ class SubmitRunner:
             in_flight = outstanding.__len__
             for fut in self._completions(window, done_q, outstanding, in_flight, start):
                 key, n_entries = outstanding.pop(fut)
-                results.append((key, cast(R, fut.result())))
-                exec_ctx.errors += n_failed(results[-1][1])
+                partial = cast(R, fut.result())
+                results.append((key, partial))
+                exec_ctx.errors += n_failed(partial)
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 if window.cancelled():  # then no next_tasks and no stop exit
