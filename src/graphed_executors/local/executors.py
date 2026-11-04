@@ -861,7 +861,9 @@ class ProcessExecutor(ProcessPoolExecutor):
     visible at the call site rather than chosen silently.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, workers: int | None = None, *, max_workers: int | None = None, **kwargs: Any
+    ) -> None:
         """Warn that this alias is deprecated, then build a :class:`ProcessPoolExecutor`."""
         warnings.warn(
             "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same "
@@ -870,4 +872,5 @@ class ProcessExecutor(ProcessPoolExecutor):
             DeprecationWarning,
             stacklevel=2,
         )
-        super().__init__(*args, **kwargs)
+        # resolved here so the max_workers= warning names the caller's line, not this one
+        super().__init__(renamed(workers, max_workers, "max_workers", None), **kwargs)
