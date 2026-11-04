@@ -10,9 +10,6 @@ Unreleased
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
-* ``run()`` at the top level of a script with no ``if __name__ == "__main__":`` guard raises a
-  ``RuntimeError`` naming the fix; it was a ``BrokenProcessPool`` after hundreds of lines of worker
-  tracebacks.
 
 0.0.7
 -----

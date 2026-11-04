@@ -1,0 +1,5 @@
+.. under: Unreleased
+
+* ``run()`` at the top level of a script with no ``if __name__ == "__main__":`` guard raises a
+  ``RuntimeError`` naming the fix; it was a ``BrokenProcessPool`` after hundreds of lines of worker
+  tracebacks.
