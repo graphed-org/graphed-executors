@@ -114,9 +114,13 @@ PLAN = Plan(
 )
 
 
-def test_a_manager_that_fails_otherwise_keeps_its_error(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("delay", [0, 0.2])  # 0.2: the driver sees the death before start() raises
+def test_a_manager_that_fails_otherwise_keeps_its_error(
+    monkeypatch: pytest.MonkeyPatch, delay: float
+) -> None:
     def start(self: Any) -> None:
         self._process = SimpleNamespace(exitcode=1, pid=0, join=lambda: None)
+        time.sleep(delay)
         raise EOFError("manager died")
 
     monkeypatch.setattr(SyncManager, "start", start)
@@ -130,17 +134,6 @@ def test_a_manager_that_cannot_spawn_keeps_its_error(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(SpawnProcess, "start", start)
     with pytest.raises(OSError, match="spawn failed"):
-        ProcessPoolExecutor(2, comms=None, monitor=MonitorBase()).run(PLAN)
-
-
-def test_a_manager_error_after_its_death_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
-    def start(self: Any) -> None:
-        self._process = SimpleNamespace(exitcode=1, pid=0, join=lambda: None)
-        time.sleep(0.2)  # the driver sees the death before start() raises
-        raise EOFError("manager died")
-
-    monkeypatch.setattr(SyncManager, "start", start)
-    with pytest.raises(EOFError, match="manager died"):
         ProcessPoolExecutor(2, comms=None, monitor=MonitorBase()).run(PLAN)
 
 
