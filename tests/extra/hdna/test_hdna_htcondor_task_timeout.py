@@ -154,7 +154,7 @@ def test_a_driverless_run_carries_the_timeout_to_its_backend(
         monkeypatch,
         leaf_plan(markers),
         "job",
-        n_pilots=2,
+        workers=2,
         pilots="local",
         task_timeout_s=7.5,
     )

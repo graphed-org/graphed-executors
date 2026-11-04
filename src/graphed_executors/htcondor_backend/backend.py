@@ -227,6 +227,7 @@ class HTCondorBackend:
         task_timeout_s: float | None = None,
     ) -> None:
         """Run tasks on the pilots ``launcher`` starts, through a driver-side task server."""
+        self._n_pilots = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
         self.capabilities = _FLOOR
         self.launcher = launcher
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
@@ -254,7 +255,6 @@ class HTCondorBackend:
         # pilot jobs submitted with the services' jobs would hold the room those need: they wait
         deferred = isinstance(launcher, CondorPilots) and hasattr(self, "host_service")
         self.min_pilots = 1  # the first need of a worker waits for this many
-        self._n_pilots = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
         self._pilots_lock = threading.Lock()
         self._submitted_at = None if deferred else time.monotonic()
         self._held = False  # the queued pilots are held while a later plan's services start

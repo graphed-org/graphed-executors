@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import operator
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -76,8 +77,10 @@ def test_a_backends_old_spelling_warns_where_it_is_written(make: Any, old: str) 
         assert backend.n_workers() == 3 if old == "max_workers" else backend._n_pilots == 3
     finally:
         backend.close()
+    before = set(threading.enumerate())
     with pytest.raises(TypeError, match="not both"):
         make(workers=2, **{old: 3})
+    assert [t.name for t in set(threading.enumerate()) - before] == []
 
 
 def test_renamed_keeps_a_zero_and_fills_only_an_absent_count() -> None:
