@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import operator
+import os
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from graphed import WorkerLostError
 from graphed.core import (
     MonitorBase,
     Partition,
@@ -51,6 +53,10 @@ def slow(part: Partition, _resources: object) -> tuple[int, ...]:
 
 def fail(part: Partition, _resources: object) -> tuple[int, ...]:
     raise ValueError("bad")
+
+
+def die(part: Partition, _resources: object) -> tuple[int, ...]:
+    os._exit(17)
 
 
 def _plan(process: Callable[..., tuple[int, ...]] = ordered, n: int = N) -> Plan[Any]:
@@ -183,3 +189,35 @@ def test_a_failed_run_closes_the_bar(
     with make(monitor=ProgressBar()) as runner, pytest.raises(Exception, match="bad"):
         runner.run(_plan(fail))
     assert capsys.readouterr().err.endswith("\n")
+
+
+@pytest.mark.parametrize("name", ["process-peer", "process-hub", "pinned-peer"])
+def test_a_lost_worker_closes_the_bar(name: str, capsys: pytest.CaptureFixture[str]) -> None:
+    with LOCAL[name](monitor=ProgressBar(), retries=0) as runner, pytest.raises(WorkerLostError):
+        runner.run(_plan(die))
+    assert capsys.readouterr().err == f"\rtasks: 0/{N}\n"
+
+
+class _Order(OverridesOnTask):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self.calls = calls
+
+    def on_run_start(self, n_tasks: int) -> None:
+        self.calls.append("on_run_start")
+
+
+def test_an_earlier_runs_events_drain_before_the_next_run_opens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    switch_in = ProcessPoolExecutor._switch_in
+
+    def spy(self: ProcessPoolExecutor, monitor: Any) -> None:
+        calls.append("switch_in")
+        switch_in(self, monitor)
+
+    monkeypatch.setattr(ProcessPoolExecutor, "_switch_in", spy)
+    with ProcessPoolExecutor(max_workers=1, comms=None, monitor=_Order(calls)) as runner:
+        runner.run(_plan())
+    assert calls == ["switch_in", "on_run_start"]
