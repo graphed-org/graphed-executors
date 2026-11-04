@@ -177,6 +177,9 @@ pool with more settings, `start_htex(workers=8, run_dir="runinfo", heartbeat_per
 and `stop_htex` stops its interchange, manager and worker processes within seconds:
 
 ```python
+if __name__ == "__main__":
+    from graphed_executors import parsl_runner, start_htex, stop_htex
+
     htex = start_htex(workers=8, run_dir="runinfo", heartbeat_period=2)
     try:
         with parsl_runner(htex) as runner:
