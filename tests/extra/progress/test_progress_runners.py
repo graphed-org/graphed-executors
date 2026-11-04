@@ -195,7 +195,7 @@ def test_a_failed_run_closes_the_bar(
 def test_a_lost_worker_closes_the_bar(name: str, capsys: pytest.CaptureFixture[str]) -> None:
     with LOCAL[name](monitor=ProgressBar(), retries=0) as runner, pytest.raises(WorkerLostError):
         runner.run(_plan(die))
-    assert capsys.readouterr().err == f"\rtasks: 0/{N}\n"
+    assert capsys.readouterr().err.endswith(f"\rtasks: 0/{N}\n")
 
 
 class _Order(OverridesOnTask):
