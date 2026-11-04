@@ -207,6 +207,19 @@ def test_the_missing_chunk_warning_names_the_callers_line(cls: Any) -> None:
     assert [x.filename for x in w if "failed chunk" in str(x.message)] == [__file__]
 
 
+def test_the_htcondor_warning_names_the_callers_line() -> None:
+    from graphed_executors.htcondor_backend import (  # noqa: PLC0415
+        HTCondorBackend,
+        HTCondorRunner,
+        LocalPilots,
+    )
+
+    backend = HTCondorBackend(LocalPilots(pythonpath=[str(Path(__file__).parent)]), 2)
+    with HTCondorRunner(backend) as runner, pytest.warns(UserWarning, match="failed chunk") as w:
+        runner.run(plan_of(3), skip_failed=1)
+    assert [x.filename for x in w if "failed chunk" in str(x.message)] == [__file__]
+
+
 def test_a_budget_exhausted_raises_on_every_runner(run: Run) -> None:
     with pytest.raises(TooManyFailedChunksError) as info:
         run(plan_of(*range(11)), skip_failed=10)

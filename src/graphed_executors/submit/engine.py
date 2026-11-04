@@ -231,6 +231,7 @@ class SubmitRunner:
         monitor = self.monitor
         control = self.control
         given = self.services
+        self._before_run(plan)
         plan = skipping(plan, skip_failed)
         while True:
             ctx = self._context(uuid.uuid4().hex[:8], monitor)
@@ -243,6 +244,9 @@ class SubmitRunner:
                 # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs the
                 # fixed tree to rewire a failed leaf's dependents
                 plan = without_lost(plan, err)
+
+    def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:
+        """Refuse ``plan`` before anything starts; a hook, so ``run`` keeps one warning frame."""
 
     def _run_scoped(
         self,

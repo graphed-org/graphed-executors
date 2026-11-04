@@ -37,10 +37,10 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, Protocol, TypeVar, overload
+from typing import Any, Protocol
 
 from graphed.core import RunControl
-from graphed.core.execution import ExecResult, Plan
+from graphed.core.execution import Plan
 from graphed.core.plan import DurablePlanV2
 from graphed.services import ServiceSpec
 
@@ -62,8 +62,6 @@ from .launch import CLAIM_ATTRS, CondorPilots, PilotLauncher, located_schedd
 from .server import TaskServer, TaskTimedOutError, WorkerLostError
 from .services import AD_ATTRS, ServiceJob, machine_ads, queued_refusal
 from .sites import SITES, SiteProfile, counts_as_alive
-
-R = TypeVar("R")
 
 # Pilots queue like any other job, so a busy pool can take minutes to start the first one.
 N_WORKERS_WAIT_S = 600.0
@@ -790,16 +788,9 @@ class HTCondorRunner(SubmitRunner):
         """Wait for ``min_pilots``; pilots lost afterwards fail the run's tasks as lost workers."""
         return self.backend.wait_for_pilots(self._min_pilots)
 
-    @overload
-    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]: ...
-    @overload
-    def run(self, plan: DurablePlanV2, *, skip_failed: int = 0) -> ExecResult[Any]: ...
-    def run(
-        self, plan: Plan[R] | DurablePlanV2, *, skip_failed: int = 0
-    ) -> ExecResult[R] | ExecResult[Any]:
-        """Run ``plan``, refusing one the pilots cannot import."""
+    def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:
+        """Refuse a ``plan`` the pilots cannot import."""
         _require_plan_importable(plan, ("process", "combine"))
-        return super().run(plan, skip_failed=skip_failed)
 
     def __exit__(self, *exc: object) -> None:
         """Close the runner; on an exception, stop waiting for slots first."""
