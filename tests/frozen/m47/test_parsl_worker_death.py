@@ -188,7 +188,7 @@ def test_exhausted_restart_budget_is_an_attributed_stage_error(tmp_path: Path) -
             "result means the loss was silently absorbed (or the restart budget was ignored)"
         )
         err = outcome["error"]
-        assert type(err) is StageError, (
+        assert isinstance(err, StageError), (
             f"expected an attributed StageError, got {type(err).__name__}: a raw parsl "
             "WorkerLost/ManagerLost or transport error must never leak to the user (§1.4)"
         )

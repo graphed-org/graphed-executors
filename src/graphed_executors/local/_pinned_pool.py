@@ -150,6 +150,11 @@ class PinnedProcessPool(Executor):
             if fut is not None:
                 fut.set_result(value) if ok else fut.set_exception(value)
 
+    @property
+    def workers(self) -> list[Any]:
+        """The worker processes, in pinning order."""
+        return self._procs
+
     def workers_alive(self) -> bool:
         """Backstop for a HARD worker crash (no error message shipped).
 

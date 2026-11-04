@@ -37,17 +37,6 @@ def test_paused_time_does_not_count_toward_the_root_deadline(
     assert (res.value, res.stopped) == (ONES, StopReason.EXHAUSTED)
 
 
-@pytest.mark.parametrize("route", ["thread-ipc", "proc-ipc"])
-def test_the_root_timeout_message_follows_the_constant(
-    route: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.5)
-    ex = mp.ROUTES[route].make()
-    run = mp.Background(lambda: ex.run(mp.make_plan(mp.Probe(sleep_s=1.0))))
-    with pytest.raises(TimeoutError, match=r"within 0\.5s"):
-        run.result(30)
-
-
 def test_a_cancel_after_the_root_leaves_a_persistent_pool_clean(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

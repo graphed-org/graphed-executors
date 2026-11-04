@@ -33,6 +33,7 @@ from dataclasses import replace
 from typing import Any, TypeVar, cast, overload
 
 import cloudpickle
+from graphed import WorkerLostError
 from graphed import services as graphed_services
 from graphed.core import (
     DurablePlanV2,
@@ -43,6 +44,7 @@ from graphed.core import (
     RunState,
     StopReason,
     Task,
+    chunk_label,
 )
 from graphed.core.execution import (
     Monitor,
@@ -54,7 +56,7 @@ from graphed.core.execution import (
     partition_label,
     worker_monitor_factory,
 )
-from graphed.debug import SourceFrame, StageError
+from graphed.debug import StageError
 from graphed.shuffle import pick
 
 from graphed_executors._plan_queue import PlanQueue
@@ -111,19 +113,26 @@ class _RunTasks:
     runs through :func:`_service_checked`.
     """
 
-    def __init__(
-        self, backend: SubmitBackend, checks: tuple[tuple[str, str, str], ...] = ()
-    ) -> None:
+    def __init__(self, backend: SubmitBackend) -> None:
         self._backend = backend
-        self._checks = checks
+        self.checks: tuple[tuple[str, str, str], ...] = ()
+        self.tasks: dict[str, Task] = {}  # by backend key: a failure's key names its chunk
         self._lock = threading.Lock()
         self._pending: set[SubmitFuture] = set()
 
     def submit(
-        self, fn: Callable[..., object], /, *args: object, key: str, retries: int
+        self,
+        fn: Callable[..., object],
+        /,
+        *args: object,
+        key: str,
+        retries: int,
+        task: Task | None = None,
     ) -> SubmitFuture:
-        if self._checks:
-            args, fn = (self._checks, fn, *args), _service_checked
+        if task is not None:
+            self.tasks[key] = task
+        if self.checks:
+            args, fn = (self.checks, fn, *args), _service_checked
         fut = self._backend.submit(fn, *args, key=key, retries=retries)
         with self._lock:
             self._pending.add(fut)
@@ -233,22 +242,21 @@ class SubmitRunner:
         # handlers run on worker threads; += is not atomic without the GIL
         seen_lock = threading.Lock()
         unsub: Callable[[], None] | None = None
+        submits = _RunTasks(self.backend)
         try:
             if control is not None and control.state is RunState.CANCELLED:
                 empty = None if isinstance(plan, DurablePlanV2) else plan.empty()
                 return ExecResult(empty, 0, 0, StopReason.CANCELLED)
             bound = plan
-            checks: tuple[tuple[str, str, str], ...] = ()
             if plan.services:
                 services = ServiceSet(
                     plan.services, self.backend, endpoints=given, scope=ctx.run_nonce
                 )
                 endpoints = scope.enter_context(services)
                 bound = graphed_services.bind_services(plan, endpoints)
-                checks = tuple(
+                submits.checks = tuple(
                     (spec.name, endpoints[spec.name], spec.check) for spec in plan.services
                 )
-            submits = _RunTasks(self.backend, checks)
             # registered after the services, so it runs before their release
             scope.callback(submits.cancel)
             if ctx.monitor_topic is not None and ctx.events_per_leaf:
@@ -281,6 +289,12 @@ class SubmitRunner:
                 return result
             # graphed's walk, through collate and aggregate_plan, while the services are still up
             return replace(result, value=graphed_services.resolve_services(bound, result.value))
+        except BaseException as exc:
+            # here, not at each result(): parsl surfaces a loss while submitting the next combine
+            translated = self._translate(exc, submits.tasks)
+            if translated is None:
+                raise
+            raise translated from exc
         finally:
             if unsub is not None:
                 unsub()
@@ -302,7 +316,6 @@ class SubmitRunner:
         if n == 0:
             return ExecResult(plan.empty(), 0, 0, StopReason.EXHAUSTED)
         plan_fp, ptoken, phandle = self._broadcast(plan.process, ctx)
-        key_to_task: dict[str, Task] = {}
         futs: dict[int, SubmitFuture] = {}
         # a raise drains nothing: a piggyback backend ships a leaf's events only in its result()
         drained = 0
@@ -312,9 +325,15 @@ class SubmitRunner:
                     # driver-side SUBMITTED (leaves only)
                     emit_task(monitor, self._submitted_event(task))
                 key = _key(plan_fp, ctx.run_nonce, "leaf", i)
-                key_to_task[key] = task
                 futs[i] = submits.submit(
-                    _leaf_task, ctx, phandle, ptoken, task, key=key, retries=self._retries
+                    _leaf_task,
+                    ctx,
+                    phandle,
+                    ptoken,
+                    task,
+                    key=key,
+                    retries=self._retries,
+                    task=task,
                 )
             combines, root = plan_tree(n)
             assert root is not None  # n >= 1
@@ -339,8 +358,8 @@ class SubmitRunner:
             while not futs[root].done():
                 fut = done_q.get()
                 if fut.exception() is not None:  # exception() transfers no result on dask
-                    self._result(fut, key_to_task)  # raises it, translated
-            value = cast(R, self._result(futs[root], key_to_task))
+                    fut.result()  # raises it
+            value = cast(R, futs[root].result())
             drained = n
             return ExecResult(value, n, len(combines), StopReason.EXHAUSTED)
         finally:
@@ -371,7 +390,6 @@ class SubmitRunner:
         window = Window(control, self._task_slots(), enumerate(tasks))
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         node_of: dict[SubmitFuture, int] = {}  # outstanding future -> its plan_tree node
-        key_to_task: dict[str, Task] = {}
         sent = done = n_combines = 0  # leaves submitted, leaves completed, combines submitted
         # a raise drains nothing: a piggyback backend ships a leaf's events only in its result()
         drained = 0
@@ -380,9 +398,8 @@ class SubmitRunner:
             nonlocal sent
             i, task = item
             key = _key(plan_fp, ctx.run_nonce, "leaf", i)
-            key_to_task[key] = task
             fut = submits.submit(
-                _leaf_task, ctx, phandle, ptoken, task, key=key, retries=self._retries
+                _leaf_task, ctx, phandle, ptoken, task, key=key, retries=self._retries, task=task
             )
             sent += 1
             node_of[fut] = i
@@ -395,7 +412,7 @@ class SubmitRunner:
             for fut in self._completions(window, done_q, node_of, in_flight, start):
                 node = node_of.pop(fut)
                 if fut.exception() is not None:  # exception() transfers no result on dask
-                    self._result(fut, key_to_task)  # raises it, translated
+                    fut.result()  # raises it
                 done += node < n
                 for out, fa, fb in tree.complete(node, fut):
                     key = _key(plan_fp, ctx.run_nonce, "combine", out)
@@ -406,7 +423,7 @@ class SubmitRunner:
                     node_of[f2] = out
                     f2.add_done_callback(done_q.put)
             pieces = sorted(
-                ((tree.first[m], self._result(f, key_to_task)) for m, f in tree.ready.items()),
+                ((tree.first[m], f.result()) for m, f in tree.ready.items()),
                 key=lambda p: p[0],
             )
             value, k = running_fold(
@@ -434,8 +451,6 @@ class SubmitRunner:
         exec_ctx = ExecContext()
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
-        # F2b: dask key -> Task, so a worker death names the partition
-        key_to_task: dict[str, Task] = {}
         results: list[tuple[int, R]] = []
         stopped: StopReason | None = None
         seq = 0
@@ -449,10 +464,15 @@ class SubmitRunner:
                 if monitor is not None:
                     emit_task(monitor, self._submitted_event(task))
                 dask_key = _key(plan_fp, ctx.run_nonce, "leaf", seq)
-                # F2b: attribute a KilledWorker to this chunk (not the key)
-                key_to_task[dask_key] = task
                 fut = submits.submit(
-                    _leaf_task, ctx, phandle, ptoken, task, key=dask_key, retries=self._retries
+                    _leaf_task,
+                    ctx,
+                    phandle,
+                    ptoken,
+                    task,
+                    key=dask_key,
+                    retries=self._retries,
+                    task=task,
                 )
                 seq += 1
                 outstanding[fut] = (task.key, task.partition.n_entries)
@@ -465,8 +485,7 @@ class SubmitRunner:
                 if fut not in outstanding:  # a cancelled/duplicate callback
                     continue
                 key, n_entries = outstanding.pop(fut)
-                # F2b: real map, not {}
-                results.append((key, cast(R, self._result(fut, key_to_task))))
+                results.append((key, cast(R, fut.result())))
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 reason = plan.stop.reason(exec_ctx) if plan.stop else None
@@ -498,8 +517,6 @@ class SubmitRunner:
         exec_ctx = ExecContext()
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         outstanding: dict[SubmitFuture, tuple[int, int]] = {}  # future -> (task.key, n_entries)
-        # F2b: dask key -> Task, so a worker death names the partition
-        key_to_task: dict[str, Task] = {}
         results: list[tuple[int, R]] = []
         stopped: StopReason | None = None
         seq = 0
@@ -517,10 +534,15 @@ class SubmitRunner:
         def start(task: Task) -> None:
             nonlocal seq
             dask_key = _key(plan_fp, ctx.run_nonce, "leaf", seq)
-            # F2b: attribute a KilledWorker to this chunk (not the key)
-            key_to_task[dask_key] = task
             fut = submits.submit(
-                _leaf_task, ctx, phandle, ptoken, task, key=dask_key, retries=self._retries
+                _leaf_task,
+                ctx,
+                phandle,
+                ptoken,
+                task,
+                key=dask_key,
+                retries=self._retries,
+                task=task,
             )
             seq += 1
             outstanding[fut] = (task.key, task.partition.n_entries)
@@ -531,8 +553,7 @@ class SubmitRunner:
             in_flight = outstanding.__len__
             for fut in self._completions(window, done_q, outstanding, in_flight, start):
                 key, n_entries = outstanding.pop(fut)
-                # F2b: real map, not {}
-                results.append((key, cast(R, self._result(fut, key_to_task))))
+                results.append((key, cast(R, fut.result())))
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 if window.cancelled():  # then no next_tasks and no stop exit
@@ -567,7 +588,6 @@ class SubmitRunner:
         done_q: queue.Queue[SubmitFuture] = queue.Queue()
         # stage task not yet seen done -> its stage has inputs
         outstanding: dict[SubmitFuture, bool] = {}
-        key_to_task: dict[str, Task] = {}
         stage_futs: list[list[SubmitFuture]] = []
         ran = [0, 0]  # tasks of stages with no inputs, tasks of the others
 
@@ -579,7 +599,7 @@ class SubmitRunner:
                 ran[outstanding.pop(fut)] += 1
                 remaining.discard(fut)
                 if fut.exception() is not None:  # exception() transfers no result on dask
-                    self._result(fut, key_to_task)  # raises it, translated
+                    fut.result()  # raises it
                 if control is not None and control.state is RunState.CANCELLED:
                     return False
             return True
@@ -595,7 +615,7 @@ class SubmitRunner:
             fn = _map_task if stage.kind == "map_write" else _stage_task
             # driver edge: each map result is fetched once, then sliced per dest here
             fetched = {
-                i: [cast("dict[int, bytes]", self._result(f, key_to_task)) for f in stage_futs[i]]
+                i: [cast("dict[int, bytes]", f.result()) for f in stage_futs[i]]
                 for i in stage.inputs
                 if plan.stages[i].kind == "map_write" and not peer
             }
@@ -619,9 +639,8 @@ class SubmitRunner:
                     else:
                         args.extend(stage_futs[i])
                 key = _key(plan_fp, ctx.run_nonce, f"{stage.kind}.{s}", t)
-                key_to_task[key] = task
                 fut = submits.submit(
-                    fn, handle, token, task, *args, key=key, retries=self._retries
+                    fn, handle, token, task, *args, key=key, retries=self._retries, task=task
                 )
                 outstanding[fut] = bool(stage.inputs)
                 fut.add_done_callback(done_q.put)
@@ -629,7 +648,7 @@ class SubmitRunner:
             stage_futs.append(futs)
         if not settle(list(outstanding)):
             return ExecResult(None, ran[0], ran[1], StopReason.CANCELLED)
-        last = [cast("bytes", self._result(f, key_to_task)) for f in stage_futs[-1]]
+        last = [cast("bytes", f.result()) for f in stage_futs[-1]]
         return ExecResult(plan.value(last), ran[0], ran[1], StopReason.EXHAUSTED)
 
     # ---- helpers ----
@@ -701,46 +720,24 @@ class SubmitRunner:
             if not grew:
                 return
 
-    def _result(self, fut: SubmitFuture, key_to_task: dict[str, Task]) -> object:
-        """Resolve a future, translating a backend worker-death signal.
-
-        The signal is a ``KilledWorker``; it becomes an attributed :class:`StageError` (plan §1.4).
-        Ordinary exceptions re-raise intact.
-        """
-        try:
-            return fut.result()
-        except BaseException as exc:
-            translated = self._translate(exc, key_to_task)
-            if translated is not None:
-                raise translated from exc
-            raise
-
-    def _translate(self, exc: BaseException, key_to_task: dict[str, Task]) -> StageError | None:
+    def _translate(self, exc: BaseException, tasks: Mapping[str, Task]) -> StageError | None:
+        """Return the attributed error for a backend failure, ``None`` for anything else."""
         describe = getattr(self.backend, "describe_failure", None)
-        if describe is None:
-            return None
-        info = describe(exc)
+        info = describe(exc) if describe is not None else None
         if info is None:
             return None
         failing_key, last_worker = info
-        task = key_to_task.get(failing_key)
-        partition = partition_label(task.partition) if task is not None else str(failing_key)
-        frame = SourceFrame(
-            filename=task.partition.uri if task is not None else str(failing_key), lineno=0
-        )
+        task = tasks.get(failing_key)
+        partition = chunk_label(task.partition) if task is not None else str(failing_key)
+        if not isinstance(exc, TimeoutError):
+            return WorkerLostError(partition=partition, worker=last_worker)
         return StageError(
             op="run",
-            frames=(frame,),
+            frames=(),
             input_forms=(),
             partition=partition,
-            cause_type=type(exc).__name__ if isinstance(exc, TimeoutError) else "KilledWorker",
-            cause_message=(
-                str(exc)
-                if isinstance(exc, TimeoutError)
-                else f"worker {last_worker} died (segfault/OOM/preemption suspected; note: blame "
-                "can be "
-                f"unfair under co-located tasks)"
-            ),
+            cause_type=type(exc).__name__,
+            cause_message=str(exc),
             opt_level=0,
         )
 

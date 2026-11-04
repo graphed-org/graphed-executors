@@ -38,6 +38,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
+import graphed
+
 from graphed_executors.local._portable import PICKLE_ERRORS, Portable
 from graphed_executors.local._transport import LookupFreeHTTPServer
 from graphed_executors.parsl_backend._shim import _parsl_task_shim
@@ -54,7 +56,7 @@ TASK_HEADER = "X-Graphed-Task"
 _HOSTPORT = re.compile(r".+:[0-9]+")
 
 
-class WorkerLostError(Exception):
+class WorkerLostError(graphed.WorkerLostError):
     """A task's pilot was lost twice (``pilot`` names the last one).
 
     Also raised when no pilot is left to run it.
@@ -62,7 +64,7 @@ class WorkerLostError(Exception):
 
     def __init__(self, key: str, pilot: str) -> None:
         """Record the task ``key`` and the ``pilot`` that lost it."""
-        super().__init__(key, pilot)
+        super().__init__(partition=key, worker=pilot)
         self.key = key
         self.pilot = pilot
 

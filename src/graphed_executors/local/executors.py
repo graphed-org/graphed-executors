@@ -609,6 +609,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         steal: bool = True,
         control: RunControl | None = None,
         max_in_flight: int = 2,
+        retries: int = 0,
     ):
         super().__init__(
             max_workers,
@@ -620,6 +621,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
             steal=steal,
             control=control,
             max_in_flight=max_in_flight,
+            retries=retries,
         )
         self._mgr: SyncManager | None = None
         # the kept hub pool's initializer identity

@@ -15,8 +15,11 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Executor as _PoolExecutor
 from concurrent.futures import Future, as_completed, wait
-from typing import Any, TypeVar, cast
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, replace
+from typing import Any, Generic, TypeVar, cast
 
+from graphed import WorkerLostError
 from graphed.core import (
     ExecContext,
     ExecResult,
@@ -82,6 +85,22 @@ class _RunLeaves:
         return self.submitted - self.cancelled
 
 
+@dataclass(frozen=True)
+class _Tracked(Generic[R]):
+    """``fn`` that holds its thread in ``running`` while it runs."""
+
+    fn: Callable[..., R]
+    running: set[int]
+
+    def __call__(self, *args: Any) -> R:
+        thread = threading.get_ident()
+        self.running.add(thread)
+        try:
+            return self.fn(*args)
+        finally:
+            self.running.discard(thread)
+
+
 class _BaseExecutor:
     """Shared driver. Subclasses supply the worker pool + the (picklable) worker entry point.
 
@@ -92,7 +111,7 @@ class _BaseExecutor:
     pool, `plan.combine` must be picklable (module-level), exactly like `plan.process`.
     """
 
-    #: How long a peer driver waits for the root, counting only time the run is not paused.
+    #: How long a peer driver waits for the root with no worker busy, not counting paused time.
     _peer_root_timeout_s = 300.0
 
     def __init__(
@@ -107,7 +126,10 @@ class _BaseExecutor:
         steal: bool = True,
         control: RunControl | None = None,
         max_in_flight: int = 2,
+        retries: int = 0,
     ):
+        self._retries = retries
+        self._running: set[int] = set()
         self._plans = PlanQueue(self.run, max_in_flight)
         self.max_workers = max_workers if max_workers is not None else (os.cpu_count() or 1)
         # test hook: called per tree-reduce combine with #leaves so far
@@ -270,14 +292,19 @@ class _BaseExecutor:
         if not self._persistent:
             self._broadcast_tokens = OrderedDict()  # a fresh pool: nothing is primed yet
             # settle before the shutdown's exit flush
-            with self._pool() as pool, self._settled(pool):
+            with self._pool() as pool, self._settled(pool), self._lost_workers(pool):
                 yield pool
             return
         if self._kept_pool is None:
             self._broadcast_tokens = OrderedDict()  # newly (re)spawned workers hold no cache
             self._kept_pool = self._pool()
-        with self._settled(self._kept_pool):
-            yield self._kept_pool  # kept alive for the next run()
+        kept = self._kept_pool
+        with self._settled(kept), self._lost_workers(kept):
+            yield kept  # kept alive for the next run()
+
+    def _lost_workers(self, pool: Any) -> AbstractContextManager[None]:
+        """Turn a dead worker into a ``WorkerLostError``: threads cannot die alone."""
+        return contextlib.nullcontext()
 
     @contextlib.contextmanager
     def _settled(self, pool: _PoolExecutor) -> Iterator[_PoolExecutor]:
@@ -350,7 +377,8 @@ class _BaseExecutor:
 
         One plan runs at a time per executor; a concurrent caller waits for the running
         plan to finish. A plan whose services are not bound is refused before any task
-        (this runner resolves no services: bind them, or use ``SubmitRunner``).
+        (this runner resolves no services: bind them, or use ``SubmitRunner``). A
+        :class:`~graphed.WorkerLostError` re-runs the whole plan up to ``retries`` times.
         """
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
@@ -361,22 +389,41 @@ class _BaseExecutor:
             self._run_lean = lean_events(self.monitor)
             control = self.control
             try:
-                if control is not None and control.state is RunState.CANCELLED:
-                    result = ExecResult(plan.empty(), 0, 0, StopReason.CANCELLED)
-                elif plan.next_tasks is not None:
-                    result = self._run_adaptive(plan, control)
-                elif self._comms is not None:
-                    result = self._run_peer(plan, control)
-                elif self._pooled_combines:
-                    result = self._run_fixed_pooled(plan, control)
-                elif control is not None:
-                    result = self._run_fixed_windowed(plan, control)
-                else:
-                    result = self._run_fixed(plan)
+                watched = replace(plan, process=self._watched(plan.process))
+                result = self._retried(watched, control)
             finally:
                 if control is not None and control.state is RunState.CANCELLED:
                     control.reset()  # a cancel ends this run only, whether or not a check saw it
             return finalize_result(plan, result)
+
+    def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
+        """Return ``fn`` reporting to :meth:`_busy` while it runs."""
+        return _Tracked(fn, self._running)
+
+    def _busy(self) -> bool:
+        return bool(self._running)
+
+    def _retried(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
+        # ponytail: whole-plan rerun, so a late loss repeats finished chunks; per-chunk retry needs
+        # the peer tree to re-own a lost worker's leaves and partials
+        # a pull stream has moved on and cannot replay
+        for _ in range(0 if plan.next_tasks is not None else self._retries):
+            with contextlib.suppress(WorkerLostError):
+                return self._run_once(plan, control)
+        return self._run_once(plan, control)
+
+    def _run_once(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
+        if control is not None and control.state is RunState.CANCELLED:
+            return ExecResult(plan.empty(), 0, 0, StopReason.CANCELLED)
+        if plan.next_tasks is not None:
+            return self._run_adaptive(plan, control)
+        if self._comms is not None:
+            return self._run_peer(plan, control)
+        if self._pooled_combines:
+            return self._run_fixed_pooled(plan, control)
+        if control is not None:
+            return self._run_fixed_windowed(plan, control)
+        return self._run_fixed(plan)
 
     def _run_peer(self, plan: Plan[R], control: RunControl | None = None) -> ExecResult[R]:
         """M38 peer reduction.
@@ -399,6 +446,7 @@ class _BaseExecutor:
         worker_addrs = tuple(f"w{i}" for i in range(w))
         items = slice_items([t.partition for t in tasks], bounds, worker_addrs)
         self._emit_submitted(tasks)  # worker-side STARTED/FINISHED/ERRORED stream in
+        plan = replace(plan, combine=self._watched(plan.combine, "a combine"))
         self._run_keys = None
         if self._run_monitor is not None and any(t.key != i for i, t in enumerate(tasks)):
             self._run_keys = [t.key for t in tasks]  # workers emit keys[leaf]
@@ -451,7 +499,8 @@ class _BaseExecutor:
 
         Forwards monitor events, hands ``via`` messages to ``on_via`` and relays run control;
         paused time does not count against ``_peer_root_timeout_s``. Returns what is in hand once
-        ``failed()`` reports a worker failure, and raises ``TimeoutError`` past the deadline.
+        ``failed()`` reports a worker failure, and raises ``TimeoutError`` once the deadline
+        passes with no worker busy: none is coming to deliver the root.
         """
         deadline = time.monotonic() + self._peer_root_timeout_s
         out: tuple[R, int] | None = None
@@ -468,7 +517,8 @@ class _BaseExecutor:
                 out = ctl.take(got[1])
             if failed():
                 break
-            if ctl is not None and ctl.relay():
+            # every poll: work seen only when the deadline lapses would miss the gaps between
+            if (ctl is not None and ctl.relay()) or got is not None or self._busy():
                 deadline = time.monotonic() + self._peer_root_timeout_s
             if time.monotonic() >= deadline:
                 raise TimeoutError(
