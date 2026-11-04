@@ -59,22 +59,26 @@ def test_both_spellings_are_refused(runner: Any) -> None:
         runner(workers=2, max_workers=3)
 
 
-BACKENDS: dict[str, tuple[Callable[..., Any], str]] = {
-    "threads": (ThreadBackend, "max_workers"),
-    "condor": (
+BACKENDS = [
+    pytest.param(ThreadBackend, "max_workers", lambda b: b.n_workers(), id="threads"),
+    pytest.param(
         lambda **kw: condor.HTCondorBackend(LocalPilots(), host="127.0.0.1", **kw),
         "n_pilots",
+        lambda b: b._n_pilots,  # n_workers() waits for live pilots
+        id="condor",
     ),
-}
+]
 
 
-@pytest.mark.parametrize(("make", "old"), BACKENDS.values(), ids=list(BACKENDS))
-def test_a_backends_old_spelling_warns_where_it_is_written(make: Any, old: str) -> None:
+@pytest.mark.parametrize(("make", "old", "count"), BACKENDS)
+def test_a_backends_old_spelling_warns_where_it_is_written(
+    make: Any, old: str, count: Any
+) -> None:
     with pytest.warns(DeprecationWarning, match=f"{old}= is deprecated") as caught:
-        backend = make(**{old: 3})
+        backend = make(**{old: 1})  # 1, not the default 2
     try:
         assert caught[0].filename == __file__
-        assert backend.n_workers() == 3 if old == "max_workers" else backend._n_pilots == 3
+        assert count(backend) == 1
     finally:
         backend.close()
     before = set(threading.enumerate())

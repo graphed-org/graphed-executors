@@ -849,6 +849,7 @@ def htcondor_runner(
     host the site does not offer is refused before any pilot is submitted. ``task_timeout_s``
     is :class:`HTCondorBackend`'s.
     """
+    n = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
     pilots = CondorPilots(
         site,
         image=image,
@@ -861,7 +862,7 @@ def htcondor_runner(
     )
     backend = HTCondorBackend(
         pilots,
-        renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS),
+        n,
         host=host,
         port_range=port_range,
         service_hosts=service_hosts,
