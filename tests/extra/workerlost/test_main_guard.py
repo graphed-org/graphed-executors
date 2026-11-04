@@ -10,7 +10,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
+from multiprocessing.context import SpawnProcess
 from multiprocessing.managers import SyncManager
 from pathlib import Path
 from types import SimpleNamespace
@@ -115,6 +117,26 @@ PLAN = Plan(
 def test_a_manager_that_fails_otherwise_keeps_its_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def start(self: Any) -> None:
         self._process = SimpleNamespace(exitcode=1, pid=0, join=lambda: None)
+        raise EOFError("manager died")
+
+    monkeypatch.setattr(SyncManager, "start", start)
+    with pytest.raises(EOFError, match="manager died"):
+        ProcessPoolExecutor(2, comms=None, monitor=MonitorBase()).run(PLAN)
+
+
+def test_a_manager_that_cannot_spawn_keeps_its_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def start(self: Any) -> None:
+        raise OSError("spawn failed")
+
+    monkeypatch.setattr(SpawnProcess, "start", start)
+    with pytest.raises(OSError, match="spawn failed"):
+        ProcessPoolExecutor(2, comms=None, monitor=MonitorBase()).run(PLAN)
+
+
+def test_a_manager_error_after_its_death_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    def start(self: Any) -> None:
+        self._process = SimpleNamespace(exitcode=1, pid=0, join=lambda: None)
+        time.sleep(0.2)  # the driver sees the death before start() raises
         raise EOFError("manager died")
 
     monkeypatch.setattr(SyncManager, "start", start)

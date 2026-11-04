@@ -748,11 +748,13 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         while not started.wait(0.05):
             proc = getattr(mgr, "_process", None)
             if proc is not None and proc.exitcode is not None:
+                started.wait(0.5)  # where start() does return, its own error follows the death
                 break
         if started.is_set() and not failed:
             return mgr
         proc = getattr(mgr, "_process", None)
-        if proc is not None:
+        # only a dead server (no error yet) or a closed pipe means a process that can be joined
+        if proc is not None and (not failed or isinstance(failed[0], EOFError)):
             proc.join()
             self._lost_in([proc])  # raises for an unguarded script
             if not failed:
