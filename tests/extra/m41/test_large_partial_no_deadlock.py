@@ -41,7 +41,7 @@ CONVOY = (3, (300, 300, 10, 1000, 1000, 200, 500, 500))
 
 def _child(n_workers: int, n_floats: int, weights: tuple[int, ...], out_path: str) -> None:
     """Spawn-child entry point: run the scenario and pickle (result, witness) for the parent."""
-    executor = ProcessPoolExecutor(max_workers=n_workers, steal=True, monitor=None)
+    executor = ProcessPoolExecutor(workers=n_workers, steal=True, monitor=None)
     value = executor.run(plan(n_floats, weights)).value
     Path(out_path).write_bytes(pickle.dumps((value, executor._last_peer_witness)))
 

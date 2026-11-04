@@ -514,14 +514,14 @@ def submit_driverless(
     recomputes only the tasks the store does not hold. ``task_timeout_s`` is
     :class:`HTCondorBackend`'s. Everything is refused before the bindings are touched.
     """
-    n_pilots = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
+    workers = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
     store, options = _resolved_store(plan, store, storage_options)
     profile, endpoints = _checked_pilots(site, pilots, services)
     _require_plan_importable(plan, ("process", "combine", "empty", "next_tasks", "stop"))
     launcher = CondorPilots(
         profile,
         image=image,
-        request_cpus=n_pilots if pilots == "local" else 1,
+        request_cpus=workers if pilots == "local" else 1,
         request_memory_mb=request_memory_mb,
         log_dir=log_dir,
         user_modules=user_modules,
@@ -533,7 +533,7 @@ def submit_driverless(
     desc = _driver_description(launcher, plan, run_dir, nonce, dag=bool(nodes))
     run = {
         "pilots": pilots,
-        "n_pilots": n_pilots,
+        "n_pilots": workers,
         "site": site,
         "image": image,
         "request_memory_mb": request_memory_mb,

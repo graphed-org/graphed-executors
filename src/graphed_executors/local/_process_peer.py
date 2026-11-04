@@ -29,6 +29,7 @@ from typing import Any, Generic, TypeVar, cast
 from graphed import WorkerLostError
 from graphed.core import ExecResult, Partition, Plan, RunControl, chunk_label
 from graphed.core.execution import complete_events
+from graphed.core.worker_warnings import process_id
 
 from ._driver import _BaseExecutor
 from ._peer import (
@@ -142,6 +143,7 @@ class _ProcessPeerBase(_BaseExecutor):
     def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
+            shutil.rmtree(self._in_flight, ignore_errors=True)  # os._exit skips the finalizer
             os._exit(_UNGUARDED_EXIT)
         return super().run(plan, skip_failed=skip_failed)
 
@@ -158,7 +160,10 @@ class _ProcessPeerBase(_BaseExecutor):
         return super()._run_once(plan, control)
 
     def _lost_in(self, workers: Sequence[BaseProcess]) -> WorkerLostError | None:
-        """Return the error for the first dead one of ``workers``, ``None`` if all are alive."""
+        """Return the error for the first dead one of ``workers``, ``None`` if all are alive.
+
+        Raise :class:`RuntimeError` instead when one exited for an unguarded script.
+        """
         exited = [p for p in workers if p.exitcode is not None]
         if not exited:
             return None
@@ -273,10 +278,13 @@ class _ProcessPeerBase(_BaseExecutor):
                 )
                 for a in worker_addrs
             ]
-            pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args)
+            pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args, driver=process_id())
         else:
             pool = _StdProcessPool(
-                max_workers=w, mp_context=ctx, initializer=peer_pool_init, initargs=(registry,)
+                max_workers=w,
+                mp_context=ctx,
+                initializer=peer_pool_init,
+                initargs=(registry, process_id()),
             )
         if self._persistent:
             self._peer_pool, self._peer_registry, self._peer_driver = pool, registry, driver_t
@@ -380,7 +388,12 @@ class _ProcessPeerBase(_BaseExecutor):
             pool = cast("_StdProcessPool", self._peer_pool)
         else:
             self._close_peer()
-            pool = _StdProcessPool(max_workers=w, mp_context=ctx, initializer=exit_with_driver)
+            pool = _StdProcessPool(
+                max_workers=w,
+                mp_context=ctx,
+                initializer=exit_with_driver,
+                initargs=(process_id(),),
+            )
             if self._persistent:
                 self._peer_pool, self._peer_nworkers = pool, w
         assert pool is not None

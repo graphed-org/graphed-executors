@@ -18,6 +18,7 @@ from graphed_executors.common import renamed
 from graphed_executors.dask_backend.backend import dask_runner
 from graphed_executors.htcondor_backend import backend as condor
 from graphed_executors.htcondor_backend.driverless import submit_driverless
+from graphed_executors.local.executors import ProcessExecutor
 from graphed_executors.parsl_backend.backend import parsl_runner
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 
@@ -39,12 +40,14 @@ def test_one_set_of_keywords_runs_every_local_runner(runner: Any) -> None:
         assert ex.max_workers == 2
 
 
-@pytest.mark.parametrize("runner", LOCAL)
+@pytest.mark.parametrize("runner", [*LOCAL, ProcessExecutor])
 def test_the_old_spelling_warns_where_it_is_written(runner: Any) -> None:
-    with pytest.warns(DeprecationWarning, match="max_workers= is deprecated") as caught:
+    with pytest.warns(DeprecationWarning) as caught:
         ex = runner(max_workers=3)
     assert ex.max_workers == 3
-    assert caught[0].filename == __file__
+    assert [w.filename for w in caught if "max_workers= is deprecated" in str(w.message)] == [
+        __file__
+    ]
     ex.close()
 
 
@@ -113,7 +116,7 @@ def _defaults(fn: Any) -> dict[str, Any]:
 
 def test_the_condor_entry_points_agree_on_their_defaults() -> None:
     runner, driverless = _defaults(condor.htcondor_runner), _defaults(submit_driverless)
-    for name in ("workers", "n_pilots", "request_memory_mb", "retries"):
+    for name in ("request_memory_mb", "retries"):
         assert runner[name] == driverless[name] is not inspect.Parameter.empty
     assert "control" in runner
 
@@ -133,3 +136,12 @@ def test_htcondor_runner_wires_workers_and_control(monkeypatch: pytest.MonkeyPat
 def test_submit_driverless_refuses_both_spellings() -> None:
     with pytest.raises(TypeError, match="not both"):
         submit_driverless(PLAN, workers=2, n_pilots=3)
+
+
+def test_submit_driverless_warns_n_pilots_where_it_is_written() -> None:
+    with (
+        pytest.warns(DeprecationWarning, match="n_pilots= is deprecated") as caught,
+        pytest.raises(ValueError, match="pilots='nope'"),
+    ):
+        submit_driverless(PLAN, n_pilots=3, pilots="nope")
+    assert caught[0].filename == __file__

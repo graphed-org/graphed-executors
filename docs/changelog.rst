@@ -10,39 +10,6 @@ Unreleased
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
-* A dead worker raises ``graphed.WorkerLostError`` on every runner, with the chunk's label in
-  ``partition`` and the worker in ``worker``. It replaces a raw ``BrokenProcessPool`` on the process
-  pools, a raw ``WorkerLost`` on parsl, and a ``StageError`` with a data file in its source-line
-  slot on dask and HTCondor. Catch it with ``except graphed.WorkerLostError``; ``cause_type`` is
-  still ``"KilledWorker"``. ``htcondor_backend.WorkerLostError`` is now a subclass of it.
-* ``ProcessPoolExecutor`` and ``PinnedPoolExecutor`` take ``retries=`` (default 0): a
-  ``WorkerLostError`` re-runs the whole plan, except one that pulls from ``next_tasks``.
-  ``ThreadExecutor`` accepts it too, so runners swap, but has no worker to lose.
-* A process pool notices a dead worker within a poll. A kill could wait out the 300 s
-  peer-root timeout, with every other worker idle.
-* A peer run longer than 300 s finishes. It raised ``TimeoutError`` after 300 s however healthy it
-  was; that timeout now only counts time with no worker running a chunk or a combine.
-* A persistent process pool that lost a worker respawns for the next run; it raised
-  ``BrokenProcessPool`` on every later run.
-* ``run()`` at the top level of a script with no ``if __name__ == "__main__":`` guard raises a
-  ``RuntimeError`` naming the fix; it was a ``BrokenProcessPool`` after hundreds of lines of worker
-  tracebacks.
-* One vocabulary across runners: ``workers=`` on ``ThreadExecutor``, ``ProcessPoolExecutor``,
-  ``PinnedPoolExecutor``, ``htcondor_runner`` and ``submit_driverless``, where ``max_workers=`` and
-  ``n_pilots=`` are deprecated and passing both spellings raises ``TypeError``; and ``control=`` on
-  ``dask_runner``, ``parsl_runner`` and ``htcondor_runner``.
-* ``htcondor_runner`` and ``submit_driverless`` agree on their defaults: 2 workers and
-  ``request_memory_mb=2048``.
-* ``run(plan, skip_failed=N)`` on every runner goes on past ``N`` failed chunks; see graphed's
-  changelog for ``ExecResult.failed``. A lost worker's chunk counts, after ``retries``, by rerunning
-  the plan with that chunk left out. ``StopCondition(max_errors=N)`` is the same budget.
-* ``ParslRunner.local(workers=4)`` starts HTEX on this machine and stops it when the ``with`` block
-  ends. ``ParslRunner(executor)`` is ``parsl_runner(executor)``, which now returns one, and leaves
-  a caller's executor running.
-* ``stop_htex`` stops the block's worker processes within seconds, where they used to outlive it
-  by the heartbeat threshold (120 s by default).
-* ``start_htex`` works from an unactivated venv, and otherwise refuses naming the cause instead of
-  ``FileNotFoundError: 'interchange.py'``.
 
 0.0.7
 -----

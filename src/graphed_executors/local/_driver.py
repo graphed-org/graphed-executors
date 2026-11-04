@@ -135,8 +135,7 @@ class _BaseExecutor:
         self._retries = retries
         self._running: set[int] = set()
         self._plans = PlanQueue(self.run, max_in_flight)
-        workers = renamed(workers, max_workers, "max_workers", None)
-        self.max_workers = workers if workers is not None else (os.cpu_count() or 1)
+        self.max_workers = renamed(workers, max_workers, "max_workers", os.cpu_count() or 1)
         # test hook: called per tree-reduce combine with #leaves so far
         self._on_combine = on_combine
         self._pooled_combines = pooled_combines

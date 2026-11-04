@@ -80,7 +80,7 @@ def test_a_persistent_pinned_pool_keeps_its_workers_across_task_counts() -> None
     spawned = worker_outbox_addresses(SPAWN_N, make_bounds(SPAWN_N, W), addrs)
     values: dict[int, str] = {}
     relays: dict[int, int] = {}
-    ex = PinnedPoolExecutor(max_workers=W, persistent=True, comms="ipc", steal=False)
+    ex = PinnedPoolExecutor(workers=W, persistent=True, comms="ipc", steal=False)
     with ex:
         values[SPAWN_N] = ex.run(_plan(SPAWN_N)).value
         relays[SPAWN_N] = ex._last_peer_relays
@@ -100,7 +100,7 @@ def test_a_persistent_pinned_pool_keeps_its_workers_across_task_counts() -> None
 
 
 def test_steals_and_relays_together_keep_the_grouping() -> None:
-    ex = PinnedPoolExecutor(max_workers=W, persistent=True, comms="ipc", steal=True)
+    ex = PinnedPoolExecutor(workers=W, persistent=True, comms="ipc", steal=True)
     with ex:
         ex.run(_plan(SPAWN_N))
         pool = ex._peer_pool
@@ -113,7 +113,7 @@ def test_steals_and_relays_together_keep_the_grouping() -> None:
 
 
 def test_a_run_failing_after_a_relay_raises_the_worker_error() -> None:
-    ex = PinnedPoolExecutor(max_workers=W, persistent=True, comms="ipc", steal=False)
+    ex = PinnedPoolExecutor(workers=W, persistent=True, comms="ipc", steal=False)
     with ex:
         ex.run(_plan(SPAWN_N))
         with pytest.raises(ValueError, match="leaf 11"):

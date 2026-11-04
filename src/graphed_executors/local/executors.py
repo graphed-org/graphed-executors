@@ -46,6 +46,7 @@ from graphed.core.execution import (
     emit_task,
     partition_label,
 )
+from graphed.core.worker_warnings import process_id
 from graphed.debug import StageError
 
 from .._window import wait_until
@@ -165,6 +166,7 @@ def _proc_init(
     *,
     monitor_factory: Callable[[], Monitor] | None = None,
     lean: bool = False,
+    driver: str | None = None,
 ) -> None:
     global _proc_resources, _proc_event_q, _proc_profiler, _proc_buffer
     global _proc_drain_stop, _proc_drain_thread, _proc_monitor, _proc_lean
@@ -172,7 +174,7 @@ def _proc_init(
         _proc_drain_stop.set()
     if _proc_drain_thread is not None:
         _proc_drain_thread.join(timeout=_PROC_EXIT_JOIN_S)
-    exit_with_driver()
+    exit_with_driver(driver)
     _proc_resources = LocalResources()
     _proc_event_q = event_q
     _proc_profiler = _proc_buffer = _proc_drain_stop = _proc_drain_thread = _proc_monitor = None
@@ -650,7 +652,9 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         return _StdProcessPool(
             max_workers=self.max_workers,
             mp_context=multiprocessing.get_context("spawn"),
-            initializer=functools.partial(_proc_init, monitor_factory=push, lean=lean),
+            initializer=functools.partial(
+                _proc_init, monitor_factory=push, lean=lean, driver=process_id()
+            ),
             initargs=(factory, event_q),
         )
 
@@ -716,7 +720,15 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         if self._run_monitor is None or self._run_push is not None:  # pushing workers bypass it
             return
         if self._mgr is None:  # one manager + queue for this executor's lifetime
-            self._mgr = multiprocessing.get_context("spawn").Manager()
+            mgr = SyncManager(ctx=multiprocessing.get_context("spawn"))
+            try:
+                mgr.start()
+            except EOFError:
+                proc = cast("Any", mgr)._process  # the server re-imports main like a worker
+                proc.join()
+                self._lost_in([proc])  # raises for an unguarded script
+                raise
+            self._mgr = mgr
             self._event_q = self._mgr.Queue(maxsize=10000)
         if self._collector is None or not self._collector.is_alive():  # idempotent across runs
             self._collector_stop = threading.Event()
@@ -857,7 +869,9 @@ class ProcessExecutor(ProcessPoolExecutor):
     visible at the call site rather than chosen silently.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, workers: int | None = None, *, max_workers: int | None = None, **kwargs: Any
+    ) -> None:
         """Warn that this alias is deprecated, then build a :class:`ProcessPoolExecutor`."""
         warnings.warn(
             "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same "
@@ -866,4 +880,5 @@ class ProcessExecutor(ProcessPoolExecutor):
             DeprecationWarning,
             stacklevel=2,
         )
-        super().__init__(*args, **kwargs)
+        # resolved here so the max_workers= warning names the caller's line, not this one
+        super().__init__(renamed(workers, max_workers, "max_workers", None), **kwargs)
