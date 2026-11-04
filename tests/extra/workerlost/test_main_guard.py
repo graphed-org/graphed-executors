@@ -174,3 +174,11 @@ def test_a_worker_reimporting_main_exits_without_running(
     with pytest.raises(SystemExit) as exited:
         ex.run(PLAN)
     assert exited.value.code == 83
+
+
+def test_an_executor_built_during_bootstrap_runs_after_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as boot:
+        boot.setattr(multiprocessing, "current_process", lambda: SimpleNamespace(_inheriting=True))
+        ex = ProcessPoolExecutor(2, comms=None)
+    picklable = Plan(process=operator.is_, combine=operator.or_, empty=bool, tasks=PLAN.tasks)
+    assert ex.run(picklable).value is False

@@ -86,6 +86,11 @@ _UNGUARDED = """run() was called while a pool worker re-imported your script.
   Put the run under:  if __name__ == "__main__":"""
 
 
+def _bootstrapping() -> bool:
+    """Whether this process is a spawned worker still importing its parent's main."""
+    return bool(getattr(multiprocessing.current_process(), "_inheriting", False))
+
+
 @dataclass(frozen=True)
 class _InFlight(Generic[R]):
     """``fn`` that names its work in a file while it runs.
@@ -136,18 +141,22 @@ class _ProcessPeerBase(_BaseExecutor):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        if getattr(multiprocessing.current_process(), "_inheriting", False):
-            # a worker re-importing main: its run() exits, and a kill before then would leak a dir
-            self._in_flight = ""
-            return
+        self._in_flight = ""
+        # a worker re-importing main exits in run(), and a kill before then would leak a dir
+        if not _bootstrapping():
+            self._make_in_flight()
+
+    def _make_in_flight(self) -> None:
         # per executor, not per run: a persistent pool's broadcast token hashes the path
         self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
 
     def run(self, plan: Plan[R]) -> ExecResult[R]:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
-        if getattr(multiprocessing.current_process(), "_inheriting", False):
+        if _bootstrapping():
             os._exit(_UNGUARDED_EXIT)
+        if not self._in_flight:  # built during a worker's bootstrap, run after it
+            self._make_in_flight()
         return super().run(plan)
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
