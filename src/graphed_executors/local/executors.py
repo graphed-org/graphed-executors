@@ -717,7 +717,15 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         if self._run_monitor is None or self._run_push is not None:  # pushing workers bypass it
             return
         if self._mgr is None:  # one manager + queue for this executor's lifetime
-            self._mgr = multiprocessing.get_context("spawn").Manager()
+            mgr = SyncManager(ctx=multiprocessing.get_context("spawn"))
+            try:
+                mgr.start()
+            except EOFError:
+                proc = cast("Any", mgr)._process  # the server re-imports main like a worker
+                proc.join()
+                self._lost_in([proc])  # raises for an unguarded script
+                raise
+            self._mgr = mgr
             self._event_q = self._mgr.Queue(maxsize=10000)
         if self._collector is None or not self._collector.is_alive():  # idempotent across runs
             self._collector_stop = threading.Event()
