@@ -18,6 +18,7 @@ from graphed_executors.common import renamed
 from graphed_executors.dask_backend.backend import dask_runner
 from graphed_executors.htcondor_backend import backend as condor
 from graphed_executors.htcondor_backend.driverless import submit_driverless
+from graphed_executors.htcondor_backend.launch import LocalPilots
 from graphed_executors.local.executors import ProcessExecutor
 from graphed_executors.parsl_backend.backend import parsl_runner
 from graphed_executors.submit import SubmitRunner, ThreadBackend
@@ -55,6 +56,28 @@ def test_the_old_spelling_warns_where_it_is_written(runner: Any) -> None:
 def test_both_spellings_are_refused(runner: Any) -> None:
     with pytest.raises(TypeError, match="not both"):
         runner(workers=2, max_workers=3)
+
+
+BACKENDS: dict[str, tuple[Callable[..., Any], str]] = {
+    "threads": (ThreadBackend, "max_workers"),
+    "condor": (
+        lambda **kw: condor.HTCondorBackend(LocalPilots(), host="127.0.0.1", **kw),
+        "n_pilots",
+    ),
+}
+
+
+@pytest.mark.parametrize(("make", "old"), BACKENDS.values(), ids=list(BACKENDS))
+def test_a_backends_old_spelling_warns_where_it_is_written(make: Any, old: str) -> None:
+    with pytest.warns(DeprecationWarning, match=f"{old}= is deprecated") as caught:
+        backend = make(**{old: 3})
+    try:
+        assert caught[0].filename == __file__
+        assert backend.n_workers() == 3 if old == "max_workers" else backend._n_pilots == 3
+    finally:
+        backend.close()
+    with pytest.raises(TypeError, match="not both"):
+        make(workers=2, **{old: 3})
 
 
 def test_renamed_keeps_a_zero_and_fills_only_an_absent_count() -> None:

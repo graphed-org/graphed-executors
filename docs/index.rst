@@ -173,7 +173,7 @@ same shape, and this one you *can* run as written:
    )
    plan = Plan(process=count, combine=add, empty=zero, tasks=tasks)
 
-   with SubmitRunner(ThreadBackend(max_workers=4)) as runner:
+   with SubmitRunner(ThreadBackend(workers=4)) as runner:
        print(runner.run(plan).value)
 
    # [700]
