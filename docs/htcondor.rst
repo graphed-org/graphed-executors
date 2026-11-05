@@ -42,7 +42,7 @@ and run the plan through two local pilots:
     plan = Plan(process=count, combine=add, empty=zero,
                 tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
-    backend = HTCondorBackend(LocalPilots(), n_pilots=2, host="127.0.0.1")
+    backend = HTCondorBackend(LocalPilots(), workers=2, host="127.0.0.1")
     with HTCondorRunner(backend) as runner:
         result = runner.run(plan)
     print(result.value, result.n_partitions, result.n_combines)

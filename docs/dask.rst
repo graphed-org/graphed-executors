@@ -125,7 +125,7 @@ library alone. Same plan, same tree, same value, nothing installed:
     plan = Plan(process=count, combine=add, empty=zero,
                 tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
-    with SubmitRunner(ThreadBackend(max_workers=4)) as runner:
+    with SubmitRunner(ThreadBackend(workers=4)) as runner:
         result = runner.run(plan)
 
     print(result.value, result.n_partitions, result.n_combines)
