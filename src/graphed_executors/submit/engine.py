@@ -258,7 +258,7 @@ class SubmitRunner:
                     # the fixed tree to rewire a failed leaf's dependents
                     plan = without_lost(plan, err)
         if result.n_partitions:  # asked earlier, a pilot backend would start its pilots
-            warn_few_tasks(plan, self._task_slots())
+            warn_few_tasks(plan, self._task_slots)
         return finalize_result(plan, result)
 
     def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:

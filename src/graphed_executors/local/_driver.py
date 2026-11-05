@@ -390,7 +390,7 @@ class _BaseExecutor:
         self._before_run(plan)
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
-        warn_few_tasks(plan, self.max_workers)
+        warn_few_tasks(plan, lambda: self.max_workers)
         plan = cast("Plan[R]", skipping(plan, skip_failed))
         with self._run_lock:
             # an earlier run's late events drain to its monitor before this run's bracket opens
