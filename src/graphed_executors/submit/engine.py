@@ -26,6 +26,7 @@ import pickle
 import queue
 import threading
 import time
+import traceback
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
@@ -157,6 +158,21 @@ class _RunTasks:
             self._backend.cancel(pending)
 
 
+def _drop_frames(err: BaseException) -> None:
+    """Drop the tracebacks of ``err``'s chain, which the rerun plan keeps and ships to workers.
+
+    Their frames' locals hold the failed attempt's futures, which a backend recomputes when their
+    result is lost; and tblib rebuilds a shipped traceback with frames pinning the worker's stack.
+    """
+    seen: set[int] = set()
+    exc: BaseException | None = err
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        traceback.clear_frames(exc.__traceback__)
+        exc.__traceback__ = None
+        exc = exc.__cause__ or exc.__context__
+
+
 class SubmitRunner:
     """A :class:`graphed.core.Executor` over any :class:`SubmitBackend`.
 
@@ -247,6 +263,7 @@ class SubmitRunner:
                     # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs
                     # the fixed tree to rewire a failed leaf's dependents
                     plan = without_lost(plan, err)
+                    _drop_frames(err)
         return finalize_result(plan, result)
 
     def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:

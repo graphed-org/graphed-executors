@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
+import gc
 import json
 import os
 import sys
 import warnings
+import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -102,8 +105,8 @@ LEGS: dict[str, Run] = {
 }
 
 
-@pytest.fixture(scope="module")
-def dask_client() -> Iterator[Any]:
+@contextlib.contextmanager
+def _dask_cluster() -> Iterator[Any]:
     distributed = pytest.importorskip("distributed")
     dask = pytest.importorskip("dask")
     with (
@@ -118,6 +121,19 @@ def dask_client() -> Iterator[Any]:
         ) as cluster,
         distributed.Client(cluster) as client,
     ):
+        yield client
+
+
+@pytest.fixture(scope="module")
+def dask_client() -> Iterator[Any]:
+    with _dask_cluster() as client:
+        yield client
+
+
+@pytest.fixture
+def fresh_dask_client() -> Iterator[Any]:
+    """Yield a cluster no earlier worker death has touched."""
+    with _dask_cluster() as client:
         yield client
 
 
@@ -261,12 +277,12 @@ def test_lost_workers_count_against_the_budget(run_with_workers: Run) -> None:
     assert len(info.value.failed) == 2
 
 
-def test_dask_lists_every_chunk_it_leaves_out(dask_client: Any) -> None:
+def test_dask_lists_every_chunk_it_leaves_out(fresh_dask_client: Any) -> None:
     plan = plan_of(poison=(5,))
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            res = _dask_leg(dask_client)(plan, skip_failed=N)
+            res = _dask_leg(fresh_dask_client)(plan, skip_failed=N)
     except WorkerLostError as err:
         chunks = {chunk_label(t.partition) for t in plan.tasks}
         # a leaf key here is a chunk the engine failed to label, not a non-chunk blame
@@ -277,6 +293,62 @@ def test_dask_lists_every_chunk_it_leaves_out(dask_client: Any) -> None:
     left_out = [f.record["entry_start"] for f in res.failed]
     assert 5 in left_out
     assert res.value == without(*left_out)
+
+
+class _LostError(Exception):
+    pass
+
+
+def _raise_lost(key: str) -> None:
+    raise _LostError(key)
+
+
+class _LosesAWorkerOnce(ThreadBackend):
+    """Lose ``chunk``'s first leaf's worker, blamed on ``blame`` or that leaf.
+
+    Each error is kept, as a dask client keeps task state.
+    """
+
+    def __init__(self, chunk: int, blame: str | None = None) -> None:
+        super().__init__(2)
+        self.chunk = chunk
+        self.blame = blame
+        self.lost = False
+        self.futures: list[weakref.ref[Any]] = []
+        self.errors: list[BaseException | None] = []
+
+    def submit(self, fn: Callable[..., object], /, *args: object, key: str, **kw: Any) -> Any:
+        if not self.lost and any(
+            isinstance(a, Task) and a.partition.entry_start == self.chunk for a in args
+        ):
+            self.lost = True
+            fn, args = functools.partial(_raise_lost, key), ()
+        fut = super().submit(fn, *args, key=key, **kw)
+        self.futures.append(weakref.ref(fut))
+        fut.add_done_callback(lambda f: self.errors.append(f.exception()))
+        return fut
+
+    def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
+        return (self.blame or str(exc.args[0]), "w") if isinstance(exc, _LostError) else None
+
+
+def test_a_rerun_lets_go_of_the_lost_attempts_futures() -> None:
+    backend = _LosesAWorkerOnce(5)
+    with SubmitRunner(backend, retries=0) as runner:
+        res = runner.run(plan_of(), skip_failed=N)
+    gc.collect()
+    assert [f.record["entry_start"] for f in res.failed] == [5]
+    assert [w for w in backend.futures if w() is not None] == []
+
+
+@pytest.mark.parametrize("key", ["graphed-fp-nonce-combine-3", "graphed-bcast-fp-nonce"])
+def test_a_loss_blamed_on_no_chunk_ends_the_run(key: str) -> None:
+    with (
+        SubmitRunner(_LosesAWorkerOnce(0, blame=key), retries=0) as runner,
+        pytest.raises(WorkerLostError) as caught,
+    ):
+        runner.run(plan_of(), skip_failed=N)
+    assert caught.value.partition == key
 
 
 def _stream(seen: list[int]) -> Callable[[ExecContext], list[Task] | None]:

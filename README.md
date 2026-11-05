@@ -208,7 +208,9 @@ Two things bite people on HTEX:
 - `run(plan, skip_failed=10)` gives up only after 10 failed chunks. `res.value` merges the chunks
   that succeeded, `res.failed` lists the others, and the run warns with the count. One failure
   past the budget raises `TooManyFailedChunksError`. A plan with `stop=StopCondition(max_errors=10)`
-  gets the same budget, through `submit(plan)` too.
+  gets the same budget, through `submit(plan)` too. A lost worker ends the run with
+  `WorkerLostError` despite the budget when the plan has `next_tasks`, or when dask blames a task
+  that is no chunk (a combine, a broadcast, a service probe).
 - `submit(plan)`, on every runner here, returns a `concurrent.futures.Future` straight away, so
   you can record and compile the next plan while this one runs; `.result()` is what `run(plan)`
   would have returned. Plans still run one at a time, in the order you submitted them.
