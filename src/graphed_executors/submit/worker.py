@@ -16,7 +16,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast
 
 from graphed.core import Task
@@ -28,7 +28,9 @@ from graphed.core.execution import (
     WorkerResources,
     emit_task,
     partition_label,
+    skipped_error,
 )
+from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.debug import StageError
 from graphed.shuffle import split
 
@@ -55,6 +57,7 @@ class RunContext:
     # pickled worker_monitor_factory: workers push, not the topic
     monitor_factory: bytes | None = None
     lean: bool = False  # lean events: no STARTED, and an unlabelled terminal event
+    driver: str = field(default_factory=process_id)
 
     @property
     def events_per_leaf(self) -> int:
@@ -219,6 +222,7 @@ def _leaf_task(ctx: RunContext, payload: bytes, token: str, task: Task) -> objec
     Worker-side timing. ``payload`` is the resolved broadcast bytes; the token cache
     deserializes it once per worker.
     """
+    enter_worker(ctx.driver)
     process = cast(
         "Callable[[Partition, WorkerResources], object]", _shared_payload(token, payload)
     )
@@ -230,7 +234,8 @@ def _leaf_task(ctx: RunContext, payload: bytes, token: str, task: Task) -> objec
     except BaseException as exc:
         _emit_phase(ctx, env, TaskPhase.ERRORED, task, error=_render_error(exc))
         raise
-    _emit_phase(ctx, env, TaskPhase.FINISHED, task)
+    why = skipped_error(result)
+    _emit_phase(ctx, env, TaskPhase.ERRORED if why else TaskPhase.FINISHED, task, error=why)
     return result
 
 

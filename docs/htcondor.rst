@@ -42,7 +42,7 @@ and run the plan through two local pilots:
     plan = Plan(process=count, combine=add, empty=zero,
                 tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
-    backend = HTCondorBackend(LocalPilots(), n_pilots=2, host="127.0.0.1")
+    backend = HTCondorBackend(LocalPilots(), workers=2, host="127.0.0.1")
     with HTCondorRunner(backend) as runner:
         result = runner.run(plan)
     print(result.value, result.n_partitions, result.n_combines)
@@ -82,7 +82,7 @@ Read these four before your first pool run
 .. warning::
 
    **A pilot runs one task at a time**, whatever ``request_cpus`` asks for. Scale with
-   ``n_pilots``, not with cores per pilot; raise ``request_cpus`` only when a single task is
+   ``workers``, not with cores per pilot; raise ``request_cpus`` only when a single task is
    multithreaded itself.
 
 .. warning::
@@ -270,11 +270,11 @@ Later, from any session on the same pool:
 
 Where the pilots run depends on ``pilots=``:
 
-* ``pilots="local"`` (the default) asks for one slot with ``n_pilots`` CPUs and runs the pilots
+* ``pilots="local"`` (the default) asks for one slot with ``workers`` CPUs and runs the pilots
   inside it as subprocesses of the driver. This is the only choice on the **LPC**, whose jobs
   cannot submit jobs (``SiteProfile.jobs_can_submit``); size ``request_memory_mb`` for all of
   them together.
-* ``pilots="condor"`` has the driver job submit ``n_pilots`` pilot jobs of its own, to the schedd
+* ``pilots="condor"`` has the driver job submit ``workers`` pilot jobs of its own, to the schedd
   your session chose, and host its task server on one of the site's ``worker_ports`` (10000–10100
   on every built-in site). The pilots need a submit directory the schedd reads, so ``log_dir`` must
   lie under the site's ``job_root`` (``SiteProfile.job_root``: ``/afs`` on **lxplus**, any path on
@@ -666,8 +666,9 @@ The arguments you will change
 
    * - Argument
      - What it does
-   * - ``n_pilots``
-     - How many pilot jobs to submit. One pilot runs one task at a time.
+   * - ``workers``
+     - How many pilot jobs to submit, 2 by default (``n_pilots=`` is its deprecated name). One
+       pilot runs one task at a time.
    * - ``site``
      - ``"lpc"``, ``"lxplus"``, ``"generic"`` (the default), or a ``SiteProfile``.
    * - ``image``

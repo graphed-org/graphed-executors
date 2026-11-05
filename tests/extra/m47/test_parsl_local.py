@@ -14,6 +14,7 @@ import pytest
 from graphed.core import Partition, Plan, RunControl, Task
 
 from graphed_executors.parsl_backend import ParslRunner, parsl_runner, start_htex, stop_htex
+from graphed_executors.parsl_backend import backend as backend_module
 from graphed_executors.parsl_backend import launch as launch_module
 
 pytest.importorskip("parsl")
@@ -122,6 +123,7 @@ def test_no_interchange_anywhere_is_refused_by_name(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sys, "executable", "/also/nowhere/python")
     with pytest.raises(RuntimeError, match=r"interchange\.py is not on PATH; activate the venv"):
         start_htex(workers=1, run_dir="unused")
+    assert os.environ["PATH"] == "/nowhere"
 
 
 def test_an_interchange_on_path_leaves_path_alone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -129,3 +131,16 @@ def test_an_interchange_on_path_leaves_path_alone(monkeypatch: pytest.MonkeyPatc
     before = os.environ["PATH"]
     launch_module._scripts_on_path()
     assert os.environ["PATH"] == before
+
+
+def test_a_refused_runner_stops_its_pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    started: list[object] = []
+
+    def recording_start(**kw: object) -> object:
+        started.append(start_htex(**kw))  # type: ignore[arg-type]
+        return started[-1]
+
+    monkeypatch.setattr(backend_module, "start_htex", recording_start)
+    with pytest.raises(ValueError, match="max_in_flight"):
+        ParslRunner.local(workers=1, run_dir=str(tmp_path), max_in_flight=0)
+    _gone_within_bound(_block_pids(started[0]))

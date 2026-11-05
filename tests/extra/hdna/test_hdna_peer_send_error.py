@@ -16,7 +16,7 @@ from _hdna_payloads import EVENTS, Events, keep_first, nothing, unpicklable_redu
 from graphed import Session
 from graphed.aggregate import aggregate_plan
 from graphed.awkward import AwkwardBackend, AwkwardForm, gak
-from graphed.core.execution import LocalResources, Partition
+from graphed.core.execution import LocalResources, Partition, Plan
 
 from graphed_executors.local import ProcessPoolExecutor, _driver
 from graphed_executors.local._peer import make_bounds, process_and_reduce
@@ -37,9 +37,10 @@ def test_an_unpicklable_partial_surfaces_its_pickling_error_promptly(
         empty=nothing,
         steps_per_file=4,
     )
+    assert isinstance(plan, Plan)
     start = time.monotonic()
     with pytest.raises(pickle.PicklingError, match="this partial does not pickle"):
-        ProcessPoolExecutor(max_workers=2, comms=comms).run(plan)
+        ProcessPoolExecutor(workers=2, comms=comms).run(plan)
     assert time.monotonic() - start < 30.0
 
 

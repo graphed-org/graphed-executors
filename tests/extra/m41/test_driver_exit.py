@@ -37,10 +37,10 @@ from _release_payloads import pid_plan
 from graphed_executors.local import PinnedPoolExecutor, ProcessPoolExecutor
 route = sys.argv[2]
 if route == "pinned":
-    ex = PinnedPoolExecutor(max_workers=2, steal=False, monitor=None)
+    ex = PinnedPoolExecutor(workers=2, steal=False, monitor=None)
 else:
     comms = None if route == "hub" else route
-    ex = ProcessPoolExecutor(max_workers=2, steal=False, monitor=None, comms=comms)
+    ex = ProcessPoolExecutor(workers=2, steal=False, monitor=None, comms=comms)
 ex.run(pid_plan(sys.argv[1], (200, 3000)))
 """
 

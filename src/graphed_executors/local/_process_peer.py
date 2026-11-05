@@ -16,6 +16,7 @@ import signal
 import tempfile
 import threading
 import time
+import uuid
 import weakref
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future, wait
@@ -29,6 +30,7 @@ from typing import Any, Generic, TypeVar, cast
 from graphed import WorkerLostError
 from graphed.core import ExecResult, Partition, Plan, RunControl, chunk_label
 from graphed.core.execution import complete_events
+from graphed.core.worker_warnings import process_id
 
 from ._driver import _BaseExecutor
 from ._peer import (
@@ -135,30 +137,38 @@ class _ProcessPeerBase(_BaseExecutor):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # per executor, not per run: a persistent pool's broadcast token hashes the path
-        self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
+        # per executor, not per run: a persistent pool's broadcast token hashes the path. Only
+        # _run_once creates it, so a worker re-importing main and killed before run() leaks none.
+        self._in_flight = os.path.join(
+            tempfile.gettempdir(), f"graphed-in-flight-{uuid.uuid4().hex}"
+        )
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
 
-    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]:
+    def _before_run(self, plan: Plan[Any]) -> None:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             os._exit(_UNGUARDED_EXIT)
-        return super().run(plan, skip_failed=skip_failed)
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         return _InFlight(fn, self._in_flight, label)
 
     def _busy(self) -> bool:
-        return bool(os.listdir(self._in_flight))
+        try:
+            return bool(os.listdir(self._in_flight))
+        except FileNotFoundError:  # no run has made it yet
+            return False
 
     def _run_once(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
         # work a shutdown cut off left its marker, which would read as running from now on
         shutil.rmtree(self._in_flight, ignore_errors=True)
-        os.makedirs(self._in_flight, exist_ok=True)
+        os.makedirs(self._in_flight, mode=0o700, exist_ok=True)
         return super()._run_once(plan, control)
 
     def _lost_in(self, workers: Sequence[BaseProcess]) -> WorkerLostError | None:
-        """Return the error for the first dead one of ``workers``, ``None`` if all are alive."""
+        """Return the error for the first dead one of ``workers``, ``None`` if all are alive.
+
+        Raise :class:`RuntimeError` instead when one exited for an unguarded script.
+        """
         exited = [p for p in workers if p.exitcode is not None]
         if not exited:
             return None
@@ -273,10 +283,13 @@ class _ProcessPeerBase(_BaseExecutor):
                 )
                 for a in worker_addrs
             ]
-            pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args)
+            pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args, driver=process_id())
         else:
             pool = _StdProcessPool(
-                max_workers=w, mp_context=ctx, initializer=peer_pool_init, initargs=(registry,)
+                max_workers=w,
+                mp_context=ctx,
+                initializer=peer_pool_init,
+                initargs=(registry, process_id()),
             )
         if self._persistent:
             self._peer_pool, self._peer_registry, self._peer_driver = pool, registry, driver_t
@@ -380,7 +393,12 @@ class _ProcessPeerBase(_BaseExecutor):
             pool = cast("_StdProcessPool", self._peer_pool)
         else:
             self._close_peer()
-            pool = _StdProcessPool(max_workers=w, mp_context=ctx, initializer=exit_with_driver)
+            pool = _StdProcessPool(
+                max_workers=w,
+                mp_context=ctx,
+                initializer=exit_with_driver,
+                initargs=(process_id(),),
+            )
             if self._persistent:
                 self._peer_pool, self._peer_nworkers = pool, w
         assert pool is not None

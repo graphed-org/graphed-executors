@@ -51,7 +51,7 @@ def two_server_plan(tag: str, names: tuple[str, str], size: int) -> Any:
 def pool_runner(tmp_path: Path) -> Any:
     return harness.run_bounded(
         lambda: htcondor_runner(
-            n_pilots=1,
+            workers=1,
             site="generic",
             service_hosts=("cluster",),
             log_dir=tmp_path / "logs",

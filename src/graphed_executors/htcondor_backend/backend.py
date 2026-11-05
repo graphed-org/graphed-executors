@@ -37,10 +37,10 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Future
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, Protocol, TypeVar, overload
+from typing import Any, Protocol
 
 from graphed.core import RunControl
-from graphed.core.execution import ExecResult, Plan
+from graphed.core.execution import Plan
 from graphed.core.plan import DurablePlanV2
 from graphed.services import ServiceSpec
 
@@ -62,8 +62,6 @@ from .launch import CLAIM_ATTRS, CondorPilots, PilotLauncher, located_schedd
 from .server import TaskServer, TaskTimedOutError, WorkerLostError
 from .services import AD_ATTRS, ServiceJob, machine_ads, queued_refusal
 from .sites import SITES, SiteProfile, counts_as_alive
-
-R = TypeVar("R")
 
 # Pilots queue like any other job, so a busy pool can take minutes to start the first one.
 N_WORKERS_WAIT_S = 600.0
@@ -190,7 +188,7 @@ class _Node:
 
 
 class HTCondorBackend:
-    """Starts a task server and ``n_pilots`` pilots through ``launcher``.
+    """Starts a task server and ``workers`` pilots through ``launcher``.
 
     :meth:`close` removes them. Pilot jobs whose services are jobs too (``CondorPilots`` with
     ``host_service``) are submitted at the first need of a worker, put off while a plan's
@@ -214,8 +212,9 @@ class HTCondorBackend:
     def __init__(
         self,
         launcher: PilotLauncher,
-        n_pilots: int,
+        workers: int | None = None,
         *,
+        n_pilots: int | None = None,
         host: str | None = None,
         port_range: tuple[int, int] | None = None,
         in_job: SiteProfile | None = None,
@@ -226,6 +225,7 @@ class HTCondorBackend:
         task_timeout_s: float | None = None,
     ) -> None:
         """Run tasks on the pilots ``launcher`` starts, through a driver-side task server."""
+        self._n_pilots = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
         self.capabilities = _FLOOR
         self.launcher = launcher
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
@@ -253,7 +253,6 @@ class HTCondorBackend:
         # pilot jobs submitted with the services' jobs would hold the room those need: they wait
         deferred = isinstance(launcher, CondorPilots) and hasattr(self, "host_service")
         self.min_pilots = 1  # the first need of a worker waits for this many
-        self._n_pilots = n_pilots
         self._pilots_lock = threading.Lock()
         self._submitted_at = None if deferred else time.monotonic()
         self._held = False  # the queued pilots are held while a later plan's services start
@@ -790,33 +789,15 @@ class HTCondorRunner(SubmitRunner):
         """Wait for ``min_pilots``; pilots lost afterwards fail the run's tasks as lost workers."""
         return self.backend.wait_for_pilots(self._min_pilots)
 
-    @overload
-    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]: ...
-    @overload
-    def run(self, plan: DurablePlanV2, *, skip_failed: int = 0) -> ExecResult[Any]: ...
-    def run(
-        self, plan: Plan[R] | DurablePlanV2, *, skip_failed: int = 0
-    ) -> ExecResult[R] | ExecResult[Any]:
-        """Run ``plan``, refusing one the pilots cannot import."""
+    def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:
+        """Refuse a ``plan`` the pilots cannot import."""
         _require_plan_importable(plan, ("process", "combine"))
-        return super().run(plan, skip_failed=skip_failed)
 
     def __exit__(self, *exc: object) -> None:
         """Close the runner; on an exception, stop waiting for slots first."""
         if exc[0] is not None:  # the plans still running are not waited for on a slot
             self.backend.stop_waiting()
         self.close()
-
-    def close(self) -> None:
-        """Finish every submitted plan, a service's wait for a slot included.
-
-        Then close the backend, which removes every job the runner submitted, also when that wait
-        is interrupted.
-        """
-        try:
-            self._plans.close()
-        finally:
-            self.backend.close()
 
 
 def htcondor_runner(
@@ -850,6 +831,7 @@ def htcondor_runner(
     host the site does not offer is refused before any pilot is submitted. ``task_timeout_s``
     is :class:`HTCondorBackend`'s.
     """
+    n = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
     pilots = CondorPilots(
         site,
         image=image,
@@ -862,7 +844,7 @@ def htcondor_runner(
     )
     backend = HTCondorBackend(
         pilots,
-        renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS),
+        n,
         host=host,
         port_range=port_range,
         service_hosts=service_hosts,

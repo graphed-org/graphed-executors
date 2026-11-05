@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import operator
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,8 @@ from graphed_executors.common import renamed
 from graphed_executors.dask_backend.backend import dask_runner
 from graphed_executors.htcondor_backend import backend as condor
 from graphed_executors.htcondor_backend.driverless import submit_driverless
+from graphed_executors.htcondor_backend.launch import LocalPilots
+from graphed_executors.local.executors import ProcessExecutor
 from graphed_executors.parsl_backend.backend import parsl_runner
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 
@@ -39,12 +42,14 @@ def test_one_set_of_keywords_runs_every_local_runner(runner: Any) -> None:
         assert ex.max_workers == 2
 
 
-@pytest.mark.parametrize("runner", LOCAL)
+@pytest.mark.parametrize("runner", [*LOCAL, ProcessExecutor])
 def test_the_old_spelling_warns_where_it_is_written(runner: Any) -> None:
-    with pytest.warns(DeprecationWarning, match="max_workers= is deprecated") as caught:
+    with pytest.warns(DeprecationWarning) as caught:
         ex = runner(max_workers=3)
     assert ex.max_workers == 3
-    assert caught[0].filename == __file__
+    assert [w.filename for w in caught if "max_workers= is deprecated" in str(w.message)] == [
+        __file__
+    ]
     ex.close()
 
 
@@ -52,6 +57,34 @@ def test_the_old_spelling_warns_where_it_is_written(runner: Any) -> None:
 def test_both_spellings_are_refused(runner: Any) -> None:
     with pytest.raises(TypeError, match="not both"):
         runner(workers=2, max_workers=3)
+
+
+BACKENDS = [
+    pytest.param(ThreadBackend, "max_workers", lambda b: b.n_workers(), id="threads"),
+    pytest.param(
+        lambda **kw: condor.HTCondorBackend(LocalPilots(), host="127.0.0.1", **kw),
+        "n_pilots",
+        lambda b: b._n_pilots,  # n_workers() waits for live pilots
+        id="condor",
+    ),
+]
+
+
+@pytest.mark.parametrize(("make", "old", "count"), BACKENDS)
+def test_a_backends_old_spelling_warns_where_it_is_written(
+    make: Any, old: str, count: Any
+) -> None:
+    with pytest.warns(DeprecationWarning, match=f"{old}= is deprecated") as caught:
+        backend = make(**{old: 1})  # 1, not the default 2
+    try:
+        assert caught[0].filename == __file__
+        assert count(backend) == 1
+    finally:
+        backend.close()
+    before = set(threading.enumerate())
+    with pytest.raises(TypeError, match="not both"):
+        make(workers=2, **{old: 3})
+    assert [t.name for t in set(threading.enumerate()) - before] == []
 
 
 def test_renamed_keeps_a_zero_and_fills_only_an_absent_count() -> None:
@@ -113,7 +146,7 @@ def _defaults(fn: Any) -> dict[str, Any]:
 
 def test_the_condor_entry_points_agree_on_their_defaults() -> None:
     runner, driverless = _defaults(condor.htcondor_runner), _defaults(submit_driverless)
-    for name in ("workers", "n_pilots", "request_memory_mb", "retries"):
+    for name in ("request_memory_mb", "retries"):
         assert runner[name] == driverless[name] is not inspect.Parameter.empty
     assert "control" in runner
 
@@ -133,3 +166,12 @@ def test_htcondor_runner_wires_workers_and_control(monkeypatch: pytest.MonkeyPat
 def test_submit_driverless_refuses_both_spellings() -> None:
     with pytest.raises(TypeError, match="not both"):
         submit_driverless(PLAN, workers=2, n_pilots=3)
+
+
+def test_submit_driverless_warns_n_pilots_where_it_is_written() -> None:
+    with (
+        pytest.warns(DeprecationWarning, match="n_pilots= is deprecated") as caught,
+        pytest.raises(ValueError, match="pilots='nope'"),
+    ):
+        submit_driverless(PLAN, n_pilots=3, pilots="nope")
+    assert caught[0].filename == __file__

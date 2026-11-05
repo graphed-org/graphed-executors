@@ -23,7 +23,7 @@ WEIGHTS = (4000, 4000)  # both workers are still computing when the interrupt la
 
 
 def _child(persistent: bool, out_path: str) -> None:
-    executor = ProcessPoolExecutor(max_workers=2, steal=True, monitor=None, persistent=persistent)
+    executor = ProcessPoolExecutor(workers=2, steal=True, monitor=None, persistent=persistent)
     threading.Timer(1.0, _thread.interrupt_main).start()  # a SIGINT in the driver's main thread
     try:
         executor.run(plan(BIG, WEIGHTS))
@@ -54,7 +54,7 @@ def _child_interrupted_mid_submit(persistent: bool, comms: str, out_path: str) -
         return fut
 
     executor = ProcessPoolExecutor(
-        max_workers=2, steal=True, monitor=None, persistent=persistent, comms=comms
+        workers=2, steal=True, monitor=None, persistent=persistent, comms=comms
     )
     try:
         with mock.patch.object(StdPool, "submit", submit):
