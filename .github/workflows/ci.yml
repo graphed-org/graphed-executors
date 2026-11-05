@@ -166,6 +166,7 @@ jobs:
             tests/extra/progress \
             tests/extra/m69b/test_m69b_schedulable.py tests/extra/m69b/test_m69b_dask_driver_check.py \
             tests/frozen/m68d tests/extra/m68d tests/extra/finalize \
+            tests/extra/workerlost/test_runner_vocabulary.py \
             --cov-config=.coveragerc-dask \
             --cov-branch --cov \
             --cov-report=term-missing
