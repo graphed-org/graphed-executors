@@ -806,17 +806,6 @@ class HTCondorRunner(SubmitRunner):
             self.backend.stop_waiting()
         self.close()
 
-    def close(self) -> None:
-        """Finish every submitted plan, a service's wait for a slot included.
-
-        Then close the backend, which removes every job the runner submitted, also when that wait
-        is interrupted.
-        """
-        try:
-            self._plans.close()
-        finally:
-            self.backend.close()
-
 
 def htcondor_runner(
     *,

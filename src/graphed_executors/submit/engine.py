@@ -205,9 +205,11 @@ class SubmitRunner:
         return self._plans.submit(plan)
 
     def close(self) -> None:
-        """Finish every submitted plan, then close the backend."""
-        self._plans.close()
-        self.backend.close()
+        """Finish every submitted plan, then close the backend, even if that wait is cut short."""
+        try:
+            self._plans.close()
+        finally:
+            self.backend.close()
 
     @overload
     def run(self, plan: Plan[R]) -> ExecResult[R]: ...

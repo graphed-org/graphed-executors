@@ -124,8 +124,20 @@ not in this package. ``result.value`` is the reduced result — bit-for-bit equa
 run, whatever the worker count and whatever order the tasks finished in.
 
 Two ownership rules: leaving the ``with`` block closes the runner but **not** your executor, and
-``stop_htex`` is what actually reaps the interchange, manager and worker processes. Skip it and
-you leak processes and ports.
+``stop_htex`` is what stops the interchange, manager and worker processes, within seconds. Skip it
+and they outlive your run: the workers until their heartbeat times out, the interchange
+indefinitely.
+
+:meth:`ParslRunner.local <graphed_executors.parsl_backend.backend.ParslRunner.local>` does both for
+a pool on this machine. It starts HTEX, and leaving the block stops it, on an exception too:
+
+.. code-block:: python
+
+    with ParslRunner.local(workers=2, run_dir=tempfile.mkdtemp()) as runner:
+        result = runner.run(plan)
+
+Both start from an unactivated venv: if ``interchange.py`` is not on ``PATH``, the directory of the
+running Python is put on it.
 
 ``runner.submit(plan)`` returns a future and runs the plan while you record the next one;
 ``parsl_runner(executor, max_in_flight=2)`` bounds how many submitted plans may be unfinished.

@@ -1,0 +1,9 @@
+.. under: Unreleased
+
+* ``ParslRunner.local(workers=4)`` starts HTEX on this machine and stops it when the ``with`` block
+  ends. ``ParslRunner(executor)`` is ``parsl_runner(executor)``, which now returns one, and leaves
+  a caller's executor running.
+* ``stop_htex`` stops the block's worker processes within seconds, where they used to outlive it
+  by the heartbeat threshold (120 s by default).
+* ``start_htex`` works from an unactivated venv, and otherwise refuses naming the cause instead of
+  ``FileNotFoundError: 'interchange.py'``.

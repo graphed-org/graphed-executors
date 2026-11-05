@@ -22,6 +22,7 @@ This module imports NOTHING from parsl at load (the ``_lazy`` accessor + the par
 from __future__ import annotations
 
 import time
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, InvalidStateError
 from contextlib import suppress
@@ -35,6 +36,7 @@ from graphed_executors.submit.protocol import SubmitFuture
 
 from ._lazy import _parsl_executor_types
 from ._shim import EventBatch, _parsl_task_shim, dispatch_events
+from .launch import start_htex, stop_htex
 
 # The two frozen 7-field vectors (m42 pin — NO new fields, NO subclass; the m47 transport dispatch
 # rides a backend-private attribute, never a capability field).
@@ -306,6 +308,54 @@ def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) ->
     return outer
 
 
+class ParslRunner(SubmitRunner):
+    """A :class:`SubmitRunner` on parsl.
+
+    ``ParslRunner(executor)`` runs on a started executor the caller owns; ``close()`` leaves it
+    running. :meth:`local` starts its own and stops it on ``close()``, or at interpreter exit.
+    """
+
+    def __init__(
+        self,
+        executor: Any,
+        *,
+        monitor: Any = None,
+        retries: int = 3,
+        max_in_flight: int = 2,
+        services: Mapping[str, str] | None = None,
+        control: RunControl | None = None,
+    ) -> None:
+        """Run on ``executor``; the keywords are :class:`SubmitRunner`'s."""
+        super().__init__(
+            ParslBackend(executor),
+            monitor=monitor,
+            retries=retries,
+            max_in_flight=max_in_flight,
+            services=services,
+            control=control,
+        )
+        self._stop: Callable[[], Any] = lambda: None
+
+    @classmethod
+    def local(cls, *, workers: int, run_dir: str = "runinfo", **options: Any) -> ParslRunner:
+        """Run on ``workers`` local HTEX processes; ``options`` are the constructor's keywords."""
+        executor = start_htex(workers=workers, run_dir=run_dir)
+        try:
+            runner = cls(executor, **options)
+        except BaseException:
+            stop_htex(executor)
+            raise
+        runner._stop = weakref.finalize(runner, stop_htex, executor)
+        return runner
+
+    def close(self) -> None:
+        """Finish every submitted plan, then stop the executor if this runner started it."""
+        try:
+            super().close()
+        finally:
+            self._stop()
+
+
 def parsl_runner(
     executor: Any,
     *,
@@ -314,15 +364,15 @@ def parsl_runner(
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
     control: RunControl | None = None,
-) -> SubmitRunner:
+) -> ParslRunner:
     """Build the user-facing runner in one line.
 
-    A :class:`SubmitRunner` over a :class:`ParslBackend` on a started parsl executor.
-    ``close()`` does NOT shut the caller's executor down (the launch helper documents teardown
-    via ``stop_htex``). ``services`` are the runner's given service endpoints.
+    A :class:`ParslRunner` on a started parsl executor. ``close()`` does NOT shut the caller's
+    executor down (the launch helper documents teardown via ``stop_htex``). ``services`` are the
+    runner's given service endpoints.
     """
-    return SubmitRunner(
-        ParslBackend(executor),
+    return ParslRunner(
+        executor,
         monitor=monitor,
         retries=retries,
         max_in_flight=max_in_flight,

@@ -153,8 +153,8 @@ def zero():
     return np.zeros(1, dtype=int)
 ```
 
-then hand `parsl_runner` any **started** parsl `HighThroughputExecutor` (or
-`ThreadPoolExecutor`); `start_htex` spins one up locally if you don't have a config of your own:
+then `ParslRunner.local` starts a pool on this machine and stops it when the block ends, however
+the block ends:
 
 ```python
 from graphed.core import Partition, Plan, Task
@@ -165,16 +165,27 @@ plan = Plan(process=my_tasks.count, combine=my_tasks.add, empty=my_tasks.zero,
             tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
 if __name__ == "__main__":
+    from graphed_executors import ParslRunner
+
+    with ParslRunner.local(workers=8) as runner:
+        print(runner.run(plan).value)         # [700]
+```
+
+On a site, hand `parsl_runner` any **started** parsl `HighThroughputExecutor` (or
+`ThreadPoolExecutor`). You own that executor: closing the runner leaves it running. For a local
+pool with more settings, `start_htex(workers=8, run_dir="runinfo", heartbeat_period=2)` starts one
+and `stop_htex` stops its interchange, manager and worker processes within seconds:
+
+```python
+if __name__ == "__main__":
     from graphed_executors import parsl_runner, start_htex, stop_htex
 
     htex = start_htex(workers=8, run_dir="runinfo", heartbeat_period=2)
     try:
-        with parsl_runner(htex) as runner:    # closing the runner does not stop your executor
-            print(runner.run(plan).value)     # [700]
+        with parsl_runner(htex) as runner:
+            print(runner.run(plan).value)
     finally:
-        stop_htex(htex)                       # reaps the interchange, manager and worker
-                                              # processes; skip it and you leak them, and
-                                              # their ports, on any exception
+        stop_htex(htex)
 ```
 
 Two things bite people on HTEX:
