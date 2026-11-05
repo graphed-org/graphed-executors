@@ -720,15 +720,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         if self._run_monitor is None or self._run_push is not None:  # pushing workers bypass it
             return
         if self._mgr is None:  # one manager + queue for this executor's lifetime
-            mgr = SyncManager(ctx=multiprocessing.get_context("spawn"))
-            try:
-                mgr.start()
-            except EOFError:
-                proc = cast("Any", mgr)._process  # the server re-imports main like a worker
-                proc.join()
-                self._lost_in([proc])  # raises for an unguarded script
-                raise
-            self._mgr = mgr
+            self._mgr = self._start_manager()
             self._event_q = self._mgr.Queue(maxsize=10000)
         if self._collector is None or not self._collector.is_alive():  # idempotent across runs
             self._collector_stop = threading.Event()
@@ -736,6 +728,38 @@ class _ProcessExecutorBase(_ProcessPeerBase):
                 target=self._collect_loop, name="graphed-dash-collector", daemon=True
             )
             self._collector.start()
+
+    def _start_manager(self) -> SyncManager:
+        """Start the event manager, raising if its server process dies first.
+
+        The server re-imports main like a worker. On Windows, one that dies before taking its pipe
+        end leaves ``start()`` waiting forever, so the server process is watched instead.
+        """
+        mgr = SyncManager(ctx=multiprocessing.get_context("spawn"))
+        failed: list[BaseException] = []
+        started = threading.Event()
+
+        def start() -> None:
+            try:
+                mgr.start()
+            except BaseException as exc:
+                failed.append(exc)
+            started.set()
+
+        threading.Thread(target=start, name="graphed-dash-manager", daemon=True).start()
+        while not started.wait(0.05):
+            proc: Any = getattr(mgr, "_process", None)
+            if proc is not None and proc.exitcode is not None:
+                started.wait(0.5)  # where start() does return, its own error follows the death
+                break
+        if started.is_set() and not failed:
+            return mgr
+        err = failed[0] if failed else None
+        proc = getattr(mgr, "_process", None)
+        if proc is not None and (err is None or isinstance(err, EOFError)):  # a failed spawn: none
+            proc.join()
+            self._lost_in([proc])  # raises for an unguarded script
+        raise err or EOFError(f"the monitor's manager process exited with code {proc.exitcode}")
 
     def _collect_loop(self) -> None:
         q = self._event_q
