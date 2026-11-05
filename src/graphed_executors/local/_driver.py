@@ -40,8 +40,10 @@ from graphed.core.execution import (
     emit_task,
     finalize_result,
     lean_events,
+    observed_run,
     partition_label,
     worker_monitor_factory,
+    worker_profiler_factory,
 )
 from graphed.services import require_bound
 
@@ -384,18 +386,20 @@ class _BaseExecutor:
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
         with self._run_lock:
+            # an earlier run's late events drain to its monitor before this run's bracket opens
             self._switch_in(self.monitor)
-            self._run_monitor = self.monitor
-            self._run_push = worker_monitor_factory(self.monitor)
-            self._run_lean = lean_events(self.monitor)
-            control = self.control
-            try:
-                watched = replace(plan, process=self._watched(plan.process))
-                result = self._retried(watched, control)
-            finally:
-                if control is not None and control.state is RunState.CANCELLED:
-                    control.reset()  # a cancel ends this run only, whether or not a check saw it
-            return finalize_result(plan, result)
+            with observed_run(self.monitor, plan):
+                self._run_monitor = self.monitor
+                self._run_push = worker_monitor_factory(self.monitor)
+                self._run_lean = lean_events(self.monitor)
+                control = self.control
+                try:
+                    watched = replace(plan, process=self._watched(plan.process))
+                    result = self._retried(watched, control)
+                finally:
+                    if control is not None and control.state is RunState.CANCELLED:
+                        control.reset()  # a cancel ends this run only, whether or not one saw it
+        return finalize_result(plan, result)
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         """Return ``fn`` reporting to :meth:`_busy` while it runs."""
@@ -467,9 +471,7 @@ class _BaseExecutor:
         Peer workers then profile exactly like the hub path and ``Dashboard(profile=True)`` works
         under peer (no silent loss).
         """
-        return (
-            self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
-        )
+        return worker_profiler_factory(self._run_monitor)
 
     def _forward_peer_events(self, payload: tuple[Any, ...]) -> bool:
         """Forward a worker monitor-event batch or profile sample-tree to the monitor.

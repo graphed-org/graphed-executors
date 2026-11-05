@@ -74,13 +74,13 @@ def test_the_attached_run_asks_for_the_lpc_row_narrowed_to_its_placement(
     def runner(**kwargs: Any) -> Iterator[Any]:
         asked.update(kwargs)
         yield SimpleNamespace(
-            run=lambda plan: SimpleNamespace(value=threads(plan, kwargs["n_pilots"]))
+            run=lambda plan: SimpleNamespace(value=threads(plan, kwargs["workers"]))
         )
 
     monkeypatch.setattr(run_lpc, "htcondor_runner", runner)
     run_lpc.main(argv(tmp_path, "--placement", "driver"))
     assert (
-        asked["site"] == "lpc" and asked["service_hosts"] == ("driver",) and asked["n_pilots"] == 2
+        asked["site"] == "lpc" and asked["service_hosts"] == ("driver",) and asked["workers"] == 2
     )
     assert asked["user_modules"] == [run_lpc.ANALYSIS] and run_lpc.ANALYSIS.name == "analysis.py"
     assert "extra_submit" not in asked
@@ -97,7 +97,7 @@ def test_the_driverless_run_asks_for_the_driver_its_pilots_and_every_server(
         asked.update(
             kwargs, services=[spec.launch.resources["memory_mb"] for spec in plan.services]
         )
-        value = threads(plan, kwargs["n_pilots"])
+        value = threads(plan, kwargs["workers"])
         return SimpleNamespace(
             cluster=1,
             log_dir="d",
@@ -130,7 +130,7 @@ def test_each_server_s_status_line_names_when_it_was_submitted_and_ready(
                 services.info(
                     "service %r: managed leg (cluster)", spec.name, extra={"status": status}
                 )
-            return SimpleNamespace(value=threads(plan, kwargs["n_pilots"]))
+            return SimpleNamespace(value=threads(plan, kwargs["workers"]))
 
         yield SimpleNamespace(run=run)
 
