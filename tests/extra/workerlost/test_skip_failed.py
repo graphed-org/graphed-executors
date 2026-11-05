@@ -26,6 +26,7 @@ from graphed.core import (
     TaskEvent,
     TaskPhase,
     TooManyFailedChunksError,
+    chunk_label,
 )
 
 from graphed_executors import PinnedPoolExecutor, ProcessPoolExecutor, ThreadExecutor
@@ -261,12 +262,16 @@ def test_lost_workers_count_against_the_budget(run_with_workers: Run) -> None:
 
 
 def test_dask_lists_every_chunk_it_leaves_out(dask_client: Any) -> None:
+    plan = plan_of(poison=(5,))
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            res = _dask_leg(dask_client)(plan_of(poison=(5,)), skip_failed=N)
+            res = _dask_leg(dask_client)(plan, skip_failed=N)
     except WorkerLostError as err:
-        assert "combine" in err.partition, "only a loss blamed on no chunk may end the run"
+        chunks = {chunk_label(t.partition) for t in plan.tasks}
+        # a leaf key here is a chunk the engine failed to label, not a non-chunk blame
+        blamed_no_chunk = err.partition not in chunks and "-leaf-" not in err.partition
+        assert blamed_no_chunk, "only a loss blamed on no chunk may end the run"
         pytest.skip("dask blamed a combine, which names no chunk to leave out")
     assert any("failed chunk" in str(w.message) for w in caught)
     left_out = [f.record["entry_start"] for f in res.failed]
