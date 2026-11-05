@@ -59,7 +59,7 @@ def test_htcondor_runner_binds_the_site_ports_unless_overridden(
     monkeypatch.setattr(CondorPilots, "prepare", prepare)
     with pytest.raises(BindingsReachedError):
         htcondor_runner(
-            n_pilots=1, site="lxplus", image="img", host="127.0.0.1", port_range=port_range
+            workers=1, site="lxplus", image="img", host="127.0.0.1", port_range=port_range
         )
     assert expected[0] <= bound_port(seen[0]) <= expected[1], seen
 

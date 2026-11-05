@@ -190,7 +190,7 @@ class _Node:
 
 
 class HTCondorBackend:
-    """Starts a task server and ``n_pilots`` pilots through ``launcher``.
+    """Starts a task server and ``workers`` pilots through ``launcher``.
 
     :meth:`close` removes them. Pilot jobs whose services are jobs too (``CondorPilots`` with
     ``host_service``) are submitted at the first need of a worker, put off while a plan's
@@ -214,8 +214,9 @@ class HTCondorBackend:
     def __init__(
         self,
         launcher: PilotLauncher,
-        n_pilots: int,
+        workers: int | None = None,
         *,
+        n_pilots: int | None = None,
         host: str | None = None,
         port_range: tuple[int, int] | None = None,
         in_job: SiteProfile | None = None,
@@ -226,6 +227,7 @@ class HTCondorBackend:
         task_timeout_s: float | None = None,
     ) -> None:
         """Run tasks on the pilots ``launcher`` starts, through a driver-side task server."""
+        self._n_pilots = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
         self.capabilities = _FLOOR
         self.launcher = launcher
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
@@ -253,7 +255,6 @@ class HTCondorBackend:
         # pilot jobs submitted with the services' jobs would hold the room those need: they wait
         deferred = isinstance(launcher, CondorPilots) and hasattr(self, "host_service")
         self.min_pilots = 1  # the first need of a worker waits for this many
-        self._n_pilots = n_pilots
         self._pilots_lock = threading.Lock()
         self._submitted_at = None if deferred else time.monotonic()
         self._held = False  # the queued pilots are held while a later plan's services start
@@ -837,6 +838,7 @@ def htcondor_runner(
     host the site does not offer is refused before any pilot is submitted. ``task_timeout_s``
     is :class:`HTCondorBackend`'s.
     """
+    n = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
     pilots = CondorPilots(
         site,
         image=image,
@@ -849,7 +851,7 @@ def htcondor_runner(
     )
     backend = HTCondorBackend(
         pilots,
-        renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS),
+        n,
         host=host,
         port_range=port_range,
         service_hosts=service_hosts,

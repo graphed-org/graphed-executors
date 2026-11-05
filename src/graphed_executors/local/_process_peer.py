@@ -16,6 +16,7 @@ import signal
 import tempfile
 import threading
 import time
+import uuid
 import weakref
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future, wait
@@ -136,14 +137,16 @@ class _ProcessPeerBase(_BaseExecutor):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # per executor, not per run: a persistent pool's broadcast token hashes the path
-        self._in_flight = tempfile.mkdtemp(prefix="graphed-in-flight-")
+        # per executor, not per run: a persistent pool's broadcast token hashes the path. Only
+        # _run_once creates it, so a worker re-importing main and killed before run() leaks none.
+        self._in_flight = os.path.join(
+            tempfile.gettempdir(), f"graphed-in-flight-{uuid.uuid4().hex}"
+        )
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
 
     def run(self, plan: Plan[R]) -> ExecResult[R]:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
-            shutil.rmtree(self._in_flight, ignore_errors=True)  # os._exit skips the finalizer
             os._exit(_UNGUARDED_EXIT)
         return super().run(plan)
 
@@ -151,12 +154,15 @@ class _ProcessPeerBase(_BaseExecutor):
         return _InFlight(fn, self._in_flight, label)
 
     def _busy(self) -> bool:
-        return bool(os.listdir(self._in_flight))
+        try:
+            return bool(os.listdir(self._in_flight))
+        except FileNotFoundError:  # no run has made it yet
+            return False
 
     def _run_once(self, plan: Plan[R], control: RunControl | None) -> ExecResult[R]:
         # work a shutdown cut off left its marker, which would read as running from now on
         shutil.rmtree(self._in_flight, ignore_errors=True)
-        os.makedirs(self._in_flight, exist_ok=True)
+        os.makedirs(self._in_flight, mode=0o700, exist_ok=True)
         return super()._run_once(plan, control)
 
     def _lost_in(self, workers: Sequence[BaseProcess]) -> WorkerLostError | None:
