@@ -84,5 +84,8 @@ def test_a_missing_extra_is_named(
 ) -> None:
     for module in ("distributed", "parsl", "parsl.executors", "htcondor2"):
         monkeypatch.setitem(sys.modules, module, None)
+    # A leg without the extra has no parsl scripts either; the missing extra must win.
+    monkeypatch.setenv("PATH", "/nowhere")
+    monkeypatch.setattr(sys, "executable", "/also/nowhere/python")
     with pytest.raises(ImportError, match=re.escape(f"pip install 'graphed-executors[{extra}]'")):
         call()

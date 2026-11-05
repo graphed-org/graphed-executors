@@ -63,8 +63,8 @@ def start_htex(
     harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here
     would break worker-side imports of caller-defined task fns.
     """
-    _scripts_on_path()
     htex_cls, _ = _parsl_executor_types()
+    _scripts_on_path()
     from parsl.providers import LocalProvider
 
     kwargs: dict[str, Any] = {
