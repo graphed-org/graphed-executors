@@ -46,6 +46,7 @@ from graphed.core.execution import (
     emit_task,
     partition_label,
     skipped_error,
+    worker_profiler_factory,
 )
 from graphed.core.worker_warnings import process_id
 from graphed.debug import StageError
@@ -349,7 +350,7 @@ def _thread_profiler(monitor: Monitor | None) -> WorkerProfiler | None:
         return cast("WorkerProfiler | None", cached)
     prof: WorkerProfiler | None = None
     with contextlib.suppress(Exception):
-        factory = monitor.worker_profiler_factory()
+        factory = worker_profiler_factory(monitor)
         if factory is not None:
             prof = factory()
             prof.start()
@@ -644,9 +645,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
 
         These are the profiler factory, event queue, push factory and lean flag.
         """
-        factory = (
-            self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
-        )
+        factory = worker_profiler_factory(self._run_monitor)
         push = self._run_push
         return factory, None if push is not None else self._event_q, push, self._run_lean
 
