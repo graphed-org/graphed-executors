@@ -158,19 +158,12 @@ class _RunTasks:
             self._backend.cancel(pending)
 
 
-def _drop_frames(err: BaseException) -> None:
-    """Drop the tracebacks of ``err``'s chain, which the rerun plan keeps and ships to workers.
-
-    Their frames' locals hold the failed attempt's futures, which a backend recomputes when their
-    result is lost; and tblib rebuilds a shipped traceback with frames pinning the worker's stack.
-    """
-    seen: set[int] = set()
-    exc: BaseException | None = err
-    while exc is not None and id(exc) not in seen:
-        seen.add(id(exc))
-        traceback.clear_frames(exc.__traceback__)
-        exc.__traceback__ = None
-        exc = exc.__cause__ or exc.__context__
+def _clear_engine_frames(exc: BaseException) -> None:
+    """Drop the locals of this package's frames in ``exc``'s traceback; the user's keep theirs."""
+    for frame, _ in traceback.walk_tb(exc.__traceback__):
+        if frame.f_globals.get("__name__", "").startswith("graphed_executors."):
+            with contextlib.suppress(RuntimeError):  # a frame still executing, as stdlib skips
+                frame.clear()
 
 
 class SubmitRunner:
@@ -263,7 +256,6 @@ class SubmitRunner:
                     # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs
                     # the fixed tree to rewire a failed leaf's dependents
                     plan = without_lost(plan, err)
-                    _drop_frames(err)
         return finalize_result(plan, result)
 
     def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:
@@ -330,6 +322,8 @@ class SubmitRunner:
             # graphed's walk, through collate and aggregate_plan, while the services are still up
             return replace(result, value=graphed_services.resolve_services(bound, result.value))
         except BaseException as exc:
+            # the backend keeps exc, whose engine frames from this raise hold the run's futures
+            _clear_engine_frames(exc)
             # here, not at each result(): parsl surfaces a loss while submitting the next combine
             translated = self._translate(exc, submits.tasks)
             if translated is None:

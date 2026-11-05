@@ -9,6 +9,7 @@ import gc
 import json
 import os
 import sys
+import traceback
 import warnings
 import weakref
 from collections.abc import Callable, Iterator
@@ -309,7 +310,7 @@ class _LosesAWorkerOnce(ThreadBackend):
     Each error is kept, as a dask client keeps task state.
     """
 
-    def __init__(self, chunk: int, blame: str | None = None) -> None:
+    def __init__(self, chunk: int | None, blame: str | None = None) -> None:
         super().__init__(2)
         self.chunk = chunk
         self.blame = blame
@@ -339,6 +340,29 @@ def test_a_rerun_lets_go_of_the_lost_attempts_futures() -> None:
     gc.collect()
     assert [f.record["entry_start"] for f in res.failed] == [5]
     assert [w for w in backend.futures if w() is not None] == []
+
+
+def test_a_failed_run_lets_go_of_its_futures() -> None:
+    backend = _LosesAWorkerOnce(None)
+    with SubmitRunner(backend, retries=0) as runner, pytest.raises(OSError, match="bad chunk"):
+        runner.run(plan_of(3))
+    gc.collect()
+    assert any(backend.errors)
+    assert [w for w in backend.futures if w() is not None] == []
+
+
+def test_a_failed_run_keeps_the_users_locals() -> None:
+    with (
+        SubmitRunner(ThreadBackend(2), retries=0) as runner,
+        pytest.raises(OSError, match="bad chunk") as caught,
+    ):
+        runner.run(plan_of(3))
+    mine = [
+        f
+        for f, _ in traceback.walk_tb(caught.value.__traceback__)
+        if f.f_globals["__name__"] == __name__
+    ]
+    assert [f.f_locals["part"].entry_start for f in mine if "part" in f.f_locals] == [3]
 
 
 @pytest.mark.parametrize("key", ["graphed-fp-nonce-combine-3", "graphed-bcast-fp-nonce"])
