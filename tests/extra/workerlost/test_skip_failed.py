@@ -326,7 +326,9 @@ class _LosesAWorkerOnce(ThreadBackend):
             fn, args = functools.partial(_raise_lost, key), ()
         fut = super().submit(fn, *args, key=key, **kw)
         self.futures.append(weakref.ref(fut))
-        fut.add_done_callback(lambda f: self.errors.append(f.exception()))
+        fut.add_done_callback(
+            lambda f: self.errors.append(None if f.cancelled() else f.exception())
+        )
         return fut
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
