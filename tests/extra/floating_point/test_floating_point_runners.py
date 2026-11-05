@@ -71,13 +71,13 @@ class _Sequential(SequentialRunner):
 
 IN_DRIVER: dict[str, Callable[[], Any]] = {
     "sequential": _Sequential,
-    "thread-peer": lambda: ThreadExecutor(max_workers=2),
-    "thread-hub": lambda: ThreadExecutor(max_workers=2, comms=None),
+    "thread-peer": lambda: ThreadExecutor(workers=2),
+    "thread-hub": lambda: ThreadExecutor(workers=2, comms=None),
     "submit-thread": lambda: SubmitRunner(ThreadBackend(2)),
 }
 IN_WORKERS: dict[str, Callable[[], Any]] = {
-    "process-peer": lambda: ProcessPoolExecutor(max_workers=2),
-    "process-hub": lambda: ProcessPoolExecutor(max_workers=2, comms=None),
+    "process-peer": lambda: ProcessPoolExecutor(workers=2),
+    "process-hub": lambda: ProcessPoolExecutor(workers=2, comms=None),
 }
 
 

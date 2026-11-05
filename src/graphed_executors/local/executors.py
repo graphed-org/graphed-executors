@@ -51,6 +51,7 @@ from graphed.core.worker_warnings import process_id
 from graphed.debug import StageError
 
 from .._window import wait_until
+from ..common import renamed
 from ._driver import _BaseExecutor
 from ._peer import OUTBOX_EXIT_WAIT_S, PeerControl, process_and_reduce
 from ._pinned_pool import exit_with_driver
@@ -600,8 +601,9 @@ class _ProcessExecutorBase(_ProcessPeerBase):
 
     def __init__(
         self,
-        max_workers: int | None = None,
+        workers: int | None = None,
         *,
+        max_workers: int | None = None,
         on_combine: Callable[[int], None] | None = None,
         pooled_combines: bool = False,
         persistent: bool = False,
@@ -613,7 +615,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         retries: int = 0,
     ):
         super().__init__(
-            max_workers,
+            renamed(workers, max_workers, "max_workers", None),
             on_combine=on_combine,
             pooled_combines=pooled_combines,
             persistent=persistent,
@@ -890,7 +892,9 @@ class ProcessExecutor(ProcessPoolExecutor):
     visible at the call site rather than chosen silently.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, workers: int | None = None, *, max_workers: int | None = None, **kwargs: Any
+    ) -> None:
         """Warn that this alias is deprecated, then build a :class:`ProcessPoolExecutor`."""
         warnings.warn(
             "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same "
@@ -899,4 +903,5 @@ class ProcessExecutor(ProcessPoolExecutor):
             DeprecationWarning,
             stacklevel=2,
         )
-        super().__init__(*args, **kwargs)
+        # resolved here so the max_workers= warning names the caller's line, not this one
+        super().__init__(renamed(workers, max_workers, "max_workers", None), **kwargs)

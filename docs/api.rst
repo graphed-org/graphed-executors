@@ -15,7 +15,7 @@ Run a plan
 give you a one-line runner each — ``dask_runner(client)`` and ``parsl_runner(executor)``. Both
 need their extra (``[dask]``, ``[parsl]``) when you construct a runner, and the error names it if
 it is missing; importing either module does *not* import dask or parsl.
-``htcondor_runner(site=..., n_pilots=...)`` submits its own pilot jobs; the HTCondor bindings are
+``htcondor_runner(site=..., workers=...)`` submits its own pilot jobs; the HTCondor bindings are
 imported only when it is built. A ``SiteProfile`` describes a pool, down to ``job_root``, the tree its
 jobs read and write directly, under which a driverless run's DAG and a self-submitting driver's
 ``log_dir`` must lie. Every

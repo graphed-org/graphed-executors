@@ -74,7 +74,7 @@ def test_a_cluster_runner_loads_its_module_not_its_extra() -> None:
         (lambda: graphed_executors.dask_runner(object()), "dask"),
         (lambda: graphed_executors.parsl_runner(object()), "parsl"),
         (lambda: graphed_executors.start_htex(workers=1, run_dir="unused"), "parsl"),
-        (lambda: graphed_executors.htcondor_runner(n_pilots=1), "htcondor"),
+        (lambda: graphed_executors.htcondor_runner(workers=1), "htcondor"),
     ],
     ids=["dask_runner", "parsl_runner", "start_htex", "htcondor_runner"],
 )

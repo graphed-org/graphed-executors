@@ -275,7 +275,7 @@ def test_on_a_pool_a_node_held_and_removed_before_the_driver_looks_is_named_by_i
     handle = submit_driverless(
         gated_plan(tmp_path / "mark", node_spec(600.0, argv, inputs=(CHILD_FILE,))),
         site="generic",
-        n_pilots=1,
+        workers=1,
         pilots="local",
         request_memory_mb=1024,
         log_dir=tmp_path / "logs",
@@ -337,7 +337,7 @@ def test_on_a_pool_a_rerun_holds_the_queued_condor_pilot_and_releases_it(
     handle = submit_driverless(
         gated_plan(mark, spec),
         site="generic",
-        n_pilots=2,
+        workers=2,
         pilots="condor",
         request_memory_mb=each,
         log_dir=tmp_path / "logs",

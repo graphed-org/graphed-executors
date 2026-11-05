@@ -40,7 +40,7 @@ def test_an_unpicklable_partial_surfaces_its_pickling_error_promptly(
     assert isinstance(plan, Plan)
     start = time.monotonic()
     with pytest.raises(pickle.PicklingError, match="this partial does not pickle"):
-        ProcessPoolExecutor(max_workers=2, comms=comms).run(plan)
+        ProcessPoolExecutor(workers=2, comms=comms).run(plan)
     assert time.monotonic() - start < 30.0
 
 

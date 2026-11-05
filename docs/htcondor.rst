@@ -42,7 +42,7 @@ and run the plan through two local pilots:
     plan = Plan(process=count, combine=add, empty=zero,
                 tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
-    backend = HTCondorBackend(LocalPilots(), n_pilots=2, host="127.0.0.1")
+    backend = HTCondorBackend(LocalPilots(), workers=2, host="127.0.0.1")
     with HTCondorRunner(backend) as runner:
         result = runner.run(plan)
     print(result.value, result.n_partitions, result.n_combines)
@@ -53,7 +53,7 @@ Each pilot announces itself, then the result prints::
     pilot myhost:47040:b82d4e07 serving http://127.0.0.1:10000
     [700] 7 6
 
-On a pool, only the runner line changes: ``htcondor_runner(site=..., n_pilots=...)`` below.
+On a pool, only the runner line changes: ``htcondor_runner(site=..., workers=...)`` below.
 
 
 Read these four before your first pool run
@@ -82,7 +82,7 @@ Read these four before your first pool run
 .. warning::
 
    **A pilot runs one task at a time**, whatever ``request_cpus`` asks for. Scale with
-   ``n_pilots``, not with cores per pilot; raise ``request_cpus`` only when a single task is
+   ``workers``, not with cores per pilot; raise ``request_cpus`` only when a single task is
    multithreaded itself.
 
 .. warning::
@@ -162,7 +162,7 @@ install and names it.
     plan = Plan(process=my_tasks.count, combine=my_tasks.add, empty=my_tasks.zero,
                 tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
 
-    with htcondor_runner(site="lpc", n_pilots=2, image=IMAGE,
+    with htcondor_runner(site="lpc", workers=2, image=IMAGE,
                          user_modules=[my_tasks.__file__]) as runner:
         print(runner.run(plan).value)          # [700]
 
@@ -213,7 +213,7 @@ packages (a shared filesystem, or the same image):
     # A recipe: this needs an HTCondor pool.
     from graphed_executors import htcondor_runner
 
-    with htcondor_runner(n_pilots=10, user_modules=["my_tasks.py"]) as runner:
+    with htcondor_runner(workers=10, user_modules=["my_tasks.py"]) as runner:
         result = runner.run(plan)              # the plan from the laptop run above
 
 For a site of your own, describe it once as a ``SiteProfile`` and pass that as ``site=``:
@@ -251,7 +251,7 @@ can log out.
     from graphed_executors.htcondor_backend import submit_driverless
 
     work = os.getcwd()                          # under your 3-day scratch area
-    handle = submit_driverless(plan, site="lpc", image=IMAGE, n_pilots=8,
+    handle = submit_driverless(plan, site="lpc", image=IMAGE, workers=8,
                                request_memory_mb=16000, log_dir=work,
                                user_modules=[my_tasks.__file__])
     handle.save("run-handle.json")
@@ -270,11 +270,11 @@ Later, from any session on the same pool:
 
 Where the pilots run depends on ``pilots=``:
 
-* ``pilots="local"`` (the default) asks for one slot with ``n_pilots`` CPUs and runs the pilots
+* ``pilots="local"`` (the default) asks for one slot with ``workers`` CPUs and runs the pilots
   inside it as subprocesses of the driver. This is the only choice on the **LPC**, whose jobs
   cannot submit jobs (``SiteProfile.jobs_can_submit``); size ``request_memory_mb`` for all of
   them together.
-* ``pilots="condor"`` has the driver job submit ``n_pilots`` pilot jobs of its own, to the schedd
+* ``pilots="condor"`` has the driver job submit ``workers`` pilot jobs of its own, to the schedd
   your session chose, and host its task server on one of the site's ``worker_ports`` (10000–10100
   on every built-in site). The pilots need a submit directory the schedd reads, so ``log_dir`` must
   lie under the site's ``job_root`` (``SiteProfile.job_root``: ``/afs`` on **lxplus**, any path on
@@ -332,7 +332,7 @@ it a checkpoint store:
 .. code-block:: python
 
     # A recipe: this needs an HTCondor pool and a filesystem every slot mounts.
-    handle = submit_driverless(plan, site="lpc", image=IMAGE, n_pilots=8,
+    handle = submit_driverless(plan, site="lpc", image=IMAGE, workers=8,
                                request_memory_mb=16000, log_dir=work,
                                user_modules=[my_tasks.__file__],
                                store="/path/every/slot/mounts/ttbar-store")
@@ -422,7 +422,7 @@ server for several plans, start it yourself and pass its endpoints to the runner
 
     from graphed_executors.submit.services import ServiceSet
 
-    with htcondor_runner(site="generic", n_pilots=4) as runner:
+    with htcondor_runner(site="generic", workers=4) as runner:
         runner.wait_for_pilots()
         with ServiceSet(plan.services, runner.backend) as endpoints:
             runner.services = endpoints
@@ -527,11 +527,11 @@ reached from CPU pilots:
         model_repository="models",               # a basename: the server runs where its inputs land
     )
     # the analysis declares it as a service its nodes call; with the plan built:
-    with htcondor_runner(site="lxplus", n_pilots=2, image=IMAGE,
+    with htcondor_runner(site="lxplus", workers=2, image=IMAGE,
                          extra_submit={"+JobFlavour": '"espresso"'}) as runner:
         result = runner.run(plan)                # the server runs as a GPU job beside the pilots
 
-    handle = submit_driverless(plan, site="lxplus", image=IMAGE, n_pilots=2,
+    handle = submit_driverless(plan, site="lxplus", image=IMAGE, workers=2,
                                request_memory_mb=4000, log_dir=os.getcwd())   # one SERVICE node
 
 
@@ -666,8 +666,9 @@ The arguments you will change
 
    * - Argument
      - What it does
-   * - ``n_pilots``
-     - How many pilot jobs to submit. One pilot runs one task at a time.
+   * - ``workers``
+     - How many pilot jobs to submit, 2 by default (``n_pilots=`` is its deprecated name). One
+       pilot runs one task at a time.
    * - ``site``
      - ``"lpc"``, ``"lxplus"``, ``"generic"`` (the default), or a ``SiteProfile``.
    * - ``image``

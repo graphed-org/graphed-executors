@@ -19,7 +19,7 @@ def test_resume_refills_while_a_task_is_still_running(tmp_path: Path) -> None:
     release = str(tmp_path / "release")
     ctl = RunControl()
     rec = mp.Recorder(on_first_finished=ctl.pause)
-    ex = ThreadExecutor(max_workers=2, comms=None, monitor=rec, control=ctl)
+    ex = ThreadExecutor(workers=2, comms=None, monitor=rec, control=ctl)
     probe = mp.Probe(
         sleep_s=0.05, hold_key=0, entered_path=str(tmp_path / "entered"), release_path=release
     )
@@ -52,7 +52,7 @@ def test_held_time_is_not_run_time() -> None:
         threading.Timer(HOLD_S, ctl.resume).start()
 
     rec = mp.Recorder(on_first_finished=pause_for_the_hold)
-    ex = ThreadExecutor(max_workers=2, comms=None, monitor=rec, control=ctl)
+    ex = ThreadExecutor(workers=2, comms=None, monitor=rec, control=ctl)
     plan = dataclasses.replace(
         mp.make_plan(mp.Probe(sleep_s=0.05), adaptive=True), next_tasks=next_tasks
     )

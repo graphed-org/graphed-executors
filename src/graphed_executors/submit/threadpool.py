@@ -18,6 +18,7 @@ from typing import Any
 
 from graphed.core.execution import LocalResources, WorkerResources
 
+from ..common import renamed
 from .engine import _reset_worker_env, set_worker_env
 from .protocol import SubmitCapabilities, SubmitFuture
 
@@ -61,10 +62,10 @@ class ThreadBackend:
     # duck-typed ``advertise_host``)
     advertise_host = "127.0.0.1"
 
-    def __init__(self, max_workers: int = 2) -> None:
-        """Run tasks on ``max_workers`` threads."""
-        self._max_workers = max_workers
-        self._pool = ThreadPoolExecutor(max_workers=max_workers)
+    def __init__(self, workers: int | None = None, *, max_workers: int | None = None) -> None:
+        """Run tasks on ``workers`` threads, 2 by default (``max_workers=`` is deprecated)."""
+        self._max_workers = renamed(workers, max_workers, "max_workers", 2)
+        self._pool = ThreadPoolExecutor(max_workers=self._max_workers)
         self._local = threading.local()
         self._handlers: dict[str, Callable[[list[dict[str, object]]], None]] = {}
 

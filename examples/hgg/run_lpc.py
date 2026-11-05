@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> None:
             plan,
             site="lpc",
             image=args.image,
-            n_pilots=args.pilots,
+            workers=args.pilots,
             pilots="local",
             request_memory_mb=driverless_memory_mb(ctx, args.pilots, args.pilot_mb),
             log_dir=args.log_dir,
@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> None:
         value = handle.result().value
     else:
         with htcondor_runner(
-            n_pilots=args.pilots,
+            workers=args.pilots,
             site="lpc",
             image=args.image,
             request_memory_mb=args.pilot_mb,

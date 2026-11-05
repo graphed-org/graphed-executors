@@ -14,6 +14,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
+from graphed.core import RunControl
+
 from graphed_executors.submit import SubmitCapabilities, SubmitRunner
 from graphed_executors.submit.protocol import SubmitFuture
 
@@ -175,6 +177,7 @@ def dask_runner(
     replicate_broadcast: bool = False,
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
+    control: RunControl | None = None,
 ) -> SubmitRunner:
     """Build the user-facing runner in one line.
 
@@ -190,5 +193,10 @@ def dask_runner(
 
     client.register_plugin(GraphedWorkerPlugin())
     return SubmitRunner(
-        backend, monitor=monitor, retries=retries, max_in_flight=max_in_flight, services=services
+        backend,
+        monitor=monitor,
+        retries=retries,
+        max_in_flight=max_in_flight,
+        services=services,
+        control=control,
     )

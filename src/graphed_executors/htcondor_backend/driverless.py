@@ -31,8 +31,10 @@ from graphed.core.execution import ExecResult, Plan
 from graphed.core.plan import DurablePlanV2
 from graphed.services import ServiceSpec, split_endpoint
 
+from graphed_executors.common import renamed
+
 from . import launch
-from .backend import _require_plan_importable
+from .backend import DEFAULT_PILOTS, _require_plan_importable
 from .launch import (
     ENV_FILE,
     LOG_FILE,
@@ -477,9 +479,10 @@ def submit_driverless(
     *,
     site: str = "generic",
     image: str | None = None,
-    n_pilots: int = 2,
+    workers: int | None = None,
+    n_pilots: int | None = None,
     pilots: str = "local",
-    request_memory_mb: int,
+    request_memory_mb: int = 2048,
     log_dir: str | Path | None = None,
     user_modules: Sequence[str | Path] = (),
     env: str | Path | None = None,
@@ -494,9 +497,9 @@ def submit_driverless(
     accept_environment: bool = False,
     task_timeout_s: float | None = None,
 ) -> RunHandle:
-    """Submit ``plan`` as ONE job on ``site`` whose driver runs it over ``n_pilots`` pilots.
+    """Submit ``plan`` as ONE job on ``site`` whose driver runs it over ``workers`` pilots.
 
-    ``pilots="local"`` starts them in the job's own slot (``request_cpus=n_pilots``),
+    ``pilots="local"`` starts them in the job's own slot (``request_cpus=workers``),
     ``pilots="condor"`` submits them as jobs from inside the driver job (sites whose jobs can
     submit, with ``worker_ports``, from a ``log_dir`` under ``job_root``). ``log_dir`` receives
     the submit files and the returned ``result.pkl`` and ``driver.log``; ``user_modules`` and
@@ -511,13 +514,14 @@ def submit_driverless(
     recomputes only the tasks the store does not hold. ``task_timeout_s`` is
     :class:`HTCondorBackend`'s. Everything is refused before the bindings are touched.
     """
+    workers = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
     store, options = _resolved_store(plan, store, storage_options)
     profile, endpoints = _checked_pilots(site, pilots, services)
     _require_plan_importable(plan, ("process", "combine", "empty", "next_tasks", "stop"))
     launcher = CondorPilots(
         profile,
         image=image,
-        request_cpus=n_pilots if pilots == "local" else 1,
+        request_cpus=workers if pilots == "local" else 1,
         request_memory_mb=request_memory_mb,
         log_dir=log_dir,
         user_modules=user_modules,
@@ -529,7 +533,7 @@ def submit_driverless(
     desc = _driver_description(launcher, plan, run_dir, nonce, dag=bool(nodes))
     run = {
         "pilots": pilots,
-        "n_pilots": n_pilots,
+        "n_pilots": workers,
         "site": site,
         "image": image,
         "request_memory_mb": request_memory_mb,

@@ -40,7 +40,7 @@ CRASH_LAST = (500, 1)
 
 def _child(n_floats: int, weights: tuple[int, ...], comms: str, out_path: str) -> None:
     """Spawn-child entry point: the error must surface AND the pool must shut down afterwards."""
-    executor = ProcessPoolExecutor(max_workers=2, steal=True, monitor=None, comms=comms)
+    executor = ProcessPoolExecutor(workers=2, steal=True, monitor=None, comms=comms)
     try:
         executor.run(plan(n_floats, weights, boom={0}))
         outcome = "no-error"
