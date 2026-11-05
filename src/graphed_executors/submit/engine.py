@@ -53,8 +53,10 @@ from graphed.core.execution import (
     emit_task,
     finalize_result,
     lean_events,
+    observed_run,
     partition_label,
     worker_monitor_factory,
+    worker_profiler_factory,
 )
 from graphed.debug import StageError
 from graphed.shuffle import pick
@@ -225,7 +227,7 @@ class SubmitRunner:
         given = self.services
         ctx = self._context(uuid.uuid4().hex[:8], monitor)
         # the submission's scope: released in reverse on exit
-        with contextlib.ExitStack() as scope:
+        with observed_run(monitor, plan), contextlib.ExitStack() as scope:
             result = self._run_scoped(plan, monitor, control, given, ctx, scope)
         return finalize_result(plan, result)
 
@@ -768,7 +770,5 @@ class SubmitRunner:
         # exercises on_profile); the RunContext field is populated per the §1.1 contract so the
         # seam is ready, but the shim does not start a profiler. ponytail: wire when a profile test
         # lands.
-        if monitor is None:
-            return None
-        factory = monitor.worker_profiler_factory()
+        factory = worker_profiler_factory(monitor)
         return pickle.dumps(factory) if factory is not None else None
