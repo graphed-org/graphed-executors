@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
+import copy
 import dataclasses
 import functools
 import gc
@@ -307,7 +309,8 @@ def _raise_lost(key: str) -> None:
 class _LosesAWorkerOnce(ThreadBackend):
     """Lose ``chunk``'s first leaf's worker, blamed on ``blame`` or that leaf.
 
-    Each error is kept, as a dask client keeps task state.
+    Each leaf's error is kept, as a dask client keeps task state; a combine here fails only
+    through a leaf, and its worker frame holds upstream futures that dask's would not.
     """
 
     def __init__(self, chunk: int | None, blame: str | None = None) -> None:
@@ -319,6 +322,7 @@ class _LosesAWorkerOnce(ThreadBackend):
         self.errors: list[BaseException | None] = []
 
     def submit(self, fn: Callable[..., object], /, *args: object, key: str, **kw: Any) -> Any:
+        leaf = any(isinstance(a, Task) for a in args)
         if not self.lost and any(
             isinstance(a, Task) and a.partition.entry_start == self.chunk for a in args
         ):
@@ -326,8 +330,20 @@ class _LosesAWorkerOnce(ThreadBackend):
             fn, args = functools.partial(_raise_lost, key), ()
         fut = super().submit(fn, *args, key=key, **kw)
         self.futures.append(weakref.ref(fut))
-        fut.add_done_callback(lambda f: self.errors.append(f.exception()))
+        if leaf:
+            fut.add_done_callback(
+                lambda f: self.errors.append(None if f.cancelled() else f.exception())
+            )
         return fut
+
+    def _invoke(self, fn: Callable[..., object], args: tuple[object, ...]) -> object:
+        # a dependent fails with a copy, as dask's never re-raise the client's error object
+        deps = [a for a in args if isinstance(a, concurrent.futures.Future)]
+        concurrent.futures.wait(deps)
+        for dep in deps:
+            if not dep.cancelled() and (err := dep.exception()) is not None:
+                raise copy.copy(err)
+        return super()._invoke(fn, args)
 
     def describe_failure(self, exc: BaseException) -> tuple[str, str] | None:
         return (self.blame or str(exc.args[0]), "w") if isinstance(exc, _LostError) else None
