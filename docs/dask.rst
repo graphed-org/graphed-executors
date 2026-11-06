@@ -365,7 +365,14 @@ raised it — not an opaque scheduler string.
 graphed turns that into a ``graphed.WorkerLostError``, a ``StageError`` naming the chunk and the
 last worker that held it.
 Under co-located tasks the blame can land on an innocent partition, so treat the attribution as a
-strong hint rather than a verdict.
+strong hint rather than a verdict. ``run(plan, skip_failed=N)`` inherits that: it leaves out the
+chunk dask blamed, which may be a neighbour of the one that killed the worker, and every chunk it
+leaves out is in ``res.failed``. Each worker loss costs one from the budget, even when dask blames
+a chunk already left out, and a loss past the budget raises ``TooManyFailedChunksError``. Blame that
+lands on a task that is no chunk of the plan (a combine, a ``graphed-bcast-*`` broadcast, or a
+``svc-*-probe-*`` service probe) leaves nothing to leave out, so the ``WorkerLostError`` ends the
+run even under ``skip_failed``; so does any loss in a plan with ``next_tasks``, whose chunks cannot
+be replayed.
 
 **A driver that dies** takes the run with it, and a plain rerun starts over. Wrap the plan with
 ``graphed.checkpoint.resumable(plan, store)`` and a rerun recomputes only the tasks the store does

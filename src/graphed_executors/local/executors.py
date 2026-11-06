@@ -45,6 +45,7 @@ from graphed.core.execution import (
     complete_events,
     emit_task,
     partition_label,
+    skipped_error,
     worker_profiler_factory,
 )
 from graphed.core.worker_warnings import process_id
@@ -313,7 +314,9 @@ def _run_with_emit(
             )
         )
         raise
-    emit_event(TaskEvent(TaskPhase.FINISHED, task.key, worker, time.perf_counter(), label, n))
+    why = skipped_error(result)
+    phase = TaskPhase.ERRORED if why else TaskPhase.FINISHED
+    emit_event(TaskEvent(phase, task.key, worker, time.perf_counter(), label, n, error=why))
     if profiler is not None and profile_due():
         with contextlib.suppress(Exception):
             payload = profiler.flush()

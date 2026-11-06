@@ -29,6 +29,9 @@ from graphed.core import (
     RunState,
     StopReason,
     Task,
+    n_failed,
+    skipping,
+    without_lost,
 )
 from graphed.core.execution import (
     LocalResources,
@@ -375,16 +378,19 @@ class _BaseExecutor:
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    def run(self, plan: Plan[R]) -> ExecResult[R]:
-        """Run ``plan`` to its reduced result.
+    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]:
+        """Run ``plan`` to its reduced result, past ``skip_failed`` failed chunks.
 
         One plan runs at a time per executor; a concurrent caller waits for the running
         plan to finish. A plan whose services are not bound is refused before any task
         (this runner resolves no services: bind them, or use ``SubmitRunner``). A
-        :class:`~graphed.WorkerLostError` re-runs the whole plan up to ``retries`` times.
+        :class:`~graphed.WorkerLostError` re-runs the whole plan up to ``retries`` times, then
+        counts as a failed chunk.
         """
+        self._before_run(plan)
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
+        plan = cast("Plan[R]", skipping(plan, skip_failed))
         with self._run_lock:
             # an earlier run's late events drain to its monitor before this run's bracket opens
             self._switch_in(self.monitor)
@@ -394,12 +400,20 @@ class _BaseExecutor:
                 self._run_lean = lean_events(self.monitor)
                 control = self.control
                 try:
-                    watched = replace(plan, process=self._watched(plan.process))
-                    result = self._retried(watched, control)
+                    while True:
+                        watched = replace(plan, process=self._watched(plan.process))
+                        try:
+                            result = self._retried(watched, control)
+                            break
+                        except WorkerLostError as err:
+                            plan = without_lost(plan, err)
                 finally:
                     if control is not None and control.state is RunState.CANCELLED:
                         control.reset()  # a cancel ends this run only, whether or not one saw it
         return finalize_result(plan, result)
+
+    def _before_run(self, plan: Plan[Any]) -> None:
+        """Refuse a run before anything starts; a hook, so ``run`` keeps one frame for warnings."""
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         """Return ``fn`` reporting to :meth:`_busy` while it runs."""
@@ -661,7 +675,9 @@ class _BaseExecutor:
                     continue
                 for fut in done:
                     key, n_entries, t0 = submitted.pop(fut)
-                    results.append((key, cast(R, fut.result())))  # re-raises a worker error intact
+                    partial = cast(R, fut.result())  # re-raises a worker error intact
+                    results.append((key, partial))
+                    ctx.errors += n_failed(partial)
                     ctx.n_done += 1
                     ctx.events_done += n_entries
                     ctx.last_durations[key] = time.perf_counter() - t0

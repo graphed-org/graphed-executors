@@ -144,11 +144,10 @@ class _ProcessPeerBase(_BaseExecutor):
         )
         weakref.finalize(self, shutil.rmtree, self._in_flight, ignore_errors=True)
 
-    def run(self, plan: Plan[R]) -> ExecResult[R]:
+    def _before_run(self, plan: Plan[Any]) -> None:
         # what stdlib spawn itself checks, but it reports it in every worker's traceback
         if getattr(multiprocessing.current_process(), "_inheriting", False):
             os._exit(_UNGUARDED_EXIT)
-        return super().run(plan)
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         return _InFlight(fn, self._in_flight, label)

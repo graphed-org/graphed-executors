@@ -26,6 +26,7 @@ import pickle
 import queue
 import threading
 import time
+import traceback
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
@@ -45,6 +46,9 @@ from graphed.core import (
     StopReason,
     Task,
     chunk_label,
+    n_failed,
+    skipping,
+    without_lost,
 )
 from graphed.core.execution import (
     Monitor,
@@ -154,6 +158,14 @@ class _RunTasks:
             self._backend.cancel(pending)
 
 
+def _clear_engine_frames(exc: BaseException) -> None:
+    """Drop the locals of this package's frames in ``exc``'s traceback; the user's keep theirs."""
+    for frame, _ in traceback.walk_tb(exc.__traceback__):
+        if frame.f_globals.get("__name__", "").startswith("graphed_executors."):
+            with contextlib.suppress(RuntimeError):  # a frame still executing, as stdlib skips
+                frame.clear()
+
+
 class SubmitRunner:
     """A :class:`graphed.core.Executor` over any :class:`SubmitBackend`.
 
@@ -212,26 +224,42 @@ class SubmitRunner:
             self.backend.close()
 
     @overload
-    def run(self, plan: Plan[R]) -> ExecResult[R]: ...
+    def run(self, plan: Plan[R], *, skip_failed: int = 0) -> ExecResult[R]: ...
     @overload
-    def run(self, plan: DurablePlanV2) -> ExecResult[Any]: ...
-    def run(self, plan: Plan[R] | DurablePlanV2) -> ExecResult[R] | ExecResult[Any]:
-        """Run ``plan``.
+    def run(self, plan: DurablePlanV2, *, skip_failed: int = 0) -> ExecResult[Any]: ...
+    def run(
+        self, plan: Plan[R] | DurablePlanV2, *, skip_failed: int = 0
+    ) -> ExecResult[R] | ExecResult[Any]:
+        """Run ``plan``, past ``skip_failed`` failed chunks.
 
         Its services are resolved, checked, probed and bound before the first plan task is
         submitted, and released, with any of its tasks not yet done, when ``run`` returns
         or raises. A :class:`~graphed.core.DurablePlanV2` (a join or repartition) runs
         stage by stage to ``plan.value`` of its last stage; a cancel returns
         ``value=None``. The plan's ``finalize`` runs here, after its services are released.
+        A lost worker's chunk counts as failed once the backend gives up on it.
         """
         monitor = self.monitor
         control = self.control
         given = self.services
-        ctx = self._context(uuid.uuid4().hex[:8], monitor)
-        # the submission's scope: released in reverse on exit
-        with observed_run(monitor, plan), contextlib.ExitStack() as scope:
-            result = self._run_scoped(plan, monitor, control, given, ctx, scope)
+        self._before_run(plan)
+        plan = skipping(plan, skip_failed)
+        with observed_run(monitor, plan):
+            while True:
+                ctx = self._context(uuid.uuid4().hex[:8], monitor)
+                try:
+                    # the submission's scope: released in reverse on exit
+                    with contextlib.ExitStack() as scope:
+                        result = self._run_scoped(plan, monitor, control, given, ctx, scope)
+                    break
+                except WorkerLostError as err:
+                    # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs
+                    # the fixed tree to rewire a failed leaf's dependents
+                    plan = without_lost(plan, err)
         return finalize_result(plan, result)
+
+    def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:
+        """Refuse ``plan`` before anything starts; a hook, so ``run`` keeps one warning frame."""
 
     def _run_scoped(
         self,
@@ -294,6 +322,8 @@ class SubmitRunner:
             # graphed's walk, through collate and aggregate_plan, while the services are still up
             return replace(result, value=graphed_services.resolve_services(bound, result.value))
         except BaseException as exc:
+            # the backend keeps exc, whose engine frames from this raise hold the run's futures
+            _clear_engine_frames(exc)
             # here, not at each result(): parsl surfaces a loss while submitting the next combine
             translated = self._translate(exc, submits.tasks)
             if translated is None:
@@ -489,7 +519,9 @@ class SubmitRunner:
                 if fut not in outstanding:  # a cancelled/duplicate callback
                     continue
                 key, n_entries = outstanding.pop(fut)
-                results.append((key, cast(R, fut.result())))
+                partial = cast(R, fut.result())
+                results.append((key, partial))
+                exec_ctx.errors += n_failed(partial)
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 reason = plan.stop.reason(exec_ctx) if plan.stop else None
@@ -557,7 +589,9 @@ class SubmitRunner:
             in_flight = outstanding.__len__
             for fut in self._completions(window, done_q, outstanding, in_flight, start):
                 key, n_entries = outstanding.pop(fut)
-                results.append((key, cast(R, fut.result())))
+                partial = cast(R, fut.result())
+                results.append((key, partial))
+                exec_ctx.errors += n_failed(partial)
                 exec_ctx.n_done += 1
                 exec_ctx.events_done += n_entries
                 if window.cancelled():  # then no next_tasks and no stop exit

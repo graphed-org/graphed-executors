@@ -1,0 +1,10 @@
+.. under: Unreleased
+
+* ``run(plan, skip_failed=N)`` on every runner goes on past ``N`` failed chunks; see graphed's
+  changelog for ``ExecResult.failed``. ``StopCondition(max_errors=N)`` is the same budget, through
+  ``submit(plan)`` too, and a left-out chunk is an ``ERRORED`` task on every runner.
+* A lost worker's chunk counts, after ``retries``, by rerunning the plan with that chunk left out;
+  each loss costs one from the budget. A loss in a plan with ``next_tasks``, or one dask blames on a
+  task that is no chunk (a combine, a broadcast, a service probe), still raises ``WorkerLostError``.
+* A failed run on a long-lived dask client lets go of its futures: the engine clears its own frames
+  from the error it raises, and the user's frames keep their locals.
