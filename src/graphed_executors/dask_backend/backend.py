@@ -11,6 +11,7 @@ out of ``sys.modules`` until a ``DaskBackend`` is actually built (``test_submit_
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
@@ -173,7 +174,7 @@ def dask_runner(
     client: Any,
     *,
     monitor: Any = None,
-    retries: int = 3,
+    retries: int | None = None,
     replicate_broadcast: bool = False,
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
@@ -183,12 +184,20 @@ def dask_runner(
     """Build the user-facing runner in one line.
 
     Register the per-worker plugin on ``client`` and return a :class:`SubmitRunner` over a
-    :class:`DaskBackend`. ``close()`` does NOT close the caller's client. ``retries`` has
-    no effect: a lost worker's budget is dask's ``distributed.scheduler.allowed-failures``. A
+    :class:`DaskBackend`. ``close()`` does NOT close the caller's client. ``retries`` is
+    deprecated and has no effect: a lost worker's budget is dask's
+    ``distributed.scheduler.allowed-failures``. A
     Plan's per-task ``resources`` hints, if any, are advisory only — this adapter does not
     enforce them yet (see :meth:`DaskBackend.submit`).
     ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``).
     """
+    if retries is not None:
+        warnings.warn(
+            "retries= has no effect on dask; a lost worker's budget is "
+            "distributed.scheduler.allowed-failures",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     # Ahead of plugin's bare import: DaskBackend raises the ImportError that names the extra.
     backend = DaskBackend(client, replicate_broadcast=replicate_broadcast)
     from .plugin import GraphedWorkerPlugin  # lazy: distributed is the optional extra
@@ -197,7 +206,6 @@ def dask_runner(
     return SubmitRunner(
         backend,
         monitor=monitor,
-        retries=retries,
         max_in_flight=max_in_flight,
         services=services,
         control=control,

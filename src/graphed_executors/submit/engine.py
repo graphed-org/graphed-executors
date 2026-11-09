@@ -67,7 +67,7 @@ from graphed.shuffle import pick
 
 from graphed_executors._plan_queue import PlanQueue
 from graphed_executors._window import PAUSED_WAKE_S, Window, wait_until
-from graphed_executors.common import RetriedProcess, warn_few_tasks
+from graphed_executors.common import check_retry_user_errors, retrying, warn_few_tasks
 from graphed_executors.local._reduce import TreeProgress, plan_tree, running_fold
 
 from .protocol import SubmitBackend, SubmitFuture
@@ -195,8 +195,7 @@ class SubmitRunner:
 
         An exception from ``process`` runs once, plus ``retry_user_errors`` tries in its worker.
         """
-        if retry_user_errors < 0:
-            raise ValueError(f"retry_user_errors must be >= 0, got {retry_user_errors}")
+        check_retry_user_errors(retry_user_errors)
         self._plans = PlanQueue(self.run, max_in_flight)
         self.backend = backend
         self.monitor = monitor  # read once at each run's start (Dashboard.attach assigns it)
@@ -253,12 +252,7 @@ class SubmitRunner:
         control = self.control
         given = self.services
         self._before_run(plan)
-        if self._retry_user_errors:
-            if not isinstance(plan, Plan):
-                raise TypeError("retry_user_errors needs a Plan; a DurablePlanV2 has no process")
-            retried = RetriedProcess(plan.process, 1 + self._retry_user_errors)
-            plan = replace(plan, process=retried)
-        plan = skipping(plan, skip_failed)
+        plan = skipping(retrying(plan, self._retry_user_errors), skip_failed)
         with observed_run(monitor, plan):
             while True:
                 ctx = self._context(uuid.uuid4().hex[:8], monitor)

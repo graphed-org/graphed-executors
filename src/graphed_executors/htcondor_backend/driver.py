@@ -139,6 +139,7 @@ def _runner(run: dict[str, Any], job: Path, log: TextIO) -> HTCondorRunner:
             min_pilots=int(run["min_pilots"]),
             retries=int(run["retries"]),
             max_in_flight=int(run["max_in_flight"]),
+            retry_user_errors=int(run.get("retry_user_errors", 0)),
         )
         on_error.pop_all()
     return runner

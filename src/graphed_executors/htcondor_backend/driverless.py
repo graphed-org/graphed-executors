@@ -31,7 +31,7 @@ from graphed.core.execution import ExecResult, Plan
 from graphed.core.plan import DurablePlanV2
 from graphed.services import ServiceSpec, split_endpoint
 
-from graphed_executors.common import renamed
+from graphed_executors.common import renamed, retrying
 
 from . import launch
 from .backend import DEFAULT_PILOTS, _require_plan_importable
@@ -496,6 +496,7 @@ def submit_driverless(
     salt: str = "",
     accept_environment: bool = False,
     task_timeout_s: float | None = None,
+    retry_user_errors: int = 0,
 ) -> RunHandle:
     """Submit ``plan`` as ONE job on ``site`` whose driver runs it over ``workers`` pilots.
 
@@ -512,8 +513,10 @@ def submit_driverless(
     ``storage_options``), the driver runs ``graphed.checkpoint.resumable(plan, store,
     storage_options=..., salt=..., accept_environment=...)`` on every try, so a retried driver
     recomputes only the tasks the store does not hold. ``task_timeout_s`` is
-    :class:`HTCondorBackend`'s. Everything is refused before the bindings are touched.
+    :class:`HTCondorBackend`'s and ``retry_user_errors`` is :class:`HTCondorRunner`'s.
+    Everything is refused before the bindings are touched.
     """
+    retrying(plan, retry_user_errors)  # the driver's runner would refuse only once pilots run
     workers = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
     store, options = _resolved_store(plan, store, storage_options)
     profile, endpoints = _checked_pilots(site, pilots, services)
@@ -547,5 +550,6 @@ def submit_driverless(
         "salt": salt,
         "accept_environment": accept_environment,
         "task_timeout_s": task_timeout_s,
+        "retry_user_errors": retry_user_errors,
     }
     return _submitted(launcher, run_dir, desc, nodes, run)

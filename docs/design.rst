@@ -370,7 +370,7 @@ service fill, happens again. ``retries`` is for lost workers alone. ``parsl_runn
 those from the driver, because parsl keeps its retries in the DataFlowKernel it does not use.
 HTCondor re-leases a lost pilot's tasks itself. dask's budget is ``distributed.scheduler.allowed-failures``: its
 per-task ``retries`` repeats exceptions, so graphed never asks for them, and ``dask_runner``'s
-``retries=`` has no effect.
+``retries=`` has no effect and is deprecated.
 
 The process pools default to ``retries=0``. ``ProcessPoolExecutor(retries=1)`` re-runs the whole
 plan after a ``WorkerLostError``, and only then: your own exception raises at once. Chunks that had

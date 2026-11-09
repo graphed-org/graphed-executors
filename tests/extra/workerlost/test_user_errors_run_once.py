@@ -6,6 +6,7 @@ import dataclasses
 import os
 import sys
 import uuid
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -123,6 +124,32 @@ def test_retries_run_out_with_the_user_error(make: Make, tmp_path: Path) -> None
     with make(retry_user_errors=1) as runner, pytest.raises(ValueError, match="crazy muon pt"):
         runner.run(plan_of(Flaky(str(tmp_path), 99)))
     assert len(os.listdir(tmp_path)) == 2
+
+
+def _failures_logged(client: Any) -> int:
+    logs = client.get_worker_logs().values()
+    return sum("Compute Failed" in m and "crazy muon pt" in m for log in logs for _, m in log)
+
+
+def test_a_dask_user_error_is_logged_once(dask_client: Any, tmp_path: Path) -> None:
+    from graphed_executors.dask_backend import dask_runner  # noqa: PLC0415
+
+    before = _failures_logged(dask_client)
+    with dask_runner(dask_client) as runner, pytest.raises(ValueError, match="crazy muon pt"):
+        runner.run(plan_of(Flaky(str(tmp_path), 99)))
+    assert _failures_logged(dask_client) - before == 1
+
+
+def test_dask_retries_warns_only_when_passed(dask_client: Any) -> None:
+    from graphed_executors.dask_backend import dask_runner  # noqa: PLC0415
+
+    with pytest.warns(DeprecationWarning, match="retries= has no effect on dask") as caught:
+        dask_runner(dask_client, retries=1).close()
+    assert [w.filename for w in caught if "retries=" in str(w.message)] == [__file__]
+    with warnings.catch_warnings(record=True) as unasked:
+        warnings.simplefilter("always")
+        dask_runner(dask_client).close()
+    assert not [w for w in unasked if "retries=" in str(w.message)]
 
 
 def test_parsl_retries_a_lost_worker(htex: Any, tmp_path: Path) -> None:

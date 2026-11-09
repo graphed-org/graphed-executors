@@ -286,8 +286,7 @@ def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) ->
             outer.cancel()
             return
         exc = raw.exception()
-        lost = in_chain(exc, *_WORKER_DEATH_NAMES)
-        if lost is not None and left > 0 and not outer.cancelled():
+        if left > 0 and not outer.cancelled() and in_chain(exc, *_WORKER_DEATH_NAMES) is not None:
             try:
                 current[0] = attempt()
             # a raise in a done-callback is only logged: settle instead
