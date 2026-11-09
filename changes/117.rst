@@ -1,0 +1,9 @@
+.. under: Unreleased
+
+* An exception from a plan's ``process`` runs once on every runner; ``retries=`` stays the
+  lost-worker budget. ``retry_user_errors=N`` (default 0) on ``SubmitRunner``, ``dask_runner``,
+  ``parsl_runner``, ``htcondor_runner`` and ``submit_driverless`` gives a failing chunk ``N`` more
+  tries in its worker, for flaky I/O (#94).
+* ``dask_runner``'s ``retries=`` is deprecated and warns when passed. It never had an effect: a
+  lost dask worker's budget is ``distributed.scheduler.allowed-failures``. It will be removed in a
+  later release.
