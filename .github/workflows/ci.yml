@@ -163,7 +163,7 @@ jobs:
             tests/frozen/m68c/test_m68c_submit_dask.py tests/frozen/m68c/test_m68c_submit_thread.py \
             tests/frozen/m74/test_m74_dask.py \
             tests/extra/m43 tests/extra/m44 tests/extra/m68a tests/extra/m68c tests/extra/floating_point \
-            tests/extra/progress \
+            tests/extra/progress tests/extra/workerlost/test_skip_failed.py \
             tests/extra/m69b/test_m69b_schedulable.py tests/extra/m69b/test_m69b_dask_driver_check.py \
             tests/frozen/m68d tests/extra/m68d tests/extra/finalize \
             tests/extra/workerlost/test_runner_vocabulary.py \
@@ -242,7 +242,7 @@ jobs:
         run: |
           python -c "import sysconfig, pathlib; pathlib.Path(sysconfig.get_path('purelib'), 'graphed_subcov.pth').write_text('import coverage; coverage.process_startup()\n')"
           pytest tests/frozen/m46 tests/frozen/m47 tests/extra/m47 tests/extra/floating_point tests/extra/progress \
-            tests/frozen/m63/test_m63_submit_parsl.py \
+            tests/frozen/m63/test_m63_submit_parsl.py tests/extra/workerlost/test_skip_failed.py \
             tests/frozen/m65/test_m65a3_control_parsl.py \
             tests/frozen/m68c/test_m68c_submit_parsl.py \
             tests/frozen/m74/test_m74_parsl.py tests/extra/hdna/test_hdna_parsl_retries.py \
