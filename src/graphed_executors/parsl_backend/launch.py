@@ -33,11 +33,12 @@ def _scripts_on_path() -> None:
     """Find ``interchange.py``, which HTEX launches by name, in an unactivated venv too."""
     if shutil.which("interchange.py"):
         return
-    os.environ["PATH"] = os.pathsep.join([os.path.dirname(sys.executable), os.environ["PATH"]])
-    if not shutil.which("interchange.py"):
+    scripts = os.path.dirname(sys.executable)
+    if not shutil.which("interchange.py", path=scripts):
         raise RuntimeError(
             "parsl's interchange.py is not on PATH; activate the venv (source .venv/bin/activate)"
         )
+    os.environ["PATH"] = os.pathsep.join([scripts, os.environ.get("PATH", os.defpath)])
 
 
 def start_htex(
@@ -62,8 +63,8 @@ def start_htex(
     harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here
     would break worker-side imports of caller-defined task fns.
     """
-    _scripts_on_path()
     htex_cls, _ = _parsl_executor_types()
+    _scripts_on_path()
     from parsl.providers import LocalProvider
 
     kwargs: dict[str, Any] = {

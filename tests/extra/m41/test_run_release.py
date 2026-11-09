@@ -16,7 +16,7 @@ from graphed_executors.local._transport import HttpTransport
 
 @pytest.mark.parametrize("comms", ["ipc", "http"])
 def test_an_interrupted_thread_run_returns_promptly_and_leaves_no_actor(comms: str) -> None:
-    ex = ThreadExecutor(max_workers=2, comms=comms, steal=True, monitor=None)
+    ex = ThreadExecutor(workers=2, comms=comms, steal=True, monitor=None)
     threading.Timer(1.0, _thread.interrupt_main).start()
     start = time.monotonic()
     with pytest.raises(KeyboardInterrupt):

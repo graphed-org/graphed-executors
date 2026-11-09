@@ -53,7 +53,7 @@ def test_a_cancel_after_the_root_leaves_a_persistent_pool_clean(
     ctl = RunControl()
     # Leaf 19 (w0's last, which forms the root) is held until the cancel has gone out.
     probe = mp.Probe(hold_key=19, entered_path=entered, release_path=release)
-    with ProcessPoolExecutor(max_workers=2, persistent=True, steal=False, control=ctl) as ex:
+    with ProcessPoolExecutor(workers=2, persistent=True, steal=False, control=ctl) as ex:
         run = mp.Background(lambda: ex.run(mp.make_plan(probe)))
         assert mp._await_file(entered)
         ctl.cancel()

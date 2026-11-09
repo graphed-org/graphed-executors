@@ -75,7 +75,7 @@ def test_a_cluster_runner_loads_its_module_not_its_extra() -> None:
         (lambda: graphed_executors.dask_runner(object()), "dask"),
         (lambda: graphed_executors.parsl_runner(object()), "parsl"),
         (lambda: graphed_executors.start_htex(workers=1, run_dir="unused"), "parsl"),
-        (lambda: graphed_executors.htcondor_runner(n_pilots=1), "htcondor"),
+        (lambda: graphed_executors.htcondor_runner(workers=1), "htcondor"),
     ],
     ids=["dask_runner", "parsl_runner", "start_htex", "htcondor_runner"],
 )
@@ -84,5 +84,8 @@ def test_a_missing_extra_is_named(
 ) -> None:
     for module in ("distributed", "parsl", "parsl.executors", "htcondor2"):
         monkeypatch.setitem(sys.modules, module, None)
+    # A leg without the extra has no parsl scripts either; the missing extra must win.
+    monkeypatch.setenv("PATH", "/nowhere")
+    monkeypatch.setattr(sys, "executable", "/also/nowhere/python")
     with pytest.raises(ImportError, match=re.escape(f"pip install 'graphed-executors[{extra}]'")):
         call()

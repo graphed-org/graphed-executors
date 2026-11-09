@@ -12,7 +12,7 @@ from graphed_executors.local import ProcessPoolExecutor
 
 def test_a_monitor_attached_after_an_unmonitored_run_sees_every_worker_event() -> None:
     plan = mp.make_plan(mp.Probe())
-    with ProcessPoolExecutor(max_workers=2, comms=None, persistent=True) as ex:
+    with ProcessPoolExecutor(workers=2, comms=None, persistent=True) as ex:
         ex.run(plan)
         rec = mp.Recorder()
         ex.monitor = rec

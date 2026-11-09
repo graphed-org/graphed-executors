@@ -34,7 +34,7 @@ def test_a_backend_only_method_evaluates_on_pool_workers_bit_identically() -> No
     assert ("*", "Jet") not in ak.behavior  # nothing global can resolve `scaled`
     expected, plan = _plan("_m54_behavior:make_backend")
     assert SequentialRunner().run(plan).value == [expected]
-    assert ProcessPoolExecutor(max_workers=2, persistent=True).run(plan).value == [expected]
+    assert ProcessPoolExecutor(workers=2, persistent=True).run(plan).value == [expected]
 
 
 def test_a_worker_without_the_behavior_cannot_resolve_the_method() -> None:
@@ -47,4 +47,4 @@ def test_a_worker_without_the_behavior_cannot_resolve_the_method() -> None:
 def test_the_default_worker_backend_carries_the_session_behavior() -> None:
     expected, plan = _plan(None)
     assert SequentialRunner().run(plan).value == [expected]
-    assert ProcessPoolExecutor(max_workers=2, persistent=True).run(plan).value == [expected]
+    assert ProcessPoolExecutor(workers=2, persistent=True).run(plan).value == [expected]

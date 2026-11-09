@@ -22,9 +22,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from graphed.core.execution import LocalResources, Plan
+from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.services import require_bound
 
-from graphed_executors.common import refuse_staged
+from graphed_executors.common import refuse_staged, warn_few_tasks
 from graphed_executors.common.transport_run import empty_run, finalized, harvest, run_epochs
 from graphed_executors.local._peer import (
     collect_peer_root,
@@ -86,6 +87,7 @@ def _dask_peer_main(
     bounds: list[int],
     worker_addresses: tuple[str, ...],
     steal_peers: tuple[str, ...],
+    driver: str,
 ) -> dict[str, Any]:
     """One worker's peer actor (module-level: spawn-safe).
 
@@ -99,6 +101,7 @@ def _dask_peer_main(
 
     from .transport import open_endpoint
 
+    enter_worker(driver)
     endpoint = open_endpoint(spec)
     # research §5: free the ThreadPool slot; the worker keeps serving handlers
     distributed.secede()
@@ -161,6 +164,7 @@ def transport_run_plan(
     # the shim needs graphed-worker; idempotent for transport
     ensure_engine_plugins(backend.client)
     addresses = sorted_addresses(backend)
+    warn_few_tasks(plan, lambda: len(addresses))
     k = max(1, min(len(addresses), n))
     worker_addrs = tuple(addresses[:k])
     bounds = make_bounds(n, k)
@@ -222,6 +226,7 @@ def _reduce_epoch(
             peers.bounds,
             peers.worker_addrs,
             peers.overlay.get(addr, ()),
+            process_id(),
             key=f"graphed-transport-{nonce}-peer-{i}",
             workers=[addr],
             retries=0,

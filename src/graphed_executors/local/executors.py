@@ -45,7 +45,10 @@ from graphed.core.execution import (
     complete_events,
     emit_task,
     partition_label,
+    skipped_error,
+    worker_profiler_factory,
 )
+from graphed.core.worker_warnings import process_id
 from graphed.debug import StageError
 
 from .._window import wait_until
@@ -165,6 +168,7 @@ def _proc_init(
     *,
     monitor_factory: Callable[[], Monitor] | None = None,
     lean: bool = False,
+    driver: str | None = None,
 ) -> None:
     global _proc_resources, _proc_event_q, _proc_profiler, _proc_buffer
     global _proc_drain_stop, _proc_drain_thread, _proc_monitor, _proc_lean
@@ -172,7 +176,7 @@ def _proc_init(
         _proc_drain_stop.set()
     if _proc_drain_thread is not None:
         _proc_drain_thread.join(timeout=_PROC_EXIT_JOIN_S)
-    exit_with_driver()
+    exit_with_driver(driver)
     _proc_resources = LocalResources()
     _proc_event_q = event_q
     _proc_profiler = _proc_buffer = _proc_drain_stop = _proc_drain_thread = _proc_monitor = None
@@ -310,7 +314,9 @@ def _run_with_emit(
             )
         )
         raise
-    emit_event(TaskEvent(TaskPhase.FINISHED, task.key, worker, time.perf_counter(), label, n))
+    why = skipped_error(result)
+    phase = TaskPhase.ERRORED if why else TaskPhase.FINISHED
+    emit_event(TaskEvent(phase, task.key, worker, time.perf_counter(), label, n, error=why))
     if profiler is not None and profile_due():
         with contextlib.suppress(Exception):
             payload = profiler.flush()
@@ -344,7 +350,7 @@ def _thread_profiler(monitor: Monitor | None) -> WorkerProfiler | None:
         return cast("WorkerProfiler | None", cached)
     prof: WorkerProfiler | None = None
     with contextlib.suppress(Exception):
-        factory = monitor.worker_profiler_factory()
+        factory = worker_profiler_factory(monitor)
         if factory is not None:
             prof = factory()
             prof.start()
@@ -639,9 +645,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
 
         These are the profiler factory, event queue, push factory and lean flag.
         """
-        factory = (
-            self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
-        )
+        factory = worker_profiler_factory(self._run_monitor)
         push = self._run_push
         return factory, None if push is not None else self._event_q, push, self._run_lean
 
@@ -650,7 +654,9 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         return _StdProcessPool(
             max_workers=self.max_workers,
             mp_context=multiprocessing.get_context("spawn"),
-            initializer=functools.partial(_proc_init, monitor_factory=push, lean=lean),
+            initializer=functools.partial(
+                _proc_init, monitor_factory=push, lean=lean, driver=process_id()
+            ),
             initargs=(factory, event_q),
         )
 
@@ -716,7 +722,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
         if self._run_monitor is None or self._run_push is not None:  # pushing workers bypass it
             return
         if self._mgr is None:  # one manager + queue for this executor's lifetime
-            self._mgr = multiprocessing.get_context("spawn").Manager()
+            self._mgr = self._start_manager()
             self._event_q = self._mgr.Queue(maxsize=10000)
         if self._collector is None or not self._collector.is_alive():  # idempotent across runs
             self._collector_stop = threading.Event()
@@ -724,6 +730,38 @@ class _ProcessExecutorBase(_ProcessPeerBase):
                 target=self._collect_loop, name="graphed-dash-collector", daemon=True
             )
             self._collector.start()
+
+    def _start_manager(self) -> SyncManager:
+        """Start the event manager, raising if its server process dies first.
+
+        The server re-imports main like a worker. On Windows, one that dies before taking its pipe
+        end leaves ``start()`` waiting forever, so the server process is watched instead.
+        """
+        mgr = SyncManager(ctx=multiprocessing.get_context("spawn"))
+        failed: list[BaseException] = []
+        started = threading.Event()
+
+        def start() -> None:
+            try:
+                mgr.start()
+            except BaseException as exc:
+                failed.append(exc)
+            started.set()
+
+        threading.Thread(target=start, name="graphed-dash-manager", daemon=True).start()
+        while not started.wait(0.05):
+            proc: Any = getattr(mgr, "_process", None)
+            if proc is not None and proc.exitcode is not None:
+                started.wait(0.5)  # where start() does return, its own error follows the death
+                break
+        if started.is_set() and not failed:
+            return mgr
+        err = failed[0] if failed else None
+        proc = getattr(mgr, "_process", None)
+        if proc is not None and (err is None or isinstance(err, EOFError)):  # a failed spawn: none
+            proc.join()
+            self._lost_in([proc])  # raises for an unguarded script
+        raise err or EOFError(f"the monitor's manager process exited with code {proc.exitcode}")
 
     def _collect_loop(self) -> None:
         q = self._event_q
@@ -857,7 +895,9 @@ class ProcessExecutor(ProcessPoolExecutor):
     visible at the call site rather than chosen silently.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, workers: int | None = None, *, max_workers: int | None = None, **kwargs: Any
+    ) -> None:
         """Warn that this alias is deprecated, then build a :class:`ProcessPoolExecutor`."""
         warnings.warn(
             "ProcessExecutor is deprecated; use ProcessPoolExecutor (full-registry, the same "
@@ -866,4 +906,5 @@ class ProcessExecutor(ProcessPoolExecutor):
             DeprecationWarning,
             stacklevel=2,
         )
-        super().__init__(*args, **kwargs)
+        # resolved here so the max_workers= warning names the caller's line, not this one
+        super().__init__(renamed(workers, max_workers, "max_workers", None), **kwargs)

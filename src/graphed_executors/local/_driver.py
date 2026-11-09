@@ -43,8 +43,10 @@ from graphed.core.execution import (
     emit_task,
     finalize_result,
     lean_events,
+    observed_run,
     partition_label,
     worker_monitor_factory,
+    worker_profiler_factory,
 )
 from graphed.services import require_bound
 
@@ -135,8 +137,7 @@ class _BaseExecutor:
         self._retries = retries
         self._running: set[int] = set()
         self._plans = PlanQueue(self.run, max_in_flight)
-        workers = renamed(workers, max_workers, "max_workers", None)
-        self.max_workers = workers if workers is not None else (os.cpu_count() or 1)
+        self.max_workers = renamed(workers, max_workers, "max_workers", os.cpu_count() or 1)
         # test hook: called per tree-reduce combine with #leaves so far
         self._on_combine = on_combine
         self._pooled_combines = pooled_combines
@@ -386,28 +387,34 @@ class _BaseExecutor:
         :class:`~graphed.WorkerLostError` re-runs the whole plan up to ``retries`` times, then
         counts as a failed chunk.
         """
+        self._before_run(plan)
         refuse_staged(plan, type(self).__name__, "ThreadBackend()")
         require_bound(plan)
-        warn_few_tasks(plan, self.max_workers)
+        warn_few_tasks(plan, lambda: self.max_workers)
         plan = cast("Plan[R]", skipping(plan, skip_failed))
         with self._run_lock:
+            # an earlier run's late events drain to its monitor before this run's bracket opens
             self._switch_in(self.monitor)
-            self._run_monitor = self.monitor
-            self._run_push = worker_monitor_factory(self.monitor)
-            self._run_lean = lean_events(self.monitor)
-            control = self.control
-            try:
-                while True:
-                    watched = replace(plan, process=self._watched(plan.process))
-                    try:
-                        result = self._retried(watched, control)
-                        break
-                    except WorkerLostError as err:
-                        plan = without_lost(plan, err)
-            finally:
-                if control is not None and control.state is RunState.CANCELLED:
-                    control.reset()  # a cancel ends this run only, whether or not a check saw it
-            return finalize_result(plan, result)
+            with observed_run(self.monitor, plan):
+                self._run_monitor = self.monitor
+                self._run_push = worker_monitor_factory(self.monitor)
+                self._run_lean = lean_events(self.monitor)
+                control = self.control
+                try:
+                    while True:
+                        watched = replace(plan, process=self._watched(plan.process))
+                        try:
+                            result = self._retried(watched, control)
+                            break
+                        except WorkerLostError as err:
+                            plan = without_lost(plan, err)
+                finally:
+                    if control is not None and control.state is RunState.CANCELLED:
+                        control.reset()  # a cancel ends this run only, whether or not one saw it
+        return finalize_result(plan, result)
+
+    def _before_run(self, plan: Plan[Any]) -> None:
+        """Refuse a run before anything starts; a hook, so ``run`` keeps one frame for warnings."""
 
     def _watched(self, fn: Callable[..., R], label: str | None = None) -> Callable[..., R]:
         """Return ``fn`` reporting to :meth:`_busy` while it runs."""
@@ -479,9 +486,7 @@ class _BaseExecutor:
         Peer workers then profile exactly like the hub path and ``Dashboard(profile=True)`` works
         under peer (no silent loss).
         """
-        return (
-            self._run_monitor.worker_profiler_factory() if self._run_monitor is not None else None
-        )
+        return worker_profiler_factory(self._run_monitor)
 
     def _forward_peer_events(self, payload: tuple[Any, ...]) -> bool:
         """Forward a worker monitor-event batch or profile sample-tree to the monitor.
@@ -671,8 +676,9 @@ class _BaseExecutor:
                     continue
                 for fut in done:
                     key, n_entries, t0 = submitted.pop(fut)
-                    results.append((key, cast(R, fut.result())))  # re-raises a worker error intact
-                    ctx.errors += n_failed(results[-1][1])
+                    partial = cast(R, fut.result())  # re-raises a worker error intact
+                    results.append((key, partial))
+                    ctx.errors += n_failed(partial)
                     ctx.n_done += 1
                     ctx.events_done += n_entries
                     ctx.last_durations[key] = time.perf_counter() - t0

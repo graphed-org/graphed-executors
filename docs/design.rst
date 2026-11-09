@@ -361,7 +361,7 @@ message says so.
 letter, so no reduction tree changes shape on any route, and the merges carry the failures up to
 the driver. The merge that holds one failure too many raises ``TooManyFailedChunksError``, which is
 what stops the run. A lost worker never reaches that wrapper, so the driver reruns the plan with
-the chunk marked failed, one rerun per lost chunk.
+the chunk marked failed, and each rerun costs one from the budget.
 
 An exception from your ``process`` runs once on every runner, so a deterministic bug reaches you
 on the first attempt. ``retry_user_errors=N`` on the cluster runners opts in to ``N`` more tries,

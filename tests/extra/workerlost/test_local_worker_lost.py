@@ -169,6 +169,7 @@ def test_a_marker_lives_exactly_as_long_as_its_chunk(tmp_path: Path) -> None:
 
 def test_the_chunk_named_is_the_dead_workers_not_a_survivors() -> None:
     with make("ipc") as ex:
+        os.makedirs(ex._in_flight)
         for name, chunk in (("11.1", "a survivor's chunk"), ("7.1", "the lost chunk")):
             Path(ex._in_flight, name).write_text(chunk)
         workers = [SimpleNamespace(pid=11, exitcode=-15), SimpleNamespace(pid=7, exitcode=17)]
@@ -185,6 +186,7 @@ class _Silent:
 def test_the_root_deadline_waits_for_a_running_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.1)
     with make("ipc") as ex:
+        os.makedirs(ex._in_flight)
         marker = Path(ex._in_flight, "1.1")
         marker.write_text("chunk")
         threading.Timer(0.5, marker.unlink).start()
@@ -208,14 +210,15 @@ class _RootAt:
 def test_a_gap_between_chunks_at_the_deadline_is_not_a_stall(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.3)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 1.0)
     with make("ipc") as ex:
+        os.makedirs(ex._in_flight)
         marker = Path(ex._in_flight, "1.1")
         marker.write_text("chunk")
-        threading.Timer(0.2, marker.unlink).start()  # nothing runs as the first deadline lapses
-        threading.Timer(0.4, marker.write_text, ("next chunk",)).start()
-        threading.Timer(0.9, marker.unlink).start()
-        root = _RootAt(time.monotonic() + 1.0)
+        threading.Timer(0.6, marker.unlink).start()  # nothing runs as the first deadline lapses
+        threading.Timer(1.2, marker.write_text, ("next chunk",)).start()
+        threading.Timer(1.6, marker.unlink).start()
+        root = _RootAt(time.monotonic() + 1.8)
         assert ex._await_peer_root(root, N, None, lambda: False) == (7, N)
 
 
@@ -260,6 +263,7 @@ def test_a_worker_lost_between_runs_is_a_worker_lost_error(route: str, tmp_path:
 
 def test_a_marker_a_shutdown_cut_off_does_not_outlive_its_run(tmp_path: Path) -> None:
     with make("ipc") as ex:
+        os.makedirs(ex._in_flight)
         Path(ex._in_flight, "1.1").write_text("a chunk cut off")
         assert ex.run(plan(Die(str(tmp_path / "log"), deaths=0))).value == N
         assert os.listdir(ex._in_flight) == []

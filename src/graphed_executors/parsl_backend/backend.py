@@ -343,7 +343,11 @@ class ParslRunner(SubmitRunner):
     def local(cls, *, workers: int, run_dir: str = "runinfo", **options: Any) -> ParslRunner:
         """Run on ``workers`` local HTEX processes; ``options`` are the constructor's keywords."""
         executor = start_htex(workers=workers, run_dir=run_dir)
-        runner = cls(executor, **options)
+        try:
+            runner = cls(executor, **options)
+        except BaseException:
+            stop_htex(executor)
+            raise
         runner._stop = weakref.finalize(runner, stop_htex, executor)
         return runner
 

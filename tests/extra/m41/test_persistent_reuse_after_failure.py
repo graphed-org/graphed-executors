@@ -27,7 +27,7 @@ WEIGHTS = (500, 1)
 
 def _child(n_floats: int, out_path: str) -> None:
     """Spawn-child entry point: fail a run, then get a CORRECT result out of the reused pool."""
-    executor = ProcessPoolExecutor(max_workers=2, steal=True, monitor=None, persistent=True)
+    executor = ProcessPoolExecutor(workers=2, steal=True, monitor=None, persistent=True)
     try:
         executor.run(plan(n_floats, WEIGHTS, boom={0}))
         outcome = "no-error"

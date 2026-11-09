@@ -28,10 +28,11 @@ from pathlib import Path
 from typing import Any, cast
 
 from graphed.core.execution import LocalResources, Plan
+from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.debug import SourceFrame, StageError
 from graphed.services import require_bound
 
-from graphed_executors.common import refuse_staged
+from graphed_executors.common import refuse_staged, warn_few_tasks
 from graphed_executors.common.http_plane import EscalatingHttpTransport, TransportDeliveryError
 from graphed_executors.common.transport_run import (
     TransportExecResult,
@@ -87,6 +88,7 @@ def rendezvous_spec(
         "driver_host": driver_ep.host,
         "driver_port": driver_ep.port,
         "worker_addrs": worker_addrs,
+        "driver": process_id(),
     }
 
 
@@ -98,6 +100,7 @@ def _parsl_peer_main(spec: dict[str, Any]) -> dict[str, Any]:
     the SubmitBackend spy seam — leaves/fragments ride the spec + the pull plane, never per-leaf
     futures.
     """
+    enter_worker(spec["driver"])
     addr = spec["addr"]
     recv_failures = spec.get("recv_failures") or None
     ep = EscalatingHttpTransport(
@@ -429,6 +432,7 @@ def parsl_run_plan(
     n = len(tasks)
     if n == 0:
         return empty_run(plan)
+    warn_few_tasks(plan, lambda: _resolve_k(pbackend, workers))
     witness = TransportWitness()
 
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s
