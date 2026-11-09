@@ -32,7 +32,7 @@ from graphed.core.worker_warnings import enter_worker, process_id
 from graphed.debug import SourceFrame, StageError
 from graphed.services import require_bound
 
-from graphed_executors.common import refuse_staged
+from graphed_executors.common import refuse_staged, warn_few_tasks
 from graphed_executors.common.http_plane import EscalatingHttpTransport, TransportDeliveryError
 from graphed_executors.common.transport_run import (
     TransportExecResult,
@@ -432,6 +432,7 @@ def parsl_run_plan(
     n = len(tasks)
     if n == 0:
         return empty_run(plan)
+    warn_few_tasks(plan, lambda: _resolve_k(pbackend, workers))
     witness = TransportWitness()
 
     barrier_s = _BARRIER_DEFAULT_S if barrier_timeout_s is None else barrier_timeout_s

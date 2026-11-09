@@ -67,6 +67,7 @@ from graphed.shuffle import pick
 
 from graphed_executors._plan_queue import PlanQueue
 from graphed_executors._window import PAUSED_WAKE_S, Window, wait_until
+from graphed_executors.common import warn_few_tasks
 from graphed_executors.local._reduce import TreeProgress, plan_tree, running_fold
 
 from .protocol import SubmitBackend, SubmitFuture
@@ -256,6 +257,8 @@ class SubmitRunner:
                     # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs
                     # the fixed tree to rewire a failed leaf's dependents
                     plan = without_lost(plan, err)
+        if result.n_partitions:  # asked earlier, a pilot backend would start its pilots
+            warn_few_tasks(plan, self._task_slots)
         return finalize_result(plan, result)
 
     def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:

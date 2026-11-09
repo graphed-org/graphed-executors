@@ -11,15 +11,17 @@ three installed; frozen no-cross-import test). It hosts:
   worker<->worker reachability (e.g. parsl HTEX).
 
 It also holds :func:`refuse_staged`, the one refusal of a join or repartition plan by the runners
-that take a single-stage ``Plan``, and :func:`renamed`, the one deprecation of a setting's name.
+that take a single-stage ``Plan``, :func:`renamed`, the one deprecation of a setting's name, and
+:func:`warn_few_tasks`, the one fewer-tasks-than-workers warning.
 """
 
 from __future__ import annotations
 
 import warnings
-from typing import TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
-from graphed.core import DurablePlanV2
+from graphed.core import DurablePlanV2, Plan
 
 T = TypeVar("T")
 
@@ -32,6 +34,21 @@ def renamed(workers: int | None, old: int | None, old_name: str, default: T) -> 
         raise TypeError(f"pass workers= or {old_name}=, not both")
     warnings.warn(f"{old_name}= is deprecated; use workers=", DeprecationWarning, stacklevel=3)
     return old
+
+
+def warn_few_tasks(plan: Plan[Any] | DurablePlanV2, workers: Callable[[], int]) -> None:
+    """Warn that ``plan`` cannot use all ``workers()``; a pull stream's count is not known yet.
+
+    ``workers`` is called only for a fixed plan with tasks, since a backend's count may be remote.
+    """
+    if not isinstance(plan, Plan) or plan.next_tasks is not None or not plan.tasks:
+        return
+    n, w = len(plan.tasks), workers()
+    if n < w:
+        warnings.warn(
+            f"{n} task(s) for {w} workers; pass events_per_task= or steps_per_file= to the plan",
+            stacklevel=3,
+        )
 
 
 def refuse_staged(plan: object, runner: str, backend: str) -> None:
