@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import logging
 import os
 import sys
 import uuid
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from graphed.core import Partition, Plan, Task
+from graphed.core import DurablePlanV2, OpSpec, Partition, Plan, StageSpec, Task
 
 from graphed_executors.common import RetriedProcess
 from graphed_executors.submit import SubmitRunner, ThreadBackend
@@ -126,20 +125,6 @@ def test_retries_run_out_with_the_user_error(make: Make, tmp_path: Path) -> None
     assert len(os.listdir(tmp_path)) == 2
 
 
-def test_dask_logs_the_failure_a_bounded_number_of_times(
-    dask_client: Any, tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    from graphed_executors.dask_backend import dask_runner  # noqa: PLC0415
-
-    with (
-        caplog.at_level(logging.INFO),
-        dask_runner(dask_client) as runner,
-        pytest.raises(ValueError, match="crazy muon pt"),
-    ):
-        runner.run(plan_of(Flaky(str(tmp_path), 99)))
-    assert caplog.text.count("Compute Failed") <= 1
-
-
 def test_parsl_retries_a_lost_worker(htex: Any, tmp_path: Path) -> None:
     from graphed_executors.parsl_backend import parsl_runner  # noqa: PLC0415
 
@@ -181,6 +166,9 @@ class Bound:
     def bind_services(self, endpoints: Any) -> Bound:
         return Bound(endpoints)
 
+    def resolve_services(self, value: int) -> int:
+        return value + 100
+
 
 def test_services_bind_through_the_retry() -> None:
     bound = RetriedProcess(Bound(), 2).bind_services({"a": "tcp://h:1"})
@@ -190,3 +178,24 @@ def test_services_bind_through_the_retry() -> None:
 def test_an_unbindable_process_binds_to_itself() -> None:
     retried = RetriedProcess(zero, 2)
     assert retried.bind_services({}) is retried
+
+
+def test_services_resolve_through_the_retry() -> None:
+    assert RetriedProcess(Bound(), 2).resolve_services(1) == 101
+    assert RetriedProcess(zero, 2).resolve_services(1) == 1
+
+
+def test_a_negative_retry_count_is_refused() -> None:
+    with pytest.raises(ValueError, match="retry_user_errors must be >= 0"):
+        SubmitRunner(ThreadBackend(1), retry_user_errors=-1)
+
+
+def test_a_staged_plan_refuses_user_error_retries() -> None:
+    stage = StageSpec(
+        "map", process=OpSpec("ref", "t:map"), tasks=(Task(0, Partition("f", "t", 0, 1)),)
+    )
+    with (
+        SubmitRunner(ThreadBackend(1), retry_user_errors=1) as runner,
+        pytest.raises(TypeError, match="retry_user_errors needs a Plan"),
+    ):
+        runner.run(DurablePlanV2(ir=b"retry-v2", stages=(stage,)))

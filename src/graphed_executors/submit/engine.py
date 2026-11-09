@@ -191,10 +191,12 @@ class SubmitRunner:
         services: Mapping[str, str] | None = None,
         retry_user_errors: int = 0,
     ) -> None:
-        """Run plans on ``backend``, retrying a lost worker ``retries`` times.
+        """Run plans on ``backend``; ``retries`` is its lost-worker budget where it takes one.
 
         An exception from ``process`` runs once, plus ``retry_user_errors`` tries in its worker.
         """
+        if retry_user_errors < 0:
+            raise ValueError(f"retry_user_errors must be >= 0, got {retry_user_errors}")
         self._plans = PlanQueue(self.run, max_in_flight)
         self.backend = backend
         self.monitor = monitor  # read once at each run's start (Dashboard.attach assigns it)
@@ -251,7 +253,9 @@ class SubmitRunner:
         control = self.control
         given = self.services
         self._before_run(plan)
-        if self._retry_user_errors and isinstance(plan, Plan):
+        if self._retry_user_errors:
+            if not isinstance(plan, Plan):
+                raise TypeError("retry_user_errors needs a Plan; a DurablePlanV2 has no process")
             retried = RetriedProcess(plan.process, 1 + self._retry_user_errors)
             plan = replace(plan, process=retried)
         plan = skipping(plan, skip_failed)

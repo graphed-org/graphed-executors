@@ -365,9 +365,10 @@ the chunk marked failed, and each rerun costs one from the budget.
 
 An exception from your ``process`` runs once on every runner, so a deterministic bug reaches you
 on the first attempt. ``retry_user_errors=N`` on the cluster runners opts in to ``N`` more tries,
-inside the worker. ``retries`` is for lost workers alone. ``parsl_runner`` resubmits those from the
-driver, because parsl keeps its retries in the DataFlowKernel it does not use. HTCondor re-leases a
-lost pilot's tasks itself. dask's budget is ``distributed.scheduler.allowed-failures``: its
+inside the worker. A retry reruns the whole chunk, so a side effect it already made, such as a
+service fill, happens again. ``retries`` is for lost workers alone. ``parsl_runner`` resubmits
+those from the driver, because parsl keeps its retries in the DataFlowKernel it does not use.
+HTCondor re-leases a lost pilot's tasks itself. dask's budget is ``distributed.scheduler.allowed-failures``: its
 per-task ``retries`` repeats exceptions, so graphed never asks for them, and ``dask_runner``'s
 ``retries=`` has no effect.
 

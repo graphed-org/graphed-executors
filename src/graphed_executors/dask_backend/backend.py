@@ -183,9 +183,10 @@ def dask_runner(
     """Build the user-facing runner in one line.
 
     Register the per-worker plugin on ``client`` and return a :class:`SubmitRunner` over a
-    :class:`DaskBackend`. ``close()`` does NOT close the caller's client. ``retries`` is
-    forwarded to dask (per-task); a Plan's per-task ``resources`` hints, if any, are advisory
-    only — this adapter does not enforce them yet (see :meth:`DaskBackend.submit`).
+    :class:`DaskBackend`. ``close()`` does NOT close the caller's client. ``retries`` has
+    no effect: a lost worker's budget is dask's ``distributed.scheduler.allowed-failures``. A
+    Plan's per-task ``resources`` hints, if any, are advisory only — this adapter does not
+    enforce them yet (see :meth:`DaskBackend.submit`).
     ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``).
     """
     # Ahead of plugin's bare import: DaskBackend raises the ImportError that names the extra.

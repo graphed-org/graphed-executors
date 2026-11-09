@@ -24,7 +24,7 @@ from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 
 from graphed.core import DurablePlanV2, Plan
-from graphed.core.services import Bindable
+from graphed.core.services import Bindable, Resolvable
 
 T = TypeVar("T")
 
@@ -58,6 +58,12 @@ class RetriedProcess:
         if not isinstance(self.process, Bindable):
             return self
         return replace(self, process=self.process.bind_services(endpoints))
+
+    def resolve_services(self, value: Any) -> Any:
+        """Resolve the run's value through the wrapped process."""
+        if not isinstance(self.process, Resolvable):
+            return value
+        return self.process.resolve_services(value)
 
 
 def warn_few_tasks(plan: Plan[Any] | DurablePlanV2, workers: Callable[[], int]) -> None:
