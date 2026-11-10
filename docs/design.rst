@@ -363,11 +363,14 @@ the driver. The merge that holds one failure too many raises ``TooManyFailedChun
 what stops the run. A lost worker never reaches that wrapper, so the driver reruns the plan with
 the chunk marked failed, and each rerun costs one from the budget.
 
-Retries are the underlying library's where it has them: ``dask_runner``'s ``retries`` forwards to
-dask's per-task retries, which resubmit on another worker, with no graphed-level loop on top.
-parsl keeps its retries in the DataFlowKernel, which ``parsl_runner`` does not use, so there the
-driver resubmits a failed task itself. The default is 3, so a deterministic exception in your
-``process`` is executed four times before the driver sees it; ``retries=0`` while debugging.
+An exception from your ``process`` runs once on every runner, so a deterministic bug reaches you
+on the first attempt. ``retry_user_errors=N`` on the cluster runners opts in to ``N`` more tries,
+inside the worker. A retry reruns the whole chunk, so a side effect it already made, such as a
+service fill, happens again. ``retries`` is for lost workers alone. ``parsl_runner`` resubmits
+those from the driver, because parsl keeps its retries in the DataFlowKernel it does not use.
+HTCondor re-leases a lost pilot's tasks itself. dask's budget is ``distributed.scheduler.allowed-failures``: its
+per-task ``retries`` repeats exceptions, so graphed never asks for them, and ``dask_runner``'s
+``retries=`` has no effect and is deprecated.
 
 The process pools default to ``retries=0``. ``ProcessPoolExecutor(retries=1)`` re-runs the whole
 plan after a ``WorkerLostError``, and only then: your own exception raises at once. Chunks that had

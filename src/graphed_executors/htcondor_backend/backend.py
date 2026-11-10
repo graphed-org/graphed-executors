@@ -773,6 +773,7 @@ class HTCondorRunner(SubmitRunner):
         max_in_flight: int = 2,
         services: Mapping[str, str] | None = None,
         control: RunControl | None = None,
+        retry_user_errors: int = 0,
     ) -> None:
         """Run plans on ``backend``, waiting for ``min_pilots`` at its first need of a worker."""
         super().__init__(
@@ -782,6 +783,7 @@ class HTCondorRunner(SubmitRunner):
             max_in_flight=max_in_flight,
             services=services,
             control=control,
+            retry_user_errors=retry_user_errors,
         )
         self._min_pilots = backend.min_pilots = min_pilots
 
@@ -822,6 +824,7 @@ def htcondor_runner(
     service_hosts: Sequence[str] | None = None,
     task_timeout_s: float | None = None,
     control: RunControl | None = None,
+    retry_user_errors: int = 0,
 ) -> HTCondorRunner:
     """``workers`` pilot jobs (default 2) on the ``site`` pool behind an :class:`HTCondorRunner`.
 
@@ -858,4 +861,5 @@ def htcondor_runner(
         max_in_flight=max_in_flight,
         services=services,
         control=control,
+        retry_user_errors=retry_user_errors,
     )

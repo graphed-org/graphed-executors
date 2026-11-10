@@ -17,13 +17,17 @@ that take a single-stage ``Plan``, :func:`renamed`, the one deprecation of a set
 
 from __future__ import annotations
 
+import contextlib
 import warnings
-from collections.abc import Callable
-from typing import Any, TypeVar
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from typing import Any, TypeVar, cast
 
 from graphed.core import DurablePlanV2, Plan
+from graphed.core.services import Bindable, Resolvable
 
 T = TypeVar("T")
+P = TypeVar("P", bound="Plan[Any] | DurablePlanV2")
 
 
 def renamed(workers: int | None, old: int | None, old_name: str, default: T) -> int | T:
@@ -34,6 +38,33 @@ def renamed(workers: int | None, old: int | None, old_name: str, default: T) -> 
         raise TypeError(f"pass workers= or {old_name}=, not both")
     warnings.warn(f"{old_name}= is deprecated; use workers=", DeprecationWarning, stacklevel=3)
     return old
+
+
+@dataclass(frozen=True)
+class RetriedProcess:
+    """``process`` retried in its worker: a user error spends no lost-worker budget."""
+
+    process: Callable[..., Any]
+    attempts: int
+
+    def __call__(self, partition: Any, resources: Any) -> Any:
+        """Run ``process``; only the last attempt's exception gets out."""
+        for _ in range(self.attempts - 1):
+            with contextlib.suppress(Exception):
+                return self.process(partition, resources)
+        return self.process(partition, resources)
+
+    def bind_services(self, endpoints: Mapping[str, str]) -> RetriedProcess:
+        """Bind ``endpoints`` into the wrapped process."""
+        if not isinstance(self.process, Bindable):
+            return self
+        return replace(self, process=self.process.bind_services(endpoints))
+
+    def resolve_services(self, value: Any) -> Any:
+        """Resolve the run's value through the wrapped process."""
+        if not isinstance(self.process, Resolvable):
+            return value
+        return self.process.resolve_services(value)
 
 
 def warn_few_tasks(plan: Plan[Any] | DurablePlanV2, workers: Callable[[], int]) -> None:
@@ -49,6 +80,22 @@ def warn_few_tasks(plan: Plan[Any] | DurablePlanV2, workers: Callable[[], int]) 
             f"{n} task(s) for {w} workers; pass events_per_task= or steps_per_file= to the plan",
             stacklevel=3,
         )
+
+
+def check_retry_user_errors(retry_user_errors: int) -> None:
+    """Refuse a negative ``retry_user_errors``."""
+    if retry_user_errors < 0:
+        raise ValueError(f"retry_user_errors must be >= 0, got {retry_user_errors}")
+
+
+def retrying(plan: P, retry_user_errors: int) -> P:
+    """``plan`` whose ``process`` gets ``retry_user_errors`` more tries in its worker."""
+    check_retry_user_errors(retry_user_errors)
+    if not retry_user_errors:
+        return plan
+    if not isinstance(plan, Plan):
+        raise TypeError("retry_user_errors needs a Plan; a DurablePlanV2 has no process")
+    return cast("P", replace(plan, process=RetriedProcess(plan.process, 1 + retry_user_errors)))
 
 
 def refuse_staged(plan: object, runner: str, backend: str) -> None:

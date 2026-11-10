@@ -87,10 +87,11 @@ A few things that save an afternoon:
 * On a real cluster prefer process workers with ``threads_per_worker=1`` — HEP stages hold the
   GIL inside compiled kernels — and ``dashboard_address=":0"`` so a second run doesn't collide on
   the dashboard port.
-* ``dask_runner`` forwards ``retries`` to dask's own per-task retry, which resubmits on another
-  worker, and there is no second retry loop on top of it. **It defaults to 3**, so a
-  deterministic exception in your ``process`` runs four times before it reaches you — pass
-  ``retries=0`` while debugging and it surfaces on the first attempt.
+* An exception in your ``process`` runs once. ``dask_runner(client, retry_user_errors=2)`` gives
+  each chunk two more tries in its worker, for flaky I/O.
+* A lost worker's budget is dask's: ``distributed.scheduler.allowed-failures``, a scheduler-wide
+  setting. dask has no per-task equivalent, so ``dask_runner``'s ``retries=`` changes nothing and
+  is deprecated.
 * Leaving the ``with`` block closes the runner, not your client. You built the cluster; you own it.
 * ``runner.submit(plan)`` returns a future and runs the plan while you record the next one;
   ``dask_runner(client, max_in_flight=2)`` bounds how many submitted plans may be unfinished.
@@ -265,7 +266,7 @@ Each engine adds one attribute of its own, which is how you tell after the fact 
 ``.transport`` means blocks moved worker-to-worker, ``.partitions`` means they moved as ordinary
 tasks. That is the first thing to check when ``"auto"`` was slower than you expected.
 
-If you need ``monitor=`` or ``retries=`` on a shuffle, call the engines directly —
+If you need ``monitor=`` on a shuffle, call the engines directly —
 :func:`~graphed_executors.dask_backend.shuffle.dask_run_repartition` /
 :func:`~graphed_executors.dask_backend.shuffle.dask_run_join` take a ``runner=``, and
 :func:`~graphed_executors.dask_backend.transport_shuffle.transport_run_repartition` /

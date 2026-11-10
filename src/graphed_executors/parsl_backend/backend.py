@@ -199,11 +199,11 @@ class ParslBackend:
         makes ``peer_data_movement`` False. Then submit the concrete values wrapped in the
         module-level shim. ``resource_spec`` is ``{"priority": p}`` on HTEX iff ``p != 0`` (the one
         key HTEX forwards, executor.py:393) else ``{}``; ALWAYS ``{}`` on TPE (measured: it raises
-        ``InvalidResourceSpecification`` on anything else). A failed task is resubmitted from the
-        driver up to ``retries`` times: parsl's own retries live in the DFK this backend does not
-        use. ``key``/``resources``/``workers`` are advisory hints this backend ignores. The shim
-        wrap happens HERE, after any spy seam, so a submitted-fn-name witness records the raw
-        ``fn`` (design-minor-3).
+        ``InvalidResourceSpecification`` on anything else). A task on a lost worker is resubmitted
+        from the driver up to ``retries`` times: parsl's own retries live in the DFK this backend
+        does not use. ``key``/``resources``/``workers`` are advisory hints this backend ignores.
+        The shim wrap happens HERE, after any spy seam, so a submitted-fn-name witness records the
+        raw ``fn`` (design-minor-3).
         """
         resolved = tuple(a.result() if isinstance(a, _ParslFuture) else a for a in args)
         spec: dict[str, int] = {"priority": priority} if (self._is_htex and priority) else {}
@@ -273,7 +273,7 @@ class ParslBackend:
 
 
 def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) -> Future[Any]:
-    """Return a future of ``attempt()`` that calls ``attempt`` again on each failure.
+    """Return a future of ``attempt()`` that calls ``attempt`` again on each lost worker.
 
     ``retries`` times at most. With ``cancels``, cancelling it cancels the attempt in flight (never
     on HTEX: see ``cancel``).
@@ -286,7 +286,7 @@ def _resubmitting(attempt: Callable[[], Any], retries: int, *, cancels: bool) ->
             outer.cancel()
             return
         exc = raw.exception()
-        if exc is not None and left > 0 and not outer.cancelled():
+        if left > 0 and not outer.cancelled() and in_chain(exc, *_WORKER_DEATH_NAMES) is not None:
             try:
                 current[0] = attempt()
             # a raise in a done-callback is only logged: settle instead
@@ -324,6 +324,7 @@ class ParslRunner(SubmitRunner):
         max_in_flight: int = 2,
         services: Mapping[str, str] | None = None,
         control: RunControl | None = None,
+        retry_user_errors: int = 0,
     ) -> None:
         """Run on ``executor``; the keywords are :class:`SubmitRunner`'s."""
         super().__init__(
@@ -333,6 +334,7 @@ class ParslRunner(SubmitRunner):
             max_in_flight=max_in_flight,
             services=services,
             control=control,
+            retry_user_errors=retry_user_errors,
         )
         self._stop: Callable[[], Any] = lambda: None
 
@@ -364,6 +366,7 @@ def parsl_runner(
     max_in_flight: int = 2,
     services: Mapping[str, str] | None = None,
     control: RunControl | None = None,
+    retry_user_errors: int = 0,
 ) -> ParslRunner:
     """Build the user-facing runner in one line.
 
@@ -378,4 +381,5 @@ def parsl_runner(
         max_in_flight=max_in_flight,
         services=services,
         control=control,
+        retry_user_errors=retry_user_errors,
     )

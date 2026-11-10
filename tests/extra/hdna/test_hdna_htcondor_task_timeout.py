@@ -11,6 +11,7 @@ import io
 import json
 import operator
 import pickle
+import shutil
 import threading
 import time
 from concurrent.futures import Future
@@ -19,12 +20,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from _hdna_payloads import HangAt
+from _hdna_payloads import FailFirst, HangAt
 from graphed.checkpoint import Store, resumable
-from graphed.core import Partition
+from graphed.core import DurablePlanV2, Partition
 from graphed.core.execution import Plan, Task
 from graphed.debug import StageError
-from m74_harness import leaf_plan, prepared_job, work_dirs
+from m74_harness import RecordingSchedd, leaf_plan, prepared_job, record_bindings, work_dirs
 
 from graphed_executors.htcondor_backend import (
     HTCondorBackend,
@@ -33,6 +34,7 @@ from graphed_executors.htcondor_backend import (
     TaskTimedOutError,
     driver,
     server,
+    submit_driverless,
 )
 
 HERE = str(Path(__file__).resolve().parent)
@@ -170,3 +172,67 @@ def test_a_driverless_run_carries_the_timeout_to_its_backend(
     with pytest.raises(RuntimeError, match="stop before"):
         driver._runner(run, job, io.StringIO())
     assert seen["task_timeout_s"] == 7.5
+
+
+def _flaky_plan(marks: Path, failures: int) -> Plan[int]:
+    tasks = (Task(0, Partition.blind("mem://once", "", 0, 1)),)
+    return Plan(
+        process=FailFirst(str(marks), failures), combine=operator.add, empty=int, tasks=tasks
+    )
+
+
+def _condor_runner(**kw: Any) -> HTCondorRunner:
+    backend = HTCondorBackend(LocalPilots(pythonpath=[HERE]), 1, host="127.0.0.1")
+    return HTCondorRunner(backend, **kw)
+
+
+def test_a_user_error_runs_once_on_a_pilot(tmp_path: Path) -> None:
+    with _condor_runner() as runner, pytest.raises(RuntimeError, match="attempt 0"):
+        runner.run(_flaky_plan(tmp_path, 99))
+    assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_retry_user_errors_reaches_the_pilot(tmp_path: Path) -> None:
+    with _condor_runner(retry_user_errors=1) as runner:
+        assert runner.run(_flaky_plan(tmp_path, 1)).value == 1
+    assert len(list(tmp_path.iterdir())) == 2
+
+
+@pytest.mark.parametrize(
+    ("asked", "code", "attempts"), [({"retry_user_errors": 1}, 0, 2), ({}, 3, 1)]
+)
+def test_a_driverless_run_retries_user_errors_only_when_asked(
+    asked: dict[str, int],
+    code: int,
+    attempts: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marks = tmp_path / "marks"
+    marks.mkdir()
+    plan = _flaky_plan(marks, 1)
+    job = prepared_job(tmp_path, monkeypatch, plan, "job", workers=1, pilots="local", **asked)
+    shutil.copy(Path(HERE, "_hdna_payloads.py"), job)  # the driver's pilots import from the job
+    monkeypatch.syspath_prepend(str(job.resolve()))  # main would leave it on sys.path
+    assert driver.main([str(job)]) == code, (job / "driver.log").read_text()
+    assert len(list(marks.iterdir())) == attempts
+
+
+@pytest.mark.parametrize(
+    ("plan", "retry_user_errors", "error"),
+    [
+        (Plan(process=FailFirst("."), combine=operator.add, empty=int, tasks=()), -1, ValueError),
+        (DurablePlanV2(ir=b"retry", stages=()), 1, TypeError),
+    ],
+)
+def test_bad_user_error_retries_are_refused_before_the_bindings(
+    plan: Any,
+    retry_user_errors: int,
+    error: type[Exception],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = record_bindings(monkeypatch, RecordingSchedd())
+    with pytest.raises(error, match="retry_user_errors"):
+        submit_driverless(plan, log_dir=tmp_path / "submit", retry_user_errors=retry_user_errors)
+    assert fake.log == []

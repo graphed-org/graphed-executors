@@ -154,11 +154,13 @@ def test_the_condor_entry_points_agree_on_their_defaults() -> None:
 def test_htcondor_runner_wires_workers_and_control(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(condor, "CondorPilots", lambda *_, **__: None)
     monkeypatch.setattr(condor, "HTCondorBackend", lambda _, n, **__: n)
-    monkeypatch.setattr(condor, "HTCondorRunner", lambda n, **kw: (n, kw["control"]))
+    monkeypatch.setattr(
+        condor, "HTCondorRunner", lambda n, **kw: (n, kw["control"], kw["retry_user_errors"])
+    )
     control = RunControl()
     build: Any = condor.htcondor_runner
-    assert build(workers=5, control=control) == (5, control)
-    assert build() == (condor.DEFAULT_PILOTS, None)
+    assert build(workers=5, control=control, retry_user_errors=1) == (5, control, 1)
+    assert build() == (condor.DEFAULT_PILOTS, None, 0)
     with pytest.warns(DeprecationWarning, match="n_pilots= is deprecated"):
         assert build(n_pilots=7)[0] == 7
 

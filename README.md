@@ -127,11 +127,11 @@ if __name__ == "__main__":                    # needed when Client() spawns a lo
     client.close()
 ```
 
-A failed task is retried on another worker three times before the error reaches you — that is
-dask's own per-task retry, and `retries=3` is already the default. Pass `retries=0` while you are
-debugging, so a deterministic bug in your `process` surfaces on the first attempt rather than the
-fourth. A worker that dies mid-task surfaces as an error naming the task and the worker address,
-not a hang.
+An exception in your `process` runs once and reaches you straight away. For flaky I/O, opt in:
+`dask_runner(client, retry_user_errors=2)` gives each chunk two more tries in its worker. A worker
+that dies mid-task is retried by dask itself, up to its scheduler-wide
+`distributed.scheduler.allowed-failures` setting, and past that surfaces as an error naming the task
+and the worker address, not a hang.
 
 ### On a parsl pool
 
