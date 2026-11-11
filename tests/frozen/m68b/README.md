@@ -80,6 +80,7 @@ coverage gate is what measures `announce.py`.
 | `…::test_a_grpc_gateway_never_passes_http_and_the_budget_is_the_whole_start` | row 2 exit 3 within `timeout_s` + margin, one start; FoN `timeout_s` per port |
 | `…::test_a_child_that_exits_at_once_is_not_restarted_per_port` | row 2 ≥ 10 ports, exit 3 naming the returncode; FoN restarted per port |
 | `…::test_a_child_that_fails_its_check_then_exits_is_started_once` | row 2 ×10, one start each; FoN restarted per port |
+| `…::test_a_child_that_fails_its_check_then_exits_is_started_once` (executors#118) | starts counted net of announce's "taken after the scan" lines: a port another process binds between the scan and the child's bind is a scan step, not a restart |
 | `…::test_an_orphaned_service_is_reaped_and_exits_0[no-200-ever,another-secret,server-gone]` | row 2 orphan rule; FoN orphaned before its first announce |
 | `…::test_watch_mode_announces_each_new_url_and_secret` | row 2 watch mode, SIGTERM reaps the child |
 | `test_cluster_services_live.py::test_a_cluster_hosted_http_server_serves_its_run_and_leaves_with_it` | row 3 (a): `Machine` identity in the status and every probe answer, task GET, `/service.json` 404, removal polled, `forget_announce` before `stop`, per-run clusters, overlap removes only its own, history ordering against `t`; FoN service outliving its run, run releasing another run's service |
