@@ -1,0 +1,6 @@
+.. under: Unreleased
+
+* ``skip_failed`` on dask charges only the chunk that kills its worker. A dead worker's scheduler
+  fails every task it held, so a poison chunk used to take co-resident chunks out of the budget
+  with it; the runner now reruns the chunks lost together, in halves, and leaves out only those
+  that lose a worker alone (#95).
