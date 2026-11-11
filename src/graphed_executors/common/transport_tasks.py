@@ -1,17 +1,17 @@
-r"""Plane-parameterized worker-transport task bodies (plan §1.6 m47 move).
+r"""Plane-parameterized worker-transport task bodies.
 
-The m44 map / gather / gather-join / broadcast-part compute bodies + the reader-plane sizing
-replay, moved here VERBATIM from ``dask_backend/transport_shuffle.py`` and parameterized by an
-injected **block plane** (``store_block`` / ``record`` on the holder side; ``pull_blocks`` on the
-puller side) so BOTH the dask worker-transport engine and the m47 parsl peer-exchange engine run
-the SAME bodies — the frozen budget goldens read the counters these bodies produce
-(``common.transport_tasks`` gates on the dask job; the parsl job executes them too but does not
-gate).
+The map / gather / gather-join / broadcast-part compute bodies + the reader-plane sizing replay,
+parameterized by an injected **block plane** (``store_block`` / ``record`` on the holder side;
+``pull_blocks`` on the puller side) so BOTH the dask worker-transport engine and the parsl
+peer-exchange engine run the SAME bodies — the frozen budget goldens read the counters these
+bodies produce (``common.transport_tasks`` gates on the dask job; the parsl job executes them too
+but does not gate).
 
 ``dask_backend/transport_shuffle.py`` keeps module-level wrappers with the exact submit names
 (``_transport_map_task`` / ``_transport_gather_task`` / ``_transport_gather_join`` /
-``_transport_broadcast_join_part``) binding a dask plane — the m45 dispatch spy records those
-``__name__``\ s. This module imports NOTHING from dask/distributed/parsl (the ``common/`` rule).
+``_transport_broadcast_join_part``) binding a dask plane — the dispatch tests count submits by
+those ``__name__``\ s. This module imports NOTHING from dask/distributed/parsl (the ``common/``
+rule).
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ def map_task_body(
 
     Coalesce this task's owned src blocks into <= P dest wires (reused ``coalesce_task``:
     ascending-src merge, O(P*rg) writer buffer) and REGISTER each in the holder's block store
-    via ``plane.store_block``. F12 holder plane: a dest wire that pushes producer-local RAM
+    via ``plane.store_block``. Holder plane: a dest wire that pushes producer-local RAM
     past ``holder_budget`` spills to disk (``holder_spill_count`` / ``peak_holder_bytes``).
     Returns only the manifest + sizes (bytes stay resident for the gather to pull).
     """
@@ -112,7 +112,7 @@ def pull_ordered(
 ) -> list[Any]:
     """Pull one side's fragments for a dest, COALESCED per holder.
 
-    One request per holder (the T2 bound); the fragments are then decoded back in the caller's
+    One request per holder (bounding incast); the fragments are then decoded back in the caller's
     ascending-task order (the deterministic merge). Byte-identical fragments (same digest from >1
     task) share one wire but are re-materialised per manifest entry (parity with
     ``stage2_gather``).
@@ -157,7 +157,7 @@ def gather_join_body(
 ) -> _JoinOut | None:
     """Gather one dest's co-partitioned build/probe fragments and join them.
 
-    Spilling under ``mem_budget``, one-sided dests included (the shared ``join_dest``, F1).
+    Spilling under ``mem_budget``, one-sided dests included (the shared ``join_dest``).
     """
     build_side = pull_ordered(plane, backend, left_pulls, timeout_s)
     probe_side = pull_ordered(plane, backend, right_pulls, timeout_s)

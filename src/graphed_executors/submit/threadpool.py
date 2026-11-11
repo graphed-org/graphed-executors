@@ -1,4 +1,4 @@
-"""``ThreadBackend`` — the stdlib conformance backend (plan §1.2.5).
+"""``ThreadBackend`` — the stdlib conformance backend.
 
 A ~80-line ``ThreadPoolExecutor`` :class:`SubmitBackend`: ``submit`` wraps ``fn`` to ``.result()``
 any :class:`SubmitFuture` args before invoking (in-process dependency resolution), and the same

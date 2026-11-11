@@ -1,8 +1,8 @@
-"""The canonical direct-HTEX recipe (plan §1.2 ``launch.py``, m46 IT3).
+"""The canonical direct-HTEX recipe.
 
 ``start_htex`` /``stop_htex``.
 
-``start_htex`` encodes the three measured direct-use moves a DFK normally performs (§0.3, verified
+``start_htex`` encodes the three measured direct-use moves a DFK normally performs (verified
 live on parsl 2026.7.20):
 
 1. set ``executor.run_dir`` (the DFK sets it per-executor);
@@ -56,12 +56,25 @@ def start_htex(
 
     ``heartbeat_period`` (seconds; ``None`` = the parsl default of 30) compresses the
     SIGKILL->WorkerLost detection latency — measured 2 s -> ~1.65 s vs ~29.7 s at the default, so
-    the m47 worker-death restart surfaces promptly (the watchdog respawns the worker in place).
+    a killed worker is noticed promptly (the watchdog respawns it in place).
 
     The caller's environment is deliberately NOT scrubbed — HTEX workers launch via the
     ``process_worker_pool`` console script and do NOT inherit the driver's ``sys.path``, so a test
     harness exports ``PYTHONPATH`` before calling this (measured load-bearing); clearing it here
     would break worker-side imports of caller-defined task fns.
+
+    Example::
+
+        from graphed_executors import parsl_runner, start_htex, stop_htex
+
+        # plan: from graphed_histogram.plan or graphed.aggregate_plan
+        executor = start_htex(workers=2, run_dir="runinfo")
+        try:
+            with parsl_runner(executor) as runner:
+                result = runner.run(plan)
+        finally:
+            stop_htex(executor)
+        print(result.value)
     """
     htex_cls, _ = _parsl_executor_types()
     _scripts_on_path()

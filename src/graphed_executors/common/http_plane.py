@@ -1,22 +1,22 @@
-"""The parsl worker-transport HTTP plane (plan §1.4; stdlib-only, importable with no parsl/dask).
+"""The parsl worker-transport HTTP plane (stdlib-only, importable with no parsl/dask).
 
-``EscalatingHttpTransport`` is a :class:`graphed.core.execution.WorkerTransport` built ON the
-frozen ``local/_transport.py`` substrate (``local/*`` is NEVER edited — this subclasses it) with
-the two behaviors the m47 contract needs that the local sender cannot provide:
+``EscalatingHttpTransport`` is a :class:`graphed.core.execution.WorkerTransport` that subclasses
+``local/_transport.py``'s ``HttpTransport`` to add two behaviors the parsl transport needs and the
+local sender cannot provide:
 
 - **Send-exhaustion escalation (the drop->raise bridge).** The base ``HttpTransport`` counts
   ``drops`` from a background sender thread and never raises — a silently dropped reduction/shuffle
-  node is a lost partial. This subclass sends **inline in the caller's thread** with the frozen
+  node is a lost partial. This subclass sends **inline in the caller's thread** with a
   5-attempt policy: 200->True; unknown/self dest->False; a destination **503** (full-inbox reject)
-  -> ``False`` + ``sends_rejected`` with **NO retry** (special-cased BEFORE the generic retry —
-  review N2; retrying into a full inbox only defers the verdict); a comm-class failure exhausting
+  -> ``False`` + ``sends_rejected`` with **NO retry** (special-cased BEFORE the generic retry:
+  retrying into a full inbox only defers the verdict); a comm-class failure exhausting
   the retries -> **raise** ``TransportDeliveryError`` + ``send_failures`` (never a silent ``drops
   += 1``).
 - **A dual-route server.** The local ``_InboxServer``/``_Handler`` is path-blind. This plane serves
   ``POST /msg`` (inbox delivery, epoch-guarded, optional bounded ``inbox_maxsize`` -> 503) and
   ``POST /pull`` (block-store reads, coalesced, evict-after-serve) on one bound port.
 
-``recv`` also honors an optional ``idle_deadline_s`` (design-A backstop): once that long passes
+``recv`` also honors an optional ``idle_deadline_s`` backstop: once that long passes
 with no delivered traffic it RAISES ``TransportDeliveryError`` so a reduce peer's drain loop always
 terminates even if the driver's ``("done",)`` release is lost. ``broadcast`` attempts EVERY peer
 then raises the aggregate (never the base stop-at-first loop), so one dead peer cannot strand the
@@ -225,7 +225,7 @@ class _DualRouteServer(LookupFreeHTTPServer):
 
 
 class EscalatingHttpTransport(HttpTransport):
-    """A :class:`graphed.core.execution.WorkerTransport` on the dual-route plane (plan §1.4).
+    """A :class:`graphed.core.execution.WorkerTransport` on the dual-route plane.
 
     Reuses the base ``set_registry``/``peers`` (registry-only); overrides
     ``__init__``/``send``/``recv``/``poll``/``broadcast``/``close`` for the inline raising
@@ -334,8 +334,7 @@ class EscalatingHttpTransport(HttpTransport):
     def broadcast(self, message: object) -> None:
         """Attempt EVERY registered peer, THEN raise the aggregated failure.
 
-        One dead peer cannot strand the live ones (design-A release netting; never the base
-        stop-at-first loop).
+        One dead peer cannot strand the live ones (never the base stop-at-first loop).
         """
         failed: list[tuple[str, BaseException]] = []
         for dest in self.peers():

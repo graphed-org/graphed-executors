@@ -1,9 +1,9 @@
-"""The shared shuffle-method resolver (plan §1.6 m47 move).
+"""The shared shuffle-method resolver.
 
 ``resolve_shuffle_method`` + ``_reject_transport_only_knobs`` moved here VERBATIM from
-``dask_backend/api.py`` so the dask facade AND the m47 parsl facade re-export the SAME function
+``dask_backend/api.py`` so the dask facade AND the parsl facade re-export the SAME function
 objects (``dask_backend.api.resolve_shuffle_method IS parsl_backend.api.resolve_shuffle_method IS
-common.facade.resolve_shuffle_method`` — the m45 truth-table suite + the frozen m47 identity
+common.facade.resolve_shuffle_method`` — the truth-table suite + the frozen identity
 witness both gate the sharing; a copy could drift). Pure and dependency-light: it reads only a
 ``SubmitCapabilities`` vector, so it imports NOTHING from dask or parsl (the ``common/`` import
 rule).

@@ -1,16 +1,15 @@
-"""Backend-agnostic worker-transport result types + failure classifier (plan §1.6 m47 move).
+"""Backend-agnostic worker-transport result types + failure classifier.
 
-The m44 witness/result dataclasses and the failure-classification helpers, moved here VERBATIM from
-``dask_backend/_transport_run.py`` so BOTH the dask worker-transport engine and the m47 parsl
-peer-exchange engine share the SAME objects (``dask_backend._transport_run.TransportWitness IS
-common.transport_run.TransportWitness`` — a frozen m47 identity witness). This module imports
-NOTHING from dask, distributed, or parsl: the classifier matches exception classes by NAME string,
-so a parsl-side ``TransportDeliveryError``/``PullTimeoutError`` is recognized without importing
-either backend (the §1.6 ``common/`` import rule; ``test_parsl_transport_imports``).
+The worker-transport witness/result dataclasses and the failure-classification helpers, shared by
+the dask worker-transport engine and the parsl peer-exchange engine as the SAME objects
+(``dask_backend._transport_run.TransportWitness IS common.transport_run.TransportWitness``). This
+module imports NOTHING from dask, distributed, or parsl: the classifier matches exception classes
+by NAME string, so a parsl-side ``TransportDeliveryError``/``PullTimeoutError`` is recognized
+without importing either backend (the ``common/`` import rule; ``test_parsl_transport_imports``).
 
 ``dask_backend/_transport_run.py`` keeps the dask-model-specific pieces (``require_pin`` reads
 ``backend.capabilities``; ``sorted_addresses``/``_counters_probe``/``_purge_probe``/
-``collect_and_purge`` touch a dask ``Client``) and re-exports the moved names from here.
+``collect_and_purge`` touch a dask ``Client``) and re-exports the shared names from here.
 """
 
 from __future__ import annotations
@@ -161,10 +160,9 @@ def _with_frames(exc: BaseException) -> str:
 def build_stage_error(exc: BaseException, backend: Any) -> Any:
     """Wrap a run-fatal failure as an attributed ``StageError``.
 
-    Never a raw ``KilledWorker`` /``WorkerLost`` / ``TransportDeliveryError`` to the user, §1.5
-    / m42 precedent. A ``describe_failure``-recognized death names the victim; anything else
-    keeps its own type + message (with the wrapped traceback frames appended, so a CI-only
-    crash names its site).
+    No raw ``KilledWorker`` / ``WorkerLost`` / ``TransportDeliveryError`` reaches the user. A
+    ``describe_failure``-recognized death names the victim; anything else keeps its own type +
+    message (with the wrapped traceback frames appended, so a CI-only crash names its site).
     """
     describe = getattr(backend, "describe_failure", None)
     info = describe(exc) if describe is not None else None
@@ -206,7 +204,7 @@ def run_epochs(
     witness: TransportWitness,
     stage_error: Callable[[BaseException, Any], Any] = build_stage_error,
 ) -> R:
-    """Run ``attempt(n, epoch_nonce)`` under a fresh epoch until it returns a result (§1.5).
+    """Run ``attempt(n, epoch_nonce)`` under a fresh epoch until it returns a result.
 
     ``attempt`` returns its result, or the exception that failed the run. A restart-worthy
     failure re-runs the WHOLE run under a fresh epoch, up to ``restarts_allowed`` times; any

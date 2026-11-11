@@ -1,4 +1,4 @@
-"""Reference single-machine executors (plan M7).
+"""Reference single-machine executors.
 
 A thread pool AND a process pool, both running the same `graphed.core.Plan` to one reduced result.
 
@@ -7,7 +7,7 @@ Both share the driver in :mod:`._driver`; they differ only in the worker pool an
 partition sets use the deterministic straggler-tolerant tree reduction; an adaptive `next_tasks`
 plan uses a running fold over a partition set discovered from observed timings. A worker failure
 (thread or process) propagates to the driver intact — in particular a picklable
-`graphed.debug.StageError` is re-raised as-is, never degraded to an opaque string (plan A.3 #8).
+`graphed.debug.StageError` is re-raised as-is, never degraded to an opaque string.
 """
 
 from __future__ import annotations
@@ -467,7 +467,17 @@ def _proc_combine_task(
 
 
 class ThreadExecutor(_BaseExecutor):
-    """Thread-pool executor: a thread-safe worker pool with thread-local `open_once` resources."""
+    """Thread-pool executor: a thread-safe worker pool with thread-local `open_once` resources.
+
+    Example::
+
+        from graphed_executors import ThreadExecutor
+
+        # plan: from graphed_histogram.plan or graphed.aggregate_plan
+        with ThreadExecutor(workers=4) as pool:
+            result = pool.run(plan)
+        print(result.value)
+    """
 
     def _pool(self) -> _PoolExecutor:
         return ThreadPoolExecutor(max_workers=self.max_workers)
@@ -854,8 +864,17 @@ class ProcessPoolExecutor(_ProcessExecutorBase):
     every peer's queue via the pool initializer. Simple and fast — the right default up to roughly
     the per-process file-descriptor limit. Because inheritance is O(N²) in fds, on large many-core
     machines (>~128 cores, or any low ``RLIMIT_NOFILE``) it warns and you should switch to
-    :class:`PinnedPoolExecutor` instead. This is the original M7 behaviour, now named explicitly so
-    the pool choice is never hidden.
+    :class:`PinnedPoolExecutor` instead. It was the only process pool before
+    :class:`PinnedPoolExecutor`; the name makes the choice visible at the call site.
+
+    Example::
+
+        from graphed_executors import ProcessPoolExecutor
+
+        # plan: from graphed_histogram.plan or graphed.aggregate_plan
+        with ProcessPoolExecutor(workers=4) as pool:
+            result = pool.run(plan)
+        print(result.value)
     """
 
     _peer_pool_is_pinned = False
@@ -890,7 +909,7 @@ class PinnedPoolExecutor(_ProcessExecutorBase):
 class ProcessExecutor(ProcessPoolExecutor):
     """Deprecated alias for :class:`ProcessPoolExecutor`.
 
-    The full-registry pool — its original M7 meaning. Kept for back-compat; pick
+    The full-registry pool under its old name. Kept for back-compat; pick
     :class:`ProcessPoolExecutor` or :class:`PinnedPoolExecutor` explicitly so the IPC pool is
     visible at the call site rather than chosen silently.
     """

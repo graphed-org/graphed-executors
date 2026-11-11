@@ -1,4 +1,4 @@
-"""The common submit-backend seam (plan §1.1-§1.2).
+"""The common submit-backend seam.
 
 The :class:`SubmitBackend` protocol, the generic :class:`SubmitRunner` Plan engine, the worker seam
 (:class:`RunContext`/:class:`WorkerEnv`), and the stdlib :class:`ThreadBackend` conformance

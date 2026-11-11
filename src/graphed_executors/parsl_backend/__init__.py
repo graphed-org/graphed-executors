@@ -1,10 +1,10 @@
-"""The parsl executor backend (plan §1.2), behind the ``[parsl]`` optional extra.
+"""The parsl executor backend, behind the ``[parsl]`` optional extra.
 
 :class:`ParslBackend` runs over a **started** parsl ``HighThroughputExecutor`` or
 ``ThreadPoolExecutor`` via DIRECT executor submit (no DFK). Capability vectors are per-instance:
 HTEX is the all-False "parsl floor" (the relay engine in
 :mod:`graphed_executors.common.relay_engine` is its shuffle path); TPE is the
-:class:`ThreadBackend` shape (``peer_data_movement=True``), so the m43 as-tasks engine (moved to
+:class:`ThreadBackend` shape (``peer_data_movement=True``), so the as-tasks engine (moved to
 :mod:`graphed_executors.common.tasks_engine`) runs over it unchanged.
 
 Importing this package pulls in NO parsl/dask/distributed: :class:`ParslBackend` defers the parsl

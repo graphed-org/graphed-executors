@@ -1,9 +1,9 @@
-"""graphed_executors.local (plan M7): reference single-machine executors for a `graphed.core.Plan`.
+"""graphed_executors.local: reference single-machine executors for a `graphed.core.Plan`.
 
 Interchangeable executors — `ThreadExecutor` (thread pool) and two spawn-based process pools — all
 run a Plan to one reduced result via a deterministic, straggler-tolerant tree reduction, honor
 `open_once` file-locality and stopping conditions, support adaptive reshaping via `next_tasks`, and
-surface a remote `StageError` to the driver intact (plan A.3 #8). Single machine only; the
+surface a remote `StageError` to the driver intact. Single machine only; the
 published contract (`graphed.core.execution`) is provisional until exercised by a real distributed
 adapter.
 

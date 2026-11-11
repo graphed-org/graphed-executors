@@ -833,6 +833,20 @@ def htcondor_runner(
     narrows where a managed service runs to a subset of the site's, such as ``("cluster",)``; a
     host the site does not offer is refused before any pilot is submitted. ``task_timeout_s``
     is :class:`HTCondorBackend`'s.
+
+    Example::
+
+        from graphed_executors import htcondor_runner
+
+        IMAGE = (
+            "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/"
+            "coffea-almalinux9-noml:2026.9.0-py3.12"
+        )
+
+        # plan: from graphed_histogram.plan or graphed.aggregate_plan
+        with htcondor_runner(site="lpc", workers=50, image=IMAGE) as runner:
+            result = runner.run(plan)
+        print(result.value)
     """
     n = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)
     pilots = CondorPilots(

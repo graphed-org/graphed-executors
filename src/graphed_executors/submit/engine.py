@@ -1,4 +1,4 @@
-"""The generic Plan engine ``SubmitRunner`` over any :class:`SubmitBackend` (plan §1.2).
+"""The generic Plan engine ``SubmitRunner`` over any :class:`SubmitBackend`.
 
 One engine, N backends — the same factorization as the generic shuffle engine over
 ``ShuffleBackend``. The fixed path mirrors the local reduction topology EXACTLY: leaves are
@@ -10,8 +10,8 @@ completions with ``running_fold`` and cancels outstanding work on stop. Both are
 
 The task functions it submits, and the worker seam they read, live in ``submit/worker.py``.
 
-A submission's scope is its run (plan-services §3.1): ``run`` opens one ``ExitStack`` and registers
-on it everything the submission acquires — the plan's :class:`ServiceSet` (``submit/services.py``)
+A submission's scope is its run: ``run`` opens one ``ExitStack`` and registers on it everything
+the submission acquires — the plan's :class:`ServiceSet` (``submit/services.py``)
 when ``plan.services`` is non-empty, then a ``cancel`` of its plan tasks not yet done — so no
 service, record or queued task of a run outlives it or reaches another. The body runs on the plan
 with the run's endpoints bound (graphed's ``bind_services``, before the first plan-task submit),

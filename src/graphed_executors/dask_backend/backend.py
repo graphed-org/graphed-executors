@@ -1,4 +1,4 @@
-"""``DaskBackend`` (plan §1.3.2).
+"""``DaskBackend``.
 
 A :class:`SubmitBackend` over a READY ``distributed.Client`` used as a dumb scheduler. Cluster
 construction (LocalCluster, SLURMCluster, LPCCondorCluster) is out-of-band user code — the verified
@@ -90,11 +90,11 @@ class DaskBackend:
         ``resources`` is accepted but **advisory-dropped** (NOT forwarded). dask treats
         ``resources=`` as a HARD scheduling constraint, so a request for a resource no
         worker advertises (e.g. ``{"GPU": 1}``) pins the task in no-worker state forever —
-        that would make correctness depend on a hint, which §1.1 forbids. Enforcement on a
+        and correctness must never depend on a hint. Enforcement on a
         resource-provisioned cluster is a future deployment-time opt-in (e.g. a
-        ``DaskBackend(enforce_resources=True)`` knob), recorded for m43/Phase-2.
+        ``DaskBackend(enforce_resources=True)`` knob), not built yet.
 
-        ``workers`` (m44 §1.2) is a STRICT worker pin honoured only when ``pin_to_worker`` is true
+        ``workers`` is a STRICT worker pin honoured only when ``pin_to_worker`` is true
         — forwarded as ``workers=[…], allow_other_workers=False`` so the task ERRORS on worker loss
         rather than migrating (the loud signal the epoch restart needs). Advisory-dropped
         otherwise, mirroring the ``resources`` treatment.
@@ -160,7 +160,7 @@ class DaskBackend:
         """Recognize a ``KilledWorker``.
 
         Its ``(failing_task_key, last_worker_address)`` is returned so the engine can raise an
-        attributed :class:`StageError` without importing distributed (§1.4). Everything else
+        attributed :class:`StageError` without importing distributed. Everything else
         returns ``None`` — the engine re-raises it intact.
         """
         if isinstance(exc, self._distributed.KilledWorker):
@@ -190,6 +190,16 @@ def dask_runner(
     Plan's per-task ``resources`` hints, if any, are advisory only — this adapter does not
     enforce them yet (see :meth:`DaskBackend.submit`).
     ``services`` are the runner's given service endpoints (``SubmitRunner(services=)``).
+
+    Example::
+
+        from dask.distributed import Client
+        from graphed_executors import dask_runner
+
+        # plan: from graphed_histogram.plan or graphed.aggregate_plan
+        with Client(n_workers=2, dashboard_address=":0") as client, dask_runner(client) as runner:
+            result = runner.run(plan)
+        print(result.value)
     """
     if retries is not None:
         warnings.warn(
