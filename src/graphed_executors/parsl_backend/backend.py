@@ -1,4 +1,4 @@
-"""``ParslBackend`` (plan §1.2).
+"""``ParslBackend``.
 
 A :class:`SubmitBackend` over a **started** parsl executor used via DIRECT executor submit — no
 DFK. The DFK unwraps future args on the head node anyway (dflow.py:863-901), so it would add a
@@ -7,9 +7,9 @@ capability gain; direct ``executor.submit(func, resource_specification, *args)``
 (executor.py:690) and measured working with three integration moves the
 :mod:`~graphed_executors.parsl_backend.launch` helper encodes.
 
-Per-INSTANCE capability vectors (plan §1.1): ``ParslBackend(HighThroughputExecutor)`` is the
+Per-INSTANCE capability vectors: ``ParslBackend(HighThroughputExecutor)`` is the
 all-seven-False "parsl floor" (future args resolve on the submit host, so ``peer_data_movement`` is
-False even when the m47 transport plane exists — setting it True would falsely open the m43
+False even when the transport plane exists — setting it True would falsely open the as-tasks
 ``_require_peer`` gate to head-node routing); ``ParslBackend(ThreadPoolExecutor)`` is the
 :class:`ThreadBackend` shape (``peer_data_movement=True`` alone — same-process shared memory). Any
 other executor type is refused with a loud ``TypeError`` naming both verified classes.
@@ -117,7 +117,7 @@ class _ParslFuture:
 
 
 class ParslBackend:
-    """A :class:`SubmitBackend` over a direct parsl executor submit (plan §1.2)."""
+    """A :class:`SubmitBackend` over a direct parsl executor submit."""
 
     def __init__(self, executor: Any) -> None:
         """Run tasks on a started parsl HighThroughputExecutor or ThreadPoolExecutor."""
@@ -142,7 +142,7 @@ class ParslBackend:
 
     @property
     def peer_transport(self) -> bool:
-        """m47: True on HTEX (the §1.4 peer plane runs on distinct worker PROCESSES), False on TPE.
+        """True on HTEX (the peer plane runs on distinct worker PROCESSES), False on TPE.
 
         Driver-process threads — a 'peer exchange' there is loopback head-node routing. A
         parsl_backend-private attribute the facade gates ``shuffle_method='transport'`` on;
@@ -195,8 +195,8 @@ class ParslBackend:
     ) -> SubmitFuture:
         """Resolve any :class:`_ParslFuture` args DRIVER-side.
 
-        Parsl workers cannot resolve a driver-process future — the §1.1 head-node round-trip that
-        makes ``peer_data_movement`` False. Then submit the concrete values wrapped in the
+        Parsl workers cannot resolve a driver-process future — the round-trip through the submit
+        host makes ``peer_data_movement`` False. Then submit the concrete values wrapped in the
         module-level shim. ``resource_spec`` is ``{"priority": p}`` on HTEX iff ``p != 0`` (the one
         key HTEX forwards, executor.py:393) else ``{}``; ALWAYS ``{}`` on TPE (measured: it raises
         ``InvalidResourceSpecification`` on anything else). A task on a lost worker is resubmitted
@@ -373,6 +373,19 @@ def parsl_runner(
     A :class:`ParslRunner` on a started parsl executor. ``close()`` does NOT shut the caller's
     executor down (the launch helper documents teardown via ``stop_htex``). ``services`` are the
     runner's given service endpoints.
+
+    Example::
+
+        from graphed_executors import parsl_runner, start_htex, stop_htex
+
+        # plan: from graphed_histogram.plan or graphed.aggregate_plan
+        executor = start_htex(workers=2, run_dir="runinfo")
+        try:
+            with parsl_runner(executor) as runner:
+                result = runner.run(plan)
+        finally:
+            stop_htex(executor)
+        print(result.value)
     """
     return ParslRunner(
         executor,

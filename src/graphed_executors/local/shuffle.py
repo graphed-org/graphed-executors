@@ -1,30 +1,30 @@
-"""The two-phase shuffle executor (plan M39 §4): map-write + gather over a ``ShuffleBackend``.
+"""The two-phase shuffle executor: map-write + gather over a ``ShuffleBackend``.
 
 This is the generic exchange/repartition ENGINE, backend-agnostic (it deals only in the opaque
 ``graphed.core.ShuffleBackend`` primitives — ``partition``/``concat``/``slice_rows``/
 ``estimated_bytes``/``to_wire``/``from_wire``), so its correctness is witnessed by EXECUTION over
-BOTH real backends (the a-BI theme), not merely a §A.4 import lint.
+BOTH real backends, not merely by an import lint.
 
-Design (plan §4.0-§4.3, §7):
+Design:
 
 - **Producer-task granularity** ``T ~ W`` (one producer-task per worker, each coalescing several
   ``src_pid``s), not ``T = N`` src_pids — so stage-1 emits at most **P blocks per producer-task**
-  (``O(T*P)``), never the ``O(N*P)`` per-src_pid MxR fragment blowup (§4.0/B, the anti-MxR gate).
+  (``O(T*P)``), never the ``O(N*P)`` per-src_pid MxR fragment blowup.
 - **Coalescing writer** streams sub-blocks into P open per-dest writers, flushing a row-group when
-  a writer reaches ``ROW_GROUP_BYTES``, so stage-1 writer memory is **O(P*rg)** (guidance 3), not
+  a writer reaches ``ROW_GROUP_BYTES``, so stage-1 writer memory is **O(P*rg)**, not
   O(total shuffled bytes). ``rg`` is the documented ``ROW_GROUP_BYTES`` knob.
-- **Deterministic ascending-``src_pid`` merge** (§4.0): producer-tasks own contiguous ascending
+- **Deterministic ascending-``src_pid`` merge**: producer-tasks own contiguous ascending
   ``src_pid`` ranges and the gather concatenates them in ascending task order, so a dest's rows
   assemble in a fixed order regardless of arrival — the content-addressed ``dest_block_hashes`` are
-  therefore byte-identical across two fuzzed-arrival runs (§7.1 determinism gate).
-- **Announcement-independent completeness** (§4.2.1/B1): the gather derives the input set from the
-  plan's producer-task set + per-producer-task manifests (a **per-dest GET**, ``O(N*P)`` metadata,
-  guidance 1), NOT from pushed announcements — which are demoted to droppable/duplicable hints.
-- **Steal + reliable ship-back** (§4.3/NB1,NB2): a stolen producer-task's blocks stay on the THIEF;
+  therefore byte-identical across two fuzzed-arrival runs.
+- **Announcement-independent completeness**: the gather derives the input set from the
+  plan's producer-task set + per-producer-task manifests (a **per-dest GET**, ``O(N*P)`` metadata),
+  NOT from pushed announcements — which are demoted to droppable/duplicable hints.
+- **Steal + reliable ship-back**: a stolen producer-task's blocks stay on the THIEF;
   only the tiny manifest is pushed to ``owner(task)`` (retry-until-ack, dedup), and the gather
   dials ``owner(task)`` for the manifest then pulls the block from the thief.
 
-Cluster-sim scope (§6.5): ``comms="ipc"`` runs the K logical nodes in-process (the default, the
+Cluster-sim scope: ``comms="ipc"`` runs the K logical nodes in-process (the default, the
 fast path every theme but the cross-process one uses); ``comms="http"`` gives each node its OWN
 node-local Store and a real HTTP block server bound to a ROUTABLE (non-loopback) address, so blocks
 move between distinct node Stores over a real socket on a dialable IP. This is a single-machine
@@ -319,10 +319,10 @@ def run_repartition(
     See the module docstring for the coalescing / determinism / announcement-independence /
     steal guarantees. ``comms="http"`` runs the routable cross-node cluster-sim.
 
-    M41 reader-plane knobs (both default off, so M39/M40 behaviour is unchanged):
+    Two reader-side budgets, both off by default:
     ``fetch_budget_bytes`` caps the RAM the gather holds — over it, fetched wires stream-spill to a
     node-local Store on disk (:func:`stage2_gather`); ``disk_budget_bytes`` caps each node's
-    Store, redistributing the spill across nodes under skew (T3).
+    Store, redistributing the spill across nodes under skew.
     """
     faults = faults if faults is not None else ShuffleFaults()
     n_src = len(src_blocks)
@@ -538,18 +538,18 @@ def run_join(
     faults: ShuffleFaults | None = None,
     advertise_host: str | None = None,
 ) -> ShuffleResult:
-    """Distributed relational hash JOIN of two block sets via the two-phase executor (plan §4.2).
+    """Distributed relational hash JOIN of two block sets via the two-phase executor.
 
     The build (``left``) and probe (``right``) sides are co-partitioned on ``__joinkey__`` (same
     ``parts`` + ``salt``) then gather-joined per dest by the generic ``join_blocks`` kernel — SQL
     *duplicating* semantics (a probe row with k build matches ⇒ k rows). ``broadcast=None`` lets
-    the pinned cost model choose (recorded in ``witness.broadcast_chosen``, E5); ``True``/``False``
+    the pinned cost model choose (recorded in ``witness.broadcast_chosen``); ``True``/``False``
     honour a plan-recorded choice. ``mem_budget_bytes`` bounds the gather-join working set by
-    spilling duplicated OUTPUT partitions to the node Store (B5). ``value`` maps dest (or
+    spilling duplicated OUTPUT partitions to the node Store. ``value`` maps dest (or
     probe-partition index, under broadcast) → the joined block; ``dest_block_hashes`` is the
     content-addressed determinism key.
 
-    F6: the auto (``broadcast=None``) choice is keyed on ``parts``, NOT the runtime ``workers``
+    The auto (``broadcast=None``) choice is keyed on ``parts``, NOT the runtime ``workers``
     count — a PLAN-STABLE N, so the SAME logical join makes the SAME choice regardless of how the
     worker pool happens to be sized at run time. (``graphed.join_plan`` applies the same
     ``parts``-keyed cost rule at plan-build time, but on partition COUNTS — the only size it has
@@ -595,7 +595,7 @@ def run_join(
 def _split_to_target(
     backend: ShuffleBackend[Any, Any], block: Any, target_bytes: int
 ) -> list[Any]:
-    """Split an oversized block at EVENT (row) boundaries into pieces of ~``target_bytes`` (§5.1).
+    """Split an oversized block at EVENT (row) boundaries into pieces of ~``target_bytes``.
 
     A small-enough block passes through unsplit.
     """
@@ -643,7 +643,7 @@ def run_repartition_by_size(
     store_root: str | os.PathLike[str] | None = None,
     row_group_bytes: int = ROW_GROUP_BYTES,
 ) -> ShuffleResult:
-    """Coalesce/split ``src_blocks`` toward ``target_bytes`` by MEASURED bytes (§5.1).
+    """Coalesce/split ``src_blocks`` toward ``target_bytes`` by MEASURED bytes.
 
     Split any oversized block at row boundaries, then coalesce consecutive pieces. Content +
     order preserved. Returns the rebalanced blocks in ``.partitions`` (no key routing — a

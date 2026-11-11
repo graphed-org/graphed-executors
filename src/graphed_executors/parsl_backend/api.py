@@ -1,12 +1,12 @@
-"""m47 (a): the parsl shuffle/join facade + the runtime reachability probe (plan §1.5, IT4).
+"""The parsl shuffle/join facade + the runtime reachability probe.
 
 ``run_repartition`` / ``run_join`` resolve the engine through the SHARED ``common.facade`` resolver
 (``parsl_backend.api.resolve_shuffle_method IS dask_backend.api.… IS common.facade.…`` — a copy
-could drift the m45-frozen truth table), then dispatch honestly per instance:
+could drift from the shared truth table), then dispatch honestly per instance:
 
 * ``"auto"``/``"tasks"`` -> the RELAY engine (``common.relay_engine``; head-node-routed, no p2p) —
   no parsl vector carries pin AND peer, so ``"auto"`` always lands on tasks;
-* explicit ``"transport"`` -> the §1.4 peer engine, gated on ``pbackend.peer_transport`` (TPE ->
+* explicit ``"transport"`` -> the peer engine, gated on ``pbackend.peer_transport`` (TPE ->
   ``NotImplementedError`` naming ``"tasks"``, zero submits) and fronted by the rendezvous-time
   reachability probe. A probe failure routes through ``on_unreachable``: ``"error"`` (the default)
   -> an attributed ``StageError`` naming the unreachable pair; ``"fallback"`` -> the relay engine
@@ -14,7 +14,7 @@ could drift the m45-frozen truth table), then dispatch honestly per instance:
 
 A transport-only knob explicitly set while resolution lands on ``"tasks"`` is a loud ``ValueError``
 BEFORE any submit. Imports only ``common.facade`` (the shared resolver) + the parsl-free probe
-primitives and the relay + transport engines, none of which couple to ``dask_backend`` (G9).
+primitives and the relay + transport engines, none of which couple to ``dask_backend``.
 """
 
 from __future__ import annotations
@@ -202,7 +202,7 @@ def run_join(
 def probe_peer_reachability(
     pbackend: Any, k: int, *, timeout_s: float = 5.0, registry_rewrite: Any = None
 ) -> ProbeReport:
-    """User-facing pre-flight (directive #2).
+    """User-facing reachability pre-flight.
 
     Seat k peers, run the overlay probe at rendezvous time, RELEASE the peers (the pool is
     usable afterwards), and report. ``registry_rewrite`` is the test poisoner seam (production

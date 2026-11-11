@@ -1,12 +1,12 @@
-"""m47 (a): the parsl worker transport.
+"""The parsl worker transport.
 
 K persistent peers over the ``EscalatingHttpTransport`` dual-route plane, driver-hosted
-self-rendezvous, epoch restarts (plan §1.4).
+self-rendezvous, epoch restarts.
 
-``parsl_run_plan`` hosts the UNCHANGED M38 ``process_and_reduce`` actor (review N1) on ``k`` peer
-tasks. Each peer mints its ``(host, port)`` IN-TASK, announces a ``hello`` to the driver endpoint,
-blocks on the barrier for the assembled registry (so no peer holds the address book before ALL k
-hellos — the G5 pre-created-inbox obligation subsumed by construction), then runs its engine body.
+``parsl_run_plan`` hosts the UNCHANGED ``process_and_reduce`` peer actor on ``k`` peer tasks. Each
+peer mints its ``(host, port)`` IN-TASK, announces a ``hello`` to the driver endpoint, blocks on
+the barrier for the assembled registry (so no peer holds the address book before ALL k
+hellos, and every inbox exists before any peer can send to it), then runs its engine body.
 The driver collects the root over its own endpoint and releases the peers with ``("done",)``. An
 exhausted send / a lost peer restarts the WHOLE run under a fresh epoch up to
 ``epoch_restarts_allowed``, else an attributed ``StageError`` (never a raw parsl exception).
@@ -14,7 +14,7 @@ exhausted send / a lost peer restarts the WHOLE run under a fresh epoch up to
 This module owns the shared driver primitives (barrier, registry broadcast, probe collection,
 restart classification) that ``transport_shuffle`` and ``api`` reuse. It imports NOTHING from parsl
 or ``dask_backend`` at load; the peer body's shuffle leg is a deferred import of
-``parsl_backend.transport_shuffle`` (F13 / G9).
+``parsl_backend.transport_shuffle``.
 """
 
 from __future__ import annotations
@@ -417,14 +417,15 @@ def parsl_run_plan(
     root_timeout_s: float = _ROOT_TIMEOUT_S,
     inject_recv_failures: dict[str, dict[str, int]] | None = None,
 ) -> TransportExecResult:
-    """Run ``plan`` as an M38 peer reduction hosted on ``pbackend`` (a ``ParslBackend`` over HTEX).
+    """Run ``plan`` as a peer reduction hosted on ``pbackend`` (a ``ParslBackend`` over HTEX).
 
-    ``monitor`` is accepted for signature parity (peer-mode telemetry is emit=False for m47).
-    Failure semantics: an exhausted send / worker death / no captured root restarts the whole
-    run under a fresh epoch up to ``epoch_restarts_allowed``, else an attributed ``StageError``
-    (§1.5). ``root_timeout_s`` bounds the driver's wait for the reduction root — raise it for a
-    legitimately long reduction (m44 parity); the peer lost-done ``idle_deadline_s`` is DERIVED
-    as ``root_timeout_s + slack`` so it always stays ≥ the root wait (§1.4).
+    ``monitor`` is accepted for signature parity; peer-mode telemetry is not emitted
+    (``emit=False``). Failure semantics: an exhausted send / worker death / no captured root
+    restarts the whole run under a fresh epoch up to ``epoch_restarts_allowed``, else an
+    attributed ``StageError``. ``root_timeout_s`` bounds the driver's wait for the reduction
+    root — raise it for a legitimately long reduction (as in the dask peer runner); the peer
+    lost-done ``idle_deadline_s`` is DERIVED as ``root_timeout_s + slack`` so it always stays
+    ≥ the root wait.
     """
     refuse_staged(plan, "parsl_run_plan", "ParslBackend(executor)")
     require_bound(plan)  # resolves no services: an unbound plan is refused before any task

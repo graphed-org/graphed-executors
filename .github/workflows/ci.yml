@@ -168,6 +168,7 @@ jobs:
             tests/frozen/m68d tests/extra/m68d tests/extra/finalize \
             tests/extra/workerlost/test_runner_vocabulary.py tests/extra/workerlost/test_few_tasks_warning.py \
             tests/extra/workerlost/test_user_errors_run_once.py \
+            'tests/extra/docs/test_docstrings.py::test_each_runnable_example_prints_the_plans_value[dask_runner]' \
             --cov-config=.coveragerc-dask \
             --cov-branch --cov \
             --cov-report=term-missing
@@ -250,6 +251,7 @@ jobs:
             tests/extra/finalize/test_finalize_runners.py::test_parsl_runners_finalize_once_on_the_driver \
             tests/extra/workerlost/test_few_tasks_warning.py::test_the_parsl_peer_reduction_warns \
             tests/extra/workerlost/test_user_errors_run_once.py \
+            'tests/extra/docs/test_docstrings.py::test_each_runnable_example_prints_the_plans_value[parsl_runner]' \
             --cov --cov-config=.coveragerc-parsl \
             --cov-branch --cov-fail-under=0
           # TERM every leftover (pool managers, spawned workers, Manager servers, resource trackers) and

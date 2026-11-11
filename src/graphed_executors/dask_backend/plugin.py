@@ -1,4 +1,4 @@
-"""The per-worker init plugin (plan §1.3.3).
+"""The per-worker init plugin.
 
 A real :class:`distributed.WorkerPlugin` subclass (``register_plugin`` raises ``TypeError`` on duck
 types) holding this worker's ``open_once`` resources. Imports distributed at module top — imported

@@ -1,6 +1,6 @@
-"""m44 (d): the M39-M41 shuffle / relational-join engine hosted on dask workers.
+"""The shuffle / relational-join engine hosted on dask workers.
 
-Over the worker transport (m44-transport-plan §1.4, Impl Target 5). An **O(T+P) scheduler graph** —
+Over the worker transport. An **O(T+P) scheduler graph** —
 exactly ``T`` strict-pinned ``_transport_map_task`` producers + ``P`` strict-pinned
 ``_transport_gather_task`` (or ``_transport_gather_join``) consumers + a CONSTANT control tail,
 with NO ``T*P`` pick tier: the map tasks register their per-dest wires in the holder's plugin block
@@ -8,13 +8,12 @@ store and the gather tasks PULL their dest's fragments worker→worker over ``gr
 (the pull-model data plane), so the bulk bytes never ride a task return or the driver.
 
 The compute BODIES + the reader-plane sizing replay MOVED to
-:mod:`graphed_executors.common.transport_tasks` (plan §1.6 m47) so the parsl peer-exchange engine
+:mod:`graphed_executors.common.transport_tasks` so the parsl peer-exchange engine
 runs the SAME bodies. This module keeps the O(T+P) DRIVER (submit/barrier/restart) + the four
-module-level **wrapper** task fns with the exact submit names the m45 dispatch spy records
+module-level **wrapper** task fns with the exact submit names the dispatch spy records
 (``_transport_map_task`` / ``_transport_gather_task`` / ``_transport_gather_join`` /
 ``_transport_broadcast_join_part``), each binding a dask block plane
-(``_get_plugin``/``pull_blocks``, deferred so this module imports on the dask-free main matrix,
-F13).
+(``_get_plugin``/``pull_blocks``, deferred so this module imports on the dask-free main matrix).
 """
 
 from __future__ import annotations
@@ -263,10 +262,10 @@ def transport_run_repartition(
     Over the worker transport. ``dest_block_hashes`` are byte-identical across runs AND equal to
     the local ``run_repartition`` on identical inputs. ``fetch_budget_bytes`` /
     ``disk_budget_bytes`` bound the reader plane (accounted by the driver-side replay);
-    ``holder_budget_bytes`` bounds the producer retention (F12); ``pull_timeout_s`` widens the
-    per-holder block-pull ceiling for large batches (R4). A worker death restarts the whole run
+    ``holder_budget_bytes`` bounds the producer retention; ``pull_timeout_s`` widens the
+    per-holder block-pull ceiling for large batches. A worker death restarts the whole run
     under a fresh epoch up to ``epoch_restarts_allowed``, else surfaces as an attributed
-    ``StageError`` (§1.5).
+    ``StageError``.
     """
     require_pin(dbackend)
     from .transport import ensure_engine_plugins
@@ -332,14 +331,14 @@ def transport_run_join(
 ) -> TransportShuffleResult:
     """Distributed relational hash JOIN over the worker transport.
 
-    ``broadcast=None`` lets the pinned ``parts``-keyed cost rule choose (F6 — never the live
+    ``broadcast=None`` lets the pinned ``parts``-keyed cost rule choose (never the live
     worker count); ``True``/``False`` honour a plan-recorded choice. Shuffle path: two
     co-partitioned repartitions (same ``salt``) + P per-dest ``_transport_gather_join`` tasks
     reusing ``join_with_budget`` (spill counters match the local engine exactly). Broadcast
     path: the build side ships once via ``dbackend.broadcast`` and each probe block is joined
     by a pinned ``_transport_broadcast_join_part`` — the large side never shuffles.
-    ``holder_budget_bytes`` bounds BOTH sides' producer retention on the shuffle path (F12,
-    mirrors repartition); ``pull_timeout_s`` widens the per-holder block-pull ceiling (R4).
+    ``holder_budget_bytes`` bounds BOTH sides' producer retention on the shuffle path (as
+    repartition does); ``pull_timeout_s`` widens the per-holder block-pull ceiling.
     Neither applies to the broadcast path (the build side ships via ``broadcast``, not the
     holder store).
     """

@@ -1,4 +1,4 @@
-"""The worker seam and the task entry points a :class:`SubmitRunner` submits (plan §1.1).
+"""The worker seam and the task entry points a :class:`SubmitRunner` submits.
 
 Per-run state travels as a picklable :class:`RunContext` first argument; per-worker capability
 (``open_once`` resources + the event transport) arrives via a :class:`WorkerEnv` a BACKEND installs

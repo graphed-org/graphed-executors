@@ -1,7 +1,7 @@
 """The engine's service set.
 
 Resolve each service a plan declares, check it, probe it from a worker, and release what was
-started when the submission that started it ends (plan-services §3.1, D2, D10).
+started when the submission that started it ends.
 
 A plan's ``services`` are graphed ``ServiceSpec`` requirements; the engine names none of them. A
 :class:`ServiceSet` satisfies each spec by three legs, in order: (1) an endpoint the user gave,
@@ -12,7 +12,7 @@ start from the spec's ``launch`` recipe: beside the driver (a stdlib ``Popen``) 
 no image and no GPUs, the backend offers ``"driver"`` in ``service_hosts``, and the driver holds it
 (the ``resources["memory_mb"]`` of the set's services beside the driver, this one included, sum to
 no more than the backend's ``driver_memory_mb``, else the host's physical memory), else on the
-cluster through the backend's ``host_service``/``release_service`` pair (D10: the capability IS the
+cluster through the backend's ``host_service``/``release_service`` pair (the capability IS the
 pair of methods). Nothing left raises :class:`ServiceUnavailableError` naming each leg and why it
 did not apply. The resolving runs inside the backend's ``starting_services()`` context when it has
 one, a backend that holds its workers back while a plan's services start, and the resolving and the

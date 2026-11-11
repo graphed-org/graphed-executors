@@ -1,20 +1,20 @@
-"""The m43 as-tasks shuffle / relational join engine as a NATIVE future graph.
+"""The as-tasks shuffle / relational join engine as a NATIVE future graph.
 
-Plan §1.3.4, §2 m43; moved to ``common/`` verbatim in m46, §1.6. Backend-generic: it runs over any
+Moved to ``common/`` verbatim. Backend-generic: it runs over any
 :class:`SubmitBackend` whose ``peer_data_movement`` capability holds — dask (via the
 ``dask_backend.shuffle`` re-export shim) and a parsl ``ThreadPoolExecutor`` (shared-memory threads
-report ``peer_data_movement=True``). The names are preserved verbatim: the frozen m43 Counter gates
+report ``peer_data_movement=True``). The names are preserved verbatim: the frozen Counter gates
 pin the submitted ``_dask_*`` function names, and a moved function object keeps its ``__name__``.
 
 The local two-phase engine computes every partition/join kernel **in the driver** (its ``cluster``
 duck-type only farms out block STORAGE — ``local/shuffle.py:364-377``), so running it over a
-dask-backed cluster object would distribute storage but not compute. m43 instead expresses
+dask-backed cluster object would distribute storage but not compute. This engine instead expresses
 map-write/gather as a dask future graph that REUSES the local per-task kernels and plan-level
 contracts, and RETIRES the announcement/manifest/steal machinery — under dask the future graph IS
 completeness (a gather *depends on* its producers; the scheduler tracks who holds what and workers
 fetch deps peer-to-peer) and the scheduler owns stealing.
 
-Graph shape (plan §1.3.4)::
+Graph shape::
 
     stage-1: T = min(n_workers, n_src) producer futures   ``_dask_map_write`` (worker-side coalesce
                  -> dict[dest -> wire bytes]                 + to_wire; records its (pid, address))
@@ -322,7 +322,7 @@ class RelayShuffleWitness(DaskShuffleWitness):
     """The :class:`DaskShuffleWitness` mechanism counters PLUS the head-node-routing witnesses.
 
     ``head_node_routed`` is True on every relay result, and ``driver_relay_bytes`` is the Σ of all
-    map-payload wire sizes resolved at the driver barrier (design-M2) — an unlabeled relay or a
+    map-payload wire sizes resolved at the driver barrier — an unlabeled relay or a
     stubbed tally fails the frozen witness.
     """
 
@@ -644,7 +644,7 @@ def dask_run_join(
 ) -> ShuffleResult:
     """Distributed relational hash JOIN of two block sets as a dask future graph.
 
-    ``broadcast=None`` lets the pinned cost rule choose, keyed on ``parts`` (F6 — never the
+    ``broadcast=None`` lets the pinned cost rule choose, keyed on ``parts`` (never the
     live worker count); ``True``/``False`` honour a plan-recorded choice. ``mem_budget_bytes``
     bounds the gather-join working set by spilling duplicated OUTPUT partitions (the reused
     ``join_with_budget``).

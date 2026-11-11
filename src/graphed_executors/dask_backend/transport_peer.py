@@ -1,9 +1,9 @@
-"""m44 (b)+(c): the M38 peer reduction hosted on dask workers over ``DaskWorkerTransport``.
+"""The peer reduction hosted on dask workers over ``DaskWorkerTransport``.
 
-m44-transport-plan §1.3. One long-running, strict-pinned, seceded peer task per worker runs the
+One long-running, strict-pinned, seceded peer task per worker runs the
 UNCHANGED ``process_and_reduce`` actor loop; the driver runs the UNCHANGED ``collect_peer_root``
 loop over a ``DriverTransport`` (fed by the workers' ``log_event``), always with an explicit
-``timeout_s`` so a lost root can never hang it (F3: on ``TimeoutError`` the caller falls back to
+``timeout_s`` so a lost root can never hang it (on ``TimeoutError`` the caller falls back to
 the peer task's returned root).
 
 Scheduler graph: exactly k ``_dask_peer_main`` actor tasks (leaves ride the broadcast payload —
@@ -13,7 +13,7 @@ fixed tree makes the result bit-for-bit the ``SequentialRunner`` baseline.
 
 This module imports the reduction kernels from ``graphed_executors.local._peer`` UNCHANGED and
 defers the dask-touching ``.transport`` import into function bodies, so it imports on the dask-free
-matrix (F13).
+matrix.
 """
 
 from __future__ import annotations
@@ -140,13 +140,13 @@ def transport_run_plan(
     root_timeout_s: float = _ROOT_TIMEOUT_S,
     epoch_restarts_allowed: int = 1,
 ) -> TransportExecResult:
-    """Run ``plan`` as an M38 peer reduction hosted on ``backend`` (a ``DaskBackend``).
+    """Run ``plan`` as a peer reduction, workers combining among themselves, on a ``DaskBackend``.
 
     ``monitor`` is accepted for signature parity but peer-mode telemetry over the transport is
-    not wired for m44 (emit=False) — a documented limitation. ``root_timeout_s`` bounds the
-    driver's ``collect_peer_root`` wait (R4; default ``_ROOT_TIMEOUT_S``) — raise it for a
+    not wired yet (emit=False) — a documented limitation. ``root_timeout_s`` bounds the
+    driver's ``collect_peer_root`` wait (default ``_ROOT_TIMEOUT_S``) — raise it for a
     legitimately long reduction, since a lost root now RAISES rather than defaulting to the
-    identity value (R2). Failure semantics (§1.5): an exhausted send / worker death / no
+    identity value. On failure, an exhausted send / worker death / no
     captured root restarts the whole run under a fresh epoch up to ``epoch_restarts_allowed``,
     else surfaces as an attributed ``StageError``.
     """

@@ -1,4 +1,4 @@
-"""The common submit-backend protocol (plan §1.1).
+"""The common submit-backend protocol.
 
 ``SubmitBackend`` names the one mechanism every parallel-execution library in the class shares:
 ``submit(fn, *args) -> future`` with future-valued args resolved before the callable runs (dask:

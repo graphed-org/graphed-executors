@@ -1,17 +1,17 @@
-"""m47 (a): the M39-M41 shuffle / relational-join engine hosted on k parsl peers (plan §1.4, IT3).
+"""The shuffle / relational-join engine hosted on k parsl peers.
 
 ``transport_run_repartition`` / ``transport_run_join`` seat ``k`` persistent peers (one per worker
 slot), each of which — INSIDE its task — maps its owned src range into its endpoint's block store,
 announces a manifest to the driver, awaits the driver's aggregated pull assignment, then PULLS its
 owned dests' fragments peer→peer over ``/pull`` (coalesced one request per holder,
 evict-after-serve) and gathers/joins them. Bytes move peer↔peer over the block plane; only the
-final dest blocks + the counters ride the task return (once, like the m44 dask returns).
-Reader-plane fetch budgets are a driver-side replay of the imported ``stage2_gather``
+final dest blocks + the counters ride the task return (once, like the dask transport engine's
+returns). Reader-plane fetch budgets are a driver-side replay of the imported ``stage2_gather``
 (``common.transport_tasks.replay_reader_plane``, the SAME code the dask job gates); join budgets
 are the real per-dest ``join_with_budget``.
 
 Reuses the driver primitives (barrier / registry / probe / restart) from ``transport_peer``;
-imports NOTHING from parsl or ``dask_backend`` (F13 / G9).
+imports NOTHING from parsl or ``dask_backend``.
 """
 
 from __future__ import annotations

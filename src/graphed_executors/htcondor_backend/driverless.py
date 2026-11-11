@@ -515,6 +515,20 @@ def submit_driverless(
     recomputes only the tasks the store does not hold. ``task_timeout_s`` is
     :class:`HTCondorBackend`'s and ``retry_user_errors`` is :class:`HTCondorRunner`'s.
     Everything is refused before the bindings are touched.
+
+    Example::
+
+        from graphed_executors.htcondor_backend import submit_driverless
+
+        IMAGE = (
+            "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/"
+            "coffea-almalinux9-noml:2026.9.0-py3.12"
+        )
+
+        # plan: from graphed_histogram.plan or graphed.aggregate_plan
+        handle = submit_driverless(plan, site="lpc", workers=8, image=IMAGE, log_dir="logs")
+        handle.wait(timeout=3600)  # returns on done, failed or removed
+        print(handle.result().value)
     """
     retrying(plan, retry_user_errors)  # the driver's runner would refuse only once pilots run
     workers = renamed(workers, n_pilots, "n_pilots", DEFAULT_PILOTS)

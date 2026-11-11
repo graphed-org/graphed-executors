@@ -1,9 +1,9 @@
 """The unified shuffle facade.
 
-THE front door to the two dask shuffle engines (m45-facade-plan, r2).
+THE front door to the two dask shuffle engines.
 
 ``run_repartition`` / ``run_join`` take a single ``shuffle_method="auto"|"transport"|"tasks"`` knob
-and dispatch over the frozen m43 as-tasks engine (``shuffle.py``) and m44 worker-transport engine
+and dispatch over the as-tasks engine (``shuffle.py``) and the worker-transport engine
 (``transport_shuffle.py``), so users pick an engine with ONE word instead of juggling both entry
 points (the "too many knobs" directive). ``"auto"`` is capability-static: transport iff the backend
 supports BOTH strict worker pinning and peer data movement, else the as-tasks engine — it does NOT
@@ -26,7 +26,7 @@ Callers needing ``monitor=`` / ``retries=`` use the still-public ``dask_run_*`` 
 internally (a caller-supplied runner would open a ``runner.backend is not dbackend`` consistency
 hole between resolution and dispatch).
 
-Dask-import-free at module load (F13): both engines' entry modules and ``SubmitRunner`` are
+Dask-import-free at module load: both engines' entry modules and ``SubmitRunner`` are
 dask-free, the transport engine deferring its distributed-touching half to the call.
 """
 

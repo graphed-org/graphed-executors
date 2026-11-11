@@ -24,16 +24,15 @@ fresh announce, so the loop is bounded by the node's restarts.
 - 0: done.
 - 1: environment, which the job's retries may get past. Anything raised before or after
   ``runner.run(plan)``: reading ``run.json`` or the plan, starting the pilots, and the driver's own
-  service set (its endpoints and placement are environment; *this plan's decision*, plan-services
-  D6). Inside ``runner.run``: a run whose workers were lost (a ``graphed.WorkerLostError``,
-  e.g. every pilot preempted; *owner ruling 2026-09-25*), a ``StoreUnavailable``, and the run's own
-  service phase or a failed task's re-check of its services (``ServiceUnavailableError``,
-  ``ServiceUnreachableError`` and a probe's ``WorkerLostError``; *this plan's decision*).
+  service set (its endpoints and placement are environment). Inside ``runner.run``: a run whose
+  workers were lost (a ``graphed.WorkerLostError``, e.g. every pilot preempted), a
+  ``StoreUnavailable``, and the run's own service phase or a failed task's re-check of its
+  services (``ServiceUnavailableError``, ``ServiceUnreachableError`` and a probe's
+  ``WorkerLostError``).
 - 3: an ``EnvironmentChanged`` from making the plan resumable on ``run.json["store"]``, and every
   other exception from ``runner.run(plan)``: the plan's own error, deterministic, so the job's
   ``retry_until`` (a DAG's ``RETRY driver 2 UNLESS-EXIT 3``) stops retrying it. A ``StageError``
-  (*owner ruling 2026-09-25*) or a task's exception re-raised intact, such as a ``ValueError``
-  (*this plan's decision*).
+  or a task's exception re-raised intact, such as a ``ValueError``.
 """
 
 from __future__ import annotations

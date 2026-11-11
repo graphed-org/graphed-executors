@@ -45,7 +45,7 @@ def sha256_hex(data: bytes) -> str:
 # ---- public result / fault / witness types ------------------------------------------------------
 @dataclass(frozen=True)
 class ShuffleFaults:
-    """Deterministic fault injection (never a timing race, R0.10a).
+    """Deterministic fault injection: fixed switches and counts, never a timing race.
 
     Announcement drop/duplicate, a forced steal (relocate >=1 producer-task to a non-owner
     node), and a fixed manifest-push drop count (drop the first N thief->owner pushes of each
@@ -131,10 +131,10 @@ class ShuffleResult:
 def routing_hash_measurement() -> dict[str, float]:
     """MEASURE the pinned sha256 route hash against a non-cryptographic alternative.
 
-    On packed-u64 keys (guidance 2 — never invent numbers, R0.11). Returns ``{name: seconds}``;
+    Measured on packed-u64 keys. Returns ``{name: seconds}``;
     ``PINNED_ROUTING_HASH`` records the chosen one (sha256, which the golden vectors require).
-    Non-crypto hashes are faster, but the process-independent B2 requirement is met by either — so
-    the choice is documented, not silently optimized away from the golden rule.
+    Non-crypto hashes are faster, but either meets the requirement that every process routes a
+    key alike — so the choice is documented, not silently optimized away from the golden rule.
     """
     keys = [k.to_bytes(8, "big") for k in range(4096)]
     t0 = time.perf_counter()
@@ -482,7 +482,7 @@ def stage2_gather(
 ) -> tuple[dict[int, Any], dict[int, str]]:
     """Gather each dest in ascending-task (== ascending-src_pid) order — the deterministic merge.
 
-    It has two M41 reader-plane hardenings over the M39 per-dest concat:
+    It hardens the reader over a plain per-destination concat in two ways:
 
     - **T2 incast avoidance:** cross-node pulls are COALESCED to one bulk fetch per (gather,
       holder) node-pair (``bulk_fetch_count <= K*K``), instead of one ``cluster.get`` per (task,

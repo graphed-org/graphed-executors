@@ -1,13 +1,13 @@
-"""graphed's M38 ``WorkerTransport`` implemented ATOP dask's worker-to-worker comm layer.
+"""graphed's ``WorkerTransport`` implemented ATOP dask's worker-to-worker comm layer.
 
-m44-transport-plan §1.1/§1.5/§1.7. The P2P-shuffle pattern: a ``WorkerPlugin`` registers custom ops
+The P2P-shuffle pattern: a ``WorkerPlugin`` registers custom ops
 in ``worker.handlers`` and sends ride ``worker.rpc`` (the pooled ``ConnectionPool``).
 
 This module subclasses ``distributed.WorkerPlugin`` and therefore imports distributed at module
 top; it is imported ONLY lazily (from the deferring ``transport_peer``/``transport_shuffle``
 function bodies, and by-reference when a worker unpickles a task fn), so
 ``graphed_executors.dask_backend`` still leaves ``distributed`` out of ``sys.modules`` until a run
-actually starts (F13).
+actually starts.
 
 Three endpoints, all satisfying the ``WorkerTransport`` Protocol structurally:
 
@@ -15,7 +15,7 @@ Three endpoints, all satisfying the ``WorkerTransport`` Protocol structurally:
   thread to the worker IO loop via ``distributed.utils.sync`` and does a bounded at-least-once
   retry over ``worker.rpc(dest).graphed_transport_recv`` (the ``HttpTransport`` sender policy: 5
   attempts, backoff, 5 s per attempt), raising ``TransportDeliveryError`` on exhaustion rather than
-  a silent ``False`` on reduction-class traffic (hard constraint 8). ``send("driver", …)`` rides
+  a silent ``False`` on reduction-class traffic. ``send("driver", …)`` rides
   ``worker.log_event``.
 - ``DriverTransport`` — the reserved ``"driver"`` endpoint in the client process (not a dask
   Server): worker→driver over ``subscribe_topic`` (fed by the workers' ``log_event``), driver→all
@@ -86,20 +86,20 @@ class TransportDeliveryError(Exception):
     """A ``send`` exhausted its bounded at-least-once retries against a live peer.
 
     Raised OUT of the pinned peer/gather task (never a silent ``False`` on reduction-class
-    traffic) so it escalates to the §1.5 epoch restart / attributed ``StageError`` — the
-    un-editable consumers ignore ``send``'s bool (``_peer.py:214``/``:453``), so raising is the
-    only sound exhaustion semantics.
+    traffic) so it escalates to the epoch restart / attributed ``StageError`` — the reduction
+    loop in ``local/_peer.py`` ignores ``send``'s bool, so raising is the only sound exhaustion
+    semantics.
     """
 
 
 class PullTimeoutError(Exception):
     """A block-plane ``graphed_block_pull`` timed out (a slow or dead holder).
 
-    Raised OUT of the pinned gather task with the holder named, so §1.5 classifies it
-    restart-worthy (a timed-out holder is treated as lost → whole-run restart onto the
-    survivors) instead of leaking a bare ``asyncio.TimeoutError`` as an opaque ``StageError``
-    (R4). ``pull_blocks(..., timeout_s=…)`` lets a caller widen the ceiling for a legitimately
-    large coalesced batch before the restart budget burns.
+    Raised OUT of the pinned gather task with the holder named, so the restart classifier
+    treats it as restart-worthy (a timed-out holder is treated as lost → whole-run restart onto
+    the survivors) instead of leaking a bare ``asyncio.TimeoutError`` as an opaque
+    ``StageError``. ``pull_blocks(..., timeout_s=…)`` lets a caller widen the ceiling for a
+    legitimately large coalesced batch before the restart budget burns.
     """
 
 
@@ -145,8 +145,7 @@ def make_transport_spec(
 
     ``overlay=None`` means every worker may send to every other worker and to ``"driver"`` (the
     engine passes its own bounded ``worker_outbox_addresses`` overlay). ``pull_timeout_s=None``
-    uses the ``PULL_ATTEMPT_TIMEOUT_S`` default; a caller widens it for large block batches
-    (R4).
+    uses the ``PULL_ATTEMPT_TIMEOUT_S`` default; a caller widens it for large block batches.
     """
     ov = None if overlay is None else {a: tuple(v) for a, v in overlay.items()}
     return _TransportSpec(
@@ -200,9 +199,9 @@ class _RunState:
 class GraphedTransportPlugin(distributed.WorkerPlugin):  # type: ignore[misc]
     """A ``distributed.WorkerPlugin`` registered once per client.
 
-    ``name='graphed-transport'``, ``idempotent=True`` — the m42 idiom, so a harness
-    pre-registration and the engine's own registration are ONE instance. ``setup`` registers
-    the three handlers, then runs the §1.7 canary (a self-RPC ping) so a drifted worker-handler
+    ``name='graphed-transport'``, ``idempotent=True``, so a harness pre-registration and
+    the engine's own registration are ONE instance. ``setup`` registers the three handlers,
+    then runs a canary (a self-RPC ping) so a drifted worker-handler
     seam fails LOUDLY at register time instead of corrupting a run.
     """
 
@@ -425,15 +424,15 @@ def pull_blocks(
     """Worker-task-side block-plane pull (the shuffle gather's data path).
 
     Dial ``holder``'s ``graphed_block_pull`` over ``worker.rpc`` for a COALESCED batch of
-    ``digests`` (one RPC per holder — the T2 incast bound), bridging the task thread to the IO
-    loop via ``sync``. A dead holder surfaces as the comm-class error the §1.5 restart
-    classifier recognizes; a purged epoch raises (never a silent empty), so a lost block can
-    never be read as zero rows (hard constraint 8).
+    ``digests`` (one RPC per holder, bounding incast), bridging the task thread to the IO
+    loop via ``sync``. A dead holder surfaces as the comm-class error the restart classifier
+    recognizes; a purged epoch raises (never a silent empty), so a lost block can never be read
+    as zero rows.
 
     ``timeout_s`` bounds each coalesced batch (default ``PULL_ATTEMPT_TIMEOUT_S``; the gather task
-    passes ``spec.pull_timeout_s`` so a caller can widen it for a legitimately large batch — R4).
+    passes ``spec.pull_timeout_s`` so a caller can widen it for a legitimately large batch).
     No per-pull retry: a timed-out or lost holder restarts the WHOLE run under a fresh epoch (a
-    fresh ``PullTimeoutError`` is the §1.5 restart-worthy signal), not this one pull.
+    fresh ``PullTimeoutError`` is the restart-worthy signal), not this one pull.
     """
     worker = distributed.get_worker()
 
@@ -489,8 +488,8 @@ class DaskWorkerTransport:
     def has_root(self) -> bool:
         """True once this endpoint has shipped a reduction root to the driver.
 
-        Even a ``None`` root (R2: ``root_sent is None`` must NOT read as 'no root', or a
-        genuinely-None reduction defaults to the identity value on the F3 fallback path).
+        Even a ``None`` root counts, so a genuinely-``None`` reduction is not replaced by the
+        identity value when the driver falls back to a peer-captured root.
         """
         return self.root_sent is not _NO_ROOT
 
