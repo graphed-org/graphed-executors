@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
 from graphed.core import Plan
 
 from graphed_executors import ProcessPoolExecutor
-from graphed_executors.parsl_backend.backend import _explained
+from graphed_executors.parsl_backend.backend import _explained, _ParslFuture
 
 MAIN_ATTR = (
     "Can't get attribute 'count' on <module '__mp_main__' from '/v/bin/process_worker_pool.py'>"
@@ -75,6 +76,18 @@ def test_a_launch_script_function_is_named_with_its_fix() -> None:
     assert type(explained) is AttributeError and explained.__cause__ is raw
     assert str(explained).startswith("count is defined in your launch script (__main__)")
     assert "PYTHONPATH" in str(explained)
+
+
+def test_a_parsl_future_raises_and_returns_the_named_error() -> None:
+    raw: Future[object] = Future()
+    raw.set_exception(AttributeError(MAIN_ATTR))
+    future = _ParslFuture(raw, {})
+    with pytest.raises(
+        AttributeError, match=r"^count is defined in your launch script"
+    ) as excinfo:
+        future.result()
+    assert excinfo.value.__cause__ is raw.exception()
+    assert str(future.exception()).startswith("count is defined in your launch script")
 
 
 @pytest.mark.parametrize(

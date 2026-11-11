@@ -243,11 +243,12 @@ jobs:
           COVERAGE_RCFILE: ${{ github.workspace }}/.coveragerc-parsl
         run: |
           python -c "import sysconfig, pathlib; pathlib.Path(sysconfig.get_path('purelib'), 'graphed_subcov.pth').write_text('import coverage; coverage.process_startup()\n')"
-          pytest tests/frozen/m46 tests/frozen/m47 tests/extra/m47 tests/extra/floating_point tests/extra/progress \
+          pytest -o faulthandler_timeout=300 tests/frozen/m46 tests/frozen/m47 tests/extra/m47 tests/extra/floating_point tests/extra/progress \
             tests/frozen/m63/test_m63_submit_parsl.py tests/extra/workerlost/test_skip_failed.py \
             'tests/extra/docs/test_backend_page_examples.py::test_the_first_example_runs_as_written[parsl.rst]' \
             tests/extra/plans/test_plan_rules.py::test_parsl_names_a_hand_built_plans_launch_script_function \
             tests/extra/plans/test_plan_rules.py::test_a_launch_script_function_is_named_with_its_fix \
+            tests/extra/plans/test_plan_rules.py::test_a_parsl_future_raises_and_returns_the_named_error \
             tests/extra/plans/test_plan_rules.py::test_any_other_error_comes_back_unchanged \
             tests/frozen/m65/test_m65a3_control_parsl.py \
             tests/frozen/m68c/test_m68c_submit_parsl.py \
