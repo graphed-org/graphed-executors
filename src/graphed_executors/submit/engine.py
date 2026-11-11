@@ -21,6 +21,7 @@ and the value is resolved against the plan while its services are still up.
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import pickle
 import queue
@@ -29,7 +30,7 @@ import time
 import traceback
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from concurrent.futures import Future
+from concurrent.futures import CancelledError, Future
 from dataclasses import replace
 from typing import Any, TypeVar, cast, overload
 
@@ -120,12 +121,13 @@ class _RunTasks:
     runs through :func:`_service_checked`.
     """
 
-    def __init__(self, backend: SubmitBackend) -> None:
+    def __init__(self, backend: SubmitBackend, lost: list[Task] | None = None) -> None:
         self._backend = backend
+        self._lost = lost  # given, it collects each leaf whose future settles as a lost worker
         self.checks: tuple[tuple[str, str, str], ...] = ()
         self.tasks: dict[str, Task] = {}  # by backend key: a failure's key names its chunk
         self._lock = threading.Lock()
-        self._pending: set[SubmitFuture] = set()
+        self._pending: dict[SubmitFuture, Task | None] = {}  # each with its leaf, if it is one
 
     def submit(
         self,
@@ -144,13 +146,32 @@ class _RunTasks:
         retries = 0 if self._backend.capabilities.per_task_retries else retries
         fut = self._backend.submit(fn, *args, key=key, retries=retries)
         with self._lock:
-            self._pending.add(fut)
+            self._pending[fut] = task
         fut.add_done_callback(self._done)  # outside the lock: a done future calls back at once
         return fut
 
     def _done(self, fut: SubmitFuture) -> None:
+        # held while the leaf is judged, so settle() returns only once every done leaf is counted
         with self._lock:
-            self._pending.discard(fut)
+            if fut not in self._pending:
+                return
+            task = self._pending.pop(fut)
+            # a dask future's local status spares exception() its event-loop round trip
+            if task is None or self._lost is None or getattr(fut, "status", "error") != "error":
+                return
+            with contextlib.suppress(CancelledError):
+                exc = fut.exception()
+                if exc is not None and _lost_worker(self._backend, exc):
+                    self._lost.append(task)
+
+    def settle(self) -> None:
+        """Count the futures already done whose callbacks have not run (dask runs them late)."""
+        if self._lost is None:
+            return
+        with self._lock:
+            done = [fut for fut in self._pending if fut.done()]
+        for fut in done:
+            self._done(fut)
 
     def cancel(self) -> None:
         """Cancel the run's plan tasks not yet done (best-effort, as ``backend.cancel`` is)."""
@@ -159,6 +180,17 @@ class _RunTasks:
             pending = [fut for fut in self._pending if not fut.done()]
         if pending:
             self._backend.cancel(pending)
+
+
+def _described(backend: SubmitBackend, exc: BaseException) -> tuple[str, str] | None:
+    """Return the ``(task key, last worker)`` that ``backend`` describes ``exc`` with, if any."""
+    describe = getattr(backend, "describe_failure", None)
+    return describe(exc) if describe is not None else None
+
+
+def _lost_worker(backend: SubmitBackend, exc: BaseException) -> bool:
+    """Return whether ``backend`` describes ``exc`` as a lost worker; a timeout is not one."""
+    return not isinstance(exc, TimeoutError) and _described(backend, exc) is not None
 
 
 def _clear_engine_frames(exc: BaseException) -> None:
@@ -256,18 +288,73 @@ class SubmitRunner:
         with observed_run(monitor, plan):
             while True:
                 ctx = self._context(uuid.uuid4().hex[:8], monitor)
+                lost: list[Task] | None = [] if skip_failed else None
                 try:
                     # the submission's scope: released in reverse on exit
                     with contextlib.ExitStack() as scope:
-                        result = self._run_scoped(plan, monitor, control, given, ctx, scope)
+                        result = self._run_scoped(plan, monitor, control, given, ctx, scope, lost)
                     break
                 except WorkerLostError as err:
                     # ponytail: reruns every chunk per poison chunk; per-leaf substitution needs
                     # the fixed tree to rewire a failed leaf's dependents
-                    plan = without_lost(plan, err)
+                    together = functools.partial(self._lose_together, given)
+                    plan = self._without_culprits(plan, err, lost or [], together)
         if result.n_partitions:  # asked earlier, a pilot backend would start its pilots
             warn_few_tasks(plan, self._task_slots)
         return finalize_result(plan, result)
+
+    @staticmethod
+    def _without_culprits(
+        plan: Plan[Any] | DurablePlanV2,
+        err: WorkerLostError,
+        lost: list[Task],
+        lose_together: Callable[[Plan[Any], tuple[Task, ...]], bool],
+    ) -> Plan[Any]:
+        """Charge the leaves that lose a worker run alone, of all that were lost with ``err``.
+
+        A backend may fail every leaf a dead worker held (dask's ``allowed-failures`` marks them
+        all), and the culprit, on every dead worker, is always among them: halves of the suspects
+        are rerun until each culprit runs alone. A lone suspect the loss was not blamed on (a
+        broadcast was) is rerun too. With no culprit found, ``err`` is charged as a single loss is.
+        """
+        suspects = tuple(sorted({t.key: t for t in lost}.values(), key=lambda t: t.key))
+        blamed_alone = [chunk_label(t.partition) for t in suspects] == [err.partition]
+        culprits: list[Task] = []
+        if suspects and not blamed_alone and isinstance(plan, Plan) and plan.next_tasks is None:
+            probe = functools.partial(lose_together, plan)
+
+            def culprits_in(group: tuple[Task, ...]) -> list[Task]:
+                if len(group) == 1:
+                    return list(group)
+                halves = (group[: len(group) // 2], group[len(group) // 2 :])
+                return [t for h in halves if probe(h) for t in culprits_in(h)]
+
+            # the run lost a worker with every suspect in it, so only a lone one needs a rerun
+            if len(suspects) > 1 or probe(suspects):
+                culprits = culprits_in(suspects)
+        errs = [
+            WorkerLostError(partition=chunk_label(t.partition), worker=err.worker)
+            for t in culprits
+        ]
+        for e in errs or [err]:
+            plan = without_lost(plan, e)
+        return cast("Plan[Any]", plan)
+
+    def _lose_together(
+        self, given: Mapping[str, str] | None, plan: Plan[Any], tasks: tuple[Task, ...]
+    ) -> bool:
+        """Run ``plan`` on ``tasks`` alone; return whether it lost a worker.
+
+        Unmonitored and uncontrolled: a probe would report its tasks to the monitor, and reset a
+        cancel that the rerun must still see.
+        """
+        ctx = self._context(uuid.uuid4().hex[:8], None)
+        try:
+            with contextlib.ExitStack() as scope:
+                self._run_scoped(replace(plan, tasks=tasks), None, None, given, ctx, scope)
+        except WorkerLostError:
+            return True
+        return False
 
     def _before_run(self, plan: Plan[Any] | DurablePlanV2) -> None:
         """Refuse ``plan`` before anything starts; a hook, so ``run`` keeps one warning frame."""
@@ -280,12 +367,13 @@ class SubmitRunner:
         given: Mapping[str, str] | None,
         ctx: RunContext,
         scope: contextlib.ExitStack,
+        lost: list[Task] | None = None,
     ) -> ExecResult[R] | ExecResult[Any]:
         events_seen = [0]
         # handlers run on worker threads; += is not atomic without the GIL
         seen_lock = threading.Lock()
         unsub: Callable[[], None] | None = None
-        submits = _RunTasks(self.backend)
+        submits = _RunTasks(self.backend, lost)
         try:
             if control is not None and control.state is RunState.CANCELLED:
                 empty = None if isinstance(plan, DurablePlanV2) else plan.empty()
@@ -335,6 +423,7 @@ class SubmitRunner:
         except BaseException as exc:
             # the backend keeps exc, whose engine frames from this raise hold the run's futures
             _clear_engine_frames(exc)
+            submits.settle()
             # here, not at each result(): parsl surfaces a loss while submitting the next combine
             translated = self._translate(exc, submits.tasks)
             if translated is None:
@@ -771,14 +860,13 @@ class SubmitRunner:
 
     def _translate(self, exc: BaseException, tasks: Mapping[str, Task]) -> StageError | None:
         """Return the attributed error for a backend failure, ``None`` for anything else."""
-        describe = getattr(self.backend, "describe_failure", None)
-        info = describe(exc) if describe is not None else None
+        info = _described(self.backend, exc)
         if info is None:
             return None
         failing_key, last_worker = info
         task = tasks.get(failing_key)
         partition = chunk_label(task.partition) if task is not None else str(failing_key)
-        if not isinstance(exc, TimeoutError):
+        if _lost_worker(self.backend, exc):
             return WorkerLostError(partition=partition, worker=last_worker)
         return StageError(
             op="run",
