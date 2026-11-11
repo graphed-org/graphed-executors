@@ -21,7 +21,8 @@ probe inside its ``starting_service_set()`` context, a backend that starts one s
 Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from
 a worker. Where the service runs, a dial passes on any listener, so a port another process listens
 on (:func:`listeners`, read from Linux ``/proc``) that the child's process tree does not hold
-(:func:`held_by`) refuses the start. The worker probe is an ordinary ``backend.submit`` of
+(:func:`held_by`) refuses the start; a port taken once the child has exited moves it to the next
+port of its range. The worker probe is an ordinary ``backend.submit`` of
 :func:`_probe_services`, one task that runs every service's check and answers with
 :func:`host_identity` and each check's reason; each answer is awaited up to the largest
 ``timeout_s`` among the set's services. It is resubmitted under a fresh key (at most ``max(2,
@@ -467,6 +468,14 @@ def _free_port(host: str, ports: tuple[int, int]) -> int:
     raise error
 
 
+def _bindable(host: str, port: int) -> bool:
+    try:
+        _free_port(host, (port, port))
+    except OSError:
+        return False
+    return True
+
+
 def _render(argv: Sequence[str], host: str, port: int) -> list[str]:
     subs = {"{port}": str(port), "{host}": host, "{python}": sys.executable}
     out = []
@@ -648,47 +657,79 @@ class ServiceSet:
         identity = self._driver_identity()
         with _PORT_LOCK:  # held from the scan until ready or failed; its wait is outside timeout_s
             started = time.time()
-            port = _free_port(host, ports)
-            env = {**os.environ, **spec.launch.env}
-            proc = subprocess.Popen(_render(spec.launch.argv, host, port), env=env)
-            stack.callback(
-                release_quietly,
-                f"service {spec.name!r} (pid {proc.pid})",
-                _stop_child,
-                proc,
-                spec.name,
-            )
-            endpoint = minted_endpoint(spec.check, host, port)
+            low, high = ports
             deadline = time.monotonic() + spec.timeout_s
+            env = {**os.environ, **spec.launch.env}
             while True:
-                code = proc.poll()
-                if code is not None:
-                    reason = (
-                        f"{proc.args!r} exited with returncode {code} before {spec.check!r} passed"
+                port = _free_port(host, (low, high))
+                proc = subprocess.Popen(_render(spec.launch.argv, host, port), env=env)
+                stack.callback(
+                    release_quietly,
+                    f"service {spec.name!r} (pid {proc.pid})",
+                    _stop_child,
+                    proc,
+                    spec.name,
+                )
+                endpoint = minted_endpoint(spec.check, host, port)
+                if self._await_child(spec, legs, proc, host, port, endpoint, deadline):
+                    break
+                low = port + 1
+                if low > high:
+                    raise OSError(
+                        errno.EADDRINUSE, f"no port in {ports[0]}-{high} on {host} stayed free"
                     )
-                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
-                left = deadline - time.monotonic()
-                reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
-                # read after the dial, which passes on any listener, so the one it reached is
-                # judged
-                inodes = listeners(port)
-                if inodes and not held_by(proc.pid, inodes):
-                    reason = f"port {port} on {host} is held by another process"
-                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
-                if reason_now is None:
-                    code = proc.poll()
-                    if code is None:
-                        break
-                    reason = f"{spec.check!r} passed but the service exited with returncode {code}"
-                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
                 if time.monotonic() >= deadline:
+                    reason = f"no port of {ports[0]}-{high} came up within {spec.timeout_s}s"
+                    raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
+        return self._record(spec, "managed", "driver", endpoint, identity, started, detail)
+
+    def _await_child(
+        self,
+        spec: ServiceSpec,
+        legs: dict[str, str],
+        proc: subprocess.Popen[bytes],
+        host: str,
+        port: int,
+        endpoint: str,
+        deadline: float,
+    ) -> bool:
+        """Wait for ``proc`` to pass ``spec.check``; ``False`` when another process took ``port``.
+
+        Any other failure raises.
+        """
+        passed = False
+        while True:
+            code = proc.poll()
+            if code is not None:
+                if _bindable(host, port):
                     reason = (
-                        f"{spec.check!r} never passed on {endpoint} within "
-                        f"{spec.timeout_s}s: {reason_now}"
+                        f"{spec.check!r} passed but the service exited with returncode {code}"
+                        if passed
+                        else f"{proc.args!r} exited with returncode {code} before {spec.check!r} "
+                        "passed"
                     )
                     raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
-                time.sleep(_POLL_S)
-        return self._record(spec, "managed", "driver", endpoint, identity, started, detail)
+                logger.info("port %d taken after the scan (the child exited %d), next", port, code)
+                return False
+            if passed:
+                return True
+            left = deadline - time.monotonic()
+            reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
+            # read after the dial, which passes on any listener, so the one it reached is judged
+            inodes = listeners(port)
+            if inodes and not held_by(proc.pid, inodes):
+                reason = f"port {port} on {host} is held by another process"
+                raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
+            if reason_now is None:
+                passed = True  # judged on the next poll: a check passes on another's listener
+                continue
+            if time.monotonic() >= deadline:
+                reason = (
+                    f"{spec.check!r} never passed on {endpoint} within "
+                    f"{spec.timeout_s}s: {reason_now}"
+                )
+                raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
+            time.sleep(_POLL_S)
 
     def _record(
         self,
