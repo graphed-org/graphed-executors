@@ -2,5 +2,4 @@
 
 * A driver-hosted service whose port another process takes after the scan moves to the next port
   once its child exits, even when the readiness dial reached the other process's listener first;
-  a foreign listener refuses the start only once ``timeout_s`` passes with the child still alive
-  (#121).
+  a child still alive a second after that listener is seen is refused as before (#121).

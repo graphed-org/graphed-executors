@@ -21,9 +21,9 @@ probe inside its ``starting_service_set()`` context, a backend that starts one s
 Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from
 a worker. Where the service runs, a dial passes on any listener, so a port another process listens
 on (:func:`listeners`, read from Linux ``/proc``) that the child's process tree does not hold
-(:func:`held_by`) refuses the start once ``timeout_s`` passes with the child alive; a port taken
-by another process the child exits on moves it to the next port of its range. The worker probe
-is an ordinary ``backend.submit`` of
+(:func:`held_by`) refuses the start unless the child exits within a short grace; a port taken by
+another process the child exits on moves it to the next port of its range. The worker probe is an
+ordinary ``backend.submit`` of
 :func:`_probe_services`, one task that runs every service's check and answers with
 :func:`host_identity` and each check's reason; each answer is awaited up to the largest
 ``timeout_s`` among the set's services. It is resubmitted under a fresh key (at most ``max(2,
@@ -67,6 +67,7 @@ logger = logging.getLogger("graphed_executors.services")
 PROBE_CHECK_S = 5.0  # each check a probe task runs
 _READY_CHECK_S = 5.0  # each check of a starting managed service, polled until its timeout_s
 _POLL_S = 0.1  # between readiness checks of a starting managed service
+_FOREIGN_GRACE_S = 1.0  # how long a child behind another's listener has to exit before refusal
 _GRACE_S = 5.0  # a terminated managed service's time to exit before it is killed
 _HEALTH_METHOD = "/grpc.health.v1.Health/Check"
 _SERVING = b"\x08\x01"  # HealthCheckResponse{status: SERVING}, protobuf-encoded
@@ -698,7 +699,7 @@ class ServiceSet:
 
         Any other failure raises.
         """
-        passed, refusal = False, None
+        passed, refusal, judge_at = False, None, deadline
         while True:
             code = proc.poll()
             if code is not None:
@@ -715,9 +716,9 @@ class ServiceSet:
             if passed:
                 return True
             # judged on a fresh poll, so a child that exited during the last dial is not refused
-            if refusal is not None and time.monotonic() >= deadline:
+            if refusal is not None and time.monotonic() >= judge_at:
                 raise ServiceUnavailableError(spec.name, {**legs, "managed": refusal})
-            left = deadline - time.monotonic()
+            left = judge_at - time.monotonic()
             reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
             # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
@@ -727,11 +728,13 @@ class ServiceSet:
                 continue
             if foreign:
                 refusal = f"port {port} on {host} is held by another process"
+                judge_at = min(judge_at, time.monotonic() + _FOREIGN_GRACE_S)
             else:
                 refusal = (
                     f"{spec.check!r} never passed on {endpoint} within "
                     f"{spec.timeout_s}s: {reason_now}"
                 )
+                judge_at = deadline
             time.sleep(_POLL_S)
 
     def _record(
