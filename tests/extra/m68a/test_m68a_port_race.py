@@ -135,3 +135,20 @@ def test_a_step_past_the_deadline_starts_no_further_child(monkeypatch: pytest.Mo
     finally:
         backend.close()
     assert started == [ports[0]]
+
+
+def test_a_range_with_no_port_left_after_a_step_raises_naming_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    low, _ = free_range(2)
+    monkeypatch.setattr(svc, "_bindable", lambda host, port: False)
+    argv = ("{python}", "-c", "pass", "{port}")
+    spec = ServiceSpec("web", "tcp", check="tcp", ports=(low, low), launch=Launch(argv=argv))
+    backend = ThreadBackend(1)
+    try:
+        with pytest.raises(
+            OSError, match=rf"^\[Errno \d+\] no port in {low}-{low} on 127\.0\.0\.1"
+        ):
+            svc.ServiceSet([spec], backend).start()
+    finally:
+        backend.close()
