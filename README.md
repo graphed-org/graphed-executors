@@ -86,9 +86,11 @@ reduce=, combine=, empty=)` exports a plan the same way from any deferred `graph
 
 There is no `.compute()`. You build a plan (the `Plan`, `Task`, and `Partition` types live in
 `graphed.core`, not in this package) and hand it to a runner; `run(plan)` returns a result whose
-`.value` is the reduced answer. On process pools and clusters, `process`/`combine`/`empty` must
-be module-level functions the workers can import — a lambda or a notebook-cell closure works on
-`ThreadExecutor` only.
+`.value` is the reduced answer. Plans from `graphed_histogram.plan` or `graphed.aggregate_plan`
+may use lambdas and functions from your script's `__main__`: they run on process pools and
+clusters as they are. A `Plan` you build yourself needs `process`/`combine`/`empty` the workers
+can import (module-level functions); a lambda there fails on a process pool with `PicklingError`
+and works on `ThreadExecutor` only.
 
 ## Which runner do I want?
 
@@ -135,12 +137,24 @@ and the worker address, not a hang.
 
 ### On a parsl pool
 
-Needs `graphed-executors[parsl]`. HTEX workers are separate processes that do **not** inherit
-your `sys.path`, so the plan's functions must live in a module they can import — not in your
-launch script. Put them in a file of their own:
+Needs `graphed-executors[parsl]`. `ParslRunner.local` starts a pool on this machine and stops it
+when the block ends, however the block ends. Hand it the histogram `h` from the analysis above:
 
 ```python
-# my_tasks.py — importable by the workers
+if __name__ == "__main__":
+    from graphed_executors import ParslRunner
+
+    with ParslRunner.local(workers=8) as runner:
+        print(gh.unpack(runner.run(gh.plan({"jet_pt": h})).value)["jet_pt"].values())
+```
+
+A plan graphed builds carries its functions to the workers, so nothing needs to be on
+`PYTHONPATH`. A `Plan` you build yourself is different: HTEX workers are separate processes that
+do **not** inherit your `sys.path`, so its functions must live in a module they can import, not in
+your launch script:
+
+```python
+# my_tasks.py — on the workers' PYTHONPATH, or part of an installed package
 import numpy as np
 
 def count(partition, resources):
@@ -153,9 +167,6 @@ def zero():
     return np.zeros(1, dtype=int)
 ```
 
-then `ParslRunner.local` starts a pool on this machine and stops it when the block ends, however
-the block ends:
-
 ```python
 from graphed.core import Partition, Plan, Task
 import my_tasks
@@ -163,12 +174,6 @@ import my_tasks
 parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
 plan = Plan(process=my_tasks.count, combine=my_tasks.add, empty=my_tasks.zero,
             tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
-
-if __name__ == "__main__":
-    from graphed_executors import ParslRunner
-
-    with ParslRunner.local(workers=8) as runner:
-        print(runner.run(plan).value)         # [700]
 ```
 
 On a site, hand `parsl_runner` any **started** parsl `HighThroughputExecutor` (or
@@ -190,9 +195,11 @@ if __name__ == "__main__":
 
 Two things bite people on HTEX:
 
-- **Workers don't inherit your `sys.path`.** Export `PYTHONPATH` (or install your package)
-  before starting the pool, so the workers can import `my_tasks`. A plan whose functions are
-  defined in the launch script itself doesn't fail fast — the run hangs.
+- **Workers don't inherit your `sys.path`.** For a hand-built `Plan`, export `PYTHONPATH` (or
+  install your package) before starting the pool, so the workers can import `my_tasks`. A
+  hand-built plan whose functions are defined in the launch script fails within seconds:
+  `AttributeError: count is defined in your launch script (__main__), which parsl workers cannot
+  import`.
 - **A killed worker takes ~30 s to notice at parsl's default heartbeat.** `heartbeat_period=2`
   brings that to ~1.65 s, so a crash is reported (and the worker respawned) promptly.
 
