@@ -1,0 +1,7 @@
+.. under: Unreleased
+
+* The dask, parsl and HTCondor pages and the README lead with a graphed-built plan, which carries
+  its functions (lambdas and ``__main__`` ones included) to every backend; only a hand-built
+  ``Plan`` needs importable functions. On parsl, a hand-built plan whose function lives in the
+  launch script now fails with an ``AttributeError`` naming the function and the fix, instead of
+  ``Can't get attribute ... on <module '__mp_main__'>`` (#100).
