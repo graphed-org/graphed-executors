@@ -1,0 +1,5 @@
+.. under: Unreleased
+
+* A driver-hosted service whose child exits while its port's listener is read moves to the next
+  port instead of refusing the port as held by another process: the exiting child orphans its own
+  listener, so only a live child's ownership verdict is final (#121).

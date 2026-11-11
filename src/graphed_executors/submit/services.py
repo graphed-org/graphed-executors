@@ -717,7 +717,8 @@ class ServiceSet:
             reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
             # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
-            if inodes and not held_by(proc.pid, inodes):
+            # a child exiting mid-read orphans its own listeners, so judge only a live one
+            if inodes and not held_by(proc.pid, inodes) and proc.poll() is None:
                 reason = f"port {port} on {host} is held by another process"
                 raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
             if reason_now is None:
