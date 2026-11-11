@@ -164,6 +164,7 @@ jobs:
             tests/frozen/m74/test_m74_dask.py \
             tests/extra/m43 tests/extra/m44 tests/extra/m68a tests/extra/m68c tests/extra/floating_point \
             tests/extra/progress tests/extra/workerlost/test_skip_failed.py \
+            'tests/extra/docs/test_backend_page_examples.py::test_the_first_example_runs_as_written[dask.rst]' \
             tests/extra/m69b/test_m69b_schedulable.py tests/extra/m69b/test_m69b_dask_driver_check.py \
             tests/frozen/m68d tests/extra/m68d tests/extra/finalize \
             tests/extra/workerlost/test_runner_vocabulary.py tests/extra/workerlost/test_few_tasks_warning.py \
@@ -244,13 +245,18 @@ jobs:
           python -c "import sysconfig, pathlib; pathlib.Path(sysconfig.get_path('purelib'), 'graphed_subcov.pth').write_text('import coverage; coverage.process_startup()\n')"
           pytest tests/frozen/m46 tests/frozen/m47 tests/extra/m47 tests/extra/floating_point tests/extra/progress \
             tests/frozen/m63/test_m63_submit_parsl.py tests/extra/workerlost/test_skip_failed.py \
+            'tests/extra/docs/test_backend_page_examples.py::test_the_first_example_runs_as_written[parsl.rst]' \
+            tests/extra/plans/test_plan_rules.py::test_parsl_names_a_hand_built_plans_launch_script_function \
+            tests/extra/plans/test_plan_rules.py::test_a_launch_script_function_is_named_with_its_fix \
+            tests/extra/plans/test_plan_rules.py::test_a_parsl_future_raises_and_returns_the_named_error \
+            tests/extra/plans/test_plan_rules.py::test_any_other_error_comes_back_unchanged \
             tests/frozen/m65/test_m65a3_control_parsl.py \
             tests/frozen/m68c/test_m68c_submit_parsl.py \
             tests/frozen/m74/test_m74_parsl.py tests/extra/hdna/test_hdna_parsl_retries.py \
             tests/extra/finalize/test_finalize_runners.py::test_parsl_runners_finalize_once_on_the_driver \
             tests/extra/workerlost/test_few_tasks_warning.py::test_the_parsl_peer_reduction_warns \
             tests/extra/workerlost/test_user_errors_run_once.py \
-            --cov --cov-config=.coveragerc-parsl \
+            --cov --cov-config=.coveragerc-parsl -o faulthandler_timeout=300 \
             --cov-branch --cov-fail-under=0
           # TERM every leftover (pool managers, spawned workers, Manager servers, resource trackers) and
           # combine once all have exited: combine fails on a data file still being written
