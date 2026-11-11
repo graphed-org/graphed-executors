@@ -73,30 +73,6 @@ def test_a_port_taken_after_the_scan_starts_the_service_on_the_next_port(
     assert f"port {ports[0]} taken after the scan" in caplog.text
 
 
-def test_a_port_another_process_listens_on_moves_the_service_to_the_next_port(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    caplog.set_level(logging.INFO, logger="graphed_executors.services")
-    ports = free_range(2)
-    listeners, held_by = svc.listeners, svc.held_by
-    # the first port's listener is a socket no child of the driver holds
-    monkeypatch.setattr(
-        svc, "listeners", lambda port: {"foreign"} if port == ports[0] else listeners(port)
-    )
-    monkeypatch.setattr(
-        svc, "held_by", lambda pid, inodes: inodes != {"foreign"} and held_by(pid, inodes)
-    )
-    argv = ("{python}", "-m", "http.server", "--bind", "127.0.0.1", "{port}")
-    spec = ServiceSpec("web", "http", check="http:/", ports=ports, launch=Launch(argv=argv))
-    backend = ThreadBackend(1)
-    try:
-        with svc.ServiceSet([spec], backend) as eps:
-            assert eps["web"] == f"http://127.0.0.1:{ports[1]}"
-    finally:
-        backend.close()
-    assert f"port {ports[0]} on 127.0.0.1 is held by another process, next" in caplog.text
-
-
 def test_a_check_passed_on_another_listener_then_the_child_exiting_moves_to_the_next_port(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -147,9 +123,8 @@ def test_a_step_past_the_deadline_starts_no_further_child(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(subprocess, "Popen", counting)
     monkeypatch.setattr(svc, "check_ready", slow)
-    monkeypatch.setattr(svc, "listeners", lambda port: {"foreign"})
-    monkeypatch.setattr(svc, "held_by", lambda pid, inodes: False)
-    argv = ("{python}", "-c", "import time; time.sleep(60)", "{port}")
+    monkeypatch.setattr(svc, "_bindable", lambda host, port: False)
+    argv = ("{python}", "-c", "import time; time.sleep(0.3)", "{port}")  # exits mid-check
     spec = ServiceSpec(
         "web", "tcp", check="tcp", ports=ports, launch=Launch(argv=argv), timeout_s=0.2
     )

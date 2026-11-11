@@ -21,8 +21,8 @@ probe inside its ``starting_service_set()`` context, a backend that starts one s
 Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from
 a worker. Where the service runs, a dial passes on any listener, so a port another process listens
 on (:func:`listeners`, read from Linux ``/proc``) that the child's process tree does not hold
-(:func:`held_by`) moves the start to the next port of its range, as does a port that is taken once
-the child exits. The worker probe is an ordinary ``backend.submit`` of
+(:func:`held_by`) refuses the start; a port taken once the child has exited moves it to the next
+port of its range. The worker probe is an ordinary ``backend.submit`` of
 :func:`_probe_services`, one task that runs every service's check and answers with
 :func:`host_identity` and each check's reason; each answer is awaited up to the largest
 ``timeout_s`` among the set's services. It is resubmitted under a fresh key (at most ``max(2,
@@ -718,9 +718,8 @@ class ServiceSet:
             # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
             if inodes and not held_by(proc.pid, inodes):
-                logger.info("port %d on %s is held by another process, next", port, host)
-                _stop_child(proc, spec.name)
-                return False
+                reason = f"port {port} on {host} is held by another process"
+                raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
             if reason_now is None:
                 passed = True  # judged on the next poll: a check passes on another's listener
                 continue

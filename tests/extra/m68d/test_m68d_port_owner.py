@@ -54,13 +54,15 @@ def test_a_driver_hosted_start_takes_its_port_only_when_its_child_holds_the_list
         if held:
             assert dict(services.start()) == {"web": f"tcp://127.0.0.1:{low}"}
         else:
-            with pytest.raises(OSError, match=f"no port in {low}-{high} on 127.0.0.1 stayed free"):
+            with pytest.raises(svc.ServiceUnavailableError) as info:
                 services.start()
+            assert (
+                info.value.legs["managed"] == f"port {low} on 127.0.0.1 is held by another process"
+            )
     finally:
         services.close()
         backend.close()
     assert asked and all(inodes == {"4242"} for _pid, inodes in asked), asked
-    assert len({pid for pid, _inodes in asked}) == (1 if held else high - low + 1), asked
 
 
 @posix
@@ -120,11 +122,15 @@ def test_a_driver_hosted_start_judges_the_listener_its_dial_reached(
     backend = ThreadBackend(1)
     services = svc.ServiceSet((spec,), backend)
     try:
-        assert dict(services.start()) == {"web": f"tcp://127.0.0.1:{low + 1}"}
+        with pytest.raises(svc.ServiceUnavailableError) as info:
+            services.start()
     finally:
         services.close()
         backend.close()
-    assert bound
+    assert (
+        bound
+        and info.value.legs["managed"] == f"port {low} on 127.0.0.1 is held by another process"
+    )
 
 
 @posix

@@ -388,10 +388,9 @@ It tries three places, in order:
 3. **One it starts**, from the spec's recipe: beside the driver when the recipe needs no image and
    no GPU and the site lets workers reach the driver's host (``service_hosts``), else as a job of its
    own on the pool (see `Cluster-hosted services`_). It is stopped when the run ends. A start
-   beside the driver whose port another process took after the free-port scan moves to the next
-   port of the range, as a cluster-hosted one does: the command exited and the port is now taken,
-   or, on Linux, the port's listener is not the started process's (a check passes on any
-   listener).
+   beside the driver whose command exits because another process took its port after the
+   free-port scan moves to the next port of the range. On Linux, a start whose port's listener the
+   started process does not hold is refused, since a check passes on any listener.
 
 ``graphed_executors.submit.recipes`` has two recipes as plain data: ``triton(name, image,
 model_repository)`` (gRPC only, one port) and ``http_server(name)`` (Python's ``http.server``).
