@@ -558,6 +558,14 @@ def test_a_leaf_lost_before_its_callback_runs_is_counted_once_settled() -> None:
     assert lost == [task]
 
 
+def test_a_probe_reports_a_group_that_loses_a_worker() -> None:
+    plan = skipping(plan_of(), 3)
+    assert isinstance(plan, Plan)
+    with SubmitRunner(_CoLost(frozenset({3})), retries=0) as runner:
+        assert runner._lose_together(None, plan, tuple(plan.tasks[2:5])) is True
+        assert runner._lose_together(None, plan, tuple(plan.tasks[2:5])) is False
+
+
 def test_a_probe_leaves_a_cancel_for_the_rerun() -> None:
     control = RunControl()
     with SubmitRunner(ThreadBackend(2), retries=0, control=control) as runner:
