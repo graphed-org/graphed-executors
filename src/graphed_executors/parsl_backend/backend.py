@@ -21,6 +21,7 @@ This module imports NOTHING from parsl at load (the ``_lazy`` accessor + the par
 
 from __future__ import annotations
 
+import re
 import time
 import weakref
 from collections.abc import Callable, Mapping, Sequence
@@ -63,6 +64,22 @@ _TPE_CAPS = SubmitCapabilities(
 _N_WORKERS_WAIT_S = 30.0
 # parsl death classes, matched by chain name-string
 _WORKER_DEATH_NAMES = ("WorkerLost", "ManagerLost")
+# what an HTEX worker raises unpickling a function defined in the launch script
+_MAIN_ATTR = re.compile(r"Can't get attribute '([^']+)' on <module '__mp_main__'")
+
+
+def _explained(exc: BaseException) -> BaseException:
+    """Name the plan function a worker could not import from the launch script, else ``exc``."""
+    found = _MAIN_ATTR.search(str(exc)) if isinstance(exc, AttributeError) else None
+    if found is None:
+        return exc
+    explained = AttributeError(
+        f"{found[1]} is defined in your launch script (__main__), which parsl workers cannot "
+        "import: move it into a module on their PYTHONPATH, or build the plan with graphed "
+        "(graphed_histogram.plan, graphed.aggregate_plan)"
+    )
+    explained.__cause__ = exc
+    return explained
 
 
 class _ParslFuture:
@@ -93,7 +110,10 @@ class _ParslFuture:
         except BaseException as exc:
             if in_chain(exc, *_WORKER_DEATH_NAMES):  # parsl's own carries no task key
                 exc.graphed_key = self._key  # type: ignore[attr-defined]
-            raise
+            explained = _explained(exc)
+            if explained is exc:
+                raise
+            raise explained from exc
         if not self._dispatched:
             self._dispatched = True
             dispatch_events(events, self._handlers)
@@ -103,7 +123,8 @@ class _ParslFuture:
         return bool(self._raw.done())
 
     def exception(self, timeout: float | None = None) -> BaseException | None:
-        return cast("BaseException | None", self._raw.exception(timeout))
+        exc = cast("BaseException | None", self._raw.exception(timeout))
+        return None if exc is None else _explained(exc)
 
     def add_done_callback(self, fn: Callable[[Any], None]) -> None:
         # deliver THIS adapter (not the raw future) so a backend-neutral as_completed keys on it

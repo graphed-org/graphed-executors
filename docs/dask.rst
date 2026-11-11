@@ -39,49 +39,43 @@ and hands you back a runner:
 
 .. code-block:: python
 
-    import numpy as np
+    import awkward as ak
+    import boost_histogram as bh
+    import graphed
+    import graphed_histogram as gh
     from distributed import Client, LocalCluster
-
-    from graphed.core import Partition, Plan, Task
+    from graphed import Session
+    from graphed.awkward import AwkwardBackend, from_parquet
     from graphed_executors import dask_runner
 
-    def count(partition, resources):
-        return np.asarray([partition.entry_stop - partition.entry_start])
-
-    def add(a, b):
-        return a + b
-
-    def zero():
-        return np.zeros(1, dtype=int)
+    def leading(pt):
+        return pt[:, :1]
 
     if __name__ == "__main__":
-        parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
-        plan = Plan(process=count, combine=add, empty=zero,
-                    tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
+        ak.to_parquet(ak.Array({"pt": [[40.0, 25.0], [55.0], [30.0, 60.0, 20.0],
+                                       [80.0], [15.0, 45.0], [70.0, 10.0]]}), "events.parquet")
+        session = Session(AwkwardBackend())
+        events = from_parquet("events", "events.parquet", session=session)
+        h = gh.boost.Histogram(bh.axis.Regular(4, 0.0, 100.0), storage=bh.storage.Int64())
+        h.fill(graphed.apply(leading, events.pt))
         with (
             LocalCluster(n_workers=2, threads_per_worker=1, processes=True,
                          dashboard_address=":0") as cluster,
             Client(cluster) as client,
+            dask_runner(client) as runner,
         ):
-            with dask_runner(client) as runner:
-                result = runner.run(plan)
+            result = runner.run(gh.plan({"jet_pt": h}, steps_per_file=3))
+        print(gh.unpack(result.value)["jet_pt"].values())   # [1 2 2 1]
+        print(result.n_partitions, result.n_combines)       # 3 2
 
-        print(result.value)
-        print(result.n_partitions, result.n_combines)
-
-Prints::
-
-    [700]
-    7 6
-
-``Plan``, ``Task``, ``Partition`` and the ``ExecResult`` you get back all live in ``graphed.core``,
-not in this package. ``result.value`` is the reduced result — bit-for-bit equal to a sequential
-run, whatever the worker count and whatever order the tasks finished in — alongside
-``.n_partitions`` and ``.n_combines``.
+``result.value`` is the reduced result — bit-for-bit equal to a sequential run, whatever the
+worker count and whatever order the tasks finished in — alongside ``.n_partitions`` and
+``.n_combines``. A ``Plan`` you build yourself (``Plan``, ``Task`` and ``Partition`` live in
+``graphed.core``, not in this package) runs the same way; :doc:`parsl` shows one.
 
 A few things that save an afternoon:
 
-* ``process`` / ``combine`` / ``empty`` are pickled to the workers, so define them at module level
+* A hand-built ``Plan``'s ``process`` / ``combine`` / ``empty`` are pickled to the workers, so define them at module level
   (a ``functools.partial`` of a module-level function, or a frozen dataclass, is fine too), and
   guard your driver code with ``if __name__ == "__main__":``.
 * On a real cluster prefer process workers with ``threads_per_worker=1`` — HEP stages hold the

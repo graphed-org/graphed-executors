@@ -14,7 +14,45 @@ Try it on your laptop first
 
 The same pilot program runs as local subprocesses, so you can check a plan's wiring before you
 queue anything. This needs ``graphed-executors[htcondor]`` only for real jobs; the local run below
-works with a plain install. Put the task functions in a module:
+works with a plain install. Fill a histogram and run its plan through two local pilots:
+
+.. code-block:: python
+
+    import awkward as ak
+    import boost_histogram as bh
+    import graphed
+    import graphed_histogram as gh
+    from graphed import Session
+    from graphed.awkward import AwkwardBackend, from_parquet
+    from graphed_executors.htcondor_backend import HTCondorBackend, HTCondorRunner, LocalPilots
+
+    def leading(pt):
+        return pt[:, :1]
+
+    if __name__ == "__main__":
+        ak.to_parquet(ak.Array({"pt": [[40.0, 25.0], [55.0], [30.0, 60.0, 20.0],
+                                       [80.0], [15.0, 45.0], [70.0, 10.0]]}), "events.parquet")
+        session = Session(AwkwardBackend())
+        events = from_parquet("events", "events.parquet", session=session)
+        h = gh.boost.Histogram(bh.axis.Regular(4, 0.0, 100.0), storage=bh.storage.Int64())
+        h.fill(graphed.apply(leading, events.pt))
+        backend = HTCondorBackend(LocalPilots(), workers=2, host="127.0.0.1")
+        with HTCondorRunner(backend) as runner:
+            result = runner.run(gh.plan({"jet_pt": h}, steps_per_file=3))
+        print(gh.unpack(result.value)["jet_pt"].values())   # [1 2 2 1]
+
+Each pilot announces itself (``pilot myhost:47041:5c0e9a1f serving http://127.0.0.1:10000``),
+then the counts print. ``leading`` lives in the script you run: the plan carries it to the
+pilots, so there is nothing to ship.
+
+On a pool, only the runner line changes: ``htcondor_runner(site=..., workers=...)`` below.
+
+
+Writing your own Plan
+---------------------
+
+A ``Plan`` you build yourself needs its functions in a module, shipped to the pilots with
+``user_modules=[...]``:
 
 .. code-block:: python
 
@@ -30,8 +68,6 @@ works with a plain install. Put the task functions in a module:
     def zero():
         return np.zeros(1, dtype=int)
 
-and run the plan through two local pilots:
-
 .. code-block:: python
 
     from graphed.core import Partition, Plan, Task
@@ -45,15 +81,9 @@ and run the plan through two local pilots:
     backend = HTCondorBackend(LocalPilots(), workers=2, host="127.0.0.1")
     with HTCondorRunner(backend) as runner:
         result = runner.run(plan)
-    print(result.value, result.n_partitions, result.n_combines)
+    print(result.value, result.n_partitions, result.n_combines)   # [700] 7 6
 
-Each pilot announces itself, then the result prints::
-
-    pilot myhost:47041:5c0e9a1f serving http://127.0.0.1:10000
-    pilot myhost:47040:b82d4e07 serving http://127.0.0.1:10000
-    [700] 7 6
-
-On a pool, only the runner line changes: ``htcondor_runner(site=..., workers=...)`` below.
+The hand-built recipes further down use ``my_tasks``.
 
 
 Read these four before your first pool run
@@ -61,10 +91,11 @@ Read these four before your first pool run
 
 .. warning::
 
-   **Pilots import your task functions by name.** A pilot is a fresh Python process in a batch
-   slot. It finds ``plan.process`` and ``plan.combine`` by module and name, so a function defined
-   in the script you run (``__main__``) or a lambda cannot reach it. The runner checks before it
-   submits anything and says so::
+   **Pilots import a hand-built Plan's functions by name.** A plan graphed builds carries your
+   functions. A ``Plan`` you build yourself does not: a pilot is a fresh Python process in a batch
+   slot, which finds ``plan.process`` and ``plan.combine`` by module and name, so a function
+   defined in the script you run (``__main__``) or a lambda cannot reach it. The runner checks
+   before it submits anything and says so::
 
        ValueError: pilots import plan.process by name; move <function count at 0x…> into a
        module and pass it in `user_modules=[...]` (__main__.count)
@@ -151,23 +182,30 @@ install and names it.
 
 .. code-block:: python
 
-    # A recipe: this needs the LPC pool.
-    from graphed.core import Partition, Plan, Task
+    # A recipe: this needs the LPC pool and a file every pilot can read.
+    import boost_histogram as bh
+    import graphed
+    import graphed_histogram as gh
+    from graphed import Session
+    from graphed.awkward import AwkwardBackend, from_parquet
     from graphed_executors import htcondor_runner
-    import my_tasks
 
     IMAGE = "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/coffeateam/coffea-almalinux9-noml:2026.9.0-py3.12"
+    DATA = "/path/every/pilot/reads/events.parquet"
 
-    parts = tuple(Partition("data", "", i * 100, (i + 1) * 100) for i in range(7))
-    plan = Plan(process=my_tasks.count, combine=my_tasks.add, empty=my_tasks.zero,
-                tasks=tuple(Task(i, p) for i, p in enumerate(parts)))
+    def leading(pt):
+        return pt[:, :1]
 
-    with htcondor_runner(site="lpc", workers=2, image=IMAGE,
-                         user_modules=[my_tasks.__file__]) as runner:
-        print(runner.run(plan).value)          # [700]
+    session = Session(AwkwardBackend())
+    events = from_parquet("events", DATA, session=session)
+    h = gh.boost.Histogram(bh.axis.Regular(4, 0.0, 100.0), storage=bh.storage.Int64())
+    h.fill(graphed.apply(leading, events.pt))
+    with htcondor_runner(site="lpc", workers=2, image=IMAGE) as runner:
+        plan = gh.plan({"jet_pt": h}, steps_per_file=20)
+        print(gh.unpack(runner.run(plan).value)["jet_pt"].values())
 
 What happens: the runner picks the least-loaded LPC schedd the way ``condor_submit`` does there,
-submits one cluster of pilots with your venv and ``my_tasks.py`` spooled alongside, and waits for
+submits one cluster of pilots with your venv spooled alongside, and waits for
 the first pilot before it runs anything. On a September 2026 run, with about 12,700 jobs idle on
 the chosen schedd, the first pilot connected 33 seconds after submission and the second after 116;
 a busier pool queues pilots for as long as it queues anything else. Leaving the ``with`` block

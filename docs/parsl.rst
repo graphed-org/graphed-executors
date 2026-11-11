@@ -15,12 +15,13 @@ Read these four before your first run
 
 .. warning::
 
-   **Your task functions must be importable on the workers.** HTEX workers are fresh Python
-   processes launched by a console script; they do not inherit your driver's ``sys.path``, so a
-   function defined in your driver's ``__main__`` fails to unpickle there with
-   ``AttributeError: Can't get attribute 'count' on <module '__mp_main__'>``. Put ``process``,
-   ``combine``, ``empty`` and any helper in an installed module. This is the single most common
-   first-run failure.
+   **A hand-built Plan's functions must be importable on the workers.** A plan graphed builds
+   (``graphed_histogram.plan``, ``graphed.aggregate_plan``) carries your functions, lambdas and
+   ``__main__`` ones included. A ``Plan`` you build yourself does not: HTEX workers are fresh
+   Python processes that do not inherit your driver's ``sys.path``, so a ``process``, ``combine``
+   or ``empty`` defined in your launch script fails within seconds with ``AttributeError: count
+   is defined in your launch script (__main__), which parsl workers cannot import``. Put those in a
+   module on the workers' ``PYTHONPATH``, or in an installed package.
 
 .. warning::
 
@@ -66,8 +67,42 @@ installed on 3.14 or 3.14t, where parsl is unverified upstream.
 Your first pool run
 -------------------
 
-Put your task functions in a module the workers can import. Anything ``pip install``-ed works; for
-a quick trial, a file on ``PYTHONPATH`` is enough:
+Fill a histogram and hand its plan to a pool on this machine. ``leading`` lives in the script you
+run, and nothing needs to be on ``PYTHONPATH``: the plan carries it to the workers.
+
+.. code-block:: python
+
+    import awkward as ak
+    import boost_histogram as bh
+    import graphed
+    import graphed_histogram as gh
+    from graphed import Session
+    from graphed.awkward import AwkwardBackend, from_parquet
+    from graphed_executors import ParslRunner
+
+    def leading(pt):
+        return pt[:, :1]
+
+    if __name__ == "__main__":
+        ak.to_parquet(ak.Array({"pt": [[40.0, 25.0], [55.0], [30.0, 60.0, 20.0],
+                                       [80.0], [15.0, 45.0], [70.0, 10.0]]}), "events.parquet")
+        session = Session(AwkwardBackend())
+        events = from_parquet("events", "events.parquet", session=session)
+        h = gh.boost.Histogram(bh.axis.Regular(4, 0.0, 100.0), storage=bh.storage.Int64())
+        h.fill(graphed.apply(leading, events.pt))
+        with ParslRunner.local(workers=2) as runner:
+            result = runner.run(gh.plan({"jet_pt": h}, steps_per_file=3))
+        print(gh.unpack(result.value)["jet_pt"].values())   # [1 2 2 1]
+
+:meth:`ParslRunner.local <graphed_executors.parsl_backend.backend.ParslRunner.local>` starts HTEX
+here and stops it when the block ends, on an exception too.
+
+
+Writing your own Plan
+---------------------
+
+A ``Plan`` you build yourself needs its functions in a module the workers can import. Anything
+``pip install``-ed works; for a quick trial, a file on ``PYTHONPATH`` is enough:
 
 .. code-block:: python
 

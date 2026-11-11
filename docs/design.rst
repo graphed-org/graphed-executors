@@ -123,9 +123,12 @@ without ever looking inside them. Two consequences are worth knowing before your
 **spawn** start method rather than ``fork``: a forked CPython process inherits lock and
 allocator state that bites precisely when you scale up, and spawn is the one behaviour every
 platform shares. A spawned worker re-imports the module it was launched from and unpickles your
-callables, so ``process``/``combine``/``empty`` must be module-level functions, a
-``functools.partial`` of one, or a frozen dataclass — and a script must guard its entry point
-with ``if __name__ == "__main__":``. Thread pools share your address space and impose neither
+callables. A plan graphed builds (``graphed_histogram.plan``, ``graphed.aggregate_plan``) carries
+your lambdas and ``__main__`` functions as they are; a ``Plan`` you build yourself needs
+``process``/``combine``/``empty`` that pickle by name — module-level functions, a
+``functools.partial`` of one, or a frozen dataclass — and a lambda there raises
+``PicklingError``. Either way a script must guard its entry point with
+``if __name__ == "__main__":``. Thread pools share your address space and impose neither
 rule, which makes ``ThreadExecutor`` the fast way to debug a plan before you scale it out.
 
 **Files open once per worker, not once per partition.** ``resources.open_once(uri, opener)``
