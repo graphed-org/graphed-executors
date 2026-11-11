@@ -460,8 +460,7 @@ jobs:
   ci-required:
     name: ci required
     if: always()
-    # test-hgg is advisory while gitlab.cern.ch (its HiggsDNA source) is down; restore it here when it returns.
-    needs: [test, test-dask, test-parsl, test-htcondor, docs]
+    needs: [test, test-dask, test-parsl, test-htcondor, test-hgg, docs]
     runs-on: ubuntu-latest
     steps:
       - name: every needed job succeeded
