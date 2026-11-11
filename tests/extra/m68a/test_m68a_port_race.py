@@ -109,31 +109,22 @@ def test_a_check_passed_on_another_listener_then_the_child_exiting_moves_to_the_
     assert f"port {ports[0]} taken after the scan (the child exited 0), next" in caplog.text
 
 
-def test_a_listener_orphaned_as_the_child_exits_moves_to_the_next_port(
+def test_a_foreign_listener_the_child_then_exits_on_moves_to_the_next_port(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     caplog.set_level(logging.INFO, logger="graphed_executors.services")
     ports = free_range(2)
     bindable = svc._bindable
-
-    def orphaned(pid: int, inodes: set[str], proc: str = "/proc") -> bool:
-        time.sleep(1.0)  # the child exits meanwhile, leaving its listener to nobody's tree
-        return False
-
     monkeypatch.setattr(svc, "check_ready", lambda endpoint, check, timeout: None)
     monkeypatch.setattr(
         svc, "listeners", lambda p, proc="/proc": {"4242"} if p == ports[0] else set()
     )
-    monkeypatch.setattr(svc, "held_by", orphaned)
+    monkeypatch.setattr(svc, "held_by", lambda pid, inodes, proc="/proc": False)
     monkeypatch.setattr(svc, "_bindable", lambda h, p: p != ports[0] and bindable(h, p))
-    serve = f"import sys, time; int(sys.argv[1]) == {ports[0]} or time.sleep(60)"
-    spec = ServiceSpec(
-        "web",
-        "tcp",
-        check="tcp",
-        ports=ports,
-        launch=Launch(argv=("{python}", "-c", serve, "{port}")),
-    )
+    # on the stolen port the child outlives the first dials, then fails its bind
+    serve = f"import sys, time; time.sleep(1.0 if int(sys.argv[1]) == {ports[0]} else 60)"
+    argv = ("{python}", "-c", serve, "{port}")
+    spec = ServiceSpec("web", "tcp", check="tcp", ports=ports, launch=Launch(argv=argv))
     backend = ThreadBackend(1)
     try:
         with svc.ServiceSet([spec], backend) as eps:

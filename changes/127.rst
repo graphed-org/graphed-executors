@@ -1,5 +1,6 @@
 .. under: Unreleased
 
-* A driver-hosted service whose child exits while its port's listener is read moves to the next
-  port instead of refusing the port as held by another process: the exiting child orphans its own
-  listener, so only a live child's ownership verdict is final (#121).
+* A driver-hosted service whose port another process takes after the scan moves to the next port
+  once its child exits, even when the readiness dial reached the other process's listener first;
+  a foreign listener refuses the start only once ``timeout_s`` passes with the child still alive
+  (#121).

@@ -21,8 +21,9 @@ probe inside its ``starting_service_set()`` context, a backend that starts one s
 Readiness is :func:`check_ready`, one function every caller runs: where the service runs, then from
 a worker. Where the service runs, a dial passes on any listener, so a port another process listens
 on (:func:`listeners`, read from Linux ``/proc``) that the child's process tree does not hold
-(:func:`held_by`) refuses the start; a port taken once the child has exited moves it to the next
-port of its range. The worker probe is an ordinary ``backend.submit`` of
+(:func:`held_by`) refuses the start once ``timeout_s`` passes with the child alive; a port taken
+by another process the child exits on moves it to the next port of its range. The worker probe
+is an ordinary ``backend.submit`` of
 :func:`_probe_services`, one task that runs every service's check and answers with
 :func:`host_identity` and each check's reason; each answer is awaited up to the largest
 ``timeout_s`` among the set's services. It is resubmitted under a fresh key (at most ``max(2,
@@ -717,16 +718,16 @@ class ServiceSet:
             reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
             # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
-            # a child exiting mid-read orphans its own listeners, so judge only a live one
-            if inodes and not held_by(proc.pid, inodes) and proc.poll() is None:
-                reason = f"port {port} on {host} is held by another process"
-                raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
-            if reason_now is None:
+            # another's listener is final only at the deadline: a child that then exits moves on
+            foreign = bool(inodes) and not held_by(proc.pid, inodes)
+            if reason_now is None and not foreign:
                 passed = True  # judged on the next poll: a check passes on another's listener
                 continue
             if time.monotonic() >= deadline:
                 reason = (
-                    f"{spec.check!r} never passed on {endpoint} within "
+                    f"port {port} on {host} is held by another process"
+                    if foreign
+                    else f"{spec.check!r} never passed on {endpoint} within "
                     f"{spec.timeout_s}s: {reason_now}"
                 )
                 raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})

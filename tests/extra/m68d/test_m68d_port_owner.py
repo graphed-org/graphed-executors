@@ -47,7 +47,10 @@ def test_a_driver_hosted_start_takes_its_port_only_when_its_child_holds_the_list
     monkeypatch.setattr(svc, "held_by", owner(held, asked))
     low, high = free_range(3)
     launch = Launch(argv=("{python}", "-c", LISTEN, "{port}"))
-    spec = ServiceSpec("web", "tcp", check="tcp", ports=(low, high), launch=launch, timeout_s=20.0)
+    timeout_s = 20.0 if held else 2.0  # a refusal waits out the deadline
+    spec = ServiceSpec(
+        "web", "tcp", check="tcp", ports=(low, high), launch=launch, timeout_s=timeout_s
+    )
     backend = ThreadBackend(1)
     services = svc.ServiceSet((spec,), backend)
     try:
@@ -118,7 +121,7 @@ def test_a_driver_hosted_start_judges_the_listener_its_dial_reached(
     low, high = free_range(3)
     bound = bound_during_the_dial(svc, "check_ready", monkeypatch, low)
     launch = Launch(argv=("{python}", "-c", LISTEN, "{port}"))
-    spec = ServiceSpec("web", "tcp", check="tcp", ports=(low, high), launch=launch, timeout_s=20.0)
+    spec = ServiceSpec("web", "tcp", check="tcp", ports=(low, high), launch=launch, timeout_s=2.0)
     backend = ThreadBackend(1)
     services = svc.ServiceSet((spec,), backend)
     try:
