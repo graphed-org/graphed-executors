@@ -115,6 +115,7 @@ def test_a_foreign_listener_the_child_then_exits_on_moves_to_the_next_port(
     caplog.set_level(logging.INFO, logger="graphed_executors.services")
     ports = free_range(2)
     bindable = svc._bindable
+    monkeypatch.setattr(svc, "_FOREIGN_GRACE_S", 10.0)  # the child's exit, not the grace, decides
     monkeypatch.setattr(svc, "check_ready", lambda endpoint, check, timeout: None)
     monkeypatch.setattr(
         svc, "listeners", lambda p, proc="/proc": {"4242"} if p == ports[0] else set()
@@ -169,8 +170,13 @@ def test_a_live_child_behind_a_foreign_listener_is_refused_within_the_grace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     low, high = free_range(2)
-    monkeypatch.setattr(svc, "_FOREIGN_GRACE_S", 0.2)
-    monkeypatch.setattr(svc, "check_ready", lambda endpoint, check, timeout: None)
+    timeouts: list[float] = []
+
+    def dial(endpoint: str, check: str, timeout: float) -> None:
+        timeouts.append(timeout)
+
+    monkeypatch.setattr(svc, "_FOREIGN_GRACE_S", 0.5)
+    monkeypatch.setattr(svc, "check_ready", dial)
     monkeypatch.setattr(svc, "listeners", lambda p, proc="/proc": {"4242"})
     monkeypatch.setattr(svc, "held_by", lambda pid, inodes, proc="/proc": False)
     argv = ("{python}", "-c", "import time; time.sleep(60)", "{port}")
@@ -187,7 +193,42 @@ def test_a_live_child_behind_a_foreign_listener_is_refused_within_the_grace(
         services.close()
         backend.close()
     assert info.value.legs["managed"] == f"port {low} on 127.0.0.1 is held by another process"
-    assert time.monotonic() - started < 15.0  # well inside the 30 s deadline
+    assert time.monotonic() - started < 15.0
+    # once the foreign listener is seen, no dial outlasts the grace
+    assert len(timeouts) > 1 and max(timeouts[1:]) <= 0.5, timeouts
+
+
+def test_a_live_child_whose_foreign_listener_goes_away_waits_out_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    low, high = free_range(2)
+    reads: list[int] = []
+
+    def foreign_once(p: int, proc: str = "/proc") -> set[str]:
+        reads.append(p)
+        return {"4242"} if len(reads) == 1 else set()
+
+    monkeypatch.setattr(svc, "_FOREIGN_GRACE_S", 0.2)
+    monkeypatch.setattr(svc, "check_ready", lambda endpoint, check, timeout: "refused")
+    monkeypatch.setattr(svc, "listeners", foreign_once)
+    monkeypatch.setattr(svc, "held_by", lambda pid, inodes, proc="/proc": False)
+    argv = ("{python}", "-c", "import time; time.sleep(60)", "{port}")
+    spec = ServiceSpec(
+        "web", "tcp", check="tcp", ports=(low, high), launch=Launch(argv=argv), timeout_s=1.5
+    )
+    backend = ThreadBackend(1)
+    services = svc.ServiceSet([spec], backend)
+    started = time.monotonic()
+    try:
+        with pytest.raises(svc.ServiceUnavailableError) as info:
+            services.start()
+    finally:
+        services.close()
+        backend.close()
+    assert time.monotonic() - started >= 1.5
+    assert info.value.legs["managed"] == (
+        f"'tcp' never passed on tcp://127.0.0.1:{low} within 1.5s: refused"
+    )
 
 
 def test_a_step_past_the_deadline_starts_no_further_child(monkeypatch: pytest.MonkeyPatch) -> None:
