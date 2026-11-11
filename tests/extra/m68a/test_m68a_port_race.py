@@ -124,7 +124,9 @@ def test_a_foreign_listener_the_child_then_exits_on_moves_to_the_next_port(
     # on the stolen port the child outlives the first dials, then fails its bind
     serve = f"import sys, time; time.sleep(1.0 if int(sys.argv[1]) == {ports[0]} else 60)"
     argv = ("{python}", "-c", serve, "{port}")
-    spec = ServiceSpec("web", "tcp", check="tcp", ports=ports, launch=Launch(argv=argv))
+    spec = ServiceSpec(
+        "web", "tcp", check="tcp", ports=ports, launch=Launch(argv=argv), timeout_s=20.0
+    )
     backend = ThreadBackend(1)
     try:
         with svc.ServiceSet([spec], backend) as eps:
@@ -132,6 +134,35 @@ def test_a_foreign_listener_the_child_then_exits_on_moves_to_the_next_port(
     finally:
         backend.close()
     assert f"port {ports[0]} taken after the scan (the child exited 0), next" in caplog.text
+
+
+def test_a_child_that_exits_during_the_last_dial_is_not_refused_as_foreign(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ports = free_range(2)
+    bindable = svc._bindable
+
+    def hangs(endpoint: str, check: str, timeout: float) -> str:
+        time.sleep(timeout)
+        return "timed out"
+
+    monkeypatch.setattr(svc, "check_ready", hangs)
+    monkeypatch.setattr(svc, "listeners", lambda p, proc="/proc": {"4242"})
+    monkeypatch.setattr(svc, "held_by", lambda pid, inodes, proc="/proc": False)
+    monkeypatch.setattr(svc, "_bindable", lambda h, p: p != ports[0] and bindable(h, p))
+    argv = ("{python}", "-c", "import time; time.sleep(0.2)", "{port}")
+    spec = ServiceSpec(
+        "web", "tcp", check="tcp", ports=ports, launch=Launch(argv=argv), timeout_s=1.5
+    )
+    backend = ThreadBackend(1)
+    services = svc.ServiceSet([spec], backend)
+    try:
+        with pytest.raises(svc.ServiceUnavailableError) as info:
+            services.start()
+    finally:
+        services.close()
+        backend.close()
+    assert info.value.legs["managed"] == f"no port of {ports[0]}-{ports[1]} came up within 1.5s"
 
 
 def test_a_step_past_the_deadline_starts_no_further_child(monkeypatch: pytest.MonkeyPatch) -> None:

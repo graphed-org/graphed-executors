@@ -698,7 +698,7 @@ class ServiceSet:
 
         Any other failure raises.
         """
-        passed = False
+        passed, refusal = False, None
         while True:
             code = proc.poll()
             if code is not None:
@@ -714,23 +714,24 @@ class ServiceSet:
                 return False
             if passed:
                 return True
+            # judged on a fresh poll, so a child that exited during the last dial is not refused
+            if refusal is not None and time.monotonic() >= deadline:
+                raise ServiceUnavailableError(spec.name, {**legs, "managed": refusal})
             left = deadline - time.monotonic()
             reason_now = check_ready(endpoint, spec.check, max(0.1, min(left, _READY_CHECK_S)))
             # read after the dial, which passes on any listener, so the one it reached is judged
             inodes = listeners(port)
-            # another's listener is final only at the deadline: a child that then exits moves on
             foreign = bool(inodes) and not held_by(proc.pid, inodes)
             if reason_now is None and not foreign:
                 passed = True  # judged on the next poll: a check passes on another's listener
                 continue
-            if time.monotonic() >= deadline:
-                reason = (
-                    f"port {port} on {host} is held by another process"
-                    if foreign
-                    else f"{spec.check!r} never passed on {endpoint} within "
+            if foreign:
+                refusal = f"port {port} on {host} is held by another process"
+            else:
+                refusal = (
+                    f"{spec.check!r} never passed on {endpoint} within "
                     f"{spec.timeout_s}s: {reason_now}"
                 )
-                raise ServiceUnavailableError(spec.name, {**legs, "managed": reason})
             time.sleep(_POLL_S)
 
     def _record(
