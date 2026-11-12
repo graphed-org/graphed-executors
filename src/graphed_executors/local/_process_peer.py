@@ -23,6 +23,7 @@ from concurrent.futures import Future, wait
 from concurrent.futures import ProcessPoolExecutor as _StdProcessPool
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from multiprocessing.connection import wait as _ready
 from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
@@ -91,16 +92,21 @@ def _reap_lost(workers: Sequence[BaseProcess]) -> list[BaseProcess]:
 
     The stdlib pool's own teardown SIGTERMs them and then joins without a bound, so one that
     ignores SIGTERM would hang its shutdown. Returns the killed ones; none if no worker exited.
+    Exits are read from the sentinels: the pool's manager thread reaps the same workers, and a
+    ``waitpid`` lost to it reads as still running.
     """
-    if all(p.exitcode is None for p in workers):
+    by_sentinel = {p.sentinel: p for p in workers}
+    running = set(by_sentinel)
+    if not _ready(list(running), 0):
         return []
     deadline = time.monotonic() + _LOST_JOIN_S
-    for p in workers:
-        p.join(max(0.0, deadline - time.monotonic()))
-    killed = [p for p in workers if p.exitcode is None]
+    while running and (left := deadline - time.monotonic()) > 0:
+        running.difference_update(_ready(list(running), left))
+    killed = [by_sentinel[s] for s in running]
     for p in killed:
         p.kill()
-        p.join()  # SIGKILL cannot be ignored
+    if killed:  # an empty wait has nothing to end it
+        _ready([p.sentinel for p in killed])  # SIGKILL cannot be ignored
     return killed
 
 

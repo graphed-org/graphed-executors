@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import contextlib
+import multiprocessing
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
+
+from graphed_executors.local import _process_peer
 
 PRELUDE = """
 import faulthandler, multiprocessing, operator, os, signal, sys, time
@@ -112,3 +116,35 @@ def test_a_pool_that_lost_a_worker_shuts_down_past_a_sigterm_ignorer(
     out = _run(tmp, CLOSE_SCRIPT)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "CLOSED", out.stdout + out.stderr
+
+
+class _Worker:
+    """A process as a ``waitpid`` lost to the pool's manager shows it: no exit code, ever."""
+
+    exitcode = None
+
+    def __init__(self, *, alive: bool) -> None:
+        self.sentinel, self._end = multiprocessing.Pipe(duplex=False)
+        self.killed = False
+        if not alive:
+            self._end.close()
+
+    def kill(self) -> None:
+        self.killed = True
+        self._end.close()
+
+
+def test_the_reap_reads_exits_from_sentinels_not_exit_codes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_process_peer, "_LOST_JOIN_S", 0.2)
+    reap = cast("Callable[[list[_Worker]], list[_Worker]]", _process_peer._reap_lost)
+    dead, live, idle = _Worker(alive=False), _Worker(alive=True), _Worker(alive=True)
+    try:
+        assert reap([idle]) == [] and not idle.killed
+        assert reap([dead, live]) == [live]
+        assert live.killed and not dead.killed
+    finally:
+        for w in (dead, live, idle):
+            w.sentinel.close()
+            w._end.close()
