@@ -95,6 +95,8 @@ Requires ``graphed`` 0.0.11 or later.
 * A process-pool run that loses a worker raises :class:`graphed.WorkerLostError` even when another
   worker ignores ``SIGTERM``: survivors still alive 5 s after the loss are killed before the pool
   shuts down, instead of the shutdown waiting on them forever (#129).
+* Test port pickers draw from 20000-32000, below Linux's ephemeral range, so a client socket's
+  source port can no longer take a picked port or self-connect to a closed one (#131).
 
 0.0.7
 -----

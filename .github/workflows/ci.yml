@@ -19,11 +19,10 @@ env:
   # corpus stays a separate package (test fixtures only, not shipped in the graphed wheel)
   CORPUS: "graphed-corpus @ git+https://github.com/graphed-org/graphed-corpus-mvp@main"
   # The frozen tree fills real histograms across the process boundary. Unlike CORPUS, omitting this
-  # fails SILENTLY: graphed-histogram IS on PyPI, so a missing line quietly installs the released
-  # wheel instead of the main this suite is frozen against, and the job goes green on the wrong
-  # package. Needed in every job that collects tests/frozen. At the histogram m69b PR's head until it
-  # merges; its histserv extra serves the m69b histograms (test-experimental drops it: no cp314t grpcio).
-  HISTOGRAM: "graphed-histogram[histserv] @ git+https://github.com/graphed-org/graphed-histogram@3830acaa26a9a5860892f263c0b0ca8c96efadb8"
+  # fails SILENTLY: graphed-histogram IS on PyPI, so a missing line quietly installs whatever release
+  # is newest, and the job goes green on an unpinned package. Needed in every job that collects tests/frozen. Pinned to the 0.0.8 release; its histserv
+  # extra serves the m69b histograms (test-experimental drops it: no cp314t grpcio).
+  HISTOGRAM: "graphed-histogram[histserv]==0.0.8"
   # test-hgg only: the coffea fork with graphed mode, the uproot commit it needs (uproot.graphed is
   # unreleased), and HiggsDNA, installed --no-deps because its declared deps pull torch/xgboost/onnx.
   COFFEA: "coffea @ git+https://github.com/graphed-org/coffea-graphed-mvp@b2612ab03932ba61f183eb5f582870109020446b"
