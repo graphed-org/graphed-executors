@@ -249,19 +249,17 @@ def port_free(port: int) -> bool:
 
 
 def free_range(n: int = 3) -> tuple[int, int]:
-    """Return an inclusive range of ``n`` free ports above the site rows' 10000-10100 band."""
+    """Return an inclusive range of ``n`` free ports in 20000-32000, below the ephemeral range."""
     for _ in range(200):
-        low = 20000 + secrets.randbelow(30000)
+        low = 20000 + secrets.randbelow(12000)
         if all(port_free(p) for p in range(low, low + n)):
             return (low, low + n - 1)
     raise AssertionError(f"no {n} consecutive free ports found")
 
 
 def closed_port() -> int:
-    """Return a port nothing listens on (bound once, then released)."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
+    """Return a port nothing listens on, below the ephemeral range a dial's own port is from."""
+    return free_range(1)[0]
 
 
 @contextlib.contextmanager

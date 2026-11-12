@@ -72,6 +72,7 @@ enforce it. Highlights the implementer must not miss:
 | worker_death | §1.4 epoch/restart, §0.3 measured latency, r3 tests-(d) | IT2+IT3 | stale-block reuse (byte divergence); no restart (pmark count / hang); raw WorkerLost leakage; restart-budget ignore (allowed=0 green) |
 | transport_imports | §0.4, §1.6 import rule, G9 | IT1 | eager parsl/dask imports in new modules; parsl→dask_backend coupling; copied resolver/witness classes (incomplete move) |
 | transport_packaging | §1.6 items 2-3, §2 IT5 | IT5 | zero-gated `http_plane` (or double-gated moved modules); un-gated moved m44 engine (missing dask sources); a `--cov=`/`--cov`-less step regression; a frozen-but-never-run m47 suite (missing pytest path) |
+| `parsl_transport_harness.closed_loopback_port` | § fixture | — | port pickers draw from 20000-32000, below Linux's ephemeral range (32768-60999) and above the 10000-10100 site band, so no client socket's source port holds a picked port or self-connects a closed one (owner ruling 2026-11-12, `freeze-m47-fixup5`) |
 
 ## Test-author judgment calls — FLAGGED for the freeze ruling
 

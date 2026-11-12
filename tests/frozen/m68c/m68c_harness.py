@@ -181,7 +181,7 @@ def _bindable(port: int) -> bool:
 
 def free_range(n: int = 3) -> tuple[int, int]:
     for _ in range(200):
-        low = 20000 + secrets.randbelow(30000)
+        low = 20000 + secrets.randbelow(12000)
         if all(_bindable(p) for p in range(low, low + n)):
             return (low, low + n - 1)
     raise AssertionError(f"no {n} consecutive free ports found")

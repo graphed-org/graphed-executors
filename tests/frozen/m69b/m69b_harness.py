@@ -335,7 +335,7 @@ def port_free(port: int) -> bool:
 def free_range(n: int) -> tuple[int, int]:
     """Return an inclusive range of ``n`` ports free now, above the 10000-10100 site band."""
     for _ in range(200):
-        low = 20000 + secrets.randbelow(30000)
+        low = 20000 + secrets.randbelow(12000)
         if all(port_free(p) for p in range(low, low + n)):
             return (low, low + n - 1)
     raise AssertionError(f"no {n} consecutive free ports found")
