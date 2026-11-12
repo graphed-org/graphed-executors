@@ -1,8 +1,10 @@
 What changed
 ============
 
-Unreleased
-----------
+0.0.8
+-----
+
+Requires ``graphed`` 0.0.11 or later.
 
 * ``SequentialRunner``, ``ThreadExecutor``, ``ProcessPoolExecutor``, ``PinnedPoolExecutor``,
   ``dask_runner``, ``parsl_runner``, ``htcondor_runner``, ``start_htex`` and ``stop_htex`` import from
@@ -10,6 +12,83 @@ Unreleased
   ``dir(graphed_executors)`` lists just these names and ``__version__``.
 * ``dask_runner`` and ``start_htex`` name the extra to install when it is missing; they raised a
   bare ``ModuleNotFoundError``.
+* A warning raised in a task on a worker process reaches the driver on every runner: each marks
+  its workers with ``graphed.core.worker_warnings.enter_worker``, so a driver that loaded its plan
+  instead of building it keeps its own ``warnings.showwarning`` and filters (graphed#197).
+* A dead worker raises ``graphed.WorkerLostError`` on every runner, with the chunk's label in
+  ``partition`` and the worker in ``worker``. It replaces a raw ``BrokenProcessPool`` on the process
+  pools, a raw ``WorkerLost`` on parsl, and a ``StageError`` with a data file in its source-line
+  slot on dask and HTCondor. Catch it with ``except graphed.WorkerLostError``; ``cause_type`` is
+  still ``"KilledWorker"``. ``htcondor_backend.WorkerLostError`` is now a subclass of it.
+* ``ProcessPoolExecutor`` and ``PinnedPoolExecutor`` take ``retries=`` (default 0): a
+  ``WorkerLostError`` re-runs the whole plan, except one that pulls from ``next_tasks``.
+  ``ThreadExecutor`` accepts it too, so runners swap, but has no worker to lose.
+* A process pool notices a dead worker within a poll. A kill could wait out the 300 s
+  peer-root timeout, with every other worker idle.
+* A peer run longer than 300 s finishes. It raised ``TimeoutError`` after 300 s however healthy it
+  was; that timeout now only counts time with no worker running a chunk or a combine.
+* A persistent process pool that lost a worker respawns for the next run; it raised
+  ``BrokenProcessPool`` on every later run.
+* A monitor without ``worker_profiler_factory``, or one whose factory raises, no longer ends a run
+  on ``ProcessPoolExecutor``, ``PinnedPoolExecutor``, ``dask_runner``, ``parsl_runner`` or
+  ``htcondor_runner``.
+* Every runner reports a run's start and end to a monitor's optional ``on_run_start(n_tasks)`` and
+  ``on_run_end()``, so ``graphed.debug.ProgressBar`` shows the plan's whole task count from the
+  first tick and closes on a cancelled, failed or lost-worker run.
+* ``run()`` at the top level of a script with no ``if __name__ == "__main__":`` guard raises a
+  ``RuntimeError`` naming the fix; it was a ``BrokenProcessPool`` after hundreds of lines of worker
+  tracebacks.
+* On Windows, an unguarded script that runs a process executor with a ``monitor`` raises the
+  ``if __name__ == "__main__":`` ``RuntimeError``; it hung while starting the monitor's manager.
+  An unguarded script also no longer leaves a ``graphed-in-flight-*`` temp directory behind.
+* One vocabulary across runners: ``workers=`` on ``ThreadExecutor``, ``ProcessPoolExecutor``,
+  ``PinnedPoolExecutor``, ``ThreadBackend``, ``HTCondorBackend``, ``htcondor_runner`` and
+  ``submit_driverless``, where ``max_workers=`` and ``n_pilots=`` are deprecated and passing both
+  spellings raises ``TypeError``; and ``control=`` on ``dask_runner``, ``parsl_runner`` and
+  ``htcondor_runner``.
+* ``htcondor_runner`` and ``submit_driverless`` agree on their defaults: 2 workers and
+  ``request_memory_mb=2048``.
+* ``ParslRunner.local(workers=4)`` starts HTEX on this machine and stops it when the ``with`` block
+  ends. ``ParslRunner(executor)`` is ``parsl_runner(executor)``, which now returns one, and leaves
+  a caller's executor running.
+* ``stop_htex`` stops the block's worker processes within seconds, where they used to outlive it
+  by the heartbeat threshold (120 s by default).
+* ``start_htex`` works from an unactivated venv, and otherwise refuses naming the cause instead of
+  ``FileNotFoundError: 'interchange.py'``.
+* ``run(plan, skip_failed=N)`` on every runner goes on past ``N`` failed chunks; see graphed's
+  changelog for ``ExecResult.failed``. ``StopCondition(max_errors=N)`` is the same budget, through
+  ``submit(plan)`` too, and a left-out chunk is an ``ERRORED`` task on every runner.
+* A lost worker's chunk counts, after ``retries``, by rerunning the plan with that chunk left out;
+  each loss costs one from the budget. A loss in a plan with ``next_tasks``, or one dask blames on a
+  task that is no chunk (a combine, a broadcast, a service probe), still raises ``WorkerLostError``.
+* A failed run on a long-lived dask client lets go of its futures: the engine clears its own frames
+  from the error it raises, and the user's frames keep their locals.
+* A plan with fewer tasks than the runner has workers warns once per run, naming
+  ``events_per_task=`` and ``steps_per_file=``: the thread and process pools, ``SubmitRunner`` (so
+  ``dask_runner``, ``parsl_runner`` and ``htcondor_runner``), and the dask and parsl peer
+  reductions. A plan with ``next_tasks``, a staged plan and an empty plan stay quiet (graphed#152).
+* An exception from a plan's ``process`` runs once on every runner; ``retries=`` stays the
+  lost-worker budget. ``retry_user_errors=N`` (default 0) on ``SubmitRunner``, ``dask_runner``,
+  ``parsl_runner``, ``htcondor_runner`` and ``submit_driverless`` gives a failing chunk ``N`` more
+  tries in its worker, for flaky I/O (#94).
+* ``dask_runner``'s ``retries=`` is deprecated and warns when passed. It never had an effect: a
+  lost dask worker's budget is ``distributed.scheduler.allowed-failures``. It will be removed in a
+  later release.
+* The API reference no longer cites internal planning ids, and ``ThreadExecutor``,
+  ``ProcessPoolExecutor``, ``dask_runner``, ``parsl_runner``, ``start_htex``, ``htcondor_runner``
+  and ``submit_driverless`` each show an example (#101).
+* The dask, parsl and HTCondor pages and the README lead with a graphed-built plan, which carries
+  its functions (lambdas and ``__main__`` ones included) to every backend; only a hand-built
+  ``Plan`` needs importable functions. On parsl, a hand-built plan whose function lives in the
+  launch script now fails with an ``AttributeError`` naming the function and the fix, instead of
+  ``Can't get attribute ... on <module '__mp_main__'>`` (#100).
+* A service started beside the driver moves to the next port of its range when another process
+  takes its port between the free-port scan and the service's bind, as a cluster-hosted one already
+  did, instead of failing the run with ``ServiceUnavailableError`` (#121).
+* ``skip_failed`` on dask charges only the chunk that kills its worker. A dead worker's scheduler
+  fails every task it held, so a poison chunk used to take co-resident chunks out of the budget
+  with it; the runner now reruns the chunks lost together, in halves, and leaves out only those
+  that lose a worker alone (#95).
 
 0.0.7
 -----

@@ -1,6 +1,0 @@
-.. under: Unreleased
-
-* A plan with fewer tasks than the runner has workers warns once per run, naming
-  ``events_per_task=`` and ``steps_per_file=``: the thread and process pools, ``SubmitRunner`` (so
-  ``dask_runner``, ``parsl_runner`` and ``htcondor_runner``), and the dask and parsl peer
-  reductions. A plan with ``next_tasks``, a staged plan and an empty plan stay quiet (graphed#152).
