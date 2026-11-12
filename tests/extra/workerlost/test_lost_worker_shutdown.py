@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 PRELUDE = """
-import multiprocessing, operator, os, signal, sys, time
+import faulthandler, multiprocessing, operator, os, signal, sys, time
 from concurrent.futures import FIRST_EXCEPTION, wait
 from graphed import WorkerLostError
 from graphed.core import Partition, Plan, Task
@@ -23,6 +23,7 @@ from graphed_executors import ProcessPoolExecutor
 from graphed_executors.local import _process_peer
 
 _process_peer._LOST_JOIN_S = 0.5  # the driver's wait on survivors; only an ignorer outlasts it
+faulthandler.dump_traceback_later(45, exit=True)  # a hang names its frames, inside the 60 s run
 
 def ignore():
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
