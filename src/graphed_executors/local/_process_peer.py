@@ -104,6 +104,14 @@ def _reap_lost(workers: Sequence[BaseProcess]) -> list[BaseProcess]:
     return killed
 
 
+class _ReapingPool(_StdProcessPool):
+    """The stdlib pool, whose shutdown first reaps the survivors of a lost worker."""
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        _reap_lost(_worker_processes(self))
+        super().shutdown(wait, cancel_futures=cancel_futures)
+
+
 # a spawned worker's exit when the script it re-imported calls run(): the driver names the fix
 _UNGUARDED_EXIT = 83
 _UNGUARDED = """run() was called while a pool worker re-imported your script.
@@ -309,7 +317,7 @@ class _ProcessPeerBase(_BaseExecutor):
             ]
             pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args, driver=process_id())
         else:
-            pool = _StdProcessPool(
+            pool = _ReapingPool(
                 max_workers=w,
                 mp_context=ctx,
                 initializer=peer_pool_init,
@@ -387,7 +395,6 @@ class _ProcessPeerBase(_BaseExecutor):
             release_w.close()  # first: the shutdown below joins actors that only this ends
             release_r.close()
             if not self._persistent:
-                _reap_lost(_worker_processes(pool))
                 pool.shutdown()
                 _close_registry(registry)
 
@@ -418,7 +425,7 @@ class _ProcessPeerBase(_BaseExecutor):
             pool = cast("_StdProcessPool", self._peer_pool)
         else:
             self._close_peer()
-            pool = _StdProcessPool(
+            pool = _ReapingPool(
                 max_workers=w,
                 mp_context=ctx,
                 initializer=exit_with_driver,
@@ -468,7 +475,6 @@ class _ProcessPeerBase(_BaseExecutor):
             release_r.close()
             driver_t.close()
             if not self._persistent:
-                _reap_lost(_worker_processes(pool))
                 pool.shutdown()
 
     def _collect_peer(

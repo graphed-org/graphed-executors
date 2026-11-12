@@ -27,7 +27,8 @@ def chunk(part, res):
             f.write(str(os.getpid()))
         time.sleep(300)
         return 1
-    time.sleep(1.0)  # the other worker ignores SIGTERM by now
+    while not os.path.exists({pidfile!r}):  # the other worker ignores SIGTERM once it exists
+        time.sleep(0.05)
     os._exit(1)
 
 plan = Plan(process=chunk, combine=operator.add, empty=int,
@@ -39,6 +40,29 @@ if __name__ == "__main__":
         print("LOST", err.partition)
 """
 
+CLOSE_SCRIPT = """
+import multiprocessing, os, signal, time
+from concurrent.futures import FIRST_EXCEPTION, wait
+from graphed_executors.local._process_peer import _ReapingPool
+
+def ignore():
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    with open({pidfile!r}, "w") as f:
+        f.write(str(os.getpid()))
+    time.sleep(300)
+
+def crash():
+    while not os.path.exists({pidfile!r}):
+        time.sleep(0.05)
+    os._exit(1)
+
+if __name__ == "__main__":
+    pool = _ReapingPool(2, mp_context=multiprocessing.get_context("spawn"))
+    wait([pool.submit(ignore), pool.submit(crash)], return_when=FIRST_EXCEPTION)
+    pool.shutdown()
+    print("CLOSED")
+"""
+
 
 @pytest.fixture
 def tmp() -> Iterator[Path]:
@@ -48,15 +72,12 @@ def tmp() -> Iterator[Path]:
     shutil.rmtree(d, ignore_errors=True)
 
 
-@pytest.mark.parametrize("comms", ["None", "'ipc'", "'http'"])
-def test_a_survivor_that_ignores_sigterm_does_not_hang_the_lost_worker_error(
-    tmp: Path, comms: str
-) -> None:
+def _run(tmp: Path, source: str, **fmt: str) -> subprocess.CompletedProcess[str]:
     pidfile = tmp / "ignorer.pid"
     script = tmp / "analysis.py"
-    script.write_text(SCRIPT.format(pidfile=str(pidfile), comms=comms))
+    script.write_text(source.format(pidfile=str(pidfile), **fmt))
     try:
-        out = subprocess.run(
+        return subprocess.run(
             [sys.executable, str(script)],
             capture_output=True,
             text=True,
@@ -67,8 +88,23 @@ def test_a_survivor_that_ignores_sigterm_does_not_hang_the_lost_worker_error(
     finally:
         with contextlib.suppress(OSError, ValueError):
             os.kill(int(pidfile.read_text()), getattr(signal, "SIGKILL", signal.SIGTERM))
+
+
+@pytest.mark.parametrize("comms", ["None", "'ipc'", "'http'"])
+def test_a_survivor_that_ignores_sigterm_does_not_hang_the_lost_worker_error(
+    tmp: Path, comms: str
+) -> None:
+    out = _run(tmp, SCRIPT, comms=comms)
     assert out.returncode == 0, out.stderr
     lost = out.stdout.strip()
     assert lost.startswith("LOST"), out.stdout + out.stderr
     if sys.platform != "win32":  # where SIGTERM can be ignored, the killed survivor is no culprit
         assert lost == "LOST f:t (entries 1-2)", out.stdout + out.stderr
+
+
+def test_a_pool_that_lost_a_worker_shuts_down_past_a_sigterm_ignorer(
+    tmp: Path,
+) -> None:
+    out = _run(tmp, CLOSE_SCRIPT)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "CLOSED", out.stdout + out.stderr

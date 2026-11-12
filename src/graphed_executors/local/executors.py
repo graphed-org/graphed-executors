@@ -28,10 +28,6 @@ from collections import OrderedDict, deque
 from collections.abc import Callable, Iterator
 from concurrent.futures import Executor as _PoolExecutor
 from concurrent.futures import Future, ThreadPoolExecutor
-from concurrent.futures import (
-    # the stdlib pool; our public ProcessPoolExecutor wraps it
-    ProcessPoolExecutor as _StdProcessPool,
-)
 from multiprocessing.managers import SyncManager
 from typing import Any, TypeVar, cast
 
@@ -57,7 +53,7 @@ from ._driver import _BaseExecutor
 from ._peer import OUTBOX_EXIT_WAIT_S, PeerControl, process_and_reduce
 from ._pinned_pool import exit_with_driver
 from ._portable import Portable
-from ._process_peer import _ProcessPeerBase
+from ._process_peer import _ProcessPeerBase, _ReapingPool
 from ._transport import build_transports
 
 if sys.platform != "win32":
@@ -661,7 +657,7 @@ class _ProcessExecutorBase(_ProcessPeerBase):
 
     def _pool(self) -> _PoolExecutor:
         factory, event_q, push, lean = self._pool_init()
-        return _StdProcessPool(
+        return _ReapingPool(
             max_workers=self.max_workers,
             mp_context=multiprocessing.get_context("spawn"),
             initializer=functools.partial(
