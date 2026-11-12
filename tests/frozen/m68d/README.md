@@ -58,6 +58,7 @@ and L1-L4 in `m68b-minicondor:local` with graphed `a51bee4`).
 | `...::test_a_removed_service_node_fails_each_driver_try_fast` | A + C live | one driver try, exit 3 (`URLError`), no retry | the 3 × `timeout_s` wait |
 | `...::test_a_slow_binding_service_beside_the_driver_takes_another_port` | port race live | svc0 not ready: 501 from the driver's task server until `timeout_s`; DAG failed | P1d on one host |
 | `...::test_an_unmatchable_service_node_fails_the_driver_fast` | A2 live | the DAG still running after 300 s | waiting out `timeout_s` on a node that can never match |
+| `m68d_harness.free_range` | fixture | — | port pickers draw from 20000-32000, below Linux's ephemeral range (32768-60999) and above the 10000-10100 site band, so no client socket's source port holds a picked port or self-connects a closed one (owner ruling 2026-11-12, `freeze-m68d-fixup3`) |
 
 ## Readings
 

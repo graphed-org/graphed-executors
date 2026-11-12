@@ -22,6 +22,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, cast
 
 import graphed.services as graphed_services
@@ -32,6 +33,9 @@ from graphed.services import Launch, ServiceSpec
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit import services as svc
 from graphed_executors.submit.recipes import http_server
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68a"))
+from services_harness import free_range
 
 # ---- servers, plans, backends -------------------------------------------------------------------
 
@@ -68,10 +72,8 @@ def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
 
 def free_ports() -> tuple[int, int]:
     """Return a range of one port that was free a moment ago."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = int(sock.getsockname()[1])
-    return (port, port)
+    low, high = free_range(1)
+    return (low, high)
 
 
 def bare(name: str = "web", kind: str = "http") -> ServiceSpec:

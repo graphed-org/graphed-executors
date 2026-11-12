@@ -48,6 +48,7 @@ graphed's `feat(runners)` tip; on graphed main every test fails at the fixture
 | `htcondor::test_submit_driverless_derives_a_join_plan_s_service_nodes` | §6 SERVICE-node derivation (m68b) | `process` | a pre-check that refuses importable stage processes; `plan.services` not reaching `_service_nodes` |
 | `htcondor::test_a_live_join_over_pool_pilots_calls_the_given_server` | §6 live V2 run | `process` (skipped without bindings) | pilots that never call the server, a wrong value |
 | `htcondor::test_a_live_join_over_pool_pilots_runs_a_lambda_stage_process` | §6 HTCondor, lambda stage processes accepted (owner ruling 2026-10-01, `freeze-m68c-fixup`): `htcondor_runner` over pool pilots runs the lambda-`combine` join to `SequentialRunner`'s non-empty value | `ValueError` naming `stages[i].process` at `fc9e316` (skipped without bindings) | a pre-check that refuses a lambda; a broadcast pilots cannot unpickle; a wrong fold |
+| `m68c_harness.free_range` | fixture | — | port pickers draw from 20000-32000, below Linux's ephemeral range (32768-60999) and above the 10000-10100 site band, so no client socket's source port holds a picked port or self-connects a closed one (owner ruling 2026-11-12, `freeze-m68c-fixup5`) |
 
 ## Choices the plan leaves open
 

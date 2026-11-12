@@ -55,7 +55,7 @@ def free_ports(n: int) -> list[int]:
 
     Scanned from a per-process base so concurrent runs differ.
     """
-    for low in range(31000 + os.getpid() % 1000 * 20, 60000, 97):
+    for low in range(20000 + os.getpid() % 600 * 20, 32000, 97):  # below the ephemeral range
         ports = list(range(low, low + n))
         if all(ann.free(p) for p in ports):
             return ports
@@ -266,10 +266,10 @@ def test_the_pid_reap_of_a_child_reaped_elsewhere_returns_at_once() -> None:
 def test_a_child_that_exits_after_ready_ends_the_job_with_its_code(
     job_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    ports = free_ports(1)
-    with socket.socket() as s:  # a url nothing answers: no 200 and no 403, well inside the lease
-        s.bind(("127.0.0.1", 0))
-        url = f"http://127.0.0.1:{s.getsockname()[1]}"
+    *ports, closed = free_ports(2)
+    url = (
+        f"http://127.0.0.1:{closed}"  # a url nothing answers: no 200 and no 403, inside the lease
+    )
     cfg = config(ports, argv=["{python}", "-c", LISTENER, "{port}", "5", "1.5", "0"], url=url)
     (job_dir / "service.json").write_text(json.dumps(cfg))
     (job_dir / "graphed-secret").write_text(os.urandom(32).hex())
