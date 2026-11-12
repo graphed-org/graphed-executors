@@ -1,5 +1,0 @@
-.. under: Unreleased
-
-* A service started beside the driver moves to the next port of its range when another process
-  takes its port between the free-port scan and the service's bind, as a cluster-hosted one already
-  did, instead of failing the run with ``ServiceUnavailableError`` (#121).

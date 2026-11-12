@@ -1,5 +1,0 @@
-.. under: Unreleased
-
-* The API reference no longer cites internal planning ids, and ``ThreadExecutor``,
-  ``ProcessPoolExecutor``, ``dask_runner``, ``parsl_runner``, ``start_htex``, ``htcondor_runner``
-  and ``submit_driverless`` each show an example (#101).

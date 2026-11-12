@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from .local import PinnedPoolExecutor, ProcessPoolExecutor, ThreadExecutor
     from .parsl_backend import parsl_runner, start_htex, stop_htex
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 
 __all__ = [
     "ParslRunner",
