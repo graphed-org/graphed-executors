@@ -14,22 +14,33 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = """
-import operator, os, signal, sys, time
+PRELUDE = """
+import multiprocessing, operator, os, signal, sys, time
+from concurrent.futures import FIRST_EXCEPTION, wait
 from graphed import WorkerLostError
 from graphed.core import Partition, Plan, Task
 from graphed_executors import ProcessPoolExecutor
+from graphed_executors.local import _process_peer
 
-def chunk(part, res):
-    if part.entry_start == 0:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        with open({pidfile!r}, "w") as f:
-            f.write(str(os.getpid()))
-        time.sleep(300)
-        return 1
+_process_peer._LOST_JOIN_S = 0.5  # the driver's wait on survivors; only an ignorer outlasts it
+
+def ignore():
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    with open({pidfile!r}, "w") as f:
+        f.write(str(os.getpid()))
+    time.sleep(300)
+
+def crash():
     while not os.path.exists({pidfile!r}):  # the other worker ignores SIGTERM once it exists
         time.sleep(0.05)
     os._exit(1)
+"""
+
+SCRIPT = (
+    PRELUDE
+    + """
+def chunk(part, res):
+    return ignore() if part.entry_start == 0 else crash()
 
 plan = Plan(process=chunk, combine=operator.add, empty=int,
             tasks=tuple(Task(i, Partition("f", "t", i, i + 1)) for i in range(2)))
@@ -39,29 +50,18 @@ if __name__ == "__main__":
     except WorkerLostError as err:
         print("LOST", err.partition)
 """
+)
 
-CLOSE_SCRIPT = """
-import multiprocessing, os, signal, time
-from concurrent.futures import FIRST_EXCEPTION, wait
-from graphed_executors.local._process_peer import _ReapingPool
-
-def ignore():
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    with open({pidfile!r}, "w") as f:
-        f.write(str(os.getpid()))
-    time.sleep(300)
-
-def crash():
-    while not os.path.exists({pidfile!r}):
-        time.sleep(0.05)
-    os._exit(1)
-
+CLOSE_SCRIPT = (
+    PRELUDE
+    + """
 if __name__ == "__main__":
-    pool = _ReapingPool(2, mp_context=multiprocessing.get_context("spawn"))
+    pool = _process_peer._ReapingPool(2, mp_context=multiprocessing.get_context("spawn"))
     wait([pool.submit(ignore), pool.submit(crash)], return_when=FIRST_EXCEPTION)
     pool.shutdown()
     print("CLOSED")
 """
+)
 
 
 @pytest.fixture

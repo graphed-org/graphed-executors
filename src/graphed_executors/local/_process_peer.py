@@ -226,8 +226,7 @@ class _ProcessPeerBase(_BaseExecutor):
             if not getattr(pool, "_broken", False):  # a chunk's own nested pool, not this one
                 raise
             workers = _worker_processes(pool)
-            killed = _reap_lost(workers)
-            # either joins them, so every exit code is in
+            killed = _reap_lost(workers)  # joins them, so every exit code is in
             if self._kept_pool is pool:
                 self._release_kept_pool()
             else:
