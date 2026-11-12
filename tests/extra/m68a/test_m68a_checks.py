@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from services_harness import closed_port
 
 from graphed_executors.submit import ThreadBackend, recipes
 from graphed_executors.submit import services as svc
@@ -59,10 +60,7 @@ def http_server(status: int = 200, ctype: str = "text/plain") -> Iterator[str]:
 
 
 def closed_endpoint(scheme: str) -> str:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    return f"{scheme}://127.0.0.1:{port}"
+    return f"{scheme}://127.0.0.1:{closed_port()}"
 
 
 def test_http_checks_by_answer() -> None:

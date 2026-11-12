@@ -159,6 +159,7 @@ import contextlib
 import functools
 import os
 import pickle
+import secrets
 import shutil
 import socket
 import tempfile
@@ -413,11 +414,15 @@ def closed_loopback_port() -> int:
     Dialing it is a deterministic, instant connection-refused (the clock-free failure the
     registry-poisoner and exhaustion arms use).
     """
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", 0))
-    port = int(s.getsockname()[1])
-    s.close()
-    return port
+    for _ in range(200):
+        port = 20000 + secrets.randbelow(12000)  # below the ephemeral range a dial's own port uses
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+        return port
+    raise AssertionError("no closed loopback port found")
 
 
 def wire_endpoints(*endpoints: Any) -> None:

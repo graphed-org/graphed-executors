@@ -87,6 +87,7 @@ an `(n_events, n_features)` matrix, which a rank-1 input would reject.
 | `test_services_live.py::*` | row 6 (a) pool, (b) given endpoint, (c) site leg |
 | `test_scope_dask_memory.py::test_at_most_task_slots_leaf_results_are_held` | row 7; r23 K2 |
 | `test_services_packaging.py::*` | row 8; §6 CI; E4, E6 |
+| `services_harness.free_range`, `services_harness.closed_port` | port pickers draw from 20000-32000, below Linux's ephemeral range (32768-60999) and above the 10000-10100 site band, so no client socket's source port holds a picked port or self-connects a closed one (owner ruling 2026-11-12, `freeze-m68a-fixup7`) |
 
 ## Blocked upstream: graphed's resolve walk
 
