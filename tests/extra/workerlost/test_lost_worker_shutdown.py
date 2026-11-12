@@ -40,11 +40,13 @@ def crash():
 SCRIPT = (
     PRELUDE
     + """
+# the quick chunk's result wakes the pool's manager after both workers exist; a worker spawned
+# after the manager's last wakeup has no sentinel there, so its crash alone would go unseen
 def chunk(part, res):
-    return ignore() if part.entry_start == 0 else crash()
+    return (ignore, int, crash)[part.entry_start]()
 
 plan = Plan(process=chunk, combine=operator.add, empty=int,
-            tasks=tuple(Task(i, Partition("f", "t", i, i + 1)) for i in range(2)))
+            tasks=tuple(Task(i, Partition("f", "t", i, i + 1)) for i in range(3)))
 if __name__ == "__main__":
     try:
         ProcessPoolExecutor(2, comms={comms}).run(plan)
@@ -58,6 +60,7 @@ CLOSE_SCRIPT = (
     + """
 if __name__ == "__main__":
     pool = _process_peer._ReapingPool(2, mp_context=multiprocessing.get_context("spawn"))
+    wait([pool.submit(int) for _ in range(2)])  # both workers exist and the manager sees them
     wait([pool.submit(ignore), pool.submit(crash)], return_when=FIRST_EXCEPTION)
     pool.shutdown()
     print("CLOSED")
@@ -100,7 +103,7 @@ def test_a_survivor_that_ignores_sigterm_does_not_hang_the_lost_worker_error(
     lost = out.stdout.strip()
     assert lost.startswith("LOST"), out.stdout + out.stderr
     if sys.platform != "win32":  # where SIGTERM can be ignored, the killed survivor is no culprit
-        assert lost == "LOST f:t (entries 1-2)", out.stdout + out.stderr
+        assert lost == "LOST f:t (entries 2-3)", out.stdout + out.stderr
 
 
 def test_a_pool_that_lost_a_worker_shuts_down_past_a_sigterm_ignorer(
