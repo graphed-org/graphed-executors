@@ -23,6 +23,7 @@ from concurrent.futures import Future, wait
 from concurrent.futures import ProcessPoolExecutor as _StdProcessPool
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from multiprocessing.connection import wait as _ready
 from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
@@ -78,7 +79,43 @@ def _worker_processes(pool: Any) -> list[BaseProcess]:
     """Return ``pool``'s worker processes, which the stdlib pool's public API does not name."""
     if pool is None:
         return []
-    return pool.workers if isinstance(pool, PinnedProcessPool) else list(pool._processes.values())
+    if isinstance(pool, PinnedProcessPool):
+        return pool.workers
+    return list((pool._processes or {}).values())  # a shut-down stdlib pool drops its map
+
+
+_LOST_JOIN_S = 5.0  # a lost-worker pool's survivors' time to exit before they are killed
+
+
+def _reap_lost(workers: Sequence[BaseProcess]) -> list[BaseProcess]:
+    """Kill the survivors of a pool that lost a worker once they outlive ``_LOST_JOIN_S``.
+
+    The stdlib pool's own teardown SIGTERMs them and then joins without a bound, so one that
+    ignores SIGTERM would hang its shutdown. Returns the killed ones; none if no worker exited.
+    Exits are read from the sentinels: the pool's manager thread reaps the same workers, and a
+    ``waitpid`` lost to it reads as still running.
+    """
+    by_sentinel = {p.sentinel: p for p in workers}
+    running = set(by_sentinel)
+    if not _ready(list(running), 0):
+        return []
+    deadline = time.monotonic() + _LOST_JOIN_S
+    while running and (left := deadline - time.monotonic()) > 0:
+        running.difference_update(_ready(list(running), left))
+    killed = [by_sentinel[s] for s in running]
+    for p in killed:
+        p.kill()
+    if killed:  # an empty wait has nothing to end it
+        _ready([p.sentinel for p in killed])  # SIGKILL cannot be ignored
+    return killed
+
+
+class _ReapingPool(_StdProcessPool):
+    """The stdlib pool, whose shutdown first reaps the survivors of a lost worker."""
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        _reap_lost(_worker_processes(self))
+        super().shutdown(wait, cancel_futures=cancel_futures)
 
 
 # a spawned worker's exit when the script it re-imported calls run(): the driver names the fix
@@ -195,12 +232,12 @@ class _ProcessPeerBase(_BaseExecutor):
             if not getattr(pool, "_broken", False):  # a chunk's own nested pool, not this one
                 raise
             workers = _worker_processes(pool)
-            # either joins them, so every exit code is in
+            killed = _reap_lost(workers)  # joins them, so every exit code is in
             if self._kept_pool is pool:
                 self._release_kept_pool()
             else:
                 pool.shutdown()
-            lost = self._lost_in(workers)
+            lost = self._lost_in([p for p in workers if p not in killed])
             if lost is None:
                 raise
             raise lost from exc
@@ -285,7 +322,7 @@ class _ProcessPeerBase(_BaseExecutor):
             ]
             pool = PinnedProcessPool(w, ctx, pinned_peer_init, init_args, driver=process_id())
         else:
-            pool = _StdProcessPool(
+            pool = _ReapingPool(
                 max_workers=w,
                 mp_context=ctx,
                 initializer=peer_pool_init,
@@ -393,7 +430,7 @@ class _ProcessPeerBase(_BaseExecutor):
             pool = cast("_StdProcessPool", self._peer_pool)
         else:
             self._close_peer()
-            pool = _StdProcessPool(
+            pool = _ReapingPool(
                 max_workers=w,
                 mp_context=ctx,
                 initializer=exit_with_driver,

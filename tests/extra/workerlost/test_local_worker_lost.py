@@ -277,19 +277,19 @@ def test_a_healthy_run_leaves_no_marker(tmp_path: Path) -> None:
 
 
 def slow(part: Partition, res: object) -> int:
-    time.sleep(0.5)
+    time.sleep(2.0)
     return 1
 
 
 def slow_add(a: int, b: int) -> int:
-    time.sleep(0.5)
+    time.sleep(2.0)
     return a + b
 
 
 def test_a_thread_run_outlasts_the_deadline_while_a_chunk_or_combine_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 0.2)
+    monkeypatch.setattr(_driver._BaseExecutor, "_peer_root_timeout_s", 1.0)
     for process, combine in ((slow, add), (lambda p, r: 1, slow_add)):
         tasks = TASKS[:2]
         with ThreadExecutor(1) as ex:

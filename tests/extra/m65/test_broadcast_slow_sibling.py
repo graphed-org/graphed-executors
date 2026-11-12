@@ -42,7 +42,7 @@ class _LateSiblingPool(ProcessPoolExecutor):
 def _late_sibling(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, late_s: float) -> None:
     monkeypatch.setattr(_LateSiblingPool, "marker", str(tmp_path / "first-booted"))
     monkeypatch.setattr(_LateSiblingPool, "late_s", late_s)
-    monkeypatch.setattr(executors, "_StdProcessPool", _LateSiblingPool)
+    monkeypatch.setattr(executors, "_ReapingPool", _LateSiblingPool)
 
 
 def test_a_worker_booting_after_its_sibling_has_answered_is_still_primed(
