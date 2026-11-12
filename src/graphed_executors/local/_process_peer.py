@@ -78,7 +78,30 @@ def _worker_processes(pool: Any) -> list[BaseProcess]:
     """Return ``pool``'s worker processes, which the stdlib pool's public API does not name."""
     if pool is None:
         return []
-    return pool.workers if isinstance(pool, PinnedProcessPool) else list(pool._processes.values())
+    if isinstance(pool, PinnedProcessPool):
+        return pool.workers
+    return list((pool._processes or {}).values())  # a shut-down stdlib pool drops its map
+
+
+_LOST_JOIN_S = 5.0  # a lost-worker pool's survivors' time to exit before they are killed
+
+
+def _reap_lost(workers: Sequence[BaseProcess]) -> list[BaseProcess]:
+    """Kill the survivors of a pool that lost a worker once they outlive ``_LOST_JOIN_S``.
+
+    The stdlib pool's own teardown SIGTERMs them and then joins without a bound, so one that
+    ignores SIGTERM would hang its shutdown. Returns the killed ones; none if no worker exited.
+    """
+    if all(p.exitcode is None for p in workers):
+        return []
+    deadline = time.monotonic() + _LOST_JOIN_S
+    for p in workers:
+        p.join(max(0.0, deadline - time.monotonic()))
+    killed = [p for p in workers if p.exitcode is None]
+    for p in killed:
+        p.kill()
+        p.join()  # SIGKILL cannot be ignored
+    return killed
 
 
 # a spawned worker's exit when the script it re-imported calls run(): the driver names the fix
@@ -195,12 +218,13 @@ class _ProcessPeerBase(_BaseExecutor):
             if not getattr(pool, "_broken", False):  # a chunk's own nested pool, not this one
                 raise
             workers = _worker_processes(pool)
+            killed = _reap_lost(workers)
             # either joins them, so every exit code is in
             if self._kept_pool is pool:
                 self._release_kept_pool()
             else:
                 pool.shutdown()
-            lost = self._lost_in(workers)
+            lost = self._lost_in([p for p in workers if p not in killed])
             if lost is None:
                 raise
             raise lost from exc
@@ -363,6 +387,7 @@ class _ProcessPeerBase(_BaseExecutor):
             release_w.close()  # first: the shutdown below joins actors that only this ends
             release_r.close()
             if not self._persistent:
+                _reap_lost(_worker_processes(pool))
                 pool.shutdown()
                 _close_registry(registry)
 
@@ -443,6 +468,7 @@ class _ProcessPeerBase(_BaseExecutor):
             release_r.close()
             driver_t.close()
             if not self._persistent:
+                _reap_lost(_worker_processes(pool))
                 pool.shutdown()
 
     def _collect_peer(
