@@ -1,5 +1,0 @@
-.. under: Unreleased
-
-* A process-pool run that loses a worker raises :class:`graphed.WorkerLostError` even when another
-  worker ignores ``SIGTERM``: survivors still alive 5 s after the loss are killed before the pool
-  shuts down, instead of the shutdown waiting on them forever (#129).

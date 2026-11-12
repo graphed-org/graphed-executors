@@ -89,6 +89,12 @@ Requires ``graphed`` 0.0.11 or later.
   fails every task it held, so a poison chunk used to take co-resident chunks out of the budget
   with it; the runner now reruns the chunks lost together, in halves, and leaves out only those
   that lose a worker alone (#95).
+* A driver-hosted service whose port another process takes after the scan moves to the next port
+  once its child exits, even when the readiness dial reached the other process's listener first;
+  a child still alive a second after that listener is seen is refused as before (#121).
+* A process-pool run that loses a worker raises :class:`graphed.WorkerLostError` even when another
+  worker ignores ``SIGTERM``: survivors still alive 5 s after the loss are killed before the pool
+  shuts down, instead of the shutdown waiting on them forever (#129).
 
 0.0.7
 -----

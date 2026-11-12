@@ -1,5 +1,0 @@
-.. under: Unreleased
-
-* A driver-hosted service whose port another process takes after the scan moves to the next port
-  once its child exits, even when the readiness dial reached the other process's listener first;
-  a child still alive a second after that listener is seen is refused as before (#121).
