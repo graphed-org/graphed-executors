@@ -22,20 +22,17 @@ from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any, cast
 
 import graphed.services as graphed_services
 import pytest
 from graphed.core.execution import Partition, Plan, Task
 from graphed.services import Launch, ServiceSpec
+from services_harness import free_range
 
 from graphed_executors.submit import SubmitRunner, ThreadBackend
 from graphed_executors.submit import services as svc
 from graphed_executors.submit.recipes import http_server
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68a"))
-from services_harness import free_range
 
 # ---- servers, plans, backends -------------------------------------------------------------------
 
@@ -70,12 +67,6 @@ def serving(status: int = 200, ok_first: int | None = None) -> Iterator[str]:
         thread.join(5.0)
 
 
-def free_ports() -> tuple[int, int]:
-    """Return a range of one port that was free a moment ago."""
-    low, high = free_range(1)
-    return (low, high)
-
-
 def bare(name: str = "web", kind: str = "http") -> ServiceSpec:
     return ServiceSpec(name, kind, check="http:/", launch=None, timeout_s=5.0)
 
@@ -85,7 +76,7 @@ def child(
 ) -> ServiceSpec:
     spec_launch = Launch(argv, **launch)
     return ServiceSpec(
-        "web", "http", check=check, ports=free_ports(), launch=spec_launch, timeout_s=timeout_s
+        "web", "http", check=check, ports=free_range(1), launch=spec_launch, timeout_s=timeout_s
     )
 
 
@@ -223,7 +214,7 @@ def test_the_site_leg_passes_or_falls_through(caplog: pytest.LogCaptureFixture) 
         backend = Duck(
             site_services={"http": dead}, service_hosts=("driver",), advertise_host="127.0.0.1"
         )
-        spec = replace(http_server("web"), ports=free_ports(), timeout_s=30.0)
+        spec = replace(http_server("web"), ports=free_range(1), timeout_s=30.0)
         with svc.ServiceSet([spec], backend) as eps:
             assert eps["web"].startswith("http://127.0.0.1:")
         backend.close()
@@ -451,7 +442,7 @@ def test_on_close_callbacks_run_first_and_a_raising_one_is_logged(
 def test_the_http_server_recipe_serves_its_root(tmp_path: Any) -> None:
     """``root`` is the served directory beside the driver too, not the driver's cwd."""
     (tmp_path / "marker.txt").write_text("from root")
-    spec = replace(http_server("web", root=str(tmp_path)), ports=free_ports(), timeout_s=30.0)
+    spec = replace(http_server("web", root=str(tmp_path)), ports=free_range(1), timeout_s=30.0)
     backend = ThreadBackend(1)
     try:
         with (

@@ -154,7 +154,9 @@ def _bindable(port: int) -> bool:
 
 def free_range(n: int = 3) -> tuple[int, int]:
     """Return an inclusive range of ``n`` free ports outside the site rows' 10000-10100 band."""
-    for low in range(20000 + os.getpid() % 600 * 20, 32000, 20):  # below the ephemeral range
+    base = os.getpid() % 600
+    for i in range(600):  # every 20-port slot of 20000-32000, below the ephemeral range
+        low = 20000 + (base + i) % 600 * 20
         if all(_bindable(p) for p in range(low, low + n)):
             return (low, low + n - 1)
     raise AssertionError(f"no {n} consecutive free ports found")

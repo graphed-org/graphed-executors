@@ -20,12 +20,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from services_harness import closed_port
 
 from graphed_executors.submit import ThreadBackend, recipes
 from graphed_executors.submit import services as svc
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68a"))
-from services_harness import free_range
 
 TIMEOUT_S = 5.0
 
@@ -62,7 +60,7 @@ def http_server(status: int = 200, ctype: str = "text/plain") -> Iterator[str]:
 
 
 def closed_endpoint(scheme: str) -> str:
-    return f"{scheme}://127.0.0.1:{free_range(1)[0]}"
+    return f"{scheme}://127.0.0.1:{closed_port()}"
 
 
 def test_http_checks_by_answer() -> None:

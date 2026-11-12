@@ -28,6 +28,9 @@ from graphed_executors.htcondor_backend import SITES, CondorPilots
 from graphed_executors.htcondor_backend import announce as ann
 from graphed_executors.htcondor_backend.services import ServiceJob
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "frozen" / "m68b"))
+from m68b_harness import closed_port, free_range
+
 posix = pytest.mark.skipif(
     sys.platform == "win32",
     reason="announce.py is POSIX-only: Windows delivers SIGTERM as TerminateProcess",
@@ -51,15 +54,9 @@ LISTENER = (
 
 
 def free_ports(n: int) -> list[int]:
-    """``n`` consecutive ports ``free()`` accepts.
-
-    Scanned from a per-process base so concurrent runs differ.
-    """
-    for low in range(20000 + os.getpid() % 600 * 20, 32000, 97):  # below the ephemeral range
-        ports = list(range(low, low + n))
-        if all(ann.free(p) for p in ports):
-            return ports
-    raise AssertionError("no free ports")
+    """``n`` consecutive ports the harness finds free, a stricter check than ``ann.free``."""
+    low, high = free_range(n)
+    return list(range(low, high + 1))
 
 
 @contextmanager
@@ -266,10 +263,9 @@ def test_the_pid_reap_of_a_child_reaped_elsewhere_returns_at_once() -> None:
 def test_a_child_that_exits_after_ready_ends_the_job_with_its_code(
     job_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    *ports, closed = free_ports(2)
-    url = (
-        f"http://127.0.0.1:{closed}"  # a url nothing answers: no 200 and no 403, inside the lease
-    )
+    ports = free_ports(1)
+    # a url nothing answers: no 200 and no 403, inside the lease
+    url = f"http://127.0.0.1:{closed_port()}"
     cfg = config(ports, argv=["{python}", "-c", LISTENER, "{port}", "5", "1.5", "0"], url=url)
     (job_dir / "service.json").write_text(json.dumps(cfg))
     (job_dir / "graphed-secret").write_text(os.urandom(32).hex())
