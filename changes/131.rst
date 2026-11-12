@@ -1,0 +1,4 @@
+.. under: Unreleased
+
+* Test port pickers draw from 20000-32000, below Linux's ephemeral range, so a client socket's
+  source port can no longer take a picked port or self-connect to a closed one (#131).
