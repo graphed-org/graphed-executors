@@ -147,6 +147,7 @@ def test_a_child_that_exits_during_the_last_dial_is_not_refused_as_foreign(
         time.sleep(timeout)
         return "timed out"
 
+    monkeypatch.setattr(svc, "_FOREIGN_GRACE_S", 10.0)  # the deadline, not the grace, judges
     monkeypatch.setattr(svc, "check_ready", hangs)
     monkeypatch.setattr(svc, "listeners", lambda p, proc="/proc": {"4242"})
     monkeypatch.setattr(svc, "held_by", lambda pid, inodes, proc="/proc": False)
@@ -208,13 +209,13 @@ def test_a_live_child_whose_foreign_listener_goes_away_waits_out_the_deadline(
         reads.append(p)
         return {"4242"} if len(reads) == 1 else set()
 
-    monkeypatch.setattr(svc, "_FOREIGN_GRACE_S", 0.2)
+    monkeypatch.setattr(svc, "_FOREIGN_GRACE_S", 1.0)
     monkeypatch.setattr(svc, "check_ready", lambda endpoint, check, timeout: "refused")
     monkeypatch.setattr(svc, "listeners", foreign_once)
     monkeypatch.setattr(svc, "held_by", lambda pid, inodes, proc="/proc": False)
     argv = ("{python}", "-c", "import time; time.sleep(60)", "{port}")
     spec = ServiceSpec(
-        "web", "tcp", check="tcp", ports=(low, high), launch=Launch(argv=argv), timeout_s=1.5
+        "web", "tcp", check="tcp", ports=(low, high), launch=Launch(argv=argv), timeout_s=3.0
     )
     backend = ThreadBackend(1)
     services = svc.ServiceSet([spec], backend)
@@ -225,9 +226,9 @@ def test_a_live_child_whose_foreign_listener_goes_away_waits_out_the_deadline(
     finally:
         services.close()
         backend.close()
-    assert time.monotonic() - started >= 1.5
+    assert time.monotonic() - started >= 3.0
     assert info.value.legs["managed"] == (
-        f"'tcp' never passed on tcp://127.0.0.1:{low} within 1.5s: refused"
+        f"'tcp' never passed on tcp://127.0.0.1:{low} within 3.0s: refused"
     )
 
 
