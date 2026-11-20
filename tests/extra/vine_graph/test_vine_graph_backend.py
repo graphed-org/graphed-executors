@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 import pickle
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass
 from types import ModuleType
@@ -41,7 +42,7 @@ from graphed_executors.submit.worker import (
 )
 from graphed_executors.vine_graph_backend import VineGraphBackend
 from graphed_executors.vine_graph_backend._shim import _take_events, _vine_task_shim
-from graphed_executors.vine_graph_backend.backend import _dispatch
+from graphed_executors.vine_graph_backend.backend import _dispatch, _VineFuture
 
 
 @pytest.fixture(autouse=True)
@@ -49,6 +50,13 @@ def vine_graph_module(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("ndcctools", "ndcctools.taskvine"):
         monkeypatch.setitem(sys.modules, name, ModuleType(name))
     monkeypatch.setitem(sys.modules, "ndcctools.taskvine.vine_graph", fake)
+
+
+def _wait_for(condition: Any, seconds: float = 10) -> None:
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
 
 
 def _send_nothing() -> Any:
@@ -182,7 +190,7 @@ def test_events_that_land_after_the_run_unsubscribed_reach_its_handler(
     seen: list[Any] = []
     unsubscribe = backend.subscribe_events("t", seen.extend)
     late: list[Any] = []
-    monkeypatch.setattr(fake.Future, "add_done_callback", lambda self, fn: late.append((fn, self)))
+    monkeypatch.setattr(_VineFuture, "add_done_callback", lambda self, fn: late.append((fn, self)))
     ctx = RunContext("run", "t", None)
     leaf = backend.submit(_leaf_task, ctx, pickle.dumps(raising), "late", tasks(1)[0], key="leaf")
     backend.take_events(leaf)
@@ -202,7 +210,8 @@ def test_a_service_checked_leaf_reports_its_events_and_a_plain_task_takes_no_eve
     assert _take_events not in executor.submitted
     ctx = RunContext("run", "t", None)
     payload = pickle.dumps(entries)
-    submits.submit(_leaf_task, ctx, payload, "tok", tasks(1)[0], key="leaf", retries=0)
+    submits.submit(_leaf_task, ctx, payload, "tok", tasks(1)[0], key="leaf", retries=0).result()
+    _wait_for(lambda: len(seen) == 2)
     assert [event["phase"] for event in seen] == ["started", "finished"]
 
 
@@ -291,8 +300,8 @@ def test_a_task_nothing_holds_is_left_unattributed() -> None:
 def test_the_backend_forgets_a_task_with_its_future() -> None:
     backend = VineGraphBackend(fake.Executor())
     future = backend.submit(int, key="k")
-    node = future._future.target
-    error = fake.TaskError("m", node, None, "signal", None)
+    future.result()
+    error = fake.TaskError("m", future.task, None, "signal", None)
     assert backend.describe_failure(error) == ("k", "m")
     del future
     gc.collect()
@@ -302,11 +311,12 @@ def test_the_backend_forgets_a_task_with_its_future() -> None:
 def test_a_failure_whose_source_is_forgotten_is_attributed_to_its_task() -> None:
     backend = VineGraphBackend(fake.Executor())
     source = backend.submit(int, key="source")
-    gone = source._future.target
+    source.result()
+    gone = source.task
     dependent = backend.submit(int, key="dependent")
     del source
     gc.collect()
-    error = fake.TaskError("m", dependent._future.target, gone, "signal", None)
+    error = fake.TaskError("m", dependent.task, gone, "signal", None)
     assert backend.describe_failure(error) == ("dependent", "m")
 
 
@@ -366,15 +376,17 @@ def test_the_backend_adapts_the_submit_seam() -> None:
     assert backend.broadcast(b"payload", token="t") == b"payload"
     future = backend.submit(int, key="k")
     assert isinstance(future, SubmitFuture)
+    future.result()
     assert future.done()
     called: list[object] = []
     future.add_done_callback(called.append)
     assert called == [future]
     assert backend.submit(add, future, future, key="dep").result() == 0
     backend.cancel([future])
-    assert future._future.cancelled
+    assert future.task.was_cancelled
     backend.close()
     assert not executor.closed
+    assert executor.submits <= 3
 
 
 def test_a_closed_executor_ends_dispatch_quietly() -> None:
@@ -383,8 +395,9 @@ def test_a_closed_executor_ends_dispatch_quietly() -> None:
     seen: list[Any] = []
     backend.subscribe_events("t", seen.extend)
     future = backend.submit(int, key="k")
+    future.result()
     executor.closed = True
-    _dispatch(backend._handlers, future._future)
+    _dispatch(backend._handlers, future)
     assert seen == []
 
 
@@ -432,3 +445,17 @@ def test_dispatch_reaches_only_subscribed_topics() -> None:
     unsub()
     unsub()
     assert handlers == {}
+
+
+def test_a_plan_takes_fewer_graph_submits_than_tasks() -> None:
+    executor = fake.Executor()
+    with vine_graph_runner(executor) as runner:
+        assert runner.run(plan(n=40)).value == 80
+    assert len(executor.submitted) == 40 + 39
+    assert executor.submits < len(executor.submitted)
+
+
+def test_a_task_of_an_unsubmitted_graph_is_refused_by_the_stream() -> None:
+    graph = fake.Graph()
+    with pytest.raises(ValueError, match="submit its Graph first"):
+        fake.Executor().as_completed([]).add(graph.add(fake.Function(int)))

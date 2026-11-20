@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from graphed.core import Plan
+from graphed.core import Partition, Plan, Task
 from graphed.core.execution import TaskPhase
 from graphed.debug import StageError
 from vine_plan_fns import Recorder, combine, empty, process, tasks
@@ -36,7 +36,7 @@ def executor(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
     logs = subprocess.DEVNULL
     workers = [subprocess.Popen(worker, env=env, stdout=logs, stderr=logs) for _ in range(2)]
     try:
-        with vg.Executor(PORT, params={"progress-bar": 0, "max-retries": 2}) as ex:
+        with vg.Executor(port=PORT, progress_bar=False, params={"max-retries": 2}) as ex:
             yield ex
     finally:
         for proc in workers:
@@ -88,3 +88,21 @@ def test_a_function_that_raises_runs_once(executor: Any, tmp_path: Path) -> None
     with vine_graph_runner(executor) as runner, pytest.raises(ValueError, match="counted"):
         runner.run(plan)
     assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_an_adaptive_plan_refills_from_the_stream(executor: Any) -> None:
+    batches = [
+        tuple(
+            Task(i, Partition("data", "Events", i * 10, (i + 1) * 10))
+            for i in range(start, start + 6)
+        )
+        for start in range(0, 30, 6)
+    ]
+
+    def next_tasks(_: object) -> Any:
+        return batches.pop(0) if batches else None
+
+    with vine_graph_runner(executor) as runner:
+        result = runner.run(Plan(process, combine, empty, next_tasks=next_tasks))
+    assert result.value.total == 300
+    assert not batches
