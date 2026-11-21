@@ -44,7 +44,7 @@ class _DaskWorkerEnv:
 
 def _dask_task_shim(fn: Callable[..., object], /, *args: object) -> object:
     worker = distributed.get_worker()
-    plugin = worker.plugins["graphed-worker"]  # registered by dask_runner / register_worker_plugin
+    plugin = worker.plugins["graphed-worker"]  # registered by DaskBackend
     env = _DaskWorkerEnv(plugin.resources, worker.address, worker.log_event)
     token = set_worker_env(env)  # the submit/ contextvar seam (§1.1)
     try:
