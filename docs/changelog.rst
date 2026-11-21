@@ -1,6 +1,13 @@
 What changed
 ============
 
+Unreleased
+----------
+
+* A process pool that loses a worker names the chunk the dead worker was running even when a
+  surviving worker's SIGTERM handler (coverage's, say) exits with a code of its own; the loss was
+  blamed on no chunk, so ``skip_failed`` could not count it (graphed-executors#134).
+
 0.0.8
 -----
 
