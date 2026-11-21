@@ -178,6 +178,16 @@ def test_the_chunk_named_is_the_dead_workers_not_a_survivors() -> None:
         assert (lost.partition, lost.worker) == ("the lost chunk", "pid 7")
 
 
+def test_a_survivor_whose_sigterm_handler_exits_otherwise_is_not_blamed() -> None:
+    with make("ipc") as ex:
+        os.makedirs(ex._in_flight)
+        Path(ex._in_flight, "7.1").write_text("the lost chunk")
+        workers = [SimpleNamespace(pid=11, exitcode=1), SimpleNamespace(pid=7, exitcode=17)]
+        lost = ex._lost_in(workers)
+        assert lost is not None
+        assert (lost.partition, lost.worker) == ("the lost chunk", "pid 7")
+
+
 class _Silent:
     def recv(self, timeout: float) -> None:
         time.sleep(timeout)

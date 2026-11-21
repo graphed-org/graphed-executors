@@ -211,10 +211,13 @@ class _ProcessPeerBase(_BaseExecutor):
             return None
         if any(p.exitcode == _UNGUARDED_EXIT for p in exited):
             raise RuntimeError(_UNGUARDED) from None
-        # a broken stdlib pool SIGTERMs the survivors; the worker that broke it exited otherwise
-        dead = next((p for p in exited if p.exitcode != -signal.SIGTERM), exited[0])
+        # a broken stdlib pool SIGTERMs the survivors, whose own SIGTERM handler (coverage's) may
+        # exit otherwise, so the one whose marker says it died running a chunk comes first
+        broke = [p for p in exited if p.exitcode != -signal.SIGTERM] or exited
+        markers = {p.pid: list(Path(self._in_flight).glob(f"{p.pid}.*")) for p in broke}
+        dead = next((p for p in broke if markers[p.pid]), broke[0])
         chunk = "no chunk (a combine, or idle)"
-        for marker in Path(self._in_flight).glob(f"{dead.pid}.*"):
+        for marker in markers[dead.pid]:
             with contextlib.suppress(OSError):
                 chunk = marker.read_text() or chunk
         return WorkerLostError(partition=chunk, worker=f"pid {dead.pid}")
