@@ -58,8 +58,10 @@ class DaskBackend:
         self._replicate_broadcast = replicate_broadcast
         # lazy: keeps distributed out of __init__
         from ._shim import _dask_task_shim
+        from .plugin import GraphedWorkerPlugin
 
         self._shim = _dask_task_shim
+        client.register_plugin(GraphedWorkerPlugin())  # the shim reads it on every worker
 
     @property
     def client(self) -> Any:
@@ -208,11 +210,7 @@ def dask_runner(
             DeprecationWarning,
             stacklevel=2,
         )
-    # Ahead of plugin's bare import: DaskBackend raises the ImportError that names the extra.
     backend = DaskBackend(client, replicate_broadcast=replicate_broadcast)
-    from .plugin import GraphedWorkerPlugin  # lazy: distributed is the optional extra
-
-    client.register_plugin(GraphedWorkerPlugin())
     return SubmitRunner(
         backend,
         monitor=monitor,
