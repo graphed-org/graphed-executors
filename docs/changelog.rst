@@ -1,6 +1,13 @@
 What changed
 ============
 
+Unreleased
+----------
+
+* ``DaskBackend(client)`` registers graphed's per-worker plugin itself, so a ``SubmitRunner``
+  over it, or a tasks-engine join or repartition, runs on a client nothing else set up; it
+  raised ``KeyError: 'graphed-worker'`` on its workers (graphed-executors#132).
+
 0.0.8
 -----
 
